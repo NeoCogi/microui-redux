@@ -149,7 +149,6 @@ fn assert_vec2f_eq(actual: Vec2f, expected: Vec2f) {
 }
 
 struct TextureClippingProbe {
-    state: Rc<RefCell<()>>,
     texture: TextureId,
     options: WidgetOption,
     screen_content: Rc<RefCell<Option<Recti>>>,
@@ -170,19 +169,10 @@ impl WidgetBuilder for TextureClippingBuilder {
 
     fn create_widget(parameters: Self::Parameters) -> Self::W {
         TextureClippingProbe {
-            state: Rc::new(RefCell::new(())),
             texture: parameters.texture,
             options: WidgetOption::NO_INTERACT,
             screen_content: parameters.screen_content,
         }
-    }
-}
-
-impl WidgetStateOwner for TextureClippingProbe {
-    type State = ();
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
     }
 }
 
@@ -192,7 +182,6 @@ impl Widget for TextureClippingProbe {
     }
 
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
-        let _state = self.state.try_borrow().expect("probe state must be available during measure");
         Dimensioni::new(64, 64)
     }
 

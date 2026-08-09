@@ -34,7 +34,7 @@
 //! path.
 
 use super::*;
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 #[derive(Clone)]
 /// Describes the content rendered inside a button widget.
@@ -134,18 +134,13 @@ impl ButtonParameters {
     }
 }
 
-/// Application-facing persistent button state.
-pub struct ButtonState;
-
-impl WidgetState for ButtonState {}
-
 /// Semantic payload emitted when the user submits a button.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct ButtonSubmitted;
 
 impl crate::WidgetEvent for ButtonSubmitted {}
 
-/// Concrete button runtime and sole strong owner of its application state.
+/// Concrete retained button, including its semantic and interaction state.
 pub struct Button {
     /// Initialization-only content.
     content: ButtonContent,
@@ -155,18 +150,15 @@ pub struct Button {
     opt: WidgetOption,
     /// Initialization-only fill behavior.
     fill: WidgetFillOption,
-    /// Persistent state allocation.
-    state: Rc<RefCell<ButtonState>>,
     /// Runtime-owned source for user submissions.
     submitted_event: Rc<crate::event::WidgetEventPort<ButtonSubmitted>>,
 }
 
 impl Button {
-    /// Constructs a typed state handle and unique button runtime.
-    pub fn create(parameters: ButtonParameters) -> (WidgetStateHandle<ButtonState>, Self) {
+    /// Constructs a retained node and a weak typed handle to its concrete button.
+    pub fn create(parameters: ButtonParameters) -> (crate::TypedWidgetHandle<Self>, crate::Node) {
         let widget = ButtonBuilder::create_widget(parameters);
-        let state = widget.state_handle();
-        (state, widget)
+        crate::Node::typed_widget(widget)
     }
 
     /// Returns the native event endpoint emitted once for every user submission.
@@ -246,6 +238,13 @@ impl Button {
     }
 }
 
+impl crate::TypedWidgetHandle<Button> {
+    /// Returns the button's native submission endpoint.
+    pub fn submitted(&self) -> crate::WidgetEventHandle<ButtonSubmitted> {
+        self.widget_event()
+    }
+}
+
 impl Widget for Button {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
@@ -273,14 +272,6 @@ impl crate::TypedWidget<ButtonSubmitted> for Button {
     }
 }
 
-impl WidgetStateOwner for Button {
-    type State = ButtonState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
-    }
-}
-
 /// Builder associating button parameters with the concrete runtime.
 pub struct ButtonBuilder;
 
@@ -294,7 +285,6 @@ impl WidgetBuilder for ButtonBuilder {
             font: parameters.font,
             opt: parameters.opt,
             fill: parameters.fill,
-            state: Rc::new(RefCell::new(ButtonState)),
             submitted_event: Rc::new(crate::event::WidgetEventPort::new()),
         }
     }

@@ -44,7 +44,7 @@ use crate::render::RendererBackend;
 use crate::{
     Button, ButtonParameters, ButtonSubmitted, Column, ColumnParameters, Context, IconId, ListItem, ListItemParameters, ListItemSubmitted, Node, Policy, Recti,
     RootHandle, ScrollArea, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, Session, SizePolicy, Stack, StackDirection, StackParameters, StackState,
-    Subscribers, Textbox, TextboxParameters, TextboxState, TextboxSubmitted, ThemeIcons, WidgetEventHandle, WidgetOption, WidgetStateHandle, WindowOption,
+    Subscribers, Textbox, TextboxParameters, TextboxSubmitted, ThemeIcons, TypedWidgetHandle, WidgetEventHandle, WidgetOption, WidgetStateHandle, WindowOption,
 };
 use crate::ui_node::RuntimeNodeId;
 
@@ -195,9 +195,9 @@ pub(crate) struct FileDialogController {
     folder_scroll: WidgetStateHandle<ScrollAreaState>,
     #[cfg_attr(not(test), allow(dead_code))]
     file_scroll: WidgetStateHandle<ScrollAreaState>,
-    path_box: WidgetStateHandle<TextboxState>,
+    path_box: TypedWidgetHandle<Textbox>,
     path_box_submitted: WidgetEventHandle<TextboxSubmitted>,
-    file_name_box: WidgetStateHandle<TextboxState>,
+    file_name_box: TypedWidgetHandle<Textbox>,
     up_button: WidgetEventHandle<ButtonSubmitted>,
     home_button: WidgetEventHandle<ButtonSubmitted>,
     go_button: WidgetEventHandle<ButtonSubmitted>,
@@ -234,19 +234,15 @@ impl FileDialogController {
         let folder_rows = Self::make_folder_rows(&current_working_directory, &folders, icons.closed_folder);
         let file_rows = Self::make_file_rows(&files, icons.file);
 
-        let (_, up_runtime) = Button::create(ButtonParameters::new("Up"));
-        let up_button = up_runtime.submitted();
-        let up_node = Node::widget(up_runtime);
+        let (up_handle, up_node) = Button::create(ButtonParameters::new("Up"));
+        let up_button = up_handle.submitted();
         let up_button_id = up_node.id();
-        let (_, home_runtime) = Button::create(ButtonParameters::new("Home"));
-        let home_button = home_runtime.submitted();
-        let home_node = Node::widget(home_runtime);
-        let (path_box, path_runtime) = Textbox::create(TextboxParameters::new(current_working_directory.clone()));
-        let path_box_submitted = path_runtime.submitted();
-        let path_node = Node::widget(path_runtime);
-        let (_, go_runtime) = Button::create(ButtonParameters::new("Go"));
-        let go_button = go_runtime.submitted();
-        let go_node = Node::widget(go_runtime);
+        let (home_handle, home_node) = Button::create(ButtonParameters::new("Home"));
+        let home_button = home_handle.submitted();
+        let (path_box, path_node) = Textbox::create(TextboxParameters::new(current_working_directory.clone()));
+        let path_box_submitted = path_box.submitted();
+        let (go_handle, go_node) = Button::create(ButtonParameters::new("Go"));
+        let go_button = go_handle.submitted();
 
         let (folder_rows_state, folder_rows_node) = Stack::create(StackParameters::new(
             SizePolicy::Remainder(0),
@@ -276,15 +272,12 @@ impl FileDialogController {
             ],
         ));
 
-        let (file_name_box, file_name_runtime) = Textbox::create(TextboxParameters::new(""));
-        let file_name_node = Node::widget(file_name_runtime);
-        let (_, cancel_runtime) = Button::create(ButtonParameters::new("Cancel"));
-        let cancel_button = cancel_runtime.submitted();
-        let cancel_node = Node::widget(cancel_runtime);
+        let (file_name_box, file_name_node) = Textbox::create(TextboxParameters::new(""));
+        let (cancel_handle, cancel_node) = Button::create(ButtonParameters::new("Cancel"));
+        let cancel_button = cancel_handle.submitted();
         let cancel_button_id = cancel_node.id();
-        let (_, ok_runtime) = Button::create(ButtonParameters::new("Open"));
-        let ok_button = ok_runtime.submitted();
-        let ok_node = Node::widget(ok_runtime);
+        let (ok_handle, ok_node) = Button::create(ButtonParameters::new("Open"));
+        let ok_button = ok_handle.submitted();
         let ok_button_id = ok_node.id();
 
         let (_, toolbar) = crate::Row::create(crate::RowParameters::new(
@@ -382,8 +375,8 @@ impl FileDialogController {
     }
 
     fn static_item(label: &str) -> Node {
-        let (_, runtime) = ListItem::create(ListItemParameters::with_opt(label, WidgetOption::NO_INTERACT));
-        Node::widget(runtime)
+        let (_, node) = ListItem::create(ListItemParameters::with_opt(label, WidgetOption::NO_INTERACT));
+        node
     }
 
     fn read_directory(path: &Path) -> (Vec<String>, Vec<String>) {
@@ -425,9 +418,8 @@ impl FileDialogController {
             } else {
                 Path::new(folder).file_name().and_then(|name| name.to_str()).unwrap_or(folder)
             };
-            let (_, runtime) = ListItem::create(ListItemParameters::with_icon(label, folder_icon));
-            submitted.push(runtime.submitted());
-            let node = Node::widget(runtime);
+            let (item, node) = ListItem::create(ListItemParameters::with_icon(label, folder_icon));
+            submitted.push(item.submitted());
             ids.push(node.id());
             nodes.push(node);
         }
@@ -446,9 +438,8 @@ impl FileDialogController {
         let mut submitted = Vec::with_capacity(files.len());
         let mut ids = Vec::with_capacity(files.len());
         for file in files {
-            let (_, runtime) = ListItem::create(ListItemParameters::with_icon(file, file_icon));
-            submitted.push(runtime.submitted());
-            let node = Node::widget(runtime);
+            let (item, node) = ListItem::create(ListItemParameters::with_icon(file, file_icon));
+            submitted.push(item.submitted());
             ids.push(node.id());
             nodes.push(node);
         }
@@ -485,7 +476,7 @@ impl FileDialogController {
             .try_update_with(self.current_working_directory.clone(), |state, path| state.set_text(path))
             .expect("file-dialog path box must remain mounted");
         self.file_name_box
-            .try_update(TextboxState::clear)
+            .try_update(Textbox::clear)
             .expect("file-dialog filename box must remain mounted");
         true
     }
@@ -653,7 +644,7 @@ impl<B: RendererBackend> Context<B> {
 mod tests {
     use super::*;
     use crate::test_support::{AllocationMeasurement, NoopRenderer, test_atlas};
-    use crate::{Button, ButtonParameters, Dimensioni, MouseButton, Node, Vec2i, WindowOption, rect};
+    use crate::{Button, ButtonParameters, Dimensioni, MouseButton, Vec2i, WindowOption, rect};
     use std::{
         fs,
         time::{Instant, SystemTime, UNIX_EPOCH},
@@ -710,13 +701,13 @@ mod tests {
     #[test]
     fn pending_file_dialog_blocks_pointer_input_to_underlying_windows() {
         let mut ctx = context();
-        let (_, button) = Button::create(ButtonParameters::new("behind"));
+        let (button, button_node) = Button::create(ButtonParameters::new("behind"));
         let mut event_session = crate::Session::new();
         event_session.connect(button.submitted(), |_| ()).unwrap();
         let mut subscribers = crate::Subscribers::new();
         subscribers.subscribe(|count: &mut usize, _: &(), _| *count += 1);
         let mut submissions = 0;
-        let window = ctx.create_window("window", rect(0, 0, 100, 80), Node::widget(button));
+        let window = ctx.create_window("window", rect(0, 0, 100, 80), button_node);
         ctx.set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
             .unwrap();
         let session = ctx.open_file_dialog(FileDialogRequest::default());

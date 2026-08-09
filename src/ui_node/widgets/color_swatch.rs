@@ -30,9 +30,7 @@
 
 //! Retained color-swatch widget.
 
-use crate::ui_node::runtime_read_state;
 use crate::*;
-use std::{cell::RefCell, rc::Rc};
 
 /// One-shot construction input for a [`ColorSwatch`].
 pub struct ColorSwatchParameters {
@@ -72,17 +70,25 @@ impl ColorSwatchParameters {
     }
 }
 
-/// Application-facing persistent color-swatch state.
-pub struct ColorSwatchState {
+/// Concrete retained color swatch, including its semantic state.
+pub struct ColorSwatch {
+    /// Initialization-only font.
+    font: FontChoice,
+    /// Base widget options.
+    opt: WidgetOption,
     /// Mutable fill color.
     fill: Color,
     /// Mutable label.
     label: String,
 }
 
-impl WidgetState for ColorSwatchState {}
+impl ColorSwatch {
+    /// Constructs a retained node and a weak typed handle to its concrete color swatch.
+    pub fn create(parameters: ColorSwatchParameters) -> (crate::TypedWidgetHandle<Self>, crate::Node) {
+        let widget = ColorSwatchBuilder::create_widget(parameters);
+        crate::Node::typed_widget(widget)
+    }
 
-impl ColorSwatchState {
     /// Returns the current fill color.
     pub const fn fill(&self) -> Color {
         self.fill
@@ -102,51 +108,50 @@ impl ColorSwatchState {
     pub fn set_label(&mut self, label: impl Into<String>) {
         self.label = label.into();
     }
-}
-
-/// Concrete color-swatch runtime and sole strong owner of its application state.
-pub struct ColorSwatch {
-    /// Initialization-only font.
-    font: FontChoice,
-    /// Base widget options.
-    opt: WidgetOption,
-    /// Persistent state allocation.
-    state: Rc<RefCell<ColorSwatchState>>,
-}
-
-impl ColorSwatch {
-    /// Constructs a typed state handle and unique color-swatch runtime.
-    pub fn create(parameters: ColorSwatchParameters) -> (WidgetStateHandle<ColorSwatchState>, Self) {
-        let widget = ColorSwatchBuilder::create_widget(parameters);
-        let state = widget.state_handle();
-        (state, widget)
-    }
 
     /// Measures a square-ish color swatch with a text-friendly default height.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
-        runtime_read_state(&self.state, "ColorSwatch::measure", |state| {
-            let font = style.resolve_font_choice(self.font);
-            let label_width = if state.label.is_empty() {
-                0
-            } else {
-                atlas.get_text_size(font, state.label.as_str()).width.max(0)
-            };
-            let height = (atlas.get_font_height(font) as i32 + padding * 2).max(24);
-            Dimensioni::new((label_width + padding * 2).max(24), height)
-        })
+        let font = style.resolve_font_choice(self.font);
+        let label_width = if self.label.is_empty() {
+            0
+        } else {
+            atlas.get_text_size(font, self.label.as_str()).width.max(0)
+        };
+        let height = (atlas.get_font_height(font) as i32 + padding * 2).max(24);
+        Dimensioni::new((label_width + padding * 2).max(24), height)
     }
 
     /// Paints the swatch fill, border, and optional label.
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        runtime_read_state(&self.state, "ColorSwatch::paint", |state| {
-            let rect = ctx.local_rect();
-            ctx.draw_rect(rect, state.fill);
-            if !state.label.is_empty() {
-                let font = ctx.style().resolve_font_choice(self.font);
-                ctx.draw_control_text_with_font(font, state.label.as_str(), rect, ControlColor::Text, self.opt);
-            }
-        });
+        let rect = ctx.local_rect();
+        ctx.draw_rect(rect, self.fill);
+        if !self.label.is_empty() {
+            let font = ctx.style().resolve_font_choice(self.font);
+            ctx.draw_control_text_with_font(font, self.label.as_str(), rect, ControlColor::Text, self.opt);
+        }
+    }
+}
+
+impl TypedWidgetHandle<ColorSwatch> {
+    /// Returns the current fill color while the widget is retained.
+    pub fn fill(&self) -> Option<Color> {
+        self.try_read(ColorSwatch::fill)
+    }
+
+    /// Replaces the retained swatch fill.
+    pub fn set_fill(&self, fill: Color) -> Option<()> {
+        self.try_update(|widget| widget.set_fill(fill))
+    }
+
+    /// Clones the current label while the widget is retained.
+    pub fn label(&self) -> Option<String> {
+        self.try_read(|widget| widget.label().to_owned())
+    }
+
+    /// Replaces the retained swatch label.
+    pub fn set_label(&self, label: impl Into<String>) -> Option<()> {
+        self.try_update_with(label.into(), |widget, label| widget.set_label(label)).ok()
     }
 }
 
@@ -166,14 +171,6 @@ impl Widget for ColorSwatch {
     }
 }
 
-impl WidgetStateOwner for ColorSwatch {
-    type State = ColorSwatchState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
-    }
-}
-
 /// Builder associating color-swatch parameters with the concrete runtime.
 pub struct ColorSwatchBuilder;
 
@@ -185,10 +182,8 @@ impl WidgetBuilder for ColorSwatchBuilder {
         ColorSwatch {
             font: parameters.font,
             opt: parameters.opt,
-            state: Rc::new(RefCell::new(ColorSwatchState {
-                fill: parameters.fill,
-                label: parameters.label,
-            })),
+            fill: parameters.fill,
+            label: parameters.label,
         }
     }
 }

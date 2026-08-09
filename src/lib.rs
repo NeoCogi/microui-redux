@@ -73,16 +73,16 @@
 //! `microui-redux` provides a GUI toolkit inspired by [rxi/microui](https://github.com/rxi/microui).
 //! The crate uses unique owning [`Node`] values as its public UI authoring input. Each
 //! [`Context`] root consumes one persistent node and remains its sole owner until explicit
-//! destruction. Applications retain typed weak [`WidgetStateHandle`] and [`RootHandle`]
-//! capabilities, not node identities or strong mounted-state owners.
+//! destruction. Leaf nodes retain widgets as erased `Rc<RefCell<dyn Widget>>` owners, while
+//! applications and coordinating composites may retain typed weak [`TypedWidgetHandle`] views of
+//! the same allocation. A handle never keeps a removed widget alive.
 //!
-//! Construction is split deliberately: a concrete `*Parameters` value is one-shot initialization,
-//! a concrete `*State` value contains mounted mutable values and native event endpoints, and the concrete
-//! runtime implements [`Widget`] plus [`WidgetStateOwner`]. Ordinary leaf constructors return
-//! `(WidgetStateHandle<State>, Runtime)`; ordinary container constructors return
-//! `(WidgetStateHandle<State>, Node)`. [`widgets::Custom::create`] is the fixed exception because
-//! its state is `()` and it exposes no application handle. Discarding a returned weak handle never
-//! changes runtime ownership.
+//! A concrete `*Parameters` value is one-shot initialization. Semantic values, interaction state,
+//! event ports, and [`Widget`] phases live in one concrete widget object rather than a parallel
+//! `*State` allocation. Built-in leaf constructors return `(TypedWidgetHandle<Widget>, Node)`;
+//! callers that need no typed access can mount any custom widget with [`Node::widget`]. Container
+//! constructors still return their topology/configuration handles because layout and child
+//! ownership are composite concerns rather than leaf widget state.
 //!
 //! # Update and paint boundary
 //!
@@ -95,15 +95,15 @@
 //! stale by Context-owned input/mutation, or for different dimensions. The runtime synthesizes no
 //! timer events and produces no generic frame-result or resource-state object.
 //!
-//! A `ContextFrame` serializes Context operations but does not lock independent typed state
-//! handles, and there is no Context token. State-access closures must finish before retained
-//! traversal reaches the same state. Framework-controlled recursion through a container's opaque
+//! A `ContextFrame` serializes Context operations but does not lock independent typed handles, and
+//! there is no Context token. Typed access closures must finish before retained traversal reaches
+//! the same widget. Framework-controlled recursion through a container's opaque
 //! child visitor is the intentional exception. If a layout-affecting handle mutation occurs after
 //! the last commit, cancel any unsubmitted frame and call `update_ui` again before paint.
 //! Handles and Context are independent Rust values, so explicitly capturing Context inside
 //! `try_update` compiles; it is nevertheless unsupported because the closure retains the mutable
-//! state borrow. If nested traversal reaches that cell, built-in runtime borrowing reports the
-//! phase-specific invariant panic. End the closure before calling `update_ui` or `render_ui`.
+//! widget borrow. If nested traversal reaches that allocation, runtime borrowing reports an
+//! invariant panic. End the closure before calling `update_ui` or `render_ui`.
 //!
 //! Update and paint traverse parent before children and siblings in forward order. Later work sees
 //! successful earlier cross-cell mutations, work already completed does not rerun, and each input
@@ -121,11 +121,11 @@
 //!     dimensions: Dimensioni,
 //!     info: FrameInfo,
 //! ) -> Result<RootHandle, RenderError> {
-//!     let (_button_state, button) = Button::create(ButtonParameters::new("Save"));
+//!     let (_button, button_node) = Button::create(ButtonParameters::new("Save"));
 //!     let root = context.create_window(
 //!         "main",
 //!         rect(20, 20, 180, 80),
-//!         Node::widget(button),
+//!         button_node,
 //!     );
 //!
 //!     context.update_ui(dimensions);
@@ -134,14 +134,14 @@
 //! }
 //! ```
 //!
-//! The crate exposes the context, state-owning containers, widgets, rendering types, styles, and
+//! The crate exposes the context, child-owning containers, widgets, rendering types, styles, and
 //! image APIs needed to embed a UI inside custom render backends while remaining allocator- and
 //! platform-agnostic.
 //! Built-in widget placement is driven by each widget's `measure` result, so auto-sized rows can use
 //! per-widget intrinsic text/icon metrics instead of a single shared control size.
 //! Retained layout is resolved from context-owned UI nodes, container sizing policies, and widget
 //! measurement results.
-//! Retained application logic observes typed widget state handles returned by constructors.
+//! Retained application logic uses typed weak widget handles returned beside mounted nodes.
 //! The [`retained`] module and repository examples document the `0.8.0-pre-alpha` retained-authoring
 //! API.
 //!
@@ -190,7 +190,7 @@ pub mod retained {
         ChildParticipation, Children, Column, ColumnParameters, ColumnState, Container, ContainerLayoutCtx, ContainerSurface, Disclosure, DisclosureParameters,
         DisclosureState, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, GridState, Layout, Node, Policy, Row, RowParameters, RowState, ScrollArea,
         ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack, StackDirection, StackParameters, StackState, UiInputEvent, Widget,
-        TextWrap, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner,
+        TextWrap, TypedWidgetHandle, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle,
         WidgetUpdateCtx,
     };
     pub use crate::window_manager::{Context, ContextFrame, RootChanged, RootHandle, RootId, RootMutationError, RootState, RootSubmitted, WindowOption};
@@ -215,19 +215,18 @@ pub mod prelude {
         CustomRenderArgs, CustomRenderHandle, Disclosure, DisclosureParameters, DisclosureState, FocusPolicy, Grid, GridItem, GridParameters, GridSpan,
         GridState, Layout, Node, Policy, RootChanged, RootHandle, RootId, RootMutationError, RootState, RootSubmitted, Row, RowParameters, RowState,
         ScrollArea, ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack, StackDirection, StackParameters, StackState, TextWrap,
-        UiInputEvent, Widget, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle,
-        WidgetStateOwner, WidgetUpdateCtx, WindowOption,
+        UiInputEvent, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState,
+        WidgetStateHandle, WidgetUpdateCtx, WindowOption,
     };
     pub use crate::math::{expand_rect, rect, vec2};
     pub use crate::theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, color};
     pub use crate::widgets::{
-        Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, ButtonSubmitted, Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters,
-        CheckboxState, ColorSwatch, ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, Combo, ComboBuilder, ComboChanged, ComboParameters,
-        ComboState, ComboSubmitted, Custom, CustomBuilder, CustomParameters, ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState, ListBoxSubmitted,
-        ListItem, ListItemBuilder, ListItemParameters, ListItemState, ListItemSubmitted, Number, NumberBuilder, NumberChanged, NumberParameters, NumberState,
-        Slider, SliderBuilder, SliderChanged, SliderParameters, SliderState, TextArea, TextAreaBuilder, TextAreaChanged, TextAreaParameters, TextAreaState,
-        TextAreaSubmitted, TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState, Textbox, TextboxBuilder, TextboxChanged, TextboxParameters,
-        TextboxState, TextboxSubmitted, Real,
+        Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters, ColorSwatch,
+        ColorSwatchBuilder, ColorSwatchParameters, Combo, ComboBuilder, ComboChanged, ComboParameters, ComboSubmitted, Custom, CustomBuilder, CustomParameters,
+        ListBox, ListBoxBuilder, ListBoxParameters, ListBoxSubmitted, ListItem, ListItemBuilder, ListItemParameters, ListItemSubmitted, Number, NumberBuilder,
+        NumberChanged, NumberParameters, Slider, SliderBuilder, SliderChanged, SliderParameters, TextArea, TextAreaBuilder, TextAreaChanged,
+        TextAreaParameters, TextAreaSubmitted, TextBlock, TextBlockBuilder, TextBlockParameters, Textbox, TextboxBuilder, TextboxChanged, TextboxParameters,
+        TextboxSubmitted, Real,
     };
     pub use rs_math3d::{
         Box3f, Color4b, CrossProduct, Dimension, Dimensioni, FloatVector, Mat4f, Quat, Quatf, Rect, Recti, Vec2f, Vec2i, Vec3f, Vec4f, Vector, Vector3,
@@ -251,16 +250,14 @@ pub use ui_node::{
     ChildParticipation, Children, Column, ColumnParameters, ColumnState, Container, ContainerLayoutCtx, ContainerSurface, Disclosure, DisclosureParameters,
     DisclosureState, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, GridState, Layout, Node, Policy, Row, RowParameters, RowState, ScrollArea,
     ScrollAreaOption, ScrollAreaParameters, ScrollAreaState, SizePolicy, Stack, StackDirection, StackParameters, StackState, TextWrap, UiInputEvent, Widget,
-    WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx,
+    TypedWidgetHandle, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetUpdateCtx,
 };
 pub use widgets::{
-    Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, ButtonSubmitted, Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters,
-    CheckboxState, ColorSwatch, ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState, Combo, ComboBuilder, ComboChanged, ComboParameters, ComboState,
-    ComboSubmitted, Custom, CustomBuilder, CustomParameters, ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState, ListBoxSubmitted, ListItem,
-    ListItemBuilder, ListItemParameters, ListItemState, ListItemSubmitted, Number, NumberBuilder, NumberChanged, NumberParameters, NumberState, Slider,
-    SliderBuilder, SliderChanged, SliderParameters, SliderState, TextArea, TextAreaBuilder, TextAreaChanged, TextAreaParameters, TextAreaState,
-    TextAreaSubmitted, Real, TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState, Textbox, TextboxBuilder, TextboxChanged, TextboxParameters,
-    TextboxState, TextboxSubmitted,
+    Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters, ColorSwatch,
+    ColorSwatchBuilder, ColorSwatchParameters, Combo, ComboBuilder, ComboChanged, ComboParameters, ComboSubmitted, Custom, CustomBuilder, CustomParameters,
+    ListBox, ListBoxBuilder, ListBoxParameters, ListBoxSubmitted, ListItem, ListItemBuilder, ListItemParameters, ListItemSubmitted, Number, NumberBuilder,
+    NumberChanged, NumberParameters, Slider, SliderBuilder, SliderChanged, SliderParameters, TextArea, TextAreaBuilder, TextAreaChanged, TextAreaParameters,
+    TextAreaSubmitted, Real, TextBlock, TextBlockBuilder, TextBlockParameters, Textbox, TextboxBuilder, TextboxChanged, TextboxParameters, TextboxSubmitted,
 };
 
 #[allow(unused_imports)]

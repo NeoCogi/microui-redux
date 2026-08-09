@@ -54,8 +54,7 @@
 //!
 //! Sliders support dragging, wheel increments, snapping, and shift-click text entry.
 use crate::*;
-use crate::ui_node::{runtime_read_state, runtime_update_state};
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 use super::numeric_edit::*;
 
@@ -113,18 +112,6 @@ impl SliderParameters {
     }
 }
 
-/// Application-facing persistent slider state.
-pub struct SliderState {
-    /// Current slider value.
-    value: Real,
-    /// Initialization-only lower bound retained for immediate setter clamping.
-    low: Real,
-    /// Initialization-only upper bound retained for immediate setter clamping.
-    high: Real,
-    /// Inline numeric editing state.
-    edit: NumberEditState,
-}
-
 /// Value snapshot emitted after a user-originated slider change.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct SliderChanged {
@@ -134,9 +121,35 @@ pub struct SliderChanged {
 
 impl crate::WidgetEvent for SliderChanged {}
 
-impl WidgetState for SliderState {}
+/// Concrete retained slider, including its semantic and editing state.
+pub struct Slider {
+    /// Initialization-only step size.
+    step: Real,
+    /// Initialization-only display precision.
+    precision: usize,
+    /// Initialization-only font.
+    font: FontChoice,
+    /// Base widget options.
+    opt: WidgetOption,
+    /// Current slider value.
+    value: Real,
+    /// Lower bound retained for immediate setter clamping.
+    low: Real,
+    /// Upper bound retained for immediate setter clamping.
+    high: Real,
+    /// Inline numeric editing state.
+    edit: NumberEditState,
+    /// Runtime-owned source for user-originated value changes.
+    changed_event: Rc<crate::event::WidgetEventPort<SliderChanged>>,
+}
 
-impl SliderState {
+impl Slider {
+    /// Constructs a retained node and a weak typed handle to its concrete slider.
+    pub fn create(parameters: SliderParameters) -> (TypedWidgetHandle<Self>, Node) {
+        let widget = SliderBuilder::create_widget(parameters);
+        Node::typed_widget(widget)
+    }
+
     /// Returns the current slider value.
     pub fn value(&self) -> Real {
         self.value
@@ -151,31 +164,6 @@ impl SliderState {
     pub fn is_editing(&self) -> bool {
         self.edit.editing
     }
-}
-
-/// Concrete slider runtime and sole strong owner of its application state.
-pub struct Slider {
-    /// Initialization-only step size.
-    step: Real,
-    /// Initialization-only display precision.
-    precision: usize,
-    /// Initialization-only font.
-    font: FontChoice,
-    /// Base widget options.
-    opt: WidgetOption,
-    /// Persistent state allocation.
-    state: Rc<RefCell<SliderState>>,
-    /// Runtime-owned source for user-originated value changes.
-    changed_event: Rc<crate::event::WidgetEventPort<SliderChanged>>,
-}
-
-impl Slider {
-    /// Constructs a typed state handle and unique slider runtime.
-    pub fn create(parameters: SliderParameters) -> (WidgetStateHandle<SliderState>, Self) {
-        let widget = SliderBuilder::create_widget(parameters);
-        let state = widget.state_handle();
-        (state, widget)
-    }
 
     /// Returns the native event endpoint emitted after every user-originated value change.
     pub fn changed(&self) -> crate::WidgetEventHandle<SliderChanged> {
@@ -185,92 +173,106 @@ impl Slider {
     /// Measures the slider track plus formatted value label.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
         let thumb_size = style.thumb_size.max(0);
-        runtime_read_state(&self.state, "Slider::measure", |state| {
-            number_preferred_size(style, atlas, self.font, state.value, self.precision, thumb_size, thumb_size)
-        })
+        number_preferred_size(style, atlas, self.font, self.value, self.precision, thumb_size, thumb_size)
     }
 
     /// Updates slider value from shift-click text entry, scroll, or pointer drag.
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         let base = ctx.local_rect();
         let font = ctx.style().resolve_font_choice(self.font);
-        let changed = runtime_update_state(&self.state, "Slider::update", |state| {
-            let last = state.value;
-            let mut v = last;
-            if number_textbox_update(ctx, input, &mut state.edit, self.precision, font, &mut v) {
-                return None;
-            }
-            if let Some(UiInputEvent::Scroll { delta, .. }) = input {
-                let range = state.high - state.low;
-                if range != 0.0 {
-                    let wheel = if delta.y != 0 { delta.y.signum() } else { delta.x.signum() };
-                    if wheel != 0 {
-                        let step_amount = if self.step != 0. { self.step.abs() } else { range / 100.0 };
-                        v += wheel as Real * step_amount;
-                        if self.step != 0. {
-                            v = snap_slider_value(v, state.low, self.step);
-                        }
+        let last = self.value;
+        let mut value = last;
+        if number_textbox_update(ctx, input, &mut self.edit, self.precision, font, &mut value) {
+            return;
+        }
+        if let Some(UiInputEvent::Scroll { delta, .. }) = input {
+            let range = self.high - self.low;
+            if range != 0.0 {
+                let wheel = if delta.y != 0 { delta.y.signum() } else { delta.x.signum() };
+                if wheel != 0 {
+                    let step_amount = if self.step != 0. { self.step.abs() } else { range / 100.0 };
+                    value += wheel as Real * step_amount;
+                    if self.step != 0. {
+                        value = snap_slider_value(value, self.low, self.step);
                     }
                 }
             }
-            let range = state.high - state.low;
-            let pointer_pos = match input {
-                Some(
-                    UiInputEvent::MouseMove { pos, .. }
-                    | UiInputEvent::MouseDrag { pos, .. }
-                    | UiInputEvent::MouseDown { pos, .. }
-                    | UiInputEvent::MouseUp { pos, .. },
-                ) => Some(*pos),
-                _ => None,
-            };
-            if ctx.focused()
-                && ctx.mouse_buttons().intersects(MouseButton::LEFT)
-                && let Some(pointer_pos) = pointer_pos
-                && base.width > 0
-                && range != 0.0
-            {
-                let content_x = pointer_pos.x;
-                v = state.low + content_x as Real * range / base.width as Real;
-                if self.step != 0. {
-                    v = snap_slider_value(v, state.low, self.step);
-                }
+        }
+        let range = self.high - self.low;
+        let pointer_pos = match input {
+            Some(
+                UiInputEvent::MouseMove { pos, .. }
+                | UiInputEvent::MouseDrag { pos, .. }
+                | UiInputEvent::MouseDown { pos, .. }
+                | UiInputEvent::MouseUp { pos, .. },
+            ) => Some(*pos),
+            _ => None,
+        };
+        if ctx.focused()
+            && ctx.mouse_buttons().intersects(MouseButton::LEFT)
+            && let Some(pointer_pos) = pointer_pos
+            && base.width > 0
+            && range != 0.0
+        {
+            value = self.low + pointer_pos.x as Real * range / base.width as Real;
+            if self.step != 0. {
+                value = snap_slider_value(value, self.low, self.step);
             }
-            if range == 0.0 {
-                v = state.low;
-            }
-            v = clamp_slider_value(v, state.low, state.high);
-            state.value = v;
-            (last != v).then_some(SliderChanged { value: v })
-        });
-        if let Some(event) = changed {
-            self.changed_event.emit(event);
+        }
+        if range == 0.0 {
+            value = self.low;
+        }
+        value = clamp_slider_value(value, self.low, self.high);
+        self.value = value;
+        if last != value {
+            self.changed_event.emit(SliderChanged { value });
         }
     }
 
     /// Paints either the inline numeric editor or the slider track/thumb/value label.
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let font = ctx.style().resolve_font_choice(self.font);
-        runtime_read_state(&self.state, "Slider::paint", |state| {
-            if state.edit.editing {
-                number_textbox_paint(ctx, &state.edit, font);
-                return;
-            }
+        if self.edit.editing {
+            number_textbox_paint(ctx, &self.edit, font);
+            return;
+        }
 
-            let base = ctx.local_rect();
-            let range = state.high - state.low;
-            ctx.draw_widget_fill(base, ControlColor::Base);
-            let w = ctx.style().thumb_size;
-            let available = (base.width - w).max(0);
-            let x = if range != 0.0 && available > 0 {
-                ((state.value - state.low) * available as Real / range) as i32
-            } else {
-                0
-            };
-            let thumb = rect(base.x + x, base.y, w, base.height);
-            ctx.draw_widget_internal_frame(thumb, ControlColor::Button);
-            let label = number_label(state.value, self.precision);
-            ctx.draw_control_text_with_font(font, label.as_str(), base, ControlColor::Text, self.opt);
-        });
+        let base = ctx.local_rect();
+        let range = self.high - self.low;
+        ctx.draw_widget_fill(base, ControlColor::Base);
+        let width = ctx.style().thumb_size;
+        let available = (base.width - width).max(0);
+        let x = if range != 0.0 && available > 0 {
+            ((self.value - self.low) * available as Real / range) as i32
+        } else {
+            0
+        };
+        let thumb = rect(base.x + x, base.y, width, base.height);
+        ctx.draw_widget_internal_frame(thumb, ControlColor::Button);
+        let label = number_label(self.value, self.precision);
+        ctx.draw_control_text_with_font(font, label.as_str(), base, ControlColor::Text, self.opt);
+    }
+}
+
+impl TypedWidgetHandle<Slider> {
+    /// Returns the current slider value while the widget is retained.
+    pub fn value(&self) -> Option<Real> {
+        self.try_read(Slider::value)
+    }
+
+    /// Replaces the slider value without emitting a user event.
+    pub fn set_value(&self, value: Real) -> Option<()> {
+        self.try_update(|widget| widget.set_value(value))
+    }
+
+    /// Returns whether the retained slider is currently editing text.
+    pub fn is_editing(&self) -> Option<bool> {
+        self.try_read(Slider::is_editing)
+    }
+
+    /// Returns the slider's native value-change endpoint.
+    pub fn changed(&self) -> WidgetEventHandle<SliderChanged> {
+        self.widget_event()
     }
 }
 
@@ -317,21 +319,11 @@ impl Widget for Slider {
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {
-        runtime_read_state(&self.state, "Slider::effective_widget_opt", |state| {
-            number_effective_widget_opt(self.opt, state.edit.editing)
-        })
+        number_effective_widget_opt(self.opt, self.edit.editing)
     }
 
     fn focus_policy(&self) -> FocusPolicy {
-        runtime_read_state(&self.state, "Slider::focus_policy", |state| number_focus_policy(state.edit.editing))
-    }
-}
-
-impl WidgetStateOwner for Slider {
-    type State = SliderState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
+        number_focus_policy(self.edit.editing)
     }
 }
 
@@ -343,18 +335,15 @@ impl WidgetBuilder for SliderBuilder {
     type W = Slider;
 
     fn create_widget(parameters: Self::Parameters) -> Self::W {
-        let state = Rc::new(RefCell::new(SliderState {
-            value: clamp_slider_value(parameters.value, parameters.low, parameters.high),
-            low: parameters.low,
-            high: parameters.high,
-            edit: NumberEditState::default(),
-        }));
         Slider {
             step: parameters.step,
             precision: parameters.precision,
             font: parameters.font,
             opt: parameters.opt,
-            state,
+            value: clamp_slider_value(parameters.value, parameters.low, parameters.high),
+            low: parameters.low,
+            high: parameters.high,
+            edit: NumberEditState::default(),
             changed_event: Rc::new(crate::event::WidgetEventPort::new()),
         }
     }
@@ -367,7 +356,7 @@ mod tests {
     use super::*;
     use crate::test_support::test_atlas as make_test_atlas;
     use crate::ui_node::{UiInputEvent, widget_context::localize_event};
-    use crate::{Number, NumberParameters, NumberState};
+    use crate::{Number, NumberBuilder, NumberParameters};
 
     fn run_slider_once(slider: &mut Slider, rect: Recti, events: Vec<UiInputEvent>, hovered: bool, focused: bool, active: bool, scroll: Option<Vec2i>) {
         let atlas = make_test_atlas();
@@ -447,7 +436,7 @@ mod tests {
         let atlas = make_test_atlas();
         let style = Style::default();
 
-        let (state, mut slider) = Slider::create(SliderParameters::new(5.0, 5.0, 5.0));
+        let mut slider = SliderBuilder::create_widget(SliderParameters::new(5.0, 5.0, 5.0));
         let rect = rect(0, 0, 100, 20);
         let input = vec![UiInputEvent::MouseDrag {
             pos: vec2(50, 10),
@@ -472,17 +461,17 @@ mod tests {
         let event = localize_event(Vec2i::new(rect.x, rect.y), input.into_iter().next().unwrap());
         slider.update(&mut ctx, Some(&event));
 
-        assert_eq!(state.try_read(|state| state.value().is_finite()), Some(true));
-        assert_eq!(state.try_read(SliderState::value), Some(5.0));
+        assert!(slider.value().is_finite());
+        assert_eq!(slider.value(), 5.0);
     }
 
     #[test]
     fn slider_wheel_snaps_fractional_step_from_lower_bound() {
-        let (state, mut slider) = Slider::create(SliderParameters::with_opt(1.15, 1.0, 2.0, 0.2, 2, WidgetOption::FRAME));
+        let mut slider = SliderBuilder::create_widget(SliderParameters::with_opt(1.15, 1.0, 2.0, 0.2, 2, WidgetOption::FRAME));
         let (mut session, mut subscribers) = slider_session(&slider);
         run_slider_once(&mut slider, rect(0, 0, 100, 20), Vec::new(), true, false, false, Some(vec2(0, 1)));
 
-        assert_real_close(state.try_read(SliderState::value).unwrap(), 1.4);
+        assert_real_close(slider.value(), 1.4);
         let mut values = Vec::new();
         assert!(session.dispatch(&mut values, &mut subscribers));
         assert_eq!(values, [1.4]);
@@ -490,7 +479,7 @@ mod tests {
 
     #[test]
     fn slider_drag_snaps_fractional_step_from_lower_bound() {
-        let (state, mut slider) = Slider::create(SliderParameters::with_opt(10.0, 10.0, 20.0, 0.25, 2, WidgetOption::FRAME));
+        let mut slider = SliderBuilder::create_widget(SliderParameters::with_opt(10.0, 10.0, 20.0, 0.25, 2, WidgetOption::FRAME));
         let input = vec![UiInputEvent::MouseDrag {
             pos: vec2(33, 10),
             delta: Vec2i::default(),
@@ -498,7 +487,7 @@ mod tests {
         }];
         run_slider_once(&mut slider, rect(0, 0, 100, 20), input, true, true, true, None);
 
-        assert_real_close(state.try_read(SliderState::value).unwrap(), 13.25);
+        assert_real_close(slider.value(), 13.25);
     }
 
     #[test]
@@ -506,7 +495,7 @@ mod tests {
         let atlas = make_test_atlas();
         let style = Style::default();
 
-        let (state, mut slider) = Slider::create(SliderParameters::new(0.0, 0.0, 100.0));
+        let mut slider = SliderBuilder::create_widget(SliderParameters::new(0.0, 0.0, 100.0));
         let rect = rect(40, 20, 100, 20);
         let input = vec![UiInputEvent::MouseDrag {
             pos: vec2(90, 30),
@@ -531,15 +520,15 @@ mod tests {
         let event = localize_event(Vec2i::new(rect.x, rect.y), input.into_iter().next().unwrap());
         slider.update(&mut ctx, Some(&event));
 
-        assert_eq!(state.try_read(SliderState::value), Some(50.0));
+        assert_eq!(slider.value(), 50.0);
     }
 
     #[test]
     fn number_drag_records_a_typed_change_and_programmatic_setter_is_silent() {
-        let (state, mut number) = Number::create(NumberParameters::new(0.0, 2.0, 0));
+        let mut number = NumberBuilder::create_widget(NumberParameters::new(0.0, 2.0, 0));
         let (mut session, mut subscribers) = number_session(&number);
         let mut values = Vec::new();
-        state.try_update(|state| state.set_value(4.0)).unwrap();
+        number.set_value(4.0);
         assert!(!session.dispatch(&mut values, &mut subscribers));
 
         run_number_once(
@@ -550,17 +539,17 @@ mod tests {
                 buttons: MouseButton::LEFT,
             }],
         );
-        assert_eq!(state.try_read(NumberState::value), Some(10.0));
+        assert_eq!(number.value(), 10.0);
         assert!(session.dispatch(&mut values, &mut subscribers));
         assert_eq!(values, [10.0]);
     }
 
     #[test]
     fn slider_programmatic_setter_is_silent() {
-        let (state, slider) = Slider::create(SliderParameters::new(0.0, -5.0, 5.0));
+        let mut slider = SliderBuilder::create_widget(SliderParameters::new(0.0, -5.0, 5.0));
         let (mut session, mut subscribers) = slider_session(&slider);
-        state.try_update(|state| state.set_value(4.0)).unwrap();
-        assert_eq!(state.try_read(SliderState::value), Some(4.0));
+        slider.set_value(4.0);
+        assert_eq!(slider.value(), 4.0);
         assert!(!session.dispatch(&mut Vec::new(), &mut subscribers));
     }
 }

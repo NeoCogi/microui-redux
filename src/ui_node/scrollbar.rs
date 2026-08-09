@@ -54,11 +54,9 @@
 //!
 //! Widgets and containers still own their layout, state, and input policy. This module only keeps
 //! the track/thumb mapping in one place so paint, dragging, and track clicks cannot disagree.
-use std::{cell::RefCell, rc::Rc};
-
 use crate::{
-    ControlColor, Dimensioni, FocusPolicy, MouseButton, Node, Recti, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, WidgetState, WidgetStateHandle,
-    WidgetStateOwner, WidgetUpdateCtx,
+    ControlColor, Dimensioni, FocusPolicy, MouseButton, Node, Recti, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx,
+    WidgetUpdateCtx,
 };
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -231,16 +229,15 @@ struct ScrollbarConfiguration {
     min_thumb_len: i32,
 }
 
-/// State strongly owned by one retained scrollbar widget.
-pub(crate) struct RetainedScrollbarState {
+/// Ordinary widget used as one retained child of a composite scroll area.
+pub(crate) struct RetainedScrollbar {
     axis: ScrollAxis,
     configuration: Option<ScrollbarConfiguration>,
     offset: i32,
+    opt: WidgetOption,
 }
 
-impl WidgetState for RetainedScrollbarState {}
-
-impl RetainedScrollbarState {
+impl RetainedScrollbar {
     /// Installs geometry from the parent layout and clamps any previous offset.
     pub(crate) fn configure(&mut self, track: Recti, view_len: i32, content_len: i32, min_thumb_len: i32) {
         // Replace the complete layout-authored configuration atomically before clamping offset.
@@ -297,26 +294,20 @@ impl RetainedScrollbarState {
     }
 }
 
-/// Ordinary widget used as one strong child of a composite scroll area.
-pub(crate) struct RetainedScrollbar {
-    state: Rc<RefCell<RetainedScrollbarState>>,
-    opt: WidgetOption,
-}
-
 impl RetainedScrollbar {
     /// Creates one independently targetable scrollbar and its weak layout capability.
     ///
     /// The returned node strongly owns the state through the widget. Its sibling parent layout gets
     /// only a weak handle used to configure range and visibility after measuring virtual content.
-    pub(crate) fn create(axis: ScrollAxis) -> (WidgetStateHandle<RetainedScrollbarState>, Node) {
+    pub(crate) fn create(axis: ScrollAxis) -> (TypedWidgetHandle<Self>, Node) {
         // Start inactive; the parent layout activates the bar only when overflow is committed.
         let widget = Self {
-            state: Rc::new(RefCell::new(RetainedScrollbarState { axis, configuration: None, offset: 0 })),
+            axis,
+            configuration: None,
+            offset: 0,
             opt: WidgetOption::NONE,
         };
-        // Capture the weak configuration handle before moving the widget into its owning Node.
-        let state = widget.state_handle();
-        (state, Node::widget(widget))
+        Node::typed_widget(widget)
     }
 }
 
@@ -327,51 +318,46 @@ impl Widget for RetainedScrollbar {
 
     fn effective_widget_opt(&self) -> WidgetOption {
         // An unconfigured retained scrollbar is transparent to hit testing without removing it.
-        crate::ui_node::runtime_read_state(&self.state, "Scrollbar::options", |state| {
-            if state.configuration.is_some() {
-                self.opt
-            } else {
-                self.opt | WidgetOption::NO_INTERACT
-            }
-        })
+        if self.configuration.is_some() {
+            self.opt
+        } else {
+            self.opt | WidgetOption::NO_INTERACT
+        }
     }
 
     fn measure(&self, style: &crate::Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
         let thickness = style.scrollbar_size.max(0);
-        crate::ui_node::runtime_read_state(&self.state, "Scrollbar::measure", |state| match state.axis {
+        match self.axis {
             ScrollAxis::Horizontal => Dimensioni::new(0, thickness),
             ScrollAxis::Vertical => Dimensioni::new(thickness, 0),
-        })
+        }
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         // Resolve one geometry snapshot for the complete event so hit testing and delta mapping use
         // identical track/thumb/range values.
-        crate::ui_node::runtime_update_state(&self.state, "Scrollbar::update", |state| {
-            let Some(geometry) = state.geometry() else { return };
-            match input {
-                Some(UiInputEvent::MouseDown { pos, button }) if button.intersects(MouseButton::LEFT) && geometry.track().contains(pos) => {
-                    // Clicking outside the thumb recenters it. Runtime capture established for this
-                    // press supplies the complete drag lease through `ctx.active()` below.
-                    if !geometry.thumb().contains(pos) {
-                        state.offset = geometry.centered_offset(*pos);
-                    }
+        let Some(geometry) = self.geometry() else { return };
+        match input {
+            Some(UiInputEvent::MouseDown { pos, button }) if button.intersects(MouseButton::LEFT) && geometry.track().contains(pos) => {
+                // Clicking outside the thumb recenters it. Runtime capture established for this
+                // press supplies the complete drag lease through `ctx.active()` below.
+                if !geometry.thumb().contains(pos) {
+                    self.offset = geometry.centered_offset(*pos);
                 }
-                Some(UiInputEvent::MouseDrag { delta, .. }) if ctx.active() => {
-                    // Only the dispatcher-owned capture recipient is active. This continues beyond
-                    // the track rectangle without retaining a second widget-local capture flag.
-                    // offset = clamp(previous_offset + drag_delta, 0, maximum_offset).
-                    state.offset = state.offset.saturating_add(geometry.drag_delta(*delta)).clamp(0, state.max_offset());
-                }
-                _ => {}
             }
-        });
+            Some(UiInputEvent::MouseDrag { delta, .. }) if ctx.active() => {
+                // Only the dispatcher-owned capture recipient is active. This continues beyond
+                // the track rectangle without retaining a second widget-local capture flag.
+                // offset = clamp(previous_offset + drag_delta, 0, maximum_offset).
+                self.offset = self.offset.saturating_add(geometry.drag_delta(*delta)).clamp(0, self.max_offset());
+            }
+            _ => {}
+        }
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         // Paint from the same derived geometry used by update; inactive bars emit no operations.
-        let geometry = crate::ui_node::runtime_read_state(&self.state, "Scrollbar::paint", RetainedScrollbarState::geometry);
-        if let Some(geometry) = geometry {
+        if let Some(geometry) = self.geometry() {
             ctx.draw_rect(geometry.track(), ctx.style().colors[ControlColor::ScrollBase as usize]);
             ctx.draw_rect(geometry.thumb(), ctx.style().colors[ControlColor::ScrollThumb as usize]);
         }
@@ -379,14 +365,6 @@ impl Widget for RetainedScrollbar {
 
     fn focus_policy(&self) -> FocusPolicy {
         FocusPolicy::DragCapture
-    }
-}
-
-impl WidgetStateOwner for RetainedScrollbar {
-    type State = RetainedScrollbarState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
     }
 }
 

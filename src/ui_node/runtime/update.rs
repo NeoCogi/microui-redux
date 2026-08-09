@@ -83,7 +83,7 @@ impl UiRuntime {
             input.key_modes,
             input.key_codes,
         );
-        node.data.widget_mut().update(&mut widget_ctx, event.as_ref());
+        node.data.with_widget_mut(|widget| widget.update(&mut widget_ctx, event.as_ref()));
         let traverse_children = node.is_container();
         if traverse_children {
             node.with_children_mut(|children| {

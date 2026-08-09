@@ -899,10 +899,10 @@ fn mark_grid_occupied(occupied: &mut Vec<bool>, columns: usize, row: usize, colu
 mod tests {
     use super::*;
     use crate::test_support::test_atlas;
+    use crate::TypedWidgetHandle;
 
-    fn text_node(label: &str) -> (WidgetStateHandle<crate::TextBlockState>, Node) {
-        let (state, runtime) = crate::TextBlock::create(crate::TextBlockParameters::new(label));
-        (state, Node::widget(runtime))
+    fn text_node(label: &str) -> (TypedWidgetHandle<crate::TextBlock>, Node) {
+        crate::TextBlock::create(crate::TextBlockParameters::new(label))
     }
 
     #[test]

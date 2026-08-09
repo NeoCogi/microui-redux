@@ -30,9 +30,8 @@
 
 //! Retained numeric-entry widget.
 
-use crate::ui_node::{runtime_read_state, runtime_update_state};
 use crate::*;
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 use super::numeric_edit::*;
 
@@ -82,14 +81,6 @@ impl NumberParameters {
     }
 }
 
-/// Application-facing persistent number-input state.
-pub struct NumberState {
-    /// Current number value.
-    value: Real,
-    /// Text editing state for shift-click numeric entry.
-    edit: NumberEditState,
-}
-
 /// Value snapshot emitted after a user-originated number change.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct NumberChanged {
@@ -99,9 +90,31 @@ pub struct NumberChanged {
 
 impl crate::WidgetEvent for NumberChanged {}
 
-impl WidgetState for NumberState {}
+/// Concrete retained number input, including its semantic and editing state.
+pub struct Number {
+    /// Initialization-only drag step.
+    step: Real,
+    /// Initialization-only display precision.
+    precision: usize,
+    /// Initialization-only font.
+    font: FontChoice,
+    /// Base widget options.
+    opt: WidgetOption,
+    /// Current number value.
+    value: Real,
+    /// Text editing state for shift-click numeric entry.
+    edit: NumberEditState,
+    /// Runtime-owned source for user-originated value changes.
+    changed_event: Rc<crate::event::WidgetEventPort<NumberChanged>>,
+}
 
-impl NumberState {
+impl Number {
+    /// Constructs a retained node and a weak typed handle to its concrete number input.
+    pub fn create(parameters: NumberParameters) -> (TypedWidgetHandle<Self>, Node) {
+        let widget = NumberBuilder::create_widget(parameters);
+        Node::typed_widget(widget)
+    }
+
     /// Returns the current number value.
     pub fn value(&self) -> Real {
         self.value
@@ -116,31 +129,6 @@ impl NumberState {
     pub fn is_editing(&self) -> bool {
         self.edit.editing
     }
-}
-
-/// Concrete number-input runtime and sole strong owner of its application state.
-pub struct Number {
-    /// Initialization-only drag step.
-    step: Real,
-    /// Initialization-only display precision.
-    precision: usize,
-    /// Initialization-only font.
-    font: FontChoice,
-    /// Base widget options.
-    opt: WidgetOption,
-    /// Persistent state allocation.
-    state: Rc<RefCell<NumberState>>,
-    /// Runtime-owned source for user-originated value changes.
-    changed_event: Rc<crate::event::WidgetEventPort<NumberChanged>>,
-}
-
-impl Number {
-    /// Constructs a typed state handle and unique number runtime.
-    pub fn create(parameters: NumberParameters) -> (WidgetStateHandle<NumberState>, Self) {
-        let widget = NumberBuilder::create_widget(parameters);
-        let state = widget.state_handle();
-        (state, widget)
-    }
 
     /// Returns the native event endpoint emitted after every user-originated value change.
     pub fn changed(&self) -> crate::WidgetEventHandle<NumberChanged> {
@@ -149,30 +137,26 @@ impl Number {
 
     /// Measures the formatted number label.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-        runtime_read_state(&self.state, "Number::measure", |state| {
-            number_preferred_size(style, atlas, self.font, state.value, self.precision, 0, 0)
-        })
+        number_preferred_size(style, atlas, self.font, self.value, self.precision, 0, 0)
     }
 
     /// Updates number value from shift-click text entry or horizontal drag.
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         let font = ctx.style().resolve_font_choice(self.font);
-        let changed = runtime_update_state(&self.state, "Number::update", |state| {
-            let last = state.value;
-            if !number_textbox_update(ctx, input, &mut state.edit, self.precision, font, &mut state.value) {
-                if ctx.focused()
-                    && ctx.mouse_buttons().intersects(MouseButton::LEFT)
-                    && let Some(UiInputEvent::MouseDrag { delta, .. }) = input
-                {
-                    state.set_value(state.value + delta.x as Real * self.step);
-                } else {
-                    state.set_value(state.value);
-                }
+        let last = self.value;
+        if !number_textbox_update(ctx, input, &mut self.edit, self.precision, font, &mut self.value) {
+            if ctx.focused()
+                && ctx.mouse_buttons().intersects(MouseButton::LEFT)
+                && let Some(UiInputEvent::MouseDrag { delta, .. }) = input
+            {
+                self.set_value(self.value + delta.x as Real * self.step);
             } else {
-                state.set_value(state.value);
+                self.set_value(self.value);
             }
-            (state.value != last).then_some(NumberChanged { value: state.value })
-        });
+        } else {
+            self.set_value(self.value);
+        }
+        let changed = (self.value != last).then_some(NumberChanged { value: self.value });
         if let Some(event) = changed {
             self.changed_event.emit(event);
         }
@@ -181,17 +165,37 @@ impl Number {
     /// Paints either the inline numeric editor or the formatted value.
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let font = ctx.style().resolve_font_choice(self.font);
-        runtime_read_state(&self.state, "Number::paint", |state| {
-            if state.edit.editing {
-                number_textbox_paint(ctx, &state.edit, font);
-                return;
-            }
+        if self.edit.editing {
+            number_textbox_paint(ctx, &self.edit, font);
+            return;
+        }
 
-            let base = ctx.local_rect();
-            ctx.draw_widget_fill(base, ControlColor::Base);
-            let label = number_label(state.value, self.precision);
-            ctx.draw_control_text_with_font(font, label.as_str(), base, ControlColor::Text, self.opt);
-        });
+        let base = ctx.local_rect();
+        ctx.draw_widget_fill(base, ControlColor::Base);
+        let label = number_label(self.value, self.precision);
+        ctx.draw_control_text_with_font(font, label.as_str(), base, ControlColor::Text, self.opt);
+    }
+}
+
+impl TypedWidgetHandle<Number> {
+    /// Returns the current number value while the widget is retained.
+    pub fn value(&self) -> Option<Real> {
+        self.try_read(Number::value)
+    }
+
+    /// Replaces the number value without emitting a user event.
+    pub fn set_value(&self, value: Real) -> Option<()> {
+        self.try_update(|widget| widget.set_value(value))
+    }
+
+    /// Returns whether the retained number is currently editing text.
+    pub fn is_editing(&self) -> Option<bool> {
+        self.try_read(Number::is_editing)
+    }
+
+    /// Returns the number input's native value-change endpoint.
+    pub fn changed(&self) -> WidgetEventHandle<NumberChanged> {
+        self.widget_event()
     }
 }
 
@@ -219,21 +223,11 @@ impl Widget for Number {
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {
-        runtime_read_state(&self.state, "Number::effective_widget_opt", |state| {
-            number_effective_widget_opt(self.opt, state.edit.editing)
-        })
+        number_effective_widget_opt(self.opt, self.edit.editing)
     }
 
     fn focus_policy(&self) -> FocusPolicy {
-        runtime_read_state(&self.state, "Number::focus_policy", |state| number_focus_policy(state.edit.editing))
-    }
-}
-
-impl WidgetStateOwner for Number {
-    type State = NumberState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
+        number_focus_policy(self.edit.editing)
     }
 }
 
@@ -245,16 +239,13 @@ impl WidgetBuilder for NumberBuilder {
     type W = Number;
 
     fn create_widget(parameters: Self::Parameters) -> Self::W {
-        let state = Rc::new(RefCell::new(NumberState {
-            value: if parameters.value.is_finite() { parameters.value } else { 0.0 },
-            edit: NumberEditState::default(),
-        }));
         Number {
             step: parameters.step,
             precision: parameters.precision,
             font: parameters.font,
             opt: parameters.opt,
-            state,
+            value: if parameters.value.is_finite() { parameters.value } else { 0.0 },
+            edit: NumberEditState::default(),
             changed_event: Rc::new(crate::event::WidgetEventPort::new()),
         }
     }

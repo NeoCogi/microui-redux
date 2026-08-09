@@ -34,8 +34,7 @@
 //! actual popup traversal.
 
 use super::*;
-use crate::ui_node::{runtime_read_state, runtime_update_state};
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 /// One-shot construction input for a [`Combo`].
 pub struct ComboParameters {
@@ -77,8 +76,8 @@ impl Default for ComboParameters {
     }
 }
 
-/// Application-facing persistent combo state.
-pub struct ComboState {
+/// Concrete retained combo, including its semantic and popup state.
+pub struct Combo {
     /// Currently selected item index.
     selected: usize,
     /// Whether the combo popup should be open.
@@ -87,13 +86,17 @@ pub struct ComboState {
     label: String,
     /// Framework-owned popup anchor snapshot published by the latest paint.
     last_anchor: Recti,
-    /// Weak publisher used by selection commands; the concrete Combo owns the event port.
-    changed_emitter: crate::event::WidgetEventEmitter<ComboChanged>,
+    /// Initialization-only font.
+    font: FontChoice,
+    /// Base widget options.
+    opt: WidgetOption,
+    /// Runtime-owned source for selection changes.
+    changed_event: Rc<crate::event::WidgetEventPort<ComboChanged>>,
+    /// Runtime-owned source for header submissions.
+    submitted_event: Rc<crate::event::WidgetEventPort<ComboSubmitted>>,
 }
 
-impl WidgetState for ComboState {}
-
-impl ComboState {
+impl Combo {
     /// Returns the popup anchor published by the latest completed combo paint.
     ///
     /// This geometry is intended for positioning the popup during a later update/commit; it does not
@@ -178,17 +181,69 @@ impl ComboState {
         if self.selected == previous_selected && self.label == previous_label {
             return;
         }
-        self.changed_emitter.emit(ComboChanged {
+        self.changed_event.emit(ComboChanged {
             selected: self.selected,
             label: self.label.clone(),
         });
     }
 
     fn emit_changed(&mut self) {
-        self.changed_emitter.emit(ComboChanged {
+        self.changed_event.emit(ComboChanged {
             selected: self.selected,
             label: self.label.clone(),
         });
+    }
+}
+
+impl TypedWidgetHandle<Combo> {
+    /// Returns the latest popup anchor while the combo is retained.
+    pub fn anchor(&self) -> Option<Recti> {
+        self.try_read(Combo::anchor)
+    }
+
+    /// Returns the selected item index while the combo is retained.
+    pub fn selected(&self) -> Option<usize> {
+        self.try_read(Combo::selected)
+    }
+
+    /// Clones the current selected-item label while the combo is retained.
+    pub fn label(&self) -> Option<String> {
+        self.try_read(|widget| widget.label().to_owned())
+    }
+
+    /// Returns whether the retained combo popup is open.
+    pub fn is_open(&self) -> Option<bool> {
+        self.try_read(Combo::is_open)
+    }
+
+    /// Opens the retained combo popup.
+    pub fn open_popup(&self) -> Option<()> {
+        self.try_update(Combo::open_popup)
+    }
+
+    /// Closes the retained combo popup.
+    pub fn close_popup(&self) -> Option<()> {
+        self.try_update(Combo::close_popup)
+    }
+
+    /// Updates the retained item snapshot and clamps selection.
+    pub fn update_items<S: AsRef<str>>(&self, items: &[S]) -> Option<()> {
+        self.try_update(|widget| widget.update_items(items))
+    }
+
+    /// Applies a retained popup selection and returns the selected label.
+    pub fn select<S: AsRef<str>>(&self, index: usize, items: &[S]) -> Option<Option<String>> {
+        self.try_update(|widget| widget.select(index, items))
+    }
+
+    /// Returns the combo's native selection-change endpoint.
+    pub fn changed(&self) -> WidgetEventHandle<ComboChanged> {
+        self.widget_event()
+    }
+
+    /// Returns the combo's native header-submission endpoint.
+    pub fn submitted(&self) -> WidgetEventHandle<ComboSubmitted> {
+        self.widget_event()
     }
 }
 
@@ -212,26 +267,11 @@ pub struct ComboSubmitted {
 
 impl crate::WidgetEvent for ComboSubmitted {}
 
-/// Concrete combo runtime and sole strong owner of its application state.
-pub struct Combo {
-    /// Initialization-only font.
-    font: FontChoice,
-    /// Base widget options.
-    opt: WidgetOption,
-    /// Persistent state allocation.
-    state: Rc<RefCell<ComboState>>,
-    /// Runtime-owned source for selection changes.
-    changed_event: Rc<crate::event::WidgetEventPort<ComboChanged>>,
-    /// Runtime-owned source for header submissions.
-    submitted_event: Rc<crate::event::WidgetEventPort<ComboSubmitted>>,
-}
-
 impl Combo {
-    /// Constructs a typed state handle and unique combo runtime.
-    pub fn create(parameters: ComboParameters) -> (WidgetStateHandle<ComboState>, Self) {
+    /// Constructs a retained node and a weak typed handle to its concrete combo.
+    pub fn create(parameters: ComboParameters) -> (TypedWidgetHandle<Self>, Node) {
         let widget = ComboBuilder::create_widget(parameters);
-        let state = widget.state_handle();
-        (state, widget)
+        Node::typed_widget(widget)
     }
 
     /// Returns the native event endpoint emitted after every selection change.
@@ -246,30 +286,26 @@ impl Combo {
 
     /// Measures the combo header label plus dropdown indicator.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-        runtime_read_state(&self.state, "Combo::measure", |state| {
-            let padding = style.padding.max(0);
-            let text_w = if state.label.is_empty() {
-                0
-            } else {
-                text_size(style, atlas, self.font, state.label.as_str()).width
-            };
-            let indicator = atlas.get_icon_size(style.icons.expand_down);
-            let width = (padding * 3 + text_w + indicator.width).max(0);
-            let height = content_height(style, atlas, self.font, indicator.height);
-            Dimensioni::new(width, height)
-        })
+        let padding = style.padding.max(0);
+        let text_w = if self.label.is_empty() {
+            0
+        } else {
+            text_size(style, atlas, self.font, self.label.as_str()).width
+        };
+        let indicator = atlas.get_icon_size(style.icons.expand_down);
+        let width = (padding * 3 + text_w + indicator.width).max(0);
+        let height = content_height(style, atlas, self.font, indicator.height);
+        Dimensioni::new(width, height)
     }
 
     /// Updates popup open state and records header submissions.
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>) {
-        let submitted = runtime_update_state(&self.state, "Combo::update", |state| {
-            if ctx.clicked() {
-                state.open = !state.open;
-                Some(ComboSubmitted { open: state.open })
-            } else {
-                None
-            }
-        });
+        let submitted = if ctx.clicked() {
+            self.open = !self.open;
+            Some(ComboSubmitted { open: self.open })
+        } else {
+            None
+        };
         if let Some(event) = submitted {
             self.submitted_event.emit(event);
         }
@@ -289,11 +325,9 @@ impl Combo {
         let mut text_rect = header;
         let reserved_width = indicator_size.width;
         text_rect.width = (text_rect.width - reserved_width).max(0);
-        runtime_update_state(&self.state, "Combo::paint", |state| {
-            state.last_anchor = rect(screen_header.x, screen_header.y + screen_header.height, screen_header.width, 1);
-            let font = ctx.style().resolve_font_choice(self.font);
-            ctx.draw_control_text_with_font(font, state.label.as_str(), text_rect, ControlColor::Text, self.opt);
-        });
+        self.last_anchor = rect(screen_header.x, screen_header.y + screen_header.height, screen_header.width, 1);
+        let font = ctx.style().resolve_font_choice(self.font);
+        ctx.draw_control_text_with_font(font, self.label.as_str(), text_rect, ControlColor::Text, self.opt);
 
         let indicator_content = ctx.draw_widget_internal_frame(indicator, ControlColor::Button);
         let icon_color = ctx.style().colors[ControlColor::Text as usize];
@@ -333,14 +367,6 @@ impl Widget for Combo {
     }
 }
 
-impl WidgetStateOwner for Combo {
-    type State = ComboState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
-    }
-}
-
 /// Builder associating combo parameters with the concrete runtime.
 pub struct ComboBuilder;
 
@@ -349,18 +375,14 @@ impl WidgetBuilder for ComboBuilder {
     type W = Combo;
 
     fn create_widget(parameters: Self::Parameters) -> Self::W {
-        let changed_event = Rc::new(crate::event::WidgetEventPort::new());
         Combo {
+            selected: 0,
+            open: false,
+            label: String::new(),
+            last_anchor: Recti::default(),
             font: parameters.font,
             opt: parameters.opt,
-            state: Rc::new(RefCell::new(ComboState {
-                selected: 0,
-                open: false,
-                label: String::new(),
-                last_anchor: Recti::default(),
-                changed_emitter: crate::event::WidgetEventEmitter::new(&changed_event),
-            })),
-            changed_event,
+            changed_event: Rc::new(crate::event::WidgetEventPort::new()),
             submitted_event: Rc::new(crate::event::WidgetEventPort::new()),
         }
     }

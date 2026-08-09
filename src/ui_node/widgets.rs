@@ -52,9 +52,9 @@
 //
 //! Built-in retained widgets.
 //!
-//! Each leaf widget separates one-shot construction parameters, application-facing persistent
-//! state, and its concrete retained runtime. Applications keep weak [`crate::WidgetStateHandle`]
-//! capabilities while the runtime remains the sole strong owner of state.
+//! Each leaf combines semantic state, interaction state, events, and runtime phases in one concrete
+//! widget. Construction returns an owning erased [`crate::Node`] plus a weak
+//! [`crate::TypedWidgetHandle`] when application-facing typed access is useful.
 
 /// Floating-point type used by numeric widgets.
 pub type Real = f32;
@@ -79,18 +79,18 @@ mod textbox;
 
 use control::{content_height, inline_content_size, layout_inline_content, layout_scaled_visual_content, scaled_visual_content_size, text_size, widget_fill_color};
 
-pub use button::{Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonState, ButtonSubmitted};
-pub use checkbox::{Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters, CheckboxState};
-pub use color_swatch::{ColorSwatch, ColorSwatchBuilder, ColorSwatchParameters, ColorSwatchState};
-pub use combo::{Combo, ComboBuilder, ComboChanged, ComboParameters, ComboState, ComboSubmitted};
+pub use button::{Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonSubmitted};
+pub use checkbox::{Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters};
+pub use color_swatch::{ColorSwatch, ColorSwatchBuilder, ColorSwatchParameters};
+pub use combo::{Combo, ComboBuilder, ComboChanged, ComboParameters, ComboSubmitted};
 pub use custom::{Custom, CustomBuilder, CustomParameters};
-pub use list_box::{ListBox, ListBoxBuilder, ListBoxParameters, ListBoxState, ListBoxSubmitted};
-pub use list_item::{ListItem, ListItemBuilder, ListItemParameters, ListItemState, ListItemSubmitted};
-pub use number::{Number, NumberBuilder, NumberChanged, NumberParameters, NumberState};
-pub use slider::{Slider, SliderBuilder, SliderChanged, SliderParameters, SliderState};
-pub use text_area::{TextArea, TextAreaBuilder, TextAreaChanged, TextAreaParameters, TextAreaState, TextAreaSubmitted};
-pub use text_block::{TextBlock, TextBlockBuilder, TextBlockParameters, TextBlockState};
-pub use textbox::{Textbox, TextboxBuilder, TextboxChanged, TextboxParameters, TextboxState, TextboxSubmitted};
+pub use list_box::{ListBox, ListBoxBuilder, ListBoxParameters, ListBoxSubmitted};
+pub use list_item::{ListItem, ListItemBuilder, ListItemParameters, ListItemSubmitted};
+pub use number::{Number, NumberBuilder, NumberChanged, NumberParameters};
+pub use slider::{Slider, SliderBuilder, SliderChanged, SliderParameters};
+pub use text_area::{TextArea, TextAreaBuilder, TextAreaChanged, TextAreaParameters, TextAreaSubmitted};
+pub use text_block::{TextBlock, TextBlockBuilder, TextBlockParameters};
+pub use textbox::{Textbox, TextboxBuilder, TextboxChanged, TextboxParameters, TextboxSubmitted};
 
 #[cfg(test)]
 mod tests;

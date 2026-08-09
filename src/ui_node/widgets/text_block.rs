@@ -56,9 +56,7 @@
 //! measurement and paint pipeline as interactive controls.
 
 use crate::ui_node::text_layout::{baseline_aligned_top, build_display_text_lines, text_block_size};
-use crate::ui_node::runtime_read_state;
 use crate::*;
-use std::{cell::RefCell, rc::Rc};
 
 /// One-shot construction input for a [`TextBlock`].
 pub struct TextBlockParameters {
@@ -97,15 +95,25 @@ impl TextBlockParameters {
     }
 }
 
-/// Application-facing persistent text-block state.
-pub struct TextBlockState {
+/// Concrete retained text block, including its semantic state.
+pub struct TextBlock {
+    /// Initialization-only wrapping mode.
+    wrap: TextWrap,
+    /// Initialization-only font.
+    font: FontChoice,
+    /// Base widget options.
+    opt: WidgetOption,
     /// Mutable display text.
     text: String,
 }
 
-impl WidgetState for TextBlockState {}
+impl TextBlock {
+    /// Constructs a retained node and a weak typed handle to its concrete text block.
+    pub fn create(parameters: TextBlockParameters) -> (TypedWidgetHandle<Self>, Node) {
+        let widget = TextBlockBuilder::create_widget(parameters);
+        Node::typed_widget(widget)
+    }
 
-impl TextBlockState {
     /// Returns the current display text.
     pub fn text(&self) -> &str {
         &self.text
@@ -120,74 +128,66 @@ impl TextBlockState {
     pub fn clear(&mut self) {
         self.text.clear();
     }
-}
-
-/// Concrete text-block runtime and sole strong owner of its application state.
-pub struct TextBlock {
-    /// Initialization-only wrapping mode.
-    wrap: TextWrap,
-    /// Initialization-only font.
-    font: FontChoice,
-    /// Base widget options.
-    opt: WidgetOption,
-    /// Persistent state allocation.
-    state: Rc<RefCell<TextBlockState>>,
-}
-
-impl TextBlock {
-    /// Constructs a typed state handle and unique text-block runtime.
-    pub fn create(parameters: TextBlockParameters) -> (WidgetStateHandle<TextBlockState>, Self) {
-        let widget = TextBlockBuilder::create_widget(parameters);
-        let state = widget.state_handle();
-        (state, widget)
-    }
 
     /// Measures wrapped display text using the available width when requested.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        runtime_read_state(&self.state, "TextBlock::measure", |state| {
-            if state.text.is_empty() {
-                return Dimensioni::new(0, 0);
-            }
+        if self.text.is_empty() {
+            return Dimensioni::new(0, 0);
+        }
 
-            let font = style.resolve_font_choice(self.font);
-            let line_height = atlas.get_font_height(font) as i32;
-            let max_width = if self.wrap == TextWrap::Word && avail.width > 0 {
-                avail.width.max(1)
-            } else {
-                i32::MAX / 4
-            };
-            let lines = build_display_text_lines(state.text.as_str(), self.wrap, max_width, font, atlas);
-            text_block_size(&lines, line_height)
-        })
+        let font = style.resolve_font_choice(self.font);
+        let line_height = atlas.get_font_height(font) as i32;
+        let max_width = if self.wrap == TextWrap::Word && avail.width > 0 {
+            avail.width.max(1)
+        } else {
+            i32::MAX / 4
+        };
+        let lines = build_display_text_lines(self.text.as_str(), self.wrap, max_width, font, atlas);
+        text_block_size(&lines, line_height)
     }
 
     /// Paints each measured display line with baseline alignment.
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        runtime_read_state(&self.state, "TextBlock::paint", |state| {
-            if state.text.is_empty() {
-                return;
-            }
+        if self.text.is_empty() {
+            return;
+        }
 
-            let bounds = ctx.local_rect();
-            let font = ctx.style().resolve_font_choice(self.font);
-            let color = ctx.style().colors[ControlColor::Text as usize];
-            let line_height = ctx.atlas().get_font_height(font) as i32;
-            let baseline = ctx.atlas().get_font_baseline(font);
-            let max_width = if self.wrap == TextWrap::Word { bounds.width.max(1) } else { i32::MAX / 4 };
-            let lines = build_display_text_lines(state.text.as_str(), self.wrap, max_width, font, ctx.atlas());
+        let bounds = ctx.local_rect();
+        let font = ctx.style().resolve_font_choice(self.font);
+        let color = ctx.style().colors[ControlColor::Text as usize];
+        let line_height = ctx.atlas().get_font_height(font) as i32;
+        let baseline = ctx.atlas().get_font_baseline(font);
+        let max_width = if self.wrap == TextWrap::Word { bounds.width.max(1) } else { i32::MAX / 4 };
+        let lines = build_display_text_lines(self.text.as_str(), self.wrap, max_width, font, ctx.atlas());
 
-            let mut painter = ctx.painter();
-            painter.with_clip(bounds, |painter| {
-                for (idx, line) in lines.iter().enumerate() {
-                    let line_rect = rect(bounds.x, bounds.y + idx as i32 * line_height, bounds.width, line_height);
-                    let line_top = baseline_aligned_top(line_rect, line_height, baseline);
-                    let slice = &state.text[line.start..line.end];
-                    if !slice.is_empty() {
-                        painter.text(font, slice, vec2(line_rect.x, line_top), color);
-                    }
+        let mut painter = ctx.painter();
+        painter.with_clip(bounds, |painter| {
+            for (idx, line) in lines.iter().enumerate() {
+                let line_rect = rect(bounds.x, bounds.y + idx as i32 * line_height, bounds.width, line_height);
+                let line_top = baseline_aligned_top(line_rect, line_height, baseline);
+                let slice = &self.text[line.start..line.end];
+                if !slice.is_empty() {
+                    painter.text(font, slice, vec2(line_rect.x, line_top), color);
                 }
-            });
+            }
         });
+    }
+}
+
+impl TypedWidgetHandle<TextBlock> {
+    /// Clones the current display text while the widget is retained.
+    pub fn text(&self) -> Option<String> {
+        self.try_read(|widget| widget.text().to_owned())
+    }
+
+    /// Replaces the retained display text.
+    pub fn set_text(&self, text: impl Into<String>) -> Option<()> {
+        self.try_update_with(text.into(), |widget, text| widget.set_text(text)).ok()
+    }
+
+    /// Clears the retained display text.
+    pub fn clear(&self) -> Option<()> {
+        self.try_update(TextBlock::clear)
     }
 }
 
@@ -207,14 +207,6 @@ impl Widget for TextBlock {
     }
 }
 
-impl WidgetStateOwner for TextBlock {
-    type State = TextBlockState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
-    }
-}
-
 /// Builder associating text-block parameters with the concrete runtime.
 pub struct TextBlockBuilder;
 
@@ -227,7 +219,7 @@ impl WidgetBuilder for TextBlockBuilder {
             wrap: parameters.wrap,
             font: parameters.font,
             opt: parameters.opt,
-            state: Rc::new(RefCell::new(TextBlockState { text: parameters.text })),
+            text: parameters.text,
         }
     }
 }

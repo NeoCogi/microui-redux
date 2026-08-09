@@ -55,8 +55,7 @@
 //! The textbox stores a UTF-8 byte cursor and uses shared text-edit helpers to keep cursor movement
 //! and deletion on valid character boundaries.
 use crate::*;
-use crate::ui_node::{runtime_read_state, runtime_update_state};
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 use super::text_edit::{apply_text_input, caret_rect, centered_line_top, clamp_cursor_boundary, cursor_from_text_x, font_line_metrics, ReturnBehavior};
 
@@ -98,17 +97,23 @@ impl TextboxParameters {
     }
 }
 
-/// Application-facing persistent textbox state.
-pub struct TextboxState {
+/// Concrete retained textbox, including its semantic and editing state.
+pub struct Textbox {
     /// Current text buffer.
     buf: String,
     /// Current UTF-8 byte cursor.
     cursor: usize,
+    /// Initialization-only font.
+    font: FontChoice,
+    /// Base widget options.
+    opt: WidgetOption,
+    /// Runtime-owned source for user-originated text changes.
+    changed_event: Rc<crate::event::WidgetEventPort<TextboxChanged>>,
+    /// Runtime-owned source for user submissions.
+    submitted_event: Rc<crate::event::WidgetEventPort<TextboxSubmitted>>,
 }
 
-impl WidgetState for TextboxState {}
-
-impl TextboxState {
+impl Textbox {
     /// Returns the current text buffer.
     pub fn text(&self) -> &str {
         self.buf.as_str()
@@ -142,6 +147,48 @@ impl TextboxState {
     }
 }
 
+impl TypedWidgetHandle<Textbox> {
+    /// Clones the current text while the widget is retained.
+    pub fn text(&self) -> Option<String> {
+        self.try_read(|widget| widget.text().to_owned())
+    }
+
+    /// Replaces the retained text and moves its cursor to the end.
+    pub fn set_text(&self, text: impl Into<String>) -> Option<()> {
+        self.try_update_with(text.into(), |widget, text| widget.set_text(text)).ok()
+    }
+
+    /// Clears the retained text.
+    pub fn clear(&self) -> Option<()> {
+        self.try_update(Textbox::clear)
+    }
+
+    /// Returns the UTF-8 byte cursor while the widget is retained.
+    pub fn cursor(&self) -> Option<usize> {
+        self.try_read(Textbox::cursor)
+    }
+
+    /// Moves the retained cursor to a valid UTF-8 boundary.
+    pub fn set_cursor(&self, cursor: usize) -> Option<()> {
+        self.try_update(|widget| widget.set_cursor(cursor))
+    }
+
+    /// Moves the retained cursor to the end.
+    pub fn move_cursor_to_end(&self) -> Option<()> {
+        self.try_update(Textbox::move_cursor_to_end)
+    }
+
+    /// Returns the textbox's native value-change endpoint.
+    pub fn changed(&self) -> WidgetEventHandle<TextboxChanged> {
+        self.widget_event()
+    }
+
+    /// Returns the textbox's native submission endpoint.
+    pub fn submitted(&self) -> WidgetEventHandle<TextboxSubmitted> {
+        self.widget_event()
+    }
+}
+
 /// Snapshot emitted after a user-originated textbox value change.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TextboxChanged {
@@ -162,26 +209,11 @@ pub struct TextboxSubmitted {
 
 impl crate::WidgetEvent for TextboxSubmitted {}
 
-/// Concrete textbox runtime and sole strong owner of its application state.
-pub struct Textbox {
-    /// Initialization-only font.
-    font: FontChoice,
-    /// Base widget options.
-    opt: WidgetOption,
-    /// Persistent state allocation.
-    state: Rc<RefCell<TextboxState>>,
-    /// Runtime-owned source for user-originated text changes.
-    changed_event: Rc<crate::event::WidgetEventPort<TextboxChanged>>,
-    /// Runtime-owned source for user submissions.
-    submitted_event: Rc<crate::event::WidgetEventPort<TextboxSubmitted>>,
-}
-
 impl Textbox {
-    /// Constructs a typed state handle and unique textbox runtime.
-    pub fn create(parameters: TextboxParameters) -> (WidgetStateHandle<TextboxState>, Self) {
+    /// Constructs a retained node and a weak typed handle to its concrete textbox.
+    pub fn create(parameters: TextboxParameters) -> (TypedWidgetHandle<Self>, Node) {
         let widget = TextboxBuilder::create_widget(parameters);
-        let state = widget.state_handle();
-        (state, widget)
+        Node::typed_widget(widget)
     }
 
     /// Returns the native event endpoint emitted after every user-originated text change.
@@ -198,35 +230,30 @@ impl Textbox {
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
         let padding = style.padding.max(0);
         let vertical_pad = (padding / 2).max(1);
-        runtime_read_state(&self.state, "Textbox::measure", |state| {
-            let font = style.resolve_font_choice(self.font);
-            let font_height = atlas.get_font_height(font) as i32;
-            let text_w = if state.buf.is_empty() {
-                0
-            } else {
-                atlas.get_text_size(font, state.buf.as_str()).width
-            };
-            let mut width = (text_w + padding * 2 + 1).max(0);
-            if avail.width > 0 {
-                width = width.min(avail.width.max(0));
-            }
-            let height = (font_height + vertical_pad * 2).max(0);
-            Dimensioni::new(width, height)
-        })
+        let font = style.resolve_font_choice(self.font);
+        let font_height = atlas.get_font_height(font) as i32;
+        let text_w = if self.buf.is_empty() {
+            0
+        } else {
+            atlas.get_text_size(font, self.buf.as_str()).width
+        };
+        let mut width = (text_w + padding * 2 + 1).max(0);
+        if avail.width > 0 {
+            width = width.min(avail.width.max(0));
+        }
+        let height = (font_height + vertical_pad * 2).max(0);
+        Dimensioni::new(width, height)
     }
 
     /// Applies input and cursor movement for this textbox.
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         let font = ctx.style().resolve_font_choice(self.font);
-        let (changed, submitted) = runtime_update_state(&self.state, "Textbox::update", |state| {
-            let outcome = textbox_update(ctx, input, &mut state.buf, &mut state.cursor, self.opt, font);
-            let changed = outcome.changed.then(|| TextboxChanged {
-                text: state.buf.clone(),
-                cursor: state.cursor,
-            });
-            let submitted = outcome.submitted.then(|| TextboxSubmitted { text: state.buf.clone() });
-            (changed, submitted)
+        let outcome = textbox_update(ctx, input, &mut self.buf, &mut self.cursor, self.opt, font);
+        let changed = outcome.changed.then(|| TextboxChanged {
+            text: self.buf.clone(),
+            cursor: self.cursor,
         });
+        let submitted = outcome.submitted.then(|| TextboxSubmitted { text: self.buf.clone() });
         if let Some(event) = changed {
             self.changed_event.emit(event);
         }
@@ -238,9 +265,7 @@ impl Textbox {
     /// Paints the textbox frame, text, and caret.
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let font = ctx.style().resolve_font_choice(self.font);
-        runtime_read_state(&self.state, "Textbox::paint", |state| {
-            textbox_paint(ctx, state.buf.as_str(), state.cursor, self.opt, font);
-        });
+        textbox_paint(ctx, self.buf.as_str(), self.cursor, self.opt, font);
     }
 }
 
@@ -419,14 +444,6 @@ impl Widget for Textbox {
     }
 }
 
-impl WidgetStateOwner for Textbox {
-    type State = TextboxState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
-    }
-}
-
 /// Builder associating textbox parameters with the concrete runtime.
 pub struct TextboxBuilder;
 
@@ -437,9 +454,10 @@ impl WidgetBuilder for TextboxBuilder {
     fn create_widget(parameters: Self::Parameters) -> Self::W {
         let cursor = parameters.buf.len();
         Textbox {
+            buf: parameters.buf,
+            cursor,
             font: parameters.font,
             opt: parameters.opt,
-            state: Rc::new(RefCell::new(TextboxState { buf: parameters.buf, cursor })),
             changed_event: Rc::new(crate::event::WidgetEventPort::new()),
             submitted_event: Rc::new(crate::event::WidgetEventPort::new()),
         }
@@ -505,7 +523,7 @@ mod tests {
 
     #[test]
     fn text_events_dispatch_complete_snapshots_in_update_order() {
-        let (state, mut textbox) = Textbox::create(TextboxParameters::new(""));
+        let mut textbox = TextboxBuilder::create_widget(TextboxParameters::new(""));
         let (mut session, mut subscribers) = text_session(&textbox);
 
         update_textbox(
@@ -519,7 +537,7 @@ mod tests {
         );
         update_textbox(&mut textbox, true, vec![UiInputEvent::Text { text: "e".into() }]);
 
-        assert_eq!(state.try_read(|state| state.text().to_owned()).as_deref(), Some("abcde"));
+        assert_eq!(textbox.text(), "abcde");
         let mut messages = Vec::new();
         assert!(session.dispatch(&mut messages, &mut subscribers));
         assert_eq!(
@@ -535,16 +553,12 @@ mod tests {
 
     #[test]
     fn programmatic_text_and_cursor_setters_are_silent() {
-        let (state, textbox) = Textbox::create(TextboxParameters::new("initial"));
+        let mut textbox = TextboxBuilder::create_widget(TextboxParameters::new("initial"));
         let (mut session, mut subscribers) = text_session(&textbox);
-        state
-            .try_update(|state| {
-                state.set_text("replacement");
-                state.set_cursor(3);
-                state.move_cursor_to_end();
-                state.clear();
-            })
-            .unwrap();
+        textbox.set_text("replacement");
+        textbox.set_cursor(3);
+        textbox.move_cursor_to_end();
+        textbox.clear();
         assert!(!session.dispatch(&mut Vec::new(), &mut subscribers));
     }
 }

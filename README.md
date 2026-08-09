@@ -1,7 +1,7 @@
 # Rxi's Microui Port to Idiomatic Rust
 [![Crate](https://img.shields.io/crates/v/microui-redux.svg)](https://crates.io/crates/microui-redux)
 
-This project started as a C2Rust conversion of Rxi's MicroUI and has since grown into a Rust-first UI toolkit. It keeps Microui's compact rendering model while moving UI authoring onto unique owning `Node` trees, typed weak state handles, context-owned roots, and backend-agnostic rendering hooks. Runtime node identity is private.
+This project started as a C2Rust conversion of Rxi's MicroUI and has since grown into a Rust-first UI toolkit. It keeps Microui's compact rendering model while moving UI authoring onto unique owning `Node` trees, typed weak widget and composite handles, context-owned roots, and backend-agnostic rendering hooks. Runtime node identity is private.
 
 Compared to [microui-rs](https://github.com/neocogi/microui-rs), this crate embraces std types, reusable retained trees, and richer widgets such as custom rendering callbacks, dialogs, and a file dialog.
 
@@ -67,15 +67,15 @@ rust-src --toolchain nightly`).
 ![random](res/microui-0.6.png)
 
 ## Key Concepts
-- **Context**: owns the high-level `Renderer`, the only ordered input queue, and retained root windows. Applications enqueue through Context methods, call `update_ui(dimensions)` to drain input and commit layout, observe or mutate typed state, synchronize again if that mutation can affect layout, then call `frame(FrameInfo).render_ui()?` to paint and submit once.
+- **Context**: owns the high-level `Renderer`, the only ordered input queue, and retained root windows. Applications enqueue through Context methods, call `update_ui(dimensions)` to drain input and commit layout, use typed widget or composite handles between traversals, synchronize again if a mutation can affect layout, then call `frame(FrameInfo).render_ui()?` to paint and submit once.
 - **Container**: the concrete retained owner of one layout policy and one authoritative opaque `Children` collection. An optional `ContainerSurface` widget supplies behavior for the container's own surface. Application-facing container state uses typed weak `WidgetStateHandle` values and safe indexed membership operations.
 - **Layout engine + flows**: parent containers assign child rectangles through scoped `ContainerLayoutCtx` services. Row, Grid, Column, Stack, Disclosure, and ScrollArea retain their children in the concrete container; typed state exposes configuration and weak topology mutation capabilities without owning mounted nodes.
-- **Widget**: a runtime UI element implementing `Widget` (for example `Button`, `Textbox`, or `Slider`) and uniquely owning its associated state allocation and native event ports. `*Parameters` are one-shot initialization; `*State` holds mounted semantic values.
-- **Node**: the non-cloneable owner of one concrete widget or container runtime. A `Node` receives private process-unique identity when constructed and transfers exactly once into a root or opaque `Children` collection; attached nodes cannot be detached or reparented.
+- **Widget**: a runtime UI element implementing `Widget` (for example `Button`, `Textbox`, or `Slider`). A concrete leaf combines semantic values, interaction state, native event ports, and runtime phases; `*Parameters` are only one-shot initialization.
+- **Node**: the non-cloneable owner of one concrete widget or container runtime. Leaf storage is erased to `Rc<RefCell<dyn Widget>>`; applications and coordinating widgets may retain a weak `TypedWidgetHandle<W>` without affecting node lifetime. A `Node` receives private process-unique identity when constructed and transfers exactly once into a root or opaque `Children` collection; attached nodes cannot be detached or reparented.
 - **Rendering**: widgets obtain a local `Painter` from `WidgetPaintCtx`; retained traversal owns the internal display list, and `Renderer` executes it through one exclusively borrowed `RendererBackend::Frame`. The portable target supports drawables up to 8192x8192 and geometry up to four maximum drawable spans beyond the viewport; see the [render subsystem guide](src/render/RENDER.md#supported-coordinate-domain) for the complete coordinate contract and integration API.
 - **Typography**: atlases can bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while text-bearing `*Parameters` select a per-widget font with `.font(...)`.
 
-The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained concepts such as `Node`, `Children`, `Container`, `Column`, `Disclosure`, typed state handles, and `Context`. Low-level rendering lives under `microui_redux::render`, and atlas construction lives under `microui_redux::atlas::builder`.
+The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained concepts such as `Node`, `Children`, `Container`, `Column`, `Disclosure`, typed widget and composite-state handles, and `Context`. Low-level rendering lives under `microui_redux::render`, and atlas construction lives under `microui_redux::atlas::builder`.
 
 ### Rendering
 
@@ -237,7 +237,7 @@ cargo run --example backend-frame-cube --features example-wgpu
 
 ### Current retained authoring model
 
-The current supported authoring path is retained widget trees registered as context-owned roots. Applications can call `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)` once, mutate built-in state through typed `WidgetStateHandle` values, commit updates with `Context::update_ui(...)`, and paint with `Context::frame(FrameInfo).render_ui()?`.
+The current supported authoring path is retained widget trees registered as context-owned roots. Applications can call `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)` once, mutate concrete leaves through weak `TypedWidgetHandle<W>` values, mutate container topology/configuration through `WidgetStateHandle<S>`, commit updates with `Context::update_ui(...)`, and paint with `Context::frame(FrameInfo).render_ui()?`.
 
 Root creation consumes one persistent application `Node` and returns a non-owning `RootHandle`.
 Roots cannot be replaced while retaining their identity: mutate descendants through a container
@@ -257,13 +257,13 @@ struct Model {
     submitted_names: Vec<String>,
 }
 
-let (_name_state, name_runtime) = Textbox::create(TextboxParameters::new(""));
-let name_submitted = name_runtime.submitted();
-let (_, label_runtime) = TextBlock::create(TextBlockParameters::new("Name"));
+let (name, name_node) = Textbox::create(TextboxParameters::new(""));
+let name_submitted = name.submitted();
+let (_, label_node) = TextBlock::create(TextBlockParameters::new("Name"));
 let (_, tree) = Row::create(RowParameters::new(
     [SizePolicy::Fixed(120), SizePolicy::Remainder(0)],
     SizePolicy::Auto,
-    [Node::widget(label_runtime), Node::widget(name_runtime)],
+    [label_node, name_node],
 ));
 
 let _root = ctx.create_window("main", rect(20, 20, 240, 120), tree);
@@ -287,10 +287,11 @@ collection. Successful insertion transfers a node, while removal, clearing, or r
 the removed runtime owners. Grid placement belongs to `GridState`, not to generic nodes:
 plain nodes occupy one cell, while `GridItem::spanned(node, columns, rows)` supplies an explicit
 parent-child span that can later be changed with `GridState::set_span` without replacing the child.
-Built-in semantic values and commands are accessed through typed weak state handles. Native event
-endpoints are captured from the concrete widget runtime before it moves into `Node`; the runtime
-implements `TypedWidget<E>` and the resulting `WidgetEventHandle<E>` is a weak capability for its
-event port. Disclosure headers and tree rows use `DisclosureParameters::{header, tree}` and no
+Built-in leaf semantic values and commands are accessed through weak `TypedWidgetHandle<W>` values.
+Each leaf implements `TypedWidget<E>` for its native event payloads, and the typed handle projects
+the corresponding weak `WidgetEventHandle<E>` without exposing or owning the erased node. Composite
+containers retain `WidgetStateHandle<S>` for topology and configuration shared across layout and
+surface objects. Disclosure headers and tree rows use `DisclosureParameters::{header, tree}` and no
 longer have a separate widget `Node` or `NodeStateValue` API.
 
 ### Retained node identity
@@ -298,8 +299,8 @@ longer have a separate widget `Node` or `NodeStateValue` API.
 Each owning `Node` receives a private, process-unique runtime identity before mounting. Moving a
 node, applying consuming `with_policy`, wrapping it in an unmounted `GridItem`, and inserting it
 into `Children` or `GridState` preserve that identity; applications cannot read or construct it.
-There is no public node ID or result lookup path. Concrete widgets expose typed event endpoints
-before node erasure, while root chrome exposes its rectangle, visibility, and active mode through
+There is no public node ID or result lookup path. Weak typed widget handles expose event endpoints
+after node erasure, while root chrome exposes its rectangle, visibility, and active mode through
 `RootHandle::state()` and its typed endpoints through `RootHandle::{changed, submitted}`.
 
 Registered roots can be configured with `Context::set_root_options(...)` and `WindowOption` to
@@ -316,34 +317,32 @@ control window chrome. Root overflow does not scroll implicitly; construct a `Sc
 - Parent containers assign each node a retained parent-local allocation; child offsets and clips remain node-local and are resolved through a stack-only transform during traversal.
 - Resolved outer rectangles and clips remain runtime stack locals. Node behavior works against its local content surface, while outer frame painting, standard hit routing, and conversion from screen input remain runtime-owned.
 - A public widget's Painter geometry and routed pointer positions share the derived content-local origin.
-- Concrete container constructors consume child `Node` values and return a typed state handle plus one completed owning `Node`; `Node::custom_render` covers backend-typed custom-render leaves.
+- Built-in leaf constructors return a weak `TypedWidgetHandle<W>` plus one completed owning `Node`; concrete container constructors consume child nodes and return a composite state handle plus their completed node. `Node::custom_render` and `Node::typed_custom_render` cover backend-typed custom-render leaves.
 - `SizePolicy::Weight(value)` distributes available track space by sibling share ratio (spacing accounted for). Use `SizePolicy::Fraction(value)` for explicit `0.0..=1.0` proportional sizing in single-track flows.
 - Returning `<= 0` for either axis from `Widget::measure` still means "use layout fallback/defaults" for that axis.
 
-Built-in state is mutated through typed handles between commits. After programmatic state/topology changes, call `update_ui` even when no input is pending so layout is synchronized before paint. Feed raw input through methods such as `mousemove`, `mousedown`, `scroll`, `keydown_code`, and `text`; calls are queued without coalescing. A widget receives the current event as `Option<&UiInputEvent>`, while `WidgetUpdateCtx::{mouse_buttons,key_modes,key_codes}` exposes held state after that event was applied.
+Built-in leaves and composite state are mutated through their respective typed handles between commits. After programmatic state/topology changes, call `update_ui` even when no input is pending so layout is synchronized before paint. Feed raw input through methods such as `mousemove`, `mousedown`, `scroll`, `keydown_code`, and `text`; calls are queued without coalescing. A widget receives the current event as `Option<&UiInputEvent>`, while `WidgetUpdateCtx::{mouse_buttons,key_modes,key_codes}` exposes held state after that event was applied.
 
 `ContextFrame` holds the Context borrow needed to serialize paint/submission, but it does not lock independent widget or root state handles and there is no Context access token. Do not keep a state-access closure active while retained update/layout/paint can reach that same state. Framework recursion through a container's scoped child visitor is the intentional exception. If layout-affecting state changes after the last commit, drop any unsubmitted frame and call `update_ui` again before paint.
 
-The application owns `Context` and its weak state handles as independent Rust values, so the
-compiler permits explicitly capturing the Context inside a state-access closure. Do not initiate
+The application owns `Context` and its weak typed handles as independent Rust values, so the
+compiler permits explicitly capturing the Context inside a handle-access closure. Do not initiate
 retained traversal that way:
 
 ```rust
-textbox_state.try_update(|state| {
-    state.set_text("hello");
-    context.update_ui(dimensions); // unsupported: the mutable state borrow is still active
+textbox.try_update(|widget| {
+    widget.set_text("hello");
+    context.update_ui(dimensions); // unsupported: the mutable widget borrow is still active
 });
 ```
 
-`try_update` holds the state's checked `RefCell` borrow until its closure returns. If the nested
-layout, update, or paint traversal reaches that state, the built-in runtime's checked borrow is
+`try_update` holds the concrete widget's checked `RefCell` borrow until its closure returns. If the nested
+layout, update, or paint traversal reaches that widget, the runtime's checked borrow is
 incompatible and panics with a diagnostic naming the runtime phase. This is the reentrancy guard;
-there is no separate Context lock. Finish the state access before committing instead:
+there is no separate Context lock. Finish typed access before committing instead:
 
 ```rust
-textbox_state
-    .try_update(|state| state.set_text("hello"))
-    .expect("textbox state unavailable");
+textbox.set_text("hello").expect("textbox unavailable");
 context.update_ui(dimensions);
 ```
 
@@ -356,7 +355,7 @@ complete layout before the next event is routed.
 
 `Widget::paint` is observational with respect to application-authored semantic state, topology,
 interaction, and committed layout. A built-in widget may publish framework-owned, paint-derived
-read-only geometry for later application use—`ComboState::anchor`, for example—or update a private
+read-only geometry for later application use—`TypedWidgetHandle<Combo>::anchor`, for example—or update a private
 rendering cache, but neither can alter the current commit. Registered custom-render callbacks may
 update only callback-private rendering caches. Mutating retained UI through an independently
 captured state handle during either callback violates the contract; it is not a deferred-next-frame
@@ -421,7 +420,7 @@ let config = builder::Config {
     fonts: FONTS,
 };
 
-let (_title_state, title_runtime) = TextBlock::create(
+let (_title, title_node) = TextBlock::create(
     TextBlockParameters::new("Inspector").font(FontRole::Heading.into()),
 );
 ```
@@ -455,7 +454,7 @@ To export an atlas as Rust, enable `save-to-rust` (and `png_source` when seriali
 ### Version 0.8.0-pre-alpha
 
 `0.8.0-pre-alpha` is the current in-development UI-node/runtime refactor. It establishes the
-direction for unique owning nodes, concrete runtime-owned state, typed weak application handles,
+direction for unique owning nodes, merged concrete leaf widgets, typed weak application handles,
 public custom containers, one-event update commits, and paint-only rendering. The README, crate
 rustdoc, and retained examples document the implemented API.
 

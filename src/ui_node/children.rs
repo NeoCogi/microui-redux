@@ -262,10 +262,9 @@ mod handle_tests {
 
     /// Builds a small node without depending on container construction during owner tests.
     fn text_node(label: &str) -> Node {
-        // TextBlock construction also gives the test a real state-owning widget runtime, ensuring
+        // TextBlock construction gives the test a real typed leaf widget runtime, ensuring
         // these checks exercise the same drop path used by application nodes.
-        let (_, widget) = crate::TextBlock::create(crate::TextBlockParameters::new(label));
-        Node::widget(widget)
+        crate::TextBlock::create(crate::TextBlockParameters::new(label)).1
     }
 
     #[test]

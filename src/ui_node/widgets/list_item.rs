@@ -33,8 +33,7 @@
 //! `ListItem` represents one selectable row in a retained list.
 
 use super::*;
-use crate::ui_node::runtime_read_state;
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 /// One-shot construction input for a [`ListItem`].
 pub struct ListItemParameters {
@@ -98,12 +97,6 @@ impl ListItemParameters {
     }
 }
 
-/// Application-facing persistent list-item state.
-pub struct ListItemState {
-    /// Mutable label displayed for the item.
-    label: String,
-}
-
 /// Snapshot emitted when the user submits a list item.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ListItemSubmitted {
@@ -113,9 +106,27 @@ pub struct ListItemSubmitted {
 
 impl crate::WidgetEvent for ListItemSubmitted {}
 
-impl WidgetState for ListItemState {}
+/// Concrete retained list item, including its semantic state.
+pub struct ListItem {
+    /// Initialization-only icon.
+    icon: Option<IconId>,
+    /// Initialization-only font.
+    font: FontChoice,
+    /// Base widget options.
+    opt: WidgetOption,
+    /// Mutable label displayed for the item.
+    label: String,
+    /// Runtime-owned source for user submissions.
+    submitted_event: Rc<crate::event::WidgetEventPort<ListItemSubmitted>>,
+}
 
-impl ListItemState {
+impl ListItem {
+    /// Constructs a retained node and a weak typed handle to its concrete list item.
+    pub fn create(parameters: ListItemParameters) -> (TypedWidgetHandle<Self>, Node) {
+        let widget = ListItemBuilder::create_widget(parameters);
+        Node::typed_widget(widget)
+    }
+
     /// Returns the current label.
     pub fn label(&self) -> &str {
         &self.label
@@ -124,29 +135,6 @@ impl ListItemState {
     /// Replaces the label without recording a user submission.
     pub fn set_label(&mut self, label: impl Into<String>) {
         self.label = label.into();
-    }
-}
-
-/// Concrete list-item runtime and sole strong owner of its application state.
-pub struct ListItem {
-    /// Initialization-only icon.
-    icon: Option<IconId>,
-    /// Initialization-only font.
-    font: FontChoice,
-    /// Base widget options.
-    opt: WidgetOption,
-    /// Persistent state allocation.
-    state: Rc<RefCell<ListItemState>>,
-    /// Runtime-owned source for user submissions.
-    submitted_event: Rc<crate::event::WidgetEventPort<ListItemSubmitted>>,
-}
-
-impl ListItem {
-    /// Constructs a typed state handle and unique list-item runtime.
-    pub fn create(parameters: ListItemParameters) -> (WidgetStateHandle<ListItemState>, Self) {
-        let widget = ListItemBuilder::create_widget(parameters);
-        let state = widget.state_handle();
-        (state, widget)
     }
 
     /// Returns the native event endpoint emitted once for every user submission.
@@ -164,13 +152,11 @@ impl ListItem {
             width += size.width + padding;
             visual_h = size.height;
         }
-        runtime_read_state(&self.state, "ListItem::measure", |state| {
-            if !state.label.is_empty() {
-                width += text_size(style, atlas, self.font, &state.label).width;
-            }
-            let height = content_height(style, atlas, self.font, visual_h);
-            Dimensioni::new(width.max(0), height)
-        })
+        if !self.label.is_empty() {
+            width += text_size(style, atlas, self.font, &self.label).width;
+        }
+        let height = content_height(style, atlas, self.font, visual_h);
+        Dimensioni::new(width.max(0), height)
     }
 
     /// Paints row highlight, optional icon, and label.
@@ -203,12 +189,27 @@ impl ListItem {
             ctx.draw_icon(icon, icon_rect, color);
         }
 
-        runtime_read_state(&self.state, "ListItem::paint", |state| {
-            if !state.label.is_empty() {
-                let font = ctx.style().resolve_font_choice(self.font);
-                ctx.draw_control_text_with_font(font, &state.label, text_rect, ControlColor::Text, self.opt);
-            }
-        });
+        if !self.label.is_empty() {
+            let font = ctx.style().resolve_font_choice(self.font);
+            ctx.draw_control_text_with_font(font, &self.label, text_rect, ControlColor::Text, self.opt);
+        }
+    }
+}
+
+impl TypedWidgetHandle<ListItem> {
+    /// Clones the current item label while the widget is retained.
+    pub fn label(&self) -> Option<String> {
+        self.try_read(|widget| widget.label().to_owned())
+    }
+
+    /// Replaces the item label without emitting a submission.
+    pub fn set_label(&self, label: impl Into<String>) -> Option<()> {
+        self.try_update_with(label.into(), |widget, label| widget.set_label(label)).ok()
+    }
+
+    /// Returns the list item's native submission endpoint.
+    pub fn submitted(&self) -> WidgetEventHandle<ListItemSubmitted> {
+        self.widget_event()
     }
 }
 
@@ -225,7 +226,7 @@ impl Widget for ListItem {
         if !ctx.clicked() {
             return;
         }
-        let label = runtime_read_state(&self.state, "ListItem::update", |state| state.label.clone());
+        let label = self.label.clone();
         self.submitted_event.emit(ListItemSubmitted { label });
     }
 
@@ -237,14 +238,6 @@ impl Widget for ListItem {
 impl crate::TypedWidget<ListItemSubmitted> for ListItem {
     fn event(&self) -> crate::WidgetEventHandle<ListItemSubmitted> {
         crate::WidgetEventHandle::new(&self.submitted_event)
-    }
-}
-
-impl WidgetStateOwner for ListItem {
-    type State = ListItemState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
     }
 }
 
@@ -260,7 +253,7 @@ impl WidgetBuilder for ListItemBuilder {
             icon: parameters.icon,
             font: parameters.font,
             opt: parameters.opt,
-            state: Rc::new(RefCell::new(ListItemState { label: parameters.label })),
+            label: parameters.label,
             submitted_event: Rc::new(crate::event::WidgetEventPort::new()),
         }
     }

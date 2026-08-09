@@ -67,8 +67,8 @@ struct State {
 fn main() {
     let atlas = atlas_assets::load_atlas();
     let mut fw = Application::new(atlas.clone(), move |_gl, ctx| {
-        let (_, hello_runtime) = Button::create(ButtonParameters::with_opt("Hello World!", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
-        let (_, tree) = Row::create(RowParameters::new([SizePolicy::Remainder(0)], SizePolicy::Auto, [Node::widget(hello_runtime)]));
+        let (_, hello) = Button::create(ButtonParameters::with_opt("Hello World!", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
+        let (_, tree) = Row::create(RowParameters::new([SizePolicy::Remainder(0)], SizePolicy::Auto, [hello]));
         State {
             _root: ctx.create_window("Hello Window", rect(40, 40, 300, 450), tree),
         }

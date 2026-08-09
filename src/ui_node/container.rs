@@ -334,8 +334,7 @@ mod tests {
 
     /// Creates one real unique node for ownership checks.
     fn text_node(label: &str) -> super::super::Node {
-        let (_, widget) = crate::TextBlock::create(crate::TextBlockParameters::new(label));
-        super::super::Node::widget(widget)
+        crate::TextBlock::create(crate::TextBlockParameters::new(label)).1
     }
 
     #[test]

@@ -31,7 +31,7 @@
 //! Retained list-box widget.
 
 use super::*;
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 /// One-shot construction input for a [`ListBox`].
 pub struct ListBoxParameters {
@@ -75,18 +75,13 @@ impl ListBoxParameters {
     }
 }
 
-/// Application-facing persistent list-box state.
-pub struct ListBoxState;
-
 /// Semantic payload emitted when the user submits a list box.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct ListBoxSubmitted;
 
 impl crate::WidgetEvent for ListBoxSubmitted {}
 
-impl WidgetState for ListBoxState {}
-
-/// Concrete list-box runtime and sole strong owner of its application state.
+/// Concrete retained list box, including its semantic and interaction state.
 pub struct ListBox {
     /// Initialization-only label.
     label: String,
@@ -96,18 +91,15 @@ pub struct ListBox {
     font: FontChoice,
     /// Base widget options.
     opt: WidgetOption,
-    /// Persistent state allocation.
-    state: Rc<RefCell<ListBoxState>>,
     /// Runtime-owned source for user submissions.
     submitted_event: Rc<crate::event::WidgetEventPort<ListBoxSubmitted>>,
 }
 
 impl ListBox {
-    /// Constructs a typed state handle and unique list-box runtime.
-    pub fn create(parameters: ListBoxParameters) -> (WidgetStateHandle<ListBoxState>, Self) {
+    /// Constructs a retained node and a weak typed handle to its concrete list box.
+    pub fn create(parameters: ListBoxParameters) -> (crate::TypedWidgetHandle<Self>, crate::Node) {
         let widget = ListBoxBuilder::create_widget(parameters);
-        let state = widget.state_handle();
-        (state, widget)
+        crate::Node::typed_widget(widget)
     }
 
     /// Returns the native event endpoint emitted once for every user submission.
@@ -140,6 +132,13 @@ impl ListBox {
     }
 }
 
+impl crate::TypedWidgetHandle<ListBox> {
+    /// Returns the list box's native submission endpoint.
+    pub fn submitted(&self) -> crate::WidgetEventHandle<ListBoxSubmitted> {
+        self.widget_event()
+    }
+}
+
 impl Widget for ListBox {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
@@ -167,14 +166,6 @@ impl crate::TypedWidget<ListBoxSubmitted> for ListBox {
     }
 }
 
-impl WidgetStateOwner for ListBox {
-    type State = ListBoxState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
-    }
-}
-
 /// Builder associating list-box parameters with the concrete runtime.
 pub struct ListBoxBuilder;
 
@@ -188,7 +179,6 @@ impl WidgetBuilder for ListBoxBuilder {
             image: parameters.image,
             font: parameters.font,
             opt: parameters.opt,
-            state: Rc::new(RefCell::new(ListBoxState)),
             submitted_event: Rc::new(crate::event::WidgetEventPort::new()),
         }
     }

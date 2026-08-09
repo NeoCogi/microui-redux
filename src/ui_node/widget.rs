@@ -127,26 +127,85 @@ impl FocusPolicy {
     }
 }
 
-/// Marker trait for application-facing state retained by a widget runtime.
+/// Marker trait for application-facing state shared by a retained composite.
 ///
-/// State contains semantic values and commands that remain meaningful after construction. Native
-/// event ports belong to the concrete runtime and are exposed through [`crate::TypedWidget`]; state
-/// does not implement measurement, update, or painting, which remain [`Widget`] phases.
+/// Ordinary leaf widgets keep semantic values directly in their concrete [`Widget`] type and expose
+/// them through [`TypedWidgetHandle`]. This separate state abstraction remains useful where several
+/// erased runtime parts coordinate through one allocation, such as container layout and surface
+/// objects or window-manager root state.
 pub trait WidgetState: 'static {}
 
 impl WidgetState for () {}
 
 /// Marker trait for one-shot widget construction input.
 ///
-/// Parameters seed application state and configure the runtime. Values that applications must
-/// mutate after construction belong in the state owned by the builder's associated runtime.
+/// Parameters seed and configure one concrete runtime. Values that applications mutate after
+/// construction live directly in the builder's associated widget.
 pub trait WidgetParameters: 'static {}
+
+/// Cloneable, non-owning typed access to one concrete retained widget.
+///
+/// A [`crate::Node`] owns the only persistent strong reference after construction. Containers and
+/// the runtime retain that widget through an erased `Rc<RefCell<dyn Widget>>`, while application
+/// code and coordinating widgets may keep this typed weak view. Removing the node therefore makes
+/// every typed handle expire instead of keeping an invisible widget alive.
+pub struct TypedWidgetHandle<W: Widget + 'static> {
+    widget: Weak<RefCell<W>>,
+}
+
+impl<W: Widget + 'static> Clone for TypedWidgetHandle<W> {
+    fn clone(&self) -> Self {
+        Self { widget: self.widget.clone() }
+    }
+}
+
+impl<W: Widget + 'static> TypedWidgetHandle<W> {
+    /// Creates a weak typed view of the allocation that will be erased into a retained node.
+    pub(crate) fn new(widget: &Rc<RefCell<W>>) -> Self {
+        Self { widget: Rc::downgrade(widget) }
+    }
+
+    /// Reports whether the retained tree still owns this widget.
+    pub fn is_alive(&self) -> bool {
+        self.widget.upgrade().is_some()
+    }
+
+    /// Runs a widget-specific read operation when the widget is alive and not mutably borrowed.
+    ///
+    /// Built-in widgets expose common semantic operations as methods on their specialized handle.
+    /// This closure form remains available for custom widget APIs and compound operations.
+    pub fn try_read<R>(&self, f: impl FnOnce(&W) -> R) -> Option<R> {
+        let widget = self.widget.upgrade()?;
+        let widget = widget.try_borrow().ok()?;
+        Some(f(&widget))
+    }
+
+    /// Runs a widget-specific mutation when the widget is alive and not otherwise borrowed.
+    pub fn try_update<R>(&self, f: impl FnOnce(&mut W) -> R) -> Option<R> {
+        let widget = self.widget.upgrade()?;
+        let mut widget = widget.try_borrow_mut().ok()?;
+        Some(f(&mut widget))
+    }
+
+    /// Mutates a widget while preserving an owned input when access cannot begin.
+    pub fn try_update_with<I, R>(&self, input: I, f: impl FnOnce(&mut W, I) -> R) -> Result<R, I> {
+        let widget = match self.widget.upgrade() {
+            Some(widget) => widget,
+            None => return Err(input),
+        };
+        let mut widget = match widget.try_borrow_mut() {
+            Ok(widget) => widget,
+            Err(_) => return Err(input),
+        };
+        Ok(f(&mut widget, input))
+    }
+}
 
 /// A cloneable, non-owning capability for checked access to concrete widget state.
 ///
-/// The concrete [`WidgetStateOwner`] runtime is the persistent owner. Consequently, cloning this
-/// handle never keeps removed state alive and does not require `T: Clone`. Dropping every handle
-/// likewise has no effect on the mounted runtime.
+/// A retained composite is the persistent owner. Consequently, cloning this handle never keeps
+/// removed state alive and does not require `T: Clone`. Dropping every handle likewise has no effect
+/// on the mounted runtime.
 ///
 /// Access closures must finish before an update, layout, or paint traversal can reach the same
 /// state. Same-cell reentrancy fails without invoking the inner closure; access to an independent
@@ -172,7 +231,7 @@ pub trait WidgetParameters: 'static {}
 /// context.update_ui(dimensions);     // supported after the borrow ends
 /// ```
 pub struct WidgetStateHandle<T: WidgetState> {
-    /// Weak access to the state allocation retained by the concrete runtime.
+    /// Weak access to the state allocation retained by the composite runtime.
     cell: Weak<RefCell<T>>,
 }
 
@@ -183,12 +242,11 @@ impl<T: WidgetState> Clone for WidgetStateHandle<T> {
 }
 
 impl<T: WidgetState> WidgetStateHandle<T> {
-    /// Creates a weak state capability for a concrete runtime's private state allocation.
+    /// Creates a weak state capability for a composite runtime's private shared allocation.
     ///
     /// This borrows the strong owner only long enough to downgrade it and never exposes that owner
-    /// through the resulting handle. This constructor is the advanced downstream
-    /// [`WidgetStateOwner`] conformance boundary: the supplied `Rc<RefCell<T>>` must be the same
-    /// private allocation used by every runtime phase, and the runtime must remain its only
+    /// through the resulting handle. The supplied `Rc<RefCell<T>>` must be the same private
+    /// allocation shared by the composite's runtime parts, and that composite must remain its only
     /// persistent strong owner. Applications ordinarily receive handles from built-in `create`
     /// constructors instead of calling this method.
     pub fn new(owner: &Rc<RefCell<T>>) -> Self {
@@ -239,28 +297,14 @@ impl<T: WidgetState> WidgetStateHandle<T> {
     }
 }
 
-/// Runtime widget that privately owns one concrete application-state allocation.
-///
-/// The returned handle must refer to the same allocation used by the runtime's [`Widget`] phases.
-/// It is a safe conformance requirement that each retained runtime be the unique persistent owner of
-/// that allocation: implementations must not expose a strong owner, raw weak pointer, or cloning path
-/// that lets the same state allocation back multiple retained nodes.
-pub trait WidgetStateOwner: Widget + 'static {
-    /// Concrete state owned by this runtime.
-    type State: WidgetState;
-
-    /// Returns a non-owning checked capability for the runtime's state allocation.
-    fn state_handle(&self) -> WidgetStateHandle<Self::State>;
-}
-
-/// Associates one-shot construction parameters with one concrete state-owning widget runtime.
+/// Associates one-shot construction parameters with one concrete widget runtime.
 pub trait WidgetBuilder: Sized + 'static {
     /// One-shot input consumed during construction.
     type Parameters: WidgetParameters;
     /// Concrete runtime created by this builder.
-    type W: WidgetStateOwner;
+    type W: Widget + 'static;
 
-    /// Consumes Parameters and creates the concrete runtime with its private strong state owner.
+    /// Consumes parameters and creates the concrete widget before it is mounted and erased.
     fn create_widget(parameters: Self::Parameters) -> Self::W;
 }
 
@@ -413,14 +457,6 @@ mod state_ownership_tests {
         }
     }
 
-    impl WidgetStateOwner for TestWidget {
-        type State = TestState;
-
-        fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-            WidgetStateHandle::new(&self.state)
-        }
-    }
-
     struct TestBuilder;
 
     impl WidgetBuilder for TestBuilder {
@@ -442,14 +478,6 @@ mod state_ownership_tests {
     struct UnitWidget {
         state: Rc<RefCell<()>>,
         opt: WidgetOption,
-    }
-
-    impl WidgetStateOwner for UnitWidget {
-        type State = ();
-
-        fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-            WidgetStateHandle::new(&self.state)
-        }
     }
 
     impl Widget for UnitWidget {
@@ -487,7 +515,7 @@ mod state_ownership_tests {
     #[test]
     fn runtime_retains_one_strong_owner_and_exposes_only_weak_handles() {
         let widget = TestBuilder::create_widget(TestParameters { value: 7 });
-        let state = widget.state_handle();
+        let state = WidgetStateHandle::new(&widget.state);
 
         assert_eq!(Rc::strong_count(&widget.state), 1);
         assert_eq!(state.try_read(|state| state.value), Some(7));
@@ -505,7 +533,7 @@ mod state_ownership_tests {
     #[test]
     fn checked_state_handle_reads_and_updates_allocate_nothing() {
         let widget = TestBuilder::create_widget(TestParameters { value: 0 });
-        let state = widget.state_handle();
+        let state = WidgetStateHandle::new(&widget.state);
 
         // Warm the checked upgrade and borrow paths before isolating their steady-state cost.
         state.try_read(|state| state.value).unwrap();
@@ -541,9 +569,9 @@ mod state_ownership_tests {
     fn same_cell_conflicts_are_unavailable_and_cross_cell_access_succeeds() {
         let first_widget = TestBuilder::create_widget(TestParameters { value: 1 });
         let second_widget = TestBuilder::create_widget(TestParameters { value: 2 });
-        let first = first_widget.state_handle();
+        let first = WidgetStateHandle::new(&first_widget.state);
         let first_clone = first.clone();
-        let second = second_widget.state_handle();
+        let second = WidgetStateHandle::new(&second_widget.state);
 
         first
             .try_update(|first_state| {
@@ -560,7 +588,7 @@ mod state_ownership_tests {
     #[test]
     fn active_access_keeps_state_alive_until_its_closure_returns() {
         let widget = TestBuilder::create_widget(TestParameters { value: 4 });
-        let state = widget.state_handle();
+        let state = WidgetStateHandle::new(&widget.state);
         let widget = RefCell::new(Some(widget));
 
         state
@@ -573,7 +601,7 @@ mod state_ownership_tests {
         assert!(!state.is_alive());
 
         let widget = TestBuilder::create_widget(TestParameters { value: 5 });
-        let state = widget.state_handle();
+        let state = WidgetStateHandle::new(&widget.state);
         let widget = RefCell::new(Some(widget));
         state
             .try_update(|_| {
@@ -587,7 +615,7 @@ mod state_ownership_tests {
     #[test]
     fn update_with_preserves_input_when_state_access_is_unavailable() {
         let widget = TestBuilder::create_widget(TestParameters { value: 0 });
-        let state = widget.state_handle();
+        let state = WidgetStateHandle::new(&widget.state);
         let closure_called = Rc::new(Cell::new(false));
 
         let conflicted_input = state
@@ -626,7 +654,7 @@ mod state_ownership_tests {
     #[test]
     fn discarded_unit_handle_does_not_change_runtime_state_ownership() {
         let widget = UnitBuilder::create_widget(UnitParameters);
-        let state = widget.state_handle();
+        let state = WidgetStateHandle::new(&widget.state);
         assert_eq!(Rc::strong_count(&widget.state), 1);
 
         drop(state);

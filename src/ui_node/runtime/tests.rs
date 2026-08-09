@@ -36,7 +36,7 @@ use std::rc::{Rc, Weak};
 use super::*;
 use crate::test_support::test_atlas;
 use crate::ui_node::children::ChildrenHandle;
-use crate::{ChildParticipation, Children, ContainerSurface, Layout, Widget, WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetStateOwner, WidgetUpdateCtx};
+use crate::{ChildParticipation, Children, ContainerSurface, Layout, Widget, WidgetPaintCtx, WidgetState, WidgetUpdateCtx};
 use crate::input::Input;
 
 #[derive(Default)]
@@ -49,7 +49,6 @@ struct ProbeCounts {
 }
 
 struct Probe {
-    state: Rc<RefCell<()>>,
     name: &'static str,
     counts: Rc<ProbeCounts>,
     log: Rc<RefCell<Vec<String>>>,
@@ -61,7 +60,6 @@ impl Probe {
         let counts = Rc::new(ProbeCounts::default());
         (
             Self {
-                state: Rc::new(RefCell::new(())),
                 name,
                 counts: counts.clone(),
                 log,
@@ -69,14 +67,6 @@ impl Probe {
             },
             counts,
         )
-    }
-}
-
-impl WidgetStateOwner for Probe {
-    type State = ();
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
     }
 }
 
@@ -104,16 +94,7 @@ impl Widget for Probe {
 }
 
 struct HoldFocusProbe {
-    state: Rc<RefCell<()>>,
     opt: WidgetOption,
-}
-
-impl WidgetStateOwner for HoldFocusProbe {
-    type State = ();
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
-    }
 }
 
 impl Widget for HoldFocusProbe {
@@ -299,18 +280,9 @@ impl Widget for CaptureSurface {
 impl ContainerSurface for CaptureSurface {}
 
 struct CrossSubtreeRemover {
-    state: Rc<RefCell<()>>,
     target: Rc<RefCell<TraversalState>>,
     removed: bool,
     opt: WidgetOption,
-}
-
-impl WidgetStateOwner for CrossSubtreeRemover {
-    type State = ();
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
-    }
 }
 
 impl Widget for CrossSubtreeRemover {
@@ -575,10 +547,7 @@ fn ignored_topmost_pointer_target_never_exposes_a_covered_sibling() {
 
 #[test]
 fn widget_focus_policy_is_authoritative_after_dispatch_cleanup() {
-    let mut root = Node::widget(HoldFocusProbe {
-        state: Rc::new(RefCell::new(())),
-        opt: WidgetOption::NONE,
-    });
+    let mut root = Node::widget(HoldFocusProbe { opt: WidgetOption::NONE });
     let id = root.id();
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -842,7 +811,6 @@ fn cross_subtree_removal_during_update_sanitizes_before_later_delivery() {
     let captured_id = captured.id();
     let (target_parent, target_state) = TraversalContainer::new([captured], false, log.clone());
     let remover = CrossSubtreeRemover {
-        state: Rc::new(RefCell::new(())),
         target: target_state,
         removed: false,
         opt: WidgetOption::NONE,

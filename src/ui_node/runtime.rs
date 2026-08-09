@@ -299,18 +299,17 @@ fn node_accepts_input(node: &Node) -> bool {
 
 fn node_is_framed(node: &Node) -> bool {
     // Dynamic widget options are authoritative because surfaces can enable/disable behavior.
-    node.data.widget().effective_widget_opt().intersects(WidgetOption::FRAME)
+    node.data.with_widget(|widget| widget.effective_widget_opt().intersects(WidgetOption::FRAME))
 }
 
 /// Resolves effective event options and focus behavior for the current update pass.
 fn node_interaction_config(node: &Node) -> (WidgetOption, FocusPolicy) {
-    let widget = node.data.widget();
-    let mut opt = widget.effective_widget_opt();
+    let (mut opt, focus_policy) = node.data.with_widget(|widget| (widget.effective_widget_opt(), widget.focus_policy()));
     if !node_accepts_input(node) {
         // Keep layout eligibility authoritative without mutating the concrete widget's options.
         opt |= WidgetOption::NO_INTERACT;
     }
-    (opt, widget.focus_policy())
+    (opt, focus_policy)
 }
 
 #[cfg(test)]

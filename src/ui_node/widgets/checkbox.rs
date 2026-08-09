@@ -33,16 +33,15 @@
 //! The checkbox toggles persistent boolean state on click and paints the atlas check icon when
 //! selected.
 
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 use super::*;
-use crate::ui_node::{runtime_read_state, runtime_update_state};
-use crate::{WidgetBuilder, WidgetParameters, WidgetState, WidgetStateHandle, WidgetStateOwner};
+use crate::{WidgetBuilder, WidgetParameters};
 
 /// One-shot construction input for a [`Checkbox`].
 ///
 /// The label, font, and widget options configure the retained runtime. The checked value seeds
-/// [`CheckboxState`], which remains application-mutable after construction.
+/// The checked value remains application-mutable through [`TypedWidgetHandle<Checkbox>`].
 pub struct CheckboxParameters {
     /// Label displayed beside the checkbox square.
     pub label: String,
@@ -79,15 +78,36 @@ impl CheckboxParameters {
     }
 }
 
-/// Application-facing persistent checkbox state.
-pub struct CheckboxState {
-    /// Current checked value.
-    checked: bool,
+/// Value snapshot emitted after a user-originated checkbox change.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct CheckboxChanged {
+    /// Checked value after applying the triggering click.
+    pub checked: bool,
 }
 
-impl WidgetState for CheckboxState {}
+impl crate::WidgetEvent for CheckboxChanged {}
 
-impl CheckboxState {
+/// Concrete retained checkbox, including its semantic and interaction state.
+pub struct Checkbox {
+    /// Label displayed beside the checkbox square.
+    label: String,
+    /// Font used for the label.
+    font: FontChoice,
+    /// Base widget options.
+    opt: WidgetOption,
+    /// Current checked value.
+    checked: bool,
+    /// Runtime-owned source for user-originated value changes.
+    changed_event: Rc<crate::event::WidgetEventPort<CheckboxChanged>>,
+}
+
+impl Checkbox {
+    /// Constructs a retained node and a weak typed handle to its concrete checkbox.
+    pub fn create(parameters: CheckboxParameters) -> (crate::TypedWidgetHandle<Self>, crate::Node) {
+        let widget = CheckboxBuilder::create_widget(parameters);
+        crate::Node::typed_widget(widget)
+    }
+
     /// Marks the checkbox as checked without recording user interaction.
     pub fn check(&mut self) {
         self.checked = true;
@@ -106,38 +126,6 @@ impl CheckboxState {
     /// Returns the current checked value.
     pub const fn checked(&self) -> bool {
         self.checked
-    }
-}
-
-/// Value snapshot emitted after a user-originated checkbox change.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct CheckboxChanged {
-    /// Checked value after applying the triggering click.
-    pub checked: bool,
-}
-
-impl crate::WidgetEvent for CheckboxChanged {}
-
-/// Concrete checkbox runtime and sole strong owner of its application state.
-pub struct Checkbox {
-    /// Label displayed beside the checkbox square.
-    label: String,
-    /// Font used for the label.
-    font: FontChoice,
-    /// Base widget options.
-    opt: WidgetOption,
-    /// Persistent state allocation owned for exactly this runtime's lifetime.
-    state: Rc<RefCell<CheckboxState>>,
-    /// Runtime-owned source for user-originated value changes.
-    changed_event: Rc<crate::event::WidgetEventPort<CheckboxChanged>>,
-}
-
-impl Checkbox {
-    /// Constructs a typed [`CheckboxState`] handle and its unique concrete runtime.
-    pub fn create(parameters: CheckboxParameters) -> (WidgetStateHandle<CheckboxState>, Self) {
-        let widget = CheckboxBuilder::create_widget(parameters);
-        let state = widget.state_handle();
-        (state, widget)
     }
 
     /// Returns the native event endpoint emitted after every user-originated value change.
@@ -176,6 +164,33 @@ impl Checkbox {
     }
 }
 
+impl crate::TypedWidgetHandle<Checkbox> {
+    /// Returns the current checked value while the widget is retained.
+    pub fn checked(&self) -> Option<bool> {
+        self.try_read(Checkbox::checked)
+    }
+
+    /// Marks the retained checkbox as checked.
+    pub fn check(&self) -> Option<()> {
+        self.try_update(Checkbox::check)
+    }
+
+    /// Marks the retained checkbox as unchecked.
+    pub fn uncheck(&self) -> Option<()> {
+        self.try_update(Checkbox::uncheck)
+    }
+
+    /// Replaces the retained checkbox value without emitting a user event.
+    pub fn set_checked(&self, checked: bool) -> Option<()> {
+        self.try_update(|widget| widget.set_checked(checked))
+    }
+
+    /// Returns the checkbox's native value-change endpoint.
+    pub fn changed(&self) -> crate::WidgetEventHandle<CheckboxChanged> {
+        self.widget_event()
+    }
+}
+
 impl Widget for Checkbox {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
@@ -190,30 +205,19 @@ impl Widget for Checkbox {
             return;
         }
 
-        let checked = runtime_update_state(&self.state, "Checkbox::update", |state| {
-            state.checked = !state.checked;
-            state.checked
-        });
+        self.checked = !self.checked;
+        let checked = self.checked;
         self.changed_event.emit(CheckboxChanged { checked });
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        let checked = runtime_read_state(&self.state, "Checkbox::paint", CheckboxState::checked);
-        self.paint_widget(checked, ctx);
+        self.paint_widget(self.checked, ctx);
     }
 }
 
 impl crate::TypedWidget<CheckboxChanged> for Checkbox {
     fn event(&self) -> crate::WidgetEventHandle<CheckboxChanged> {
         crate::WidgetEventHandle::new(&self.changed_event)
-    }
-}
-
-impl WidgetStateOwner for Checkbox {
-    type State = CheckboxState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
     }
 }
 
@@ -229,7 +233,7 @@ impl WidgetBuilder for CheckboxBuilder {
             label: parameters.label,
             font: parameters.font,
             opt: parameters.opt,
-            state: Rc::new(RefCell::new(CheckboxState { checked: parameters.checked })),
+            checked: parameters.checked,
             changed_event: Rc::new(crate::event::WidgetEventPort::new()),
         }
     }

@@ -29,7 +29,10 @@
 //
 
 use crate::render::{CustomRenderHandle, CustomRenderKey, RendererBackend};
-use crate::{Dimensioni, Widget, WidgetStateOwner};
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use crate::{Dimensioni, TypedWidgetHandle, Widget};
 
 use super::{ChildParticipation, Children, Container, NodeLayout, RuntimeNodeId};
 
@@ -80,7 +83,7 @@ impl NodeRuntime {
 /// A `Node` owns exactly one concrete widget or container runtime. It is intentionally not
 /// cloneable: successful insertion transfers ownership into one [`Children`] collection. Its
 /// process-unique identity is runtime-private, unrelated to public [`crate::RootId`] values, and is
-/// never stored in or exposed through a [`crate::WidgetStateHandle`]. Attached nodes cannot be
+/// never stored in or exposed through a [`crate::TypedWidgetHandle`]. Attached nodes cannot be
 /// detached or reparented: topology APIs either keep ownership in place or drop the removed
 /// runtime. Build a replacement node when content must move to another parent.
 pub struct Node {
@@ -91,21 +94,19 @@ pub struct Node {
 }
 
 impl Node {
-    /// Creates a leaf node from one concrete state-owning widget runtime.
-    pub fn widget<W: WidgetStateOwner>(widget: W) -> Self {
-        // Public leaves must own typed state so callers can obtain a weak application handle before
-        // the concrete widget is boxed inside WidgetNode.
-        Self::widget_with_custom_render(widget, None)
+    /// Creates a leaf node without retaining a typed application handle.
+    pub fn widget<W: Widget + 'static>(widget: W) -> Self {
+        Self::mount_widget(widget, None).1
     }
 
-    /// Creates a framework-internal leaf whose state is owned by a surrounding composite.
-    ///
-    /// Composite-only surfaces such as a disclosure header already refer to state retained by their
-    /// enclosing layout. Requiring a second unit-state allocation merely to satisfy the public leaf
-    /// constructor would add no ownership or behavior, so this path accepts an ordinary `Widget`.
+    /// Creates a leaf and a weak typed handle to the same retained widget allocation.
+    pub fn typed_widget<W: Widget + 'static>(widget: W) -> (TypedWidgetHandle<W>, Self) {
+        Self::mount_widget(widget, None)
+    }
+
+    /// Creates a framework-internal leaf without returning a typed application handle.
     pub(crate) fn widget_internal<W: Widget + 'static>(widget: W) -> Self {
-        // No public state handle is produced; lifetime is exactly the lifetime of this Node.
-        Self::from_kind(NodeKind::Widget(WidgetNode::new(widget, None)))
+        Self::widget(widget)
     }
 
     /// Creates a leaf node with a backend-typed custom-render callback.
@@ -115,14 +116,28 @@ impl Node {
     pub fn custom_render<B, W>(widget: W, renderer: CustomRenderHandle<B>) -> Self
     where
         B: RendererBackend,
-        W: WidgetStateOwner,
+        W: Widget + 'static,
     {
-        Self::widget_with_custom_render(widget, Some(renderer.key))
+        Self::mount_widget(widget, Some(renderer.key)).1
     }
 
-    fn widget_with_custom_render<W: WidgetStateOwner>(widget: W, custom_render: Option<crate::render::CustomRenderKey>) -> Self {
-        // Erase widget type and renderer metadata together so they cannot become detached owners.
-        Self::from_kind(NodeKind::Widget(WidgetNode::new(widget, custom_render)))
+    /// Creates a custom-render leaf while preserving weak typed application access.
+    pub fn typed_custom_render<B, W>(widget: W, renderer: CustomRenderHandle<B>) -> (TypedWidgetHandle<W>, Self)
+    where
+        B: RendererBackend,
+        W: Widget + 'static,
+    {
+        Self::mount_widget(widget, Some(renderer.key))
+    }
+
+    fn mount_widget<W: Widget + 'static>(widget: W, custom_render: Option<crate::render::CustomRenderKey>) -> (TypedWidgetHandle<W>, Self) {
+        // Allocate once while the concrete type is known, then erase only the strong reference
+        // retained by the node. Both references therefore address the same RefCell allocation.
+        let widget = Rc::new(RefCell::new(widget));
+        let handle = TypedWidgetHandle::new(&widget);
+        let widget: Rc<RefCell<dyn Widget>> = widget;
+        let node = Self::from_kind(NodeKind::Widget(WidgetNode::new(widget, custom_render)));
+        (handle, node)
     }
 
     /// Creates a branch node from one complete concrete container owner.
@@ -167,13 +182,14 @@ impl Node {
     pub(crate) fn measure(&self, style: &crate::Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
         // Frame geometry is intrinsic to the widget, so remove it from the content bound before
         // dispatch and add it back to the returned content preference afterward.
-        let framed = self.data.widget().effective_widget_opt().intersects(crate::WidgetOption::FRAME);
+        let framed = self
+            .data
+            .with_widget(|widget| widget.effective_widget_opt().intersects(crate::WidgetOption::FRAME));
         let border_width = if framed { style.frame_border().width.max(0) } else { 0 };
         // Both leaves and containers expose one Widget measurement entry point through NodeKind.
         let measured_content = self
             .data
-            .widget()
-            .measure(style, atlas, crate::ui_node::frame::content_available(available, border_width));
+            .with_widget(|widget| widget.measure(style, atlas, crate::ui_node::frame::content_available(available, border_width)));
         // Widgets cannot return negative geometry. Node placement policy is intentionally absent:
         // the parent applies it later when allocating this preferred outer size.
         let preferred_content = Dimensioni::new(measured_content.width.max(0), measured_content.height.max(0));
@@ -241,18 +257,16 @@ impl Node {
 
 /// Thin retained leaf owner for one erased widget and optional custom-render metadata.
 pub(crate) struct WidgetNode {
-    /// Concrete state-owning runtime erased only after generic insertion validates its owner.
-    pub(crate) widget: Box<dyn Widget>,
+    /// Sole persistent strong widget owner, erased without changing its allocation.
+    pub(crate) widget: Rc<RefCell<dyn Widget>>,
     /// Optional custom backend render callback for custom-render leaves.
     custom_render: Option<CustomRenderKey>,
 }
 
 impl WidgetNode {
     /// Erases one concrete runtime at the retained leaf boundary.
-    pub(crate) fn new<W: Widget + 'static>(widget: W, custom_render: Option<CustomRenderKey>) -> Self {
-        // Boxing occurs only here, after public constructors have enforced any stronger ownership
-        // contract required for application-addressable widgets.
-        Self { widget: Box::new(widget), custom_render }
+    pub(crate) fn new(widget: Rc<RefCell<dyn Widget>>, custom_render: Option<CustomRenderKey>) -> Self {
+        Self { widget, custom_render }
     }
 
     /// Returns the private custom-render callback key, when one was supplied at construction.
@@ -263,28 +277,38 @@ impl WidgetNode {
 
 /// Private runtime payload for an owning [`Node`].
 pub(crate) enum NodeKind {
-    /// Direct state-owning leaf runtime.
+    /// Direct erased leaf widget runtime.
     Widget(WidgetNode),
     /// Direct concrete container owner with one erased geometry policy.
     Container(Container),
 }
 
 impl NodeKind {
-    /// Returns the one common runtime phase object for either node variant.
-    pub(crate) fn widget(&self) -> &dyn Widget {
-        // Common phases do not need to know whether Widget behavior comes from a leaf or Container.
+    /// Runs a read-only operation against the common widget phase object.
+    pub(crate) fn with_widget<R>(&self, f: impl FnOnce(&dyn Widget) -> R) -> R {
         match self {
-            Self::Widget(node) => &*node.widget,
-            Self::Container(container) => container,
+            Self::Widget(node) => {
+                let widget = node
+                    .widget
+                    .try_borrow()
+                    .expect("retained widget invariant violated: a typed access closure must finish before runtime traversal");
+                f(&*widget)
+            }
+            Self::Container(container) => f(container),
         }
     }
 
-    /// Returns the one mutable common runtime phase object for either node variant.
-    pub(crate) fn widget_mut(&mut self) -> &mut dyn Widget {
-        // Mutable dispatch follows the same single branch used by read-only phase queries.
+    /// Runs a mutable operation against the common widget phase object.
+    pub(crate) fn with_widget_mut<R>(&mut self, f: impl FnOnce(&mut dyn Widget) -> R) -> R {
         match self {
-            Self::Widget(node) => &mut *node.widget,
-            Self::Container(container) => container,
+            Self::Widget(node) => {
+                let mut widget = node
+                    .widget
+                    .try_borrow_mut()
+                    .expect("retained widget invariant violated: a typed access closure must finish before runtime traversal");
+                f(&mut *widget)
+            }
+            Self::Container(container) => f(container),
         }
     }
 }
@@ -294,9 +318,8 @@ mod tests {
     use super::*;
     use crate::test_support::test_atlas;
 
-    fn text_node(label: &str) -> (crate::WidgetStateHandle<crate::TextBlockState>, Node) {
-        let (state, runtime) = crate::TextBlock::create(crate::TextBlockParameters::new(label));
-        (state, Node::widget(runtime))
+    fn text_node(label: &str) -> (crate::TypedWidgetHandle<crate::TextBlock>, Node) {
+        crate::TextBlock::create(crate::TextBlockParameters::new(label))
     }
 
     #[test]

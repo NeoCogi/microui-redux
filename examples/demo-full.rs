@@ -104,7 +104,6 @@ struct TriangleState {
 }
 
 struct PainterDemo {
-    state: Rc<RefCell<()>>,
     phase: f32,
     star_center: Option<Vec2f>,
     opt: WidgetOption,
@@ -122,19 +121,10 @@ impl WidgetBuilder for PainterDemoBuilder {
 
     fn create_widget(_parameters: Self::Parameters) -> Self::W {
         PainterDemo {
-            state: Rc::new(RefCell::new(())),
             phase: 0.0,
             star_center: None,
             opt: WidgetOption::NONE,
         }
-    }
-}
-
-impl WidgetStateOwner for PainterDemo {
-    type State = ();
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
     }
 }
 
@@ -144,7 +134,6 @@ impl Widget for PainterDemo {
     }
 
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-        let _state = self.state.try_borrow().expect("painter state must be available during measure");
         Dimensioni::new(240, 200)
     }
 
@@ -277,7 +266,6 @@ enum FalloffTarget {
 }
 
 struct FalloffEditor {
-    state: Rc<RefCell<()>>,
     nodes: Vec<FalloffNode>,
     active: Option<FalloffTarget>,
     hovered: Option<FalloffTarget>,
@@ -296,7 +284,6 @@ impl WidgetBuilder for FalloffEditorBuilder {
 
     fn create_widget(_parameters: Self::Parameters) -> Self::W {
         let mut editor = FalloffEditor {
-            state: Rc::new(RefCell::new(())),
             nodes: vec![
                 FalloffNode {
                     pos: Vec2f::new(0.0, 1.0),
@@ -545,21 +532,12 @@ impl FalloffEditor {
     }
 }
 
-impl WidgetStateOwner for FalloffEditor {
-    type State = ();
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
-    }
-}
-
 impl Widget for FalloffEditor {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
     }
 
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-        let _state = self.state.try_borrow().expect("falloff state must be available during measure");
         Dimensioni::new(300, 220)
     }
 
@@ -731,7 +709,6 @@ struct SuzanneData {
 }
 
 struct SuzanneWidget {
-    state: Rc<RefCell<()>>,
     data: Rc<RefCell<SuzanneData>>,
     opt: WidgetOption,
 }
@@ -750,18 +727,9 @@ impl WidgetBuilder for SuzanneWidgetBuilder {
 
     fn create_widget(parameters: Self::Parameters) -> Self::W {
         SuzanneWidget {
-            state: Rc::new(RefCell::new(())),
             data: parameters.data,
             opt: WidgetOption::HOLD_FOCUS | WidgetOption::GRAB_SCROLL,
         }
-    }
-}
-
-impl WidgetStateOwner for SuzanneWidget {
-    type State = ();
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
     }
 }
 
@@ -771,7 +739,6 @@ impl Widget for SuzanneWidget {
     }
 
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-        let _state = self.state.try_borrow().expect("Suzanne state must be available during measure");
         Dimensioni::new(80, 24)
     }
 
@@ -848,10 +815,42 @@ impl Widget for SuzanneWidget {
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
 
-fn stateful_leaf<B: WidgetBuilder>(parameters: B::Parameters) -> (WidgetStateHandle<<B::W as WidgetStateOwner>::State>, B::W) {
-    let runtime = B::create_widget(parameters);
-    let state = runtime.state_handle();
-    (state, runtime)
+fn stateful_leaf<B: WidgetBuilder>(parameters: B::Parameters) -> (TypedWidgetHandle<B::W>, Node) {
+    Node::typed_widget(B::create_widget(parameters))
+}
+
+trait IntoDemoNode {
+    fn into_demo_node(self) -> Node;
+}
+
+impl IntoDemoNode for Node {
+    fn into_demo_node(self) -> Node {
+        self
+    }
+}
+
+impl IntoDemoNode for Custom {
+    fn into_demo_node(self) -> Node {
+        Node::widget(self)
+    }
+}
+
+impl IntoDemoNode for PainterDemo {
+    fn into_demo_node(self) -> Node {
+        Node::widget(self)
+    }
+}
+
+impl IntoDemoNode for FalloffEditor {
+    fn into_demo_node(self) -> Node {
+        Node::widget(self)
+    }
+}
+
+impl IntoDemoNode for SuzanneWidget {
+    fn into_demo_node(self) -> Node {
+        Node::widget(self)
+    }
 }
 
 /// Small example-local authoring scope that immediately moves unique nodes into concrete
@@ -880,19 +879,19 @@ impl DemoNodes {
         DemoNode { nodes: self, policy }
     }
 
-    fn widget<W: WidgetStateOwner>(&mut self, widget: W) {
-        self.push(Node::widget(widget));
+    fn widget<W: IntoDemoNode>(&mut self, widget: W) {
+        self.push(widget.into_demo_node());
     }
 
     fn text_with_wrap(&mut self, text: impl Into<String>, wrap: TextWrap) {
-        let (_, widget) = TextBlock::create(TextBlockParameters::with_wrap(text, wrap));
-        self.widget(widget);
+        let (_, node) = TextBlock::create(TextBlockParameters::with_wrap(text, wrap));
+        self.push(node);
     }
 
     fn custom_render<B, W>(&mut self, widget: W, renderer: CustomRenderHandle<B>)
     where
         B: RendererBackend,
-        W: WidgetStateOwner,
+        W: Widget + 'static,
     {
         self.push(Node::custom_render(widget, renderer));
     }
@@ -943,8 +942,8 @@ struct DemoNode<'a> {
 }
 
 impl DemoNode<'_> {
-    fn widget<W: WidgetStateOwner>(self, widget: W) {
-        self.nodes.push(Node::widget(widget).with_policy(self.policy));
+    fn widget<W: IntoDemoNode>(self, widget: W) {
+        self.nodes.push(widget.into_demo_node().with_policy(self.policy));
     }
 
     fn scroll_area(self, opt: ScrollAreaOption, f: impl FnOnce(&mut DemoNodes)) {
@@ -978,62 +977,62 @@ fn replace_root_content(root: &WidgetStateHandle<ColumnState>, nodes: Vec<Node>,
     }
 }
 
-fn retained_leaf<B: WidgetBuilder>(parameters: B::Parameters) -> B::W {
+fn retained_leaf<B: WidgetBuilder>(parameters: B::Parameters) -> Node {
     stateful_leaf::<B>(parameters).1
 }
 
-fn static_label(text: impl Into<String>) -> ListItem {
+fn static_label(text: impl Into<String>) -> Node {
     retained_leaf::<ListItemBuilder>(ListItemParameters::with_opt(text, WidgetOption::NO_INTERACT))
 }
 
-fn centered_button(label: impl Into<String>) -> (WidgetEventHandle<ButtonSubmitted>, Button) {
-    let button = ButtonBuilder::create_widget(ButtonParameters::with_opt(label, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
+fn centered_button(label: impl Into<String>) -> (WidgetEventHandle<ButtonSubmitted>, Node) {
+    let (button, node) = Button::create(ButtonParameters::with_opt(label, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
     let submitted = button.submitted();
-    (submitted, button)
+    (submitted, node)
 }
 
-fn set_slider_value(state: &WidgetStateHandle<SliderState>, value: Real) {
-    state.try_update(|slider| slider.set_value(value)).expect("slider state unavailable");
+fn set_slider_value(state: &TypedWidgetHandle<Slider>, value: Real) {
+    state.set_value(value).expect("slider unavailable");
 }
 
 struct DemoRuntimes {
-    bg_sliders: [Slider; 3],
-    style_color_sliders: [Slider; 56],
-    style_value_sliders: [Slider; 5],
-    submit_buf: Textbox,
-    text_area: TextArea,
-    combo: Combo,
-    combo_items: [ListItem; 4],
-    style_color_labels: [ListItem; 14],
-    style_color_swatches: [ColorSwatch; 14],
-    style_metric_labels: [ListItem; 5],
-    stack_direction_labels: [ListItem; 2],
-    weight_labels: [ListItem; 2],
-    window_info_labels: [ListItem; 3],
-    window_info_values: [ListItem; 3],
-    test_button_labels: [ListItem; 3],
-    tree_labels: [ListItem; 2],
-    background_labels: [ListItem; 3],
-    submit_button: Button,
-    log_text: TextBlock,
-    typography_heading: TextBlock,
-    typography_body: TextBlock,
-    typography_button: Button,
-    test_buttons: [Button; 6],
-    tree_buttons: [Button; 6],
-    popup_buttons: [Button; 2],
-    texture_buttons: [Button; 4],
-    stack_direction_buttons: [Button; 6],
-    weight_buttons: [Button; 9],
-    external_image_button: Option<Button>,
-    checkboxes: [Checkbox; 3],
+    bg_sliders: [Node; 3],
+    style_color_sliders: [Node; 56],
+    style_value_sliders: [Node; 5],
+    submit_buf: Node,
+    text_area: Node,
+    combo: Node,
+    combo_items: [Node; 4],
+    style_color_labels: [Node; 14],
+    style_color_swatches: [Node; 14],
+    style_metric_labels: [Node; 5],
+    stack_direction_labels: [Node; 2],
+    weight_labels: [Node; 2],
+    window_info_labels: [Node; 3],
+    window_info_values: [Node; 3],
+    test_button_labels: [Node; 3],
+    tree_labels: [Node; 2],
+    background_labels: [Node; 3],
+    submit_button: Node,
+    log_text: Node,
+    typography_heading: Node,
+    typography_body: Node,
+    typography_button: Node,
+    test_buttons: [Node; 6],
+    tree_buttons: [Node; 6],
+    popup_buttons: [Node; 2],
+    texture_buttons: [Node; 4],
+    stack_direction_buttons: [Node; 6],
+    weight_buttons: [Node; 9],
+    external_image_button: Option<Node>,
+    checkboxes: [Node; 3],
     triangle_renderer: CustomRenderHandle<SelectedBackend>,
     suzanne_renderer: CustomRenderHandle<SelectedBackend>,
     triangle_widget: Custom,
     painter_widget: PainterDemo,
     falloff_widget: FalloffEditor,
     suzanne_widget: SuzanneWidget,
-    background_swatch: ColorSwatch,
+    background_swatch: Node,
 }
 
 enum Message {
@@ -1053,21 +1052,21 @@ enum Message {
 
 struct State {
     bg: [Real; 3],
-    bg_slider_states: [WidgetStateHandle<SliderState>; 3],
+    bg_slider_states: [TypedWidgetHandle<Slider>; 3],
     bg_slider_changed: [WidgetEventHandle<SliderChanged>; 3],
-    style_color_slider_states: [WidgetStateHandle<SliderState>; 56],
+    style_color_slider_states: [TypedWidgetHandle<Slider>; 56],
     style_color_slider_changed: [WidgetEventHandle<SliderChanged>; 56],
-    style_value_slider_states: [WidgetStateHandle<SliderState>; 5],
+    style_value_slider_states: [TypedWidgetHandle<Slider>; 5],
     style_value_slider_changed: [WidgetEventHandle<SliderChanged>; 5],
     logbuf: Rc<RefCell<String>>,
-    submit_buf_state: WidgetStateHandle<TextboxState>,
+    submit_buf_state: TypedWidgetHandle<Textbox>,
     submit_buf_submitted: WidgetEventHandle<TextboxSubmitted>,
-    combo_typed_state: WidgetStateHandle<ComboState>,
+    combo_typed_state: TypedWidgetHandle<Combo>,
     combo_submitted: WidgetEventHandle<ComboSubmitted>,
-    combo_item_states: [WidgetStateHandle<ListItemState>; 4],
+    combo_item_states: [TypedWidgetHandle<ListItem>; 4],
     combo_item_submitted: [WidgetEventHandle<ListItemSubmitted>; 4],
-    style_color_swatch_states: [WidgetStateHandle<ColorSwatchState>; 14],
-    window_info_value_states: [WidgetStateHandle<ListItemState>; 3],
+    style_color_swatch_states: [TypedWidgetHandle<ColorSwatch>; 14],
+    window_info_value_states: [TypedWidgetHandle<ListItem>; 3],
     style: Style,
 
     demo_root: RootHandle,
@@ -1079,7 +1078,7 @@ struct State {
     last_frame: Instant,
 
     submit_button_submitted: WidgetEventHandle<ButtonSubmitted>,
-    log_text_state: WidgetStateHandle<TextBlockState>,
+    log_text_state: TypedWidgetHandle<TextBlock>,
     test_button_submitted: [WidgetEventHandle<ButtonSubmitted>; 6],
     tree_button_submitted: [WidgetEventHandle<ButtonSubmitted>; 6],
     popup_button_submitted: [WidgetEventHandle<ButtonSubmitted>; 2],
@@ -1089,7 +1088,7 @@ struct State {
     open_dialog: bool,
     combo_open: bool,
     triangle_data: Rc<RefCell<TriangleState>>,
-    background_swatch_state: WidgetStateHandle<ColorSwatchState>,
+    background_swatch_state: TypedWidgetHandle<ColorSwatch>,
 }
 
 impl State {
@@ -1208,7 +1207,7 @@ impl State {
             ))
         });
         let style_color_slider_states = style_color_slider_pairs.each_ref().map(|(state, _)| state.clone());
-        let style_color_slider_changed = style_color_slider_pairs.each_ref().map(|(_, runtime)| runtime.changed());
+        let style_color_slider_changed = style_color_slider_pairs.each_ref().map(|(handle, _)| handle.changed());
         let style_color_sliders = style_color_slider_pairs.map(|(_, runtime)| runtime);
         let style_color_swatch_pairs = std::array::from_fn(|_| stateful_leaf::<ColorSwatchBuilder>(ColorSwatchParameters::new(color(0, 0, 0, 0xFF))));
         let style_color_swatch_states = style_color_swatch_pairs.each_ref().map(|(state, _)| state.clone());
@@ -1256,7 +1255,7 @@ impl State {
             )),
         ];
         let style_value_slider_states = style_value_slider_pairs.each_ref().map(|(state, _)| state.clone());
-        let style_value_slider_changed = style_value_slider_pairs.each_ref().map(|(_, runtime)| runtime.changed());
+        let style_value_slider_changed = style_value_slider_pairs.each_ref().map(|(handle, _)| handle.changed());
         let style_value_sliders = style_value_slider_pairs.map(|(_, runtime)| runtime);
         let bg_slider_pairs = std::array::from_fn(|_| {
             stateful_leaf::<SliderBuilder>(SliderParameters::with_opt(
@@ -1269,7 +1268,7 @@ impl State {
             ))
         });
         let bg_slider_states = bg_slider_pairs.each_ref().map(|(state, _)| state.clone());
-        let bg_slider_changed = bg_slider_pairs.each_ref().map(|(_, runtime)| runtime.changed());
+        let bg_slider_changed = bg_slider_pairs.each_ref().map(|(handle, _)| handle.changed());
         let bg_sliders = bg_slider_pairs.map(|(_, runtime)| runtime);
         let text_area = retained_leaf::<TextAreaBuilder>(
             TextAreaParameters::new(
@@ -1278,7 +1277,7 @@ impl State {
             .wrap(TextWrap::Word),
         );
         let (submit_buf_state, submit_buf) = stateful_leaf::<TextboxBuilder>(TextboxParameters::new("").font(FontRole::Mono.into()));
-        let submit_buf_submitted = submit_buf.submitted();
+        let submit_buf_submitted = submit_buf_state.submitted();
         let (log_text_state, log_text) = stateful_leaf::<TextBlockBuilder>(TextBlockParameters::new("").font(FontRole::Mono.into()));
         let typography_heading = retained_leaf::<TextBlockBuilder>(TextBlockParameters::new("NORMAL.ttf at 18px").font(FontRole::Heading.into()));
         let typography_body = retained_leaf::<TextBlockBuilder>(
@@ -1339,7 +1338,7 @@ impl State {
         let _stack_direction_root = ctx.create_window("Stack Direction Demo", rect(530, 40, 280, 220), stack_direction_node);
         let _weight_root = ctx.create_window("Weight Demo", rect(530, 270, 280, 260), weight_node);
         let (combo_typed_state, combo_runtime) = stateful_leaf::<ComboBuilder>(ComboParameters::new());
-        let combo_submitted = combo_runtime.submitted();
+        let combo_submitted = combo_typed_state.submitted();
         let combo_item_pairs = [
             stateful_leaf::<ListItemBuilder>(ListItemParameters::new("Apple")),
             stateful_leaf::<ListItemBuilder>(ListItemParameters::new("Banana")),
@@ -1347,7 +1346,7 @@ impl State {
             stateful_leaf::<ListItemBuilder>(ListItemParameters::new("Date")),
         ];
         let combo_item_states = combo_item_pairs.each_ref().map(|(state, _)| state.clone());
-        let combo_item_submitted = combo_item_pairs.each_ref().map(|(_, runtime)| runtime.submitted());
+        let combo_item_submitted = combo_item_pairs.each_ref().map(|(handle, _)| handle.submitted());
         let combo_items = combo_item_pairs.map(|(_, runtime)| runtime);
         let window_info_value_pairs = std::array::from_fn(|_| stateful_leaf::<ListItemBuilder>(ListItemParameters::with_opt("", WidgetOption::NO_INTERACT)));
         let window_info_value_states = window_info_value_pairs.each_ref().map(|(state, _)| state.clone());
@@ -1649,7 +1648,7 @@ impl State {
 
     fn submit_log(&mut self, text: String) {
         self.write_log(text.as_str());
-        self.submit_buf_state.try_update(TextboxState::clear).expect("submit textbox state unavailable");
+        self.submit_buf_state.try_update(Textbox::clear).expect("submit textbox unavailable");
     }
 
     fn sync_background_controls_from_bg(&mut self) {
@@ -2175,7 +2174,7 @@ impl State {
             .try_update(|combo| combo.update_items(&combo_labels))
             .expect("combo state unavailable");
 
-        let combo_anchor = self.combo_typed_state.try_read(ComboState::anchor).expect("combo state unavailable");
+        let combo_anchor = self.combo_typed_state.try_read(Combo::anchor).expect("combo unavailable");
         if self.combo_open {
             ctx.set_root_visible(self.combo_popup_root.id(), true).expect("combo popup root must exist");
             ctx.set_root_rect(self.combo_popup_root.id(), combo_anchor)

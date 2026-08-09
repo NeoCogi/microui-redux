@@ -309,7 +309,10 @@ impl UiRuntime {
     fn pointer_hits_node(&self, node: &Node, parent_transform: Transform, pos: Vec2i) -> bool {
         // NO_INTERACT makes only this node's own surface transparent; eligible descendants were
         // already considered by the caller.
-        if node.data.widget().effective_widget_opt().intersects(WidgetOption::NO_INTERACT) {
+        if node
+            .data
+            .with_widget(|widget| widget.effective_widget_opt().intersects(WidgetOption::NO_INTERACT))
+        {
             return false;
         }
 
@@ -417,7 +420,11 @@ impl UiRuntime {
             NodeKind::Widget(widget) => {
                 // Leaf event-kind policy is completely dispatcher-owned; no Widget query widens
                 // the public trait or permits a handler to influence geometric target selection.
-                let opt = widget.widget.effective_widget_opt();
+                let opt = widget
+                    .widget
+                    .try_borrow()
+                    .expect("retained widget invariant violated during input dispatch")
+                    .effective_widget_opt();
                 self.dispatch_widget_input(&node.state, local_rect, local_clip, opt, true, &local_event)
             }
             NodeKind::Container(container) => {

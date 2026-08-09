@@ -34,7 +34,6 @@
 //! rendering commands.
 
 use super::*;
-use std::{cell::RefCell, rc::Rc};
 
 /// One-shot construction input for a [`Custom`] runtime.
 pub struct CustomParameters {
@@ -82,8 +81,6 @@ pub struct Custom {
     font: FontChoice,
     /// Base widget options.
     opt: WidgetOption,
-    /// Unit state retained with the same ownership shape as every runtime.
-    state: Rc<RefCell<()>>,
 }
 
 impl Custom {
@@ -120,14 +117,6 @@ impl Widget for Custom {
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
 
-impl WidgetStateOwner for Custom {
-    type State = ();
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
-    }
-}
-
 /// Builder associating custom-render parameters with the concrete runtime.
 pub struct CustomBuilder;
 
@@ -140,7 +129,6 @@ impl WidgetBuilder for CustomBuilder {
             name: parameters.name,
             font: parameters.font,
             opt: parameters.opt,
-            state: Rc::new(RefCell::new(())),
         }
     }
 }

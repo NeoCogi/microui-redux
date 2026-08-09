@@ -61,13 +61,13 @@ fn image_widgets_measure_external_texture_dimensions() {
     let style = Style::default();
     let texture = TextureId::new(7, 13, 5);
 
-    let (_, button) = Button::create(ButtonParameters::with_image("aa", Some(texture), WidgetOption::FRAME, WidgetFillOption::ALL));
+    let button = ButtonBuilder::create_widget(ButtonParameters::with_image("aa", Some(texture), WidgetOption::FRAME, WidgetFillOption::ALL));
     let button_size = button.measure(&style, &atlas, Dimensioni::default());
 
     assert_eq!(button_size.width, style.padding * 2 + texture.width() + style.padding + 16);
     assert_eq!(button_size.height, 14);
 
-    let (_, list_box) = ListBox::create(ListBoxParameters::new("a", Some(texture)));
+    let list_box = ListBoxBuilder::create_widget(ListBoxParameters::new("a", Some(texture)));
     let list_size = list_box.measure(&style, &atlas, Dimensioni::default());
 
     assert_eq!(list_size.width, style.padding * 2 + texture.width() + style.padding + 8);
@@ -90,7 +90,7 @@ fn inline_image_layout_keeps_visual_and_text_rects_separate() {
 fn combo_run_toggles_open_state() {
     let atlas = make_test_atlas();
     let style = Rc::new(Style::default());
-    let (combo_state, mut combo) = Combo::create(ComboParameters::new());
+    let mut combo = ComboBuilder::create_widget(ComboParameters::new());
     let rect = rect(0, 0, 100, 20);
     let mut ctx = WidgetUpdateCtx::new_with_interaction(
         rect,
@@ -108,9 +108,9 @@ fn combo_run_toggles_open_state() {
     );
 
     combo.update(&mut ctx, None);
-    assert_eq!(combo_state.try_read(ComboState::is_open), Some(true));
+    assert!(combo.is_open());
 
-    assert_eq!(combo_state.try_update(ComboState::open_popup), Some(()));
+    combo.open_popup();
     let mut ctx = WidgetUpdateCtx::new_with_interaction(
         rect,
         rect,
@@ -126,84 +126,59 @@ fn combo_run_toggles_open_state() {
         KeyCode::NONE,
     );
     combo.update(&mut ctx, None);
-    assert_eq!(combo_state.try_read(ComboState::is_open), Some(false));
+    assert!(!combo.is_open());
 }
 
 #[test]
 fn combo_select_updates_label_and_closes_popup() {
-    let (combo_state, _combo) = Combo::create(ComboParameters::new());
+    let mut combo = ComboBuilder::create_widget(ComboParameters::new());
     let items = ["Apple", "Banana", "Cherry"];
 
-    combo_state.try_update(ComboState::open_popup).unwrap();
-    let selected = combo_state.try_update(|combo| combo.select(1, &items)).unwrap();
+    combo.open_popup();
+    let selected = combo.select(1, &items);
 
     assert_eq!(selected.as_deref(), Some("Banana"));
-    assert_eq!(combo_state.try_read(ComboState::selected), Some(1));
-    assert_eq!(combo_state.try_read(ComboState::is_open), Some(false));
+    assert_eq!(combo.selected(), 1);
+    assert!(!combo.is_open());
 }
 
 #[test]
 fn convenience_constructors_store_explicit_outer_frame_policy() {
-    assert!(Button::create(ButtonParameters::new("button")).1.widget_opt().intersects(WidgetOption::FRAME));
-    assert!(Combo::create(ComboParameters::new()).1.widget_opt().intersects(WidgetOption::FRAME));
-    assert!(
-        crate::Textbox::create(crate::TextboxParameters::new(""))
-            .1
-            .widget_opt()
-            .intersects(WidgetOption::FRAME)
-    );
-    assert!(
-        crate::TextArea::create(crate::TextAreaParameters::new(""))
-            .1
-            .widget_opt()
-            .intersects(WidgetOption::FRAME)
-    );
-    assert!(
-        crate::Slider::create(crate::SliderParameters::new(0.0, 0.0, 1.0))
-            .1
-            .widget_opt()
-            .intersects(WidgetOption::FRAME)
-    );
-    assert!(
-        crate::Number::create(crate::NumberParameters::new(0.0, 1.0, 0))
-            .1
-            .widget_opt()
-            .intersects(WidgetOption::FRAME)
-    );
-    assert!(
-        crate::ColorSwatch::create(crate::ColorSwatchParameters::new(color(0, 0, 0, 255)))
-            .1
-            .widget_opt()
-            .intersects(WidgetOption::FRAME)
-    );
+    fn has_option<W: Widget + 'static>(handle: &TypedWidgetHandle<W>, option: WidgetOption) -> bool {
+        handle.try_read(|widget| widget.widget_opt().intersects(option)).unwrap()
+    }
+
+    let (button, _button_node) = Button::create(ButtonParameters::new("button"));
+    let (combo, _combo_node) = Combo::create(ComboParameters::new());
+    let (textbox, _textbox_node) = crate::Textbox::create(crate::TextboxParameters::new(""));
+    let (text_area, _text_area_node) = crate::TextArea::create(crate::TextAreaParameters::new(""));
+    let (slider, _slider_node) = crate::Slider::create(crate::SliderParameters::new(0.0, 0.0, 1.0));
+    let (number, _number_node) = crate::Number::create(crate::NumberParameters::new(0.0, 1.0, 0));
+    let (swatch, _swatch_node) = crate::ColorSwatch::create(crate::ColorSwatchParameters::new(color(0, 0, 0, 255)));
+    assert!(has_option(&button, WidgetOption::FRAME));
+    assert!(has_option(&combo, WidgetOption::FRAME));
+    assert!(has_option(&textbox, WidgetOption::FRAME));
+    assert!(has_option(&text_area, WidgetOption::FRAME));
+    assert!(has_option(&slider, WidgetOption::FRAME));
+    assert!(has_option(&number, WidgetOption::FRAME));
+    assert!(has_option(&swatch, WidgetOption::FRAME));
     let header = crate::Disclosure::create(crate::DisclosureParameters::header("header", false, std::iter::empty())).1;
-    assert!(!header.data.widget().effective_widget_opt().intersects(WidgetOption::FRAME));
+    assert!(!header.data.with_widget(|widget| widget.effective_widget_opt().intersects(WidgetOption::FRAME)));
 
-    let (_, checkbox) = Checkbox::create(CheckboxParameters::new("checkbox", false));
-    assert!(!checkbox.widget_opt().intersects(WidgetOption::FRAME));
-    assert!(!ListItem::create(ListItemParameters::new("item")).1.widget_opt().intersects(WidgetOption::FRAME));
-    assert!(
-        !ListBox::create(ListBoxParameters::new("item", None))
-            .1
-            .widget_opt()
-            .intersects(WidgetOption::FRAME)
-    );
+    let (checkbox, _checkbox_node) = Checkbox::create(CheckboxParameters::new("checkbox", false));
+    let (item, _item_node) = ListItem::create(ListItemParameters::new("item"));
+    let (list, _list_node) = ListBox::create(ListBoxParameters::new("item", None));
+    assert!(!has_option(&checkbox, WidgetOption::FRAME));
+    assert!(!has_option(&item, WidgetOption::FRAME));
+    assert!(!has_option(&list, WidgetOption::FRAME));
     assert!(!Custom::create(CustomParameters::new("custom")).widget_opt().intersects(WidgetOption::FRAME));
-    assert!(
-        !crate::TextBlock::create(crate::TextBlockParameters::new("text"))
-            .1
-            .widget_opt()
-            .intersects(WidgetOption::FRAME)
-    );
+    let (text, _text_node) = crate::TextBlock::create(crate::TextBlockParameters::new("text"));
+    assert!(!has_option(&text, WidgetOption::FRAME));
     let tree = crate::Disclosure::create(crate::DisclosureParameters::tree("tree", false, std::iter::empty())).1;
-    assert!(!tree.data.widget().effective_widget_opt().intersects(WidgetOption::FRAME));
+    assert!(!tree.data.with_widget(|widget| widget.effective_widget_opt().intersects(WidgetOption::FRAME)));
 
-    assert!(
-        !Button::create(ButtonParameters::with_opt("flat", WidgetOption::ALIGN_CENTER))
-            .1
-            .widget_opt()
-            .intersects(WidgetOption::FRAME)
-    );
+    let (flat, _flat_node) = Button::create(ButtonParameters::with_opt("flat", WidgetOption::ALIGN_CENTER));
+    assert!(!has_option(&flat, WidgetOption::FRAME));
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -217,11 +192,11 @@ enum ClickMessage {
 
 #[test]
 fn typed_click_events_dispatch_every_occurrence_in_order() {
-    let (_, mut checkbox) = Checkbox::create(CheckboxParameters::new("check", false));
-    let (_, mut button) = Button::create(ButtonParameters::new("button"));
-    let (_, mut item) = ListItem::create(ListItemParameters::new("item"));
-    let (_, mut list) = ListBox::create(ListBoxParameters::new("list", None));
-    let (_, mut combo) = Combo::create(ComboParameters::new());
+    let mut checkbox = CheckboxBuilder::create_widget(CheckboxParameters::new("check", false));
+    let mut button = ButtonBuilder::create_widget(ButtonParameters::new("button"));
+    let mut item = ListItemBuilder::create_widget(ListItemParameters::new("item"));
+    let mut list = ListBoxBuilder::create_widget(ListBoxParameters::new("list", None));
+    let mut combo = ComboBuilder::create_widget(ComboParameters::new());
 
     let mut session = crate::Session::new();
     session.connect(checkbox.changed(), |event| ClickMessage::Checkbox(event.checked)).unwrap();
@@ -269,11 +244,11 @@ fn typed_click_events_dispatch_every_occurrence_in_order() {
 
 #[test]
 fn combo_selection_and_item_clamping_emit_only_value_changes() {
-    let (state, runtime) = Combo::create(ComboParameters::new());
+    let (state, _node) = Combo::create(ComboParameters::new());
     let labels = ["zero", "one", "two"];
 
     let mut session = crate::Session::new();
-    session.connect(runtime.changed(), |event| (event.selected, event.label)).unwrap();
+    session.connect(state.changed(), |event| (event.selected, event.label)).unwrap();
     let mut subscribers = crate::Subscribers::new();
     subscribers.subscribe(|events: &mut Vec<(usize, String)>, event: &(usize, String), _| events.push(event.clone()));
     let mut events = Vec::new();
@@ -289,7 +264,7 @@ fn combo_selection_and_item_clamping_emit_only_value_changes() {
     assert_eq!(events, [(2, "two".to_owned())]);
 
     state.try_update(|combo| combo.update_items(&labels[..1])).unwrap();
-    assert_eq!(state.try_read(ComboState::selected), Some(0));
+    assert_eq!(state.try_read(Combo::selected), Some(0));
     assert!(session.dispatch(&mut events, &mut subscribers));
     assert_eq!(events, [(2, "two".to_owned()), (0, "zero".to_owned())]);
 
@@ -299,11 +274,11 @@ fn combo_selection_and_item_clamping_emit_only_value_changes() {
 
 #[test]
 fn checkbox_and_list_item_programmatic_setters_are_silent() {
-    let (checkbox, checkbox_runtime) = Checkbox::create(CheckboxParameters::new("check", false));
-    let (item, item_runtime) = ListItem::create(ListItemParameters::new("before"));
+    let (checkbox, _checkbox_node) = Checkbox::create(CheckboxParameters::new("check", false));
+    let (item, _item_node) = ListItem::create(ListItemParameters::new("before"));
     let mut session = crate::Session::new();
-    session.connect(checkbox_runtime.changed(), |_| ()).unwrap();
-    session.connect(item_runtime.submitted(), |_| ()).unwrap();
+    session.connect(checkbox.changed(), |_| ()).unwrap();
+    session.connect(item.submitted(), |_| ()).unwrap();
     let mut subscribers = crate::Subscribers::<(), ()>::new();
 
     checkbox
@@ -319,11 +294,11 @@ fn checkbox_and_list_item_programmatic_setters_are_silent() {
 
 #[test]
 fn connecting_an_event_does_not_borrow_semantic_widget_state() {
-    let (state, button) = Button::create(ButtonParameters::new("button"));
+    let (button, _node) = Button::create(ButtonParameters::new("button"));
     let submitted = button.submitted();
     let mut session = crate::Session::new();
 
-    let connected = state
+    let connected = button
         .try_update(|_| session.connect(submitted, |_| ()))
         .expect("button state should remain available");
 
@@ -331,12 +306,9 @@ fn connecting_an_event_does_not_borrow_semantic_widget_state() {
 }
 
 #[test]
-fn custom_constructor_returns_only_the_runtime_and_retains_unit_state() {
-    fn assert_runtime(_: Custom) {}
-
-    let runtime = Custom::create(CustomParameters::new("custom"));
-    let state = runtime.state_handle();
-    assert!(state.is_alive());
-    assert_runtime(runtime);
-    assert!(!state.is_alive());
+fn custom_widgets_need_no_unit_state_allocation() {
+    let (handle, node) = Node::typed_widget(Custom::create(CustomParameters::new("custom")));
+    assert!(handle.is_alive());
+    drop(node);
+    assert!(!handle.is_alive());
 }

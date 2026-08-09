@@ -36,11 +36,11 @@ use std::{
 use bitflags::bitflags;
 
 use crate::ui_node::children::ChildrenHandle;
-use crate::ui_node::scrollbar::{RetainedScrollbar, RetainedScrollbarState, ScrollAxis, scrollbar_base};
+use crate::ui_node::scrollbar::{RetainedScrollbar, ScrollAxis, scrollbar_base};
 use crate::ui_node::{runtime_read_state, runtime_update_state};
 use crate::{
-    AtlasHandle, ChildParticipation, Container, ContainerSurface, ControlColor, Dimensioni, FocusPolicy, Layout, Recti, Style, UiInputEvent, Vec2i, Widget,
-    WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetUpdateCtx,
+    AtlasHandle, ChildParticipation, Container, ContainerSurface, ControlColor, Dimensioni, FocusPolicy, Layout, Recti, Style, TypedWidgetHandle, UiInputEvent,
+    Vec2i, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetState, WidgetStateHandle, WidgetUpdateCtx,
 };
 
 use super::{Children, ContainerLayoutCtx, Node};
@@ -121,9 +121,9 @@ pub struct ScrollAreaState {
     /// Weak topology capability for the virtual-surface child.
     content: ChildrenHandle,
     /// Weak state capability for the horizontal scrollbar child.
-    horizontal: WidgetStateHandle<RetainedScrollbarState>,
+    horizontal: TypedWidgetHandle<RetainedScrollbar>,
     /// Weak state capability for the vertical scrollbar child.
-    vertical: WidgetStateHandle<RetainedScrollbarState>,
+    vertical: TypedWidgetHandle<RetainedScrollbar>,
     /// Dynamic participation policy shared by surface and layout.
     scrolling_enabled: bool,
     /// Latest geometry summary; interactive state remains in the child widgets.
@@ -239,14 +239,14 @@ impl ScrollAreaState {
     }
 
     /// Reads one live structural scrollbar without taking ownership of its state.
-    fn axis_offset(handle: &WidgetStateHandle<RetainedScrollbarState>) -> i32 {
+    fn axis_offset(handle: &TypedWidgetHandle<RetainedScrollbar>) -> i32 {
         handle
-            .try_read(RetainedScrollbarState::offset)
+            .try_read(RetainedScrollbar::offset)
             .expect("ScrollArea structural scrollbar must outlive its parent state")
     }
 
     /// Writes a requested offset through the scrollbar's weak state capability.
-    fn set_axis_offset(handle: &WidgetStateHandle<RetainedScrollbarState>, offset: i32) {
+    fn set_axis_offset(handle: &TypedWidgetHandle<RetainedScrollbar>, offset: i32) {
         handle
             .try_update(|state| state.set_offset(offset))
             .expect("ScrollArea structural scrollbar must be available outside traversal")
@@ -255,13 +255,13 @@ impl ScrollAreaState {
     /// Returns both committed ranges without copying geometry into interactive state.
     fn max_offset(&self) -> Vec2i {
         Vec2i::new(
-            self.horizontal.try_read(RetainedScrollbarState::max_offset).unwrap_or(0),
-            self.vertical.try_read(RetainedScrollbarState::max_offset).unwrap_or(0),
+            self.horizontal.try_read(RetainedScrollbar::max_offset).unwrap_or(0),
+            self.vertical.try_read(RetainedScrollbar::max_offset).unwrap_or(0),
         )
     }
 
     /// Clears one scrollbar's offset and committed geometry.
-    fn reset_axis(handle: &WidgetStateHandle<RetainedScrollbarState>) {
+    fn reset_axis(handle: &TypedWidgetHandle<RetainedScrollbar>) {
         // Pointer capture is runtime-owned, so deactivation has no widget-local drag lease to
         // clear; hidden participation invalidates the corresponding runtime identity during layout.
         handle
@@ -349,9 +349,9 @@ impl ContainerSurface for ScrollAreaSurface {
 /// Geometry policy for content owned by the virtual-surface structural child.
 struct VirtualSurfaceLayout {
     /// Scroll translation is read from the real horizontal child widget.
-    horizontal: WidgetStateHandle<RetainedScrollbarState>,
+    horizontal: TypedWidgetHandle<RetainedScrollbar>,
     /// Scroll translation is read from the real vertical child widget.
-    vertical: WidgetStateHandle<RetainedScrollbarState>,
+    vertical: TypedWidgetHandle<RetainedScrollbar>,
 }
 
 impl Layout for VirtualSurfaceLayout {
@@ -414,9 +414,9 @@ pub struct ScrollAreaLayout {
     /// Sole strong owner of application-facing composite state.
     state: Rc<RefCell<ScrollAreaState>>,
     /// Weak capability used only to configure the horizontal child after placement.
-    horizontal: WidgetStateHandle<RetainedScrollbarState>,
+    horizontal: TypedWidgetHandle<RetainedScrollbar>,
     /// Weak capability used only to configure the vertical child after placement.
-    vertical: WidgetStateHandle<RetainedScrollbarState>,
+    vertical: TypedWidgetHandle<RetainedScrollbar>,
 }
 
 impl ScrollAreaLayout {
@@ -428,14 +428,7 @@ impl ScrollAreaLayout {
     const VERTICAL: usize = 2;
 
     /// Configures one visible scrollbar using widget-local track coordinates.
-    fn configure_bar(
-        handle: &WidgetStateHandle<RetainedScrollbarState>,
-        track: Recti,
-        view_len: i32,
-        content_len: i32,
-        min_thumb_len: i32,
-        requested_offset: i32,
-    ) {
+    fn configure_bar(handle: &TypedWidgetHandle<RetainedScrollbar>, track: Recti, view_len: i32, content_len: i32, min_thumb_len: i32, requested_offset: i32) {
         // Apply the requested offset before configuring the new range; configure performs the final
         // clamp and resets drag geometry using the current widget-local track.
         handle
@@ -447,10 +440,10 @@ impl ScrollAreaLayout {
     }
 
     /// Deactivates one hidden scrollbar without removing its strong child owner.
-    fn deactivate_bar(handle: &WidgetStateHandle<RetainedScrollbarState>) {
+    fn deactivate_bar(handle: &TypedWidgetHandle<RetainedScrollbar>) {
         // Retain the child node and handle identity while clearing geometry, offset, and drag state.
         handle
-            .try_update(RetainedScrollbarState::deactivate)
+            .try_update(RetainedScrollbar::deactivate)
             .expect("ScrollArea layout requires its retained scrollbar child");
     }
 }
@@ -562,8 +555,8 @@ impl Layout for ScrollAreaLayout {
             let _ = ctx.layout_child(children, Self::VIRTUAL_SURFACE, child_rect);
             let offset = Vec2i::new(ScrollAreaState::axis_offset(&self.horizontal), ScrollAreaState::axis_offset(&self.vertical));
             let maximum = Vec2i::new(
-                self.horizontal.try_read(RetainedScrollbarState::max_offset).unwrap_or(0),
-                self.vertical.try_read(RetainedScrollbarState::max_offset).unwrap_or(0),
+                self.horizontal.try_read(RetainedScrollbar::max_offset).unwrap_or(0),
+                self.vertical.try_read(RetainedScrollbar::max_offset).unwrap_or(0),
             );
             let corner = (vertical_visible && horizontal_visible)
                 .then(|| Recti::new(body.x + body.width, body.y + body.height, vertical_track.width, horizontal_track.height));
@@ -673,14 +666,9 @@ mod tests {
 
     #[test]
     fn scroll_area_keeps_three_structural_children_and_content_behind_virtual_surface() {
-        use crate::WidgetStateOwner;
-
         let child = Custom::create(CustomParameters::new("child"));
-        let child_state = child.state_handle();
-        let (scroll, node) = ScrollArea::create(ScrollAreaParameters::new(
-            ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL,
-            [Node::widget(child)],
-        ));
+        let (child_state, child) = Node::typed_widget(child);
+        let (scroll, node) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, [child]));
 
         assert_eq!(scroll.try_read(ScrollAreaState::len), Some(Some(1)));
         assert_eq!(
@@ -773,7 +761,6 @@ mod tests {
             "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum.",
             TextWrap::Word,
         ));
-        let text = Node::widget(text);
         let text_id = text.id();
         let (_, text_stack) = Stack::create(StackParameters::new(
             SizePolicy::Remainder(0),
@@ -785,7 +772,7 @@ mod tests {
         let (_, row) = Row::create(RowParameters::new(
             [SizePolicy::Fixed(40), SizePolicy::Remainder(0)],
             SizePolicy::Auto,
-            [Node::widget(label), text_column],
+            [label, text_column],
         ));
         let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, [row]));
         let style = Style {

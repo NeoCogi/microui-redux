@@ -77,7 +77,7 @@ impl UiRuntime {
                 node.state.clicked,
                 node.state.active,
             );
-            node.data.widget_mut().paint(&mut widget_ctx);
+            node.data.with_widget_mut(|widget| widget.paint(&mut widget_ctx));
         }
 
         if let NodeKind::Widget(widget) = &node.data

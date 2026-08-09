@@ -36,9 +36,6 @@ use crate::{AtlasHandle, Container, Dimensioni, Layout, Recti, Style, WidgetOpti
 
 use super::{Axis, Children, ContainerLayoutCtx, Node};
 
-#[cfg(test)]
-use crate::WidgetStateOwner;
-
 /// One-shot construction input for a horizontal row.
 ///
 /// The initial children, index-matched width tracks, and shared item height are copied into
@@ -286,8 +283,8 @@ mod tests {
     #[test]
     fn row_state_owns_topology_and_mutable_track_configuration() {
         let first = Custom::create(CustomParameters::new("first"));
-        let first_state = first.state_handle();
-        let (row, node) = Row::create(RowParameters::new([SizePolicy::Auto], SizePolicy::Auto, [Node::widget(first)]));
+        let (first_state, first) = Node::typed_widget(first);
+        let (row, node) = Row::create(RowParameters::new([SizePolicy::Auto], SizePolicy::Auto, [first]));
         assert_eq!(row.try_read(RowState::len), Some(Some(1)));
 
         row.try_update(|state| {

@@ -40,7 +40,7 @@
 //! retained tree                                             application
 //! ┌─────────────────────────────────┐          ┌────────────────────────────┐
 //! │ concrete widget W               │          │ Session<Message>           │
-//! │ ├─ semantic WidgetState S       │          │ ├─ FIFO Inbox<Message>     │
+//! │ ├─ semantic + interaction state │          │ ├─ FIFO Inbox<Message>     │
 //! │ └─ Rc<WidgetEventPort<E>>       │          │ └─ Connection records      │
 //! │      └─ WidgetEventTarget<E> ───┼─ Weak ──►│                            │
 //! └──────────────┬──────────────────┘          └─────────────┬──────────────┘
@@ -55,14 +55,14 @@
 //!
 //! A widget author defines an owned native payload such as `SliderChanged` and explicitly
 //! implements [`WidgetEvent`] for it. The concrete widget runtime owns a private
-//! [`WidgetEventPort<E>`](WidgetEventPort) alongside, but separate from, its semantic state. User
-//! input updates state and calls `port.emit(event)` only for user-originated semantic changes;
-//! ordinary programmatic state setters remain silent.
+//! [`WidgetEventPort<E>`](WidgetEventPort) alongside its semantic fields. User input updates the
+//! widget and calls `port.emit(event)` only for user-originated semantic changes; ordinary
+//! programmatic setters remain silent.
 //!
 //! The runtime implements [`TypedWidget<E>`], possibly once for each distinct native event type.
-//! Applications capture a [`WidgetEventHandle<E>`] from the concrete runtime before moving it into
-//! a type-erased [`crate::Node`]. The handle contains only a weak pointer to the selected port. It
-//! neither borrows semantic state nor keeps the widget mounted.
+//! Applications obtain a [`WidgetEventHandle<E>`] through the widget's weak
+//! [`crate::TypedWidgetHandle`] after construction. The event handle contains only a weak pointer
+//! to the selected port; it neither borrows the widget nor keeps it mounted.
 //!
 //! ## Connecting a widget to an application
 //!
@@ -271,10 +271,25 @@ impl<E: WidgetEvent> WidgetEventHandle<E> {
         Self { port: Rc::downgrade(port) }
     }
 
+    /// Creates an already-expired endpoint for an expired typed widget handle.
+    pub(crate) fn expired() -> Self {
+        Self { port: Weak::new() }
+    }
+
     /// Returns whether the concrete widget still owns this event source.
     pub fn is_alive(&self) -> bool {
         // strong_count does not upgrade or borrow the port and therefore cannot affect lifetime.
         self.port.strong_count() != 0
+    }
+}
+
+impl<W: Widget + 'static> crate::TypedWidgetHandle<W> {
+    /// Projects a concrete widget-owned event port through this weak typed widget handle.
+    pub(crate) fn widget_event<E: WidgetEvent>(&self) -> WidgetEventHandle<E>
+    where
+        W: TypedWidget<E>,
+    {
+        self.try_read(TypedWidget::event).unwrap_or_else(WidgetEventHandle::expired)
     }
 }
 

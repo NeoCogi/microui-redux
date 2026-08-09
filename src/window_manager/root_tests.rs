@@ -35,8 +35,7 @@ use crate::{
     color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Column, ColumnParameters, ColumnState, Custom,
     CustomParameters, Dimensioni, Disclosure, DisclosureParameters, DisclosureState, Grid, GridParameters, KeyMode, MouseButton, Node, Policy, Row,
     RowParameters, ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, SizePolicy, Stack, StackDirection, StackParameters, Style,
-    Textbox, TextboxChanged, TextboxParameters, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetStateOwner,
-    WidgetUpdateCtx,
+    Textbox, TextboxChanged, TextboxParameters, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetState, WidgetStateHandle, WidgetUpdateCtx,
 };
 use crate::render::{FrameInfo, RenderError};
 use crate::ui_node::{runtime_read_state, runtime_update_state};
@@ -81,14 +80,6 @@ impl WidgetState for OrderedProbeState {}
 struct OrderedProbe {
     state: Rc<RefCell<OrderedProbeState>>,
     opt: WidgetOption,
-}
-
-impl WidgetStateOwner for OrderedProbe {
-    type State = OrderedProbeState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
-    }
 }
 
 impl Widget for OrderedProbe {
@@ -150,16 +141,8 @@ impl CommitProbe {
             painted_rects: painted_rects.clone(),
             opt: WidgetOption::NONE,
         };
-        let state = probe.state_handle();
+        let state = WidgetStateHandle::new(&probe.state);
         (state, probe, painted_rects)
-    }
-}
-
-impl WidgetStateOwner for CommitProbe {
-    type State = CommitProbeState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
     }
 }
 
@@ -213,16 +196,8 @@ impl SiblingMutationProbe {
             target,
             opt: WidgetOption::NONE,
         };
-        let state = probe.state_handle();
+        let state = WidgetStateHandle::new(&probe.state);
         (state, probe)
-    }
-}
-
-impl WidgetStateOwner for SiblingMutationProbe {
-    type State = SiblingMutationState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
     }
 }
 
@@ -250,26 +225,13 @@ impl Widget for SiblingMutationProbe {
 }
 
 struct CountedProbe {
-    state: Rc<RefCell<()>>,
     updates: Rc<Cell<usize>>,
     opt: WidgetOption,
 }
 
 impl CountedProbe {
     fn new(updates: Rc<Cell<usize>>) -> Self {
-        Self {
-            state: Rc::new(RefCell::new(())),
-            updates,
-            opt: WidgetOption::NONE,
-        }
-    }
-}
-
-impl WidgetStateOwner for CountedProbe {
-    type State = ();
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
+        Self { updates, opt: WidgetOption::NONE }
     }
 }
 
@@ -303,14 +265,6 @@ struct TopologyMutator {
     other_container: WidgetStateHandle<ColumnState>,
     candidate: Option<Node>,
     opt: WidgetOption,
-}
-
-impl WidgetStateOwner for TopologyMutator {
-    type State = TopologyMutationState;
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
-    }
 }
 
 impl Widget for TopologyMutator {
@@ -515,7 +469,7 @@ fn collapsed_disclosure_skips_descendant_phases_and_drops_targets_only_on_remova
         state: Rc::new(RefCell::new(OrderedProbeState::default())),
         opt: WidgetOption::HOLD_FOCUS,
     };
-    let probe_state = probe.state_handle();
+    let probe_state = WidgetStateHandle::new(&probe.state);
     let probe_node = Node::widget(probe);
     let probe_id = probe_node.id();
 
@@ -523,8 +477,8 @@ fn collapsed_disclosure_skips_descendant_phases_and_drops_targets_only_on_remova
         .register_custom_renderer(|frame, _args| frame.record_marker("disclosure custom child"))
         .unwrap();
     let custom_runtime = Custom::create(CustomParameters::new("custom"));
-    let custom_state = custom_runtime.state_handle();
-    let custom_node = Node::custom_render(custom_runtime, custom).with_policy(Policy::fixed(20, 10));
+    let (custom_state, custom_node) = Node::typed_custom_render(custom_runtime, custom);
+    let custom_node = custom_node.with_policy(Policy::fixed(20, 10));
 
     let (disclosure, content) = Disclosure::create(DisclosureParameters::header("section", true, [probe_node, custom_node]));
     let root = ctx.create_window("window", rect(0, 0, 160, 140), content);
@@ -689,7 +643,7 @@ fn topology_mutation_is_blocked_for_the_active_container_and_visible_in_a_later_
         candidate: Some(candidate),
         opt: WidgetOption::NONE,
     };
-    let mutator_state = mutator.state_handle();
+    let mutator_state = WidgetStateHandle::new(&mutator.state);
     let (outer_container, content) = Column::create(ColumnParameters::new([Node::widget(mutator), other_node]));
     *same_container.borrow_mut() = Some(outer_container.clone());
     let mut ctx = context();
@@ -740,7 +694,7 @@ fn programmatic_topology_mutation_needs_only_an_empty_queue_layout_commit() {
 fn traversal_reaching_state_borrowed_by_an_access_closure_reports_the_runtime_diagnostic() {
     let (text, widget) = crate::TextBlock::create(crate::TextBlockParameters::new("borrowed"));
     let mut ctx = context();
-    let root = ctx.create_window("window", rect(0, 0, 140, 100), Node::widget(widget));
+    let root = ctx.create_window("window", rect(0, 0, 140, 100), widget);
     ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     let dimensions = Dimensioni::new(320, 240);
@@ -748,26 +702,25 @@ fn traversal_reaching_state_borrowed_by_an_access_closure_reports_the_runtime_di
     let update_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         text.try_update(|_| ctx.update_ui(dimensions));
     }))
-    .expect_err("layout must diagnose the active TextBlockState borrow");
+    .expect_err("layout must diagnose the active TextBlock borrow");
     let update_message = panic_message(update_panic.as_ref());
-    assert!(update_message.contains("retained widget state invariant violated during TextBlock::measure"));
-    assert!(update_message.contains("state-access closures must finish before retained update, layout, or paint traversal"));
+    assert!(update_message.contains("retained widget invariant violated"));
+    assert!(update_message.contains("typed access closure must finish before runtime traversal"));
 
     // Once the access closure has unwound and released its borrow, the same commit is valid.
     ctx.update_ui(dimensions);
     let paint_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         text.try_update(|_| ctx.frame(frame_info(dimensions)).render_ui().unwrap());
     }))
-    .expect_err("paint must diagnose the active TextBlockState borrow");
+    .expect_err("paint must diagnose the active TextBlock borrow");
     let paint_message = panic_message(paint_panic.as_ref());
-    assert!(paint_message.contains("retained widget state invariant violated during TextBlock::paint"));
+    assert!(paint_message.contains("retained widget invariant violated"));
 
     ctx.frame(frame_info(dimensions)).render_ui().unwrap();
 
     // A shared access closure is likewise incompatible when the routed update needs to mutate the
     // same cell, even though the synchronization layout's shared reads are allowed by RefCell.
-    let (checkbox, checkbox_widget) = Checkbox::create(CheckboxParameters::new("checkbox", false));
-    let checkbox_node = Node::widget(checkbox_widget);
+    let (checkbox, checkbox_node) = Checkbox::create(CheckboxParameters::new("checkbox", false));
     let checkbox_id = checkbox_node.id();
     let mut checkbox_ctx = context();
     let checkbox_root = checkbox_ctx.create_window("checkbox", rect(0, 0, 140, 100), checkbox_node);
@@ -780,9 +733,10 @@ fn traversal_reaching_state_borrowed_by_an_access_closure_reports_the_runtime_di
     let read_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         checkbox.try_read(|_| checkbox_ctx.update_ui(dimensions));
     }))
-    .expect_err("Checkbox::update must diagnose the active shared CheckboxState borrow");
+    .expect_err("Checkbox::update must diagnose the active shared Checkbox borrow");
     let read_message = panic_message(read_panic.as_ref());
-    assert!(read_message.contains("retained widget state invariant violated during Checkbox::update"));
+    assert!(read_message.contains("retained widget invariant violated"));
+    assert!(read_message.contains("typed access closure must finish before runtime traversal"));
 }
 
 fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
@@ -794,9 +748,8 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
 }
 
 fn button_content(label: &str) -> (crate::WidgetEventHandle<ButtonSubmitted>, Node) {
-    let (_, widget) = Button::create(ButtonParameters::new(label));
-    let submitted = widget.submitted();
-    (submitted, Node::widget(widget))
+    let (widget, node) = Button::create(ButtonParameters::new(label));
+    (widget.submitted(), node)
 }
 
 #[test]
@@ -811,13 +764,11 @@ fn widget_handle_events_map_into_one_typed_session_without_state_polling() {
         SecondSubmitted,
     }
 
-    let (_, first_widget) = Button::create(ButtonParameters::new("first"));
+    let (first_widget, first) = Button::create(ButtonParameters::new("first"));
     let first_submitted = first_widget.submitted();
-    let first = Node::widget(first_widget);
     let first_id = first.id();
-    let (_, second_widget) = Button::create(ButtonParameters::new("second"));
+    let (second_widget, second) = Button::create(ButtonParameters::new("second"));
     let second_submitted = second_widget.submitted();
-    let second = Node::widget(second_widget);
     let second_id = second.id();
     let (_, content) = Row::create(RowParameters::new(
         [SizePolicy::Fixed(60), SizePolicy::Fixed(60)],
@@ -864,9 +815,8 @@ fn textbox_handle_event_maps_a_complete_snapshot_into_the_session() {
         Changed(TextboxChanged),
     }
 
-    let (_, widget) = Textbox::create(TextboxParameters::new(""));
+    let (widget, node) = Textbox::create(TextboxParameters::new(""));
     let changed = widget.changed();
-    let node = Node::widget(widget);
     let node_id = node.id();
     let mut ctx = context();
     let root = ctx.create_window("textbox signal", rect(0, 0, 140, 100), node);
@@ -1045,7 +995,7 @@ fn dynamic_container_root_changes_descendants_without_replacing_the_root() {
     let root_id = root.id();
     let (button, widget) = Button::create(ButtonParameters::new("new child"));
 
-    let inserted = column.try_update(|column| column.push(Node::widget(widget))).unwrap();
+    let inserted = column.try_update(|column| column.push(widget)).unwrap();
     assert!(inserted.is_ok());
     ctx.update_and_render_ui();
     assert_eq!(root.id(), root_id);
@@ -1182,7 +1132,7 @@ fn blank_root_press_confines_drag_to_the_pressed_root() {
         state: Rc::new(RefCell::new(OrderedProbeState::default())),
         opt: WidgetOption::NONE,
     };
-    let probe_state = probe.state_handle();
+    let probe_state = WidgetStateHandle::new(&probe.state);
     let mut ctx = context();
     let first = ctx.create_window("first", rect(0, 0, 100, 80), empty_content());
     let second = ctx.create_window("second", rect(160, 120, 100, 80), Node::widget(probe).with_policy(Policy::fill()));
@@ -1212,7 +1162,7 @@ fn active_root_confines_scroll_while_hover_and_press_remain_hit_routed() {
         state: Rc::new(RefCell::new(OrderedProbeState::default())),
         opt: WidgetOption::GRAB_SCROLL,
     };
-    let probe_state = probe.state_handle();
+    let probe_state = WidgetStateHandle::new(&probe.state);
     let mut ctx = context();
     let first = ctx.create_window("first", rect(0, 0, 100, 80), empty_content());
     let second = ctx.create_window("second", rect(160, 120, 100, 80), Node::widget(probe).with_policy(Policy::fill()));
@@ -1245,7 +1195,7 @@ fn pointer_captured_root_remains_the_keyboard_and_text_input_root() {
         state: Rc::new(RefCell::new(OrderedProbeState::default())),
         opt: WidgetOption::NONE,
     };
-    let probe_state = probe.state_handle();
+    let probe_state = WidgetStateHandle::new(&probe.state);
     let mut ctx = context();
     let first = ctx.create_window("first", rect(0, 0, 100, 80), Node::widget(probe).with_policy(Policy::fill()));
     let second = ctx.create_window("second", rect(160, 120, 100, 80), empty_content());
@@ -1540,7 +1490,7 @@ fn resize_overlay_preempts_content_where_the_grip_overlaps_the_root_body() {
         state: Rc::new(RefCell::new(OrderedProbeState::default())),
         opt: WidgetOption::NONE,
     };
-    let probe_state = probe.state_handle();
+    let probe_state = WidgetStateHandle::new(&probe.state);
     let mut ctx = context();
     let root = ctx.create_window("window", rect(30, 30, 140, 100), Node::widget(probe).with_policy(Policy::fill()));
     ctx.update_and_render_ui();
@@ -1582,7 +1532,7 @@ fn content_capture_remains_exclusive_while_dragging_across_root_chrome() {
         state: Rc::new(RefCell::new(OrderedProbeState::default())),
         opt: WidgetOption::NONE,
     };
-    let probe_state = probe.state_handle();
+    let probe_state = WidgetStateHandle::new(&probe.state);
     let mut ctx = context();
     let root = ctx.create_window("window", rect(30, 30, 140, 100), Node::widget(probe).with_policy(Policy::fill()));
     ctx.update_and_render_ui();
@@ -1637,7 +1587,7 @@ fn hiding_and_showing_root_does_not_restore_chrome_capture() {
 fn chrome_geometry_exposes_one_body_and_auto_size_tracks_content() {
     let mut ctx = context();
     let (_, text) = crate::TextBlock::create(crate::TextBlockParameters::new("window content"));
-    let root = ctx.create_popup("popup", Node::widget(text));
+    let root = ctx.create_popup("popup", text);
     ctx.set_root_visible(root.id(), true).unwrap();
     ctx.update_and_render_ui();
 
@@ -1655,8 +1605,7 @@ fn auto_height_preserves_popup_width_and_stretches_stack_items() {
     let items = ["Apple", "Banana", "Cherry", "Date"]
         .into_iter()
         .map(|label| {
-            let (_, item) = ListItem::create(ListItemParameters::new(label));
-            let node = Node::widget(item);
+            let (_, node) = ListItem::create(ListItemParameters::new(label));
             item_ids.push(node.id());
             node
         })
@@ -1696,7 +1645,7 @@ fn auto_height_preserves_popup_width_and_stretches_stack_items() {
 fn auto_width_preserves_programmed_height() {
     let (_, item) = ListItem::create(ListItemParameters::new("intrinsic width"));
     let mut ctx = context();
-    let root = ctx.create_popup("horizontal", Node::widget(item));
+    let root = ctx.create_popup("horizontal", item);
     let programmed = rect(20, 30, 1, 120);
     ctx.set_root_options(
         root.id(),

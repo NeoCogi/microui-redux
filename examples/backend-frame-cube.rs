@@ -62,7 +62,7 @@ use common::vulkan_renderer::VulkanRenderer as SelectedBackend;
 use common::wgpu_renderer::WgpuRenderer as SelectedBackend;
 use microui_redux::{prelude::*, render::Vertex};
 use rs_math3d::{EPS_F32, lookat, perspective, project3};
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// Resolves the concrete active-frame type chosen by the backend Cargo feature.
@@ -77,7 +77,6 @@ type SelectedFrame<'a> = <SelectedBackend as RendererBackend>::Frame<'a>;
 /// records the cube at the correct display-list ordering point. A real interactive viewport could
 /// process mouse input in `update` and share camera state with that callback.
 struct CubeWidget {
-    state: Rc<RefCell<()>>,
     opt: WidgetOption,
 }
 
@@ -92,18 +91,7 @@ impl WidgetBuilder for CubeBuilder {
     type W = CubeWidget;
 
     fn create_widget(_parameters: Self::Parameters) -> Self::W {
-        CubeWidget {
-            state: Rc::new(RefCell::new(())),
-            opt: WidgetOption::NO_INTERACT,
-        }
-    }
-}
-
-impl WidgetStateOwner for CubeWidget {
-    type State = ();
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
+        CubeWidget { opt: WidgetOption::NO_INTERACT }
     }
 }
 
@@ -113,7 +101,6 @@ impl Widget for CubeWidget {
     }
 
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-        let _state = self.state.try_borrow().expect("cube state must be available during measure");
         Dimensioni::new(300, 300)
     }
 

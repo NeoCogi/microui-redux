@@ -166,22 +166,13 @@ fn print_scenario(result: &ScenarioResult) {
 #[test]
 #[ignore = "manual serial release-mode P5.1 retained UI baseline"]
 fn ui_node_p5_baseline_runtime() {
-    let one = measure_scenario("one widget", 1, || {
-        let (_, widget) = TextBlock::create(TextBlockParameters::new("one"));
-        Node::widget(widget)
-    });
+    let one = measure_scenario("one widget", 1, || TextBlock::create(TextBlockParameters::new("one")).1);
     let hundred = measure_scenario("100-node tree", 100, || {
-        let children = (0..99).map(|index| {
-            let (_, widget) = TextBlock::create(TextBlockParameters::new(format!("node-{index}")));
-            Node::widget(widget)
-        });
+        let children = (0..99).map(|index| TextBlock::create(TextBlockParameters::new(format!("node-{index}"))).1);
         Column::create(ColumnParameters::new(children)).1
     });
     let scroll = measure_scenario("scroll area with 20 content widgets", 21, || {
-        let children = (0..20).map(|index| {
-            let (_, widget) = TextBlock::create(TextBlockParameters::new(format!("row-{index}")));
-            Node::widget(widget)
-        });
+        let children = (0..20).map(|index| TextBlock::create(TextBlockParameters::new(format!("row-{index}"))).1);
         ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, children)).1
     });
 

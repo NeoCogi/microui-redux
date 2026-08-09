@@ -33,8 +33,6 @@
 //! through `WidgetPaintCtx::painter`.
 
 use microui_redux::{prelude::*, render::Vertex, AtlasSource};
-use std::{cell::RefCell, rc::Rc};
-
 const ICON_NAMES: [&str; 6] = ["white", "close", "expand", "collapse", "check", "expand_down"];
 
 struct NoopRenderer {
@@ -70,7 +68,6 @@ impl RendererBackend for NoopRenderer {
 }
 
 struct RetainedPaint {
-    state: Rc<RefCell<()>>,
     opt: WidgetOption,
 }
 
@@ -85,18 +82,7 @@ impl WidgetBuilder for RetainedPaintBuilder {
     type W = RetainedPaint;
 
     fn create_widget(_parameters: Self::Parameters) -> Self::W {
-        RetainedPaint {
-            state: Rc::new(RefCell::new(())),
-            opt: WidgetOption::NONE,
-        }
-    }
-}
-
-impl WidgetStateOwner for RetainedPaint {
-    type State = ();
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
+        RetainedPaint { opt: WidgetOption::NONE }
     }
 }
 
@@ -106,7 +92,6 @@ impl Widget for RetainedPaint {
     }
 
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
-        let _state = self.state.try_borrow().expect("paint state must be available during measure");
         Dimensioni::new(96, 48)
     }
 

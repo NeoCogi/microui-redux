@@ -170,26 +170,12 @@ fn external_container(children: impl IntoIterator<Item = Node>) -> (WidgetStateH
 }
 
 struct ExternalLeaf {
-    state: Rc<RefCell<()>>,
     options: WidgetOption,
 }
 
 impl ExternalLeaf {
-    fn create() -> (WidgetStateHandle<()>, Self) {
-        let leaf = Self {
-            state: Rc::new(RefCell::new(())),
-            options: WidgetOption::NONE,
-        };
-        let state = leaf.state_handle();
-        (state, leaf)
-    }
-}
-
-impl WidgetStateOwner for ExternalLeaf {
-    type State = ();
-
-    fn state_handle(&self) -> WidgetStateHandle<Self::State> {
-        WidgetStateHandle::new(&self.state)
+    fn create() -> (TypedWidgetHandle<Self>, Node) {
+        Node::typed_widget(Self { options: WidgetOption::NONE })
     }
 }
 
@@ -210,7 +196,7 @@ impl Widget for ExternalLeaf {
 fn downstream_custom_container_measures_and_lays_out_through_public_scoped_apis() {
     let (child_state, child) = ExternalLeaf::create();
     let policy = Policy::fixed(24, 18);
-    let children = [Node::widget(child).with_policy(policy)];
+    let children = [child.with_policy(policy)];
     let (state, runtime) = external_container(children);
     let node = Node::container(runtime);
     let mut ctx = context();

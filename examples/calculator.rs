@@ -65,14 +65,14 @@ enum Action {
 struct CalcButton {
     action: Action,
     submitted: WidgetEventHandle<ButtonSubmitted>,
-    widget: Option<Button>,
+    widget: Option<Node>,
 }
 
 impl CalcButton {
     fn new(label: &str, action: Action) -> Self {
-        let (_, runtime) = Button::create(ButtonParameters::with_opt(label, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
-        let submitted = runtime.submitted();
-        Self { action, submitted, widget: Some(runtime) }
+        let (button, node) = Button::create(ButtonParameters::with_opt(label, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
+        let submitted = button.submitted();
+        Self { action, submitted, widget: Some(node) }
     }
 }
 
@@ -313,7 +313,7 @@ impl Calculator {
 
 struct State {
     root: RootHandle,
-    display: WidgetStateHandle<TextboxState>,
+    display: TypedWidgetHandle<Textbox>,
     calculator: Calculator,
     buttons: [CalcButton; 20],
 }
@@ -347,17 +347,13 @@ fn main() {
             CalcButton::new(".", Action::Dot),
             CalcButton::new("=", Action::Equals),
         ];
-        let (_, display_row) = Row::create(RowParameters::new(
-            [SizePolicy::Remainder(0)],
-            SizePolicy::Remainder(0),
-            [Node::widget(display_runtime)],
-        ));
+        let (_, display_row) = Row::create(RowParameters::new([SizePolicy::Remainder(0)], SizePolicy::Remainder(0), [display_runtime]));
         let display_row = display_row.with_policy(Policy::new(SizePolicy::Auto, SizePolicy::Fraction(DISPLAY_HEIGHT_FRACTION)));
         let columns = [SizePolicy::Weight(1.0); 4];
         let rows = [SizePolicy::Weight(KEYPAD_ROW_HEIGHT_WEIGHT); 5];
         let button_nodes = buttons
             .iter_mut()
-            .map(|button| Node::widget(button.widget.take().expect("calculator tree is built once")))
+            .map(|button| button.widget.take().expect("calculator tree is built once"))
             .collect::<Vec<_>>();
         let (_, grid) = Grid::create(GridParameters::new(columns, rows, button_nodes));
         let (_, keypad_column) = Column::create(ColumnParameters::new([grid]));
@@ -391,9 +387,7 @@ fn main() {
         |ctx, state, dim| {
             ctx.set_root_rect(state.root.id(), rect(0, 0, dim.width, dim.height))
                 .expect("calculator root should remain registered");
-            let _ = state
-                .display
-                .try_update_with(state.calculator.display_text().to_owned(), |display, text| display.set_text(text));
+            let _ = state.display.set_text(state.calculator.display_text());
         },
     );
 }
