@@ -35,12 +35,12 @@ use crate::math::RectExt;
 
 impl UiRuntime {
     /// Measures one already-borrowed node through the authoritative private node path.
-    pub(super) fn measure_node(&self, node: &Node, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
+    pub(in crate::ui_node) fn measure_node(&self, node: &Node, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.measures += 1);
         // Node::measure is the only place that adds frame geometry; containers receive the same
         // content-only measurement contract whether reached here or through Children.
-        node.measure(style, atlas, available, Some(self.measurement_epoch))
+        node.measure(&MeasureCtx::new(style, atlas, self.measurement_epoch), available)
     }
 
     /// Lays out one already-borrowed node through direct widget/container dispatch.

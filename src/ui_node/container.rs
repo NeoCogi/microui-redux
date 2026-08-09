@@ -34,6 +34,44 @@ use crate::{Dimensioni, Recti, Style, TypedWidgetHandle, UiInputEvent, Vec2i, Wi
 
 use super::{ChildParticipation, Children, NodeLayout, NodeRuntime, UiRuntime};
 
+/// Immutable services shared by one recursive preferred-size traversal.
+///
+/// The context owns phase-local resources and the private cache epoch. Containers use
+/// [`Self::measure_child`] instead of storing traversal metadata in their retained child owner.
+pub struct MeasureCtx<'a> {
+    style: &'a Style,
+    atlas: &'a crate::AtlasHandle,
+    epoch: u64,
+}
+
+impl<'a> MeasureCtx<'a> {
+    /// Creates one runtime-scoped measurement context.
+    pub(crate) fn new(style: &'a Style, atlas: &'a crate::AtlasHandle, epoch: u64) -> Self {
+        Self { style, atlas, epoch }
+    }
+
+    /// Returns the active UI style.
+    pub fn style(&self) -> &Style {
+        self.style
+    }
+
+    /// Returns the active atlas.
+    pub fn atlas(&self) -> &crate::AtlasHandle {
+        self.atlas
+    }
+
+    /// Measures one indexed child under `available` without applying placement policy.
+    pub fn measure_child(&self, children: &Children, index: usize, available: Dimensioni) -> Option<Dimensioni> {
+        // Resolve and recurse behind the opaque collection boundary; only derived geometry leaves.
+        children.get(index).map(|node| node.measure(self, available))
+    }
+
+    /// Returns the private identity shared by every query in this traversal.
+    pub(crate) fn epoch(&self) -> u64 {
+        self.epoch
+    }
+}
+
 /// Complete behavior of one retained branch widget.
 ///
 /// The concrete widget owns semantic, interaction, and layout policy while [`Container`] owns the
@@ -41,7 +79,7 @@ use super::{ChildParticipation, Children, NodeLayout, NodeRuntime, UiRuntime};
 /// recursively visiting descendants.
 pub trait ContainerWidget: Widget {
     /// Measures preferred content from the authoritative child collection.
-    fn measure(&self, children: &Children, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni;
+    fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni;
 
     /// Places retained children and commits descendant viewport/content geometry.
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti);
@@ -143,27 +181,18 @@ impl Container {
     }
 
     /// Resolves frame width and measures content under one typed-runtime borrow.
-    pub(crate) fn measure_content_with_frame(
-        &self,
-        style: &Style,
-        atlas: &crate::AtlasHandle,
-        available: Dimensioni,
-        measurement_epoch: Option<u64>,
-    ) -> (i32, Dimensioni) {
+    pub(crate) fn measure_content_with_frame(&self, ctx: &MeasureCtx<'_>, available: Dimensioni) -> (i32, Dimensioni) {
         let children = self
             .children
             .try_borrow()
             .unwrap_or_else(|_| panic!("retained child invariant violated: collection is mutably borrowed during measurement"));
-        // ContainerWidget deliberately remains unaware of runtime generations. Children carries
-        // the scoped epoch so every recursive measure_child call uses the same node-local cache.
-        children.set_measurement_epoch(measurement_epoch);
         let widget = self.widget.try_borrow().unwrap_or_else(|_| typed_container_borrow_conflict());
         let border_width = if widget.effective_widget_opt().intersects(WidgetOption::FRAME) {
-            style.frame_border().width.max(0)
+            ctx.style().frame_border().width.max(0)
         } else {
             0
         };
-        let measured = ContainerWidget::measure(&*widget, &children, style, atlas, super::frame::content_available(available, border_width));
+        let measured = ContainerWidget::measure(&*widget, ctx, &children, super::frame::content_available(available, border_width));
         (border_width, measured)
     }
 
@@ -237,6 +266,14 @@ impl ContainerLayoutCtx<'_> {
         children.child_policy(index)
     }
 
+    /// Measures one indexed child under `available` during placement.
+    pub fn measure_child(&self, children: &Children, index: usize, available: Dimensioni) -> Option<Dimensioni> {
+        // Placement participates in the same runtime epoch as the measure phase immediately before
+        // it, so identical child queries reuse the node-local preferred-size result.
+        let node = children.get(index)?;
+        Some(self.runtime.measure_node(node, self.style, self.atlas, available))
+    }
+
     /// Assigns one indexed child rectangle and returns its resulting allocated size.
     pub fn layout_child(&mut self, children: &mut Children, index: usize, rect: Recti) -> Option<Dimensioni> {
         // Resolve the child internally, recurse immediately, and return only derived geometry.
@@ -305,7 +342,7 @@ mod tests {
     }
 
     impl ContainerWidget for GeometryOnly {
-        fn measure(&self, children: &Children, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
+        fn measure(&self, _ctx: &MeasureCtx<'_>, children: &Children, _available: Dimensioni) -> Dimensioni {
             Dimensioni::new(children.len() as i32, 1)
         }
 

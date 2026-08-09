@@ -143,9 +143,9 @@ impl TraversalContainer {
 }
 
 impl ContainerWidget for TraversalContainer {
-    fn measure(&self, children: &Children, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
+    fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
         (0..children.len())
-            .filter_map(|index| children.measure_child(index, style, atlas, available))
+            .filter_map(|index| ctx.measure_child(children, index, available))
             .fold(Dimensioni::default(), |size, child| {
                 Dimensioni::new(size.width.max(child.width), size.height.max(child.height))
             })
@@ -201,7 +201,7 @@ impl CaptureContainer {
 }
 
 impl ContainerWidget for CaptureContainer {
-    fn measure(&self, _children: &Children, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
+    fn measure(&self, _ctx: &MeasureCtx<'_>, _children: &Children, _available: Dimensioni) -> Dimensioni {
         Dimensioni::new(20, 20)
     }
 

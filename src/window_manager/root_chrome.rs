@@ -34,7 +34,7 @@ use std::rc::Rc;
 
 use crate::render::Painter;
 use crate::{
-    AtlasHandle, Children, Container, ContainerLayoutCtx, ContainerWidget, ControlColor, Dimensioni, FocusPolicy, MouseButton, Node, Recti, Style,
+    AtlasHandle, Children, Container, ContainerLayoutCtx, ContainerWidget, ControlColor, Dimensioni, FocusPolicy, MeasureCtx, MouseButton, Node, Recti, Style,
     TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, WindowOption,
 };
 
@@ -349,12 +349,12 @@ impl ContainerWidget for RootChrome {
         event_position(event).is_some_and(|position| self.geometry.hit_test(position).is_some()) && !matches!(event, UiInputEvent::Scroll { .. })
     }
 
-    fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+    fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
         // Resolve chrome-only minimum/insets first, then measure the one application child inside
         // that body. Auto-size and placement therefore share root_chrome_geometry.
-        let minimum = root_chrome_geometry(Recti::default(), Dimensioni::default(), &self.name, self.options, style, atlas).minimum_outer;
+        let minimum = root_chrome_geometry(Recti::default(), Dimensioni::default(), &self.name, self.options, ctx.style(), ctx.atlas()).minimum_outer;
         let outer = Recti::new(0, 0, available.width.max(minimum.width), available.height.max(minimum.height));
-        let shell = root_chrome_geometry(outer, Dimensioni::default(), &self.name, self.options, style, atlas);
+        let shell = root_chrome_geometry(outer, Dimensioni::default(), &self.name, self.options, ctx.style(), ctx.atlas());
         // Convert the outer measurement bound into remaining application-content space.
         // chrome_occupancy = outer_extent - body_extent.
         let horizontal_chrome = outer.width.saturating_sub(shell.body.width);
@@ -364,11 +364,10 @@ impl ContainerWidget for RootChrome {
             inset_available(available.height, vertical_chrome),
         );
         let policy = children.child_policy(0).unwrap_or_else(crate::Policy::auto);
-        let child = children
+        let child = ctx
             .measure_child(
+                children,
                 0,
-                style,
-                atlas,
                 Dimensioni::new(
                     policy.width.measurement_bound(child_available.width),
                     policy.height.measurement_bound(child_available.height),
@@ -380,18 +379,17 @@ impl ContainerWidget for RootChrome {
             policy.height.preferred_extent(child.height, child_available.height),
         );
         // Rebuild geometry with measured content and expose only its intrinsic outer extent.
-        root_chrome_geometry(Recti::default(), child, &self.name, self.options, style, atlas).intrinsic_outer
+        root_chrome_geometry(Recti::default(), child, &self.name, self.options, ctx.style(), ctx.atlas()).intrinsic_outer
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
         // Provisional shell geometry supplies the exact measurement constraint for the child.
         let shell = root_chrome_geometry(rect, Dimensioni::default(), &self.name, self.options, ctx.style(), ctx.atlas());
         let policy = children.child_policy(0).unwrap_or_else(crate::Policy::auto);
-        let child = children
+        let child = ctx
             .measure_child(
+                children,
                 0,
-                ctx.style(),
-                ctx.atlas(),
                 Dimensioni::new(
                     policy.width.measurement_bound(shell.body.width.max(1)),
                     policy.height.measurement_bound(shell.body.height.max(1)),

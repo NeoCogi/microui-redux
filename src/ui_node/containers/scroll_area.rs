@@ -35,8 +35,8 @@ use bitflags::bitflags;
 use crate::ui_node::children::ChildrenHandle;
 use crate::ui_node::scrollbar::{RetainedScrollbar, ScrollAxis, scrollbar_base};
 use crate::{
-    AtlasHandle, ChildParticipation, Container, ContainerWidget, ControlColor, Dimensioni, FocusPolicy, Recti, Style, TypedWidgetHandle, UiInputEvent, Vec2i,
-    Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
+    ChildParticipation, Container, ContainerWidget, ControlColor, Dimensioni, FocusPolicy, MeasureCtx, Recti, TypedWidgetHandle, UiInputEvent, Vec2i, Widget,
+    WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
 use super::{Children, ContainerLayoutCtx, Node};
@@ -318,9 +318,9 @@ struct VirtualSurface {
 }
 
 impl ContainerWidget for VirtualSurface {
-    fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+    fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
         // Vertical content remains intrinsically unbounded while width can constrain wrapping.
-        super::column::measure_column(children, style, atlas, Dimensioni::new(available.width, 0))
+        super::column::measure_column(ctx, children, Dimensioni::new(available.width, 0))
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
@@ -356,17 +356,15 @@ fn layout_virtual_content(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Child
     for index in 0..children.len() {
         // Preserve intrinsic horizontal overflow while constraining responsive children to at
         // least the viewport width. A second measurement observes wrapping at the committed width.
-        let preferred = children
-            .measure_child(index, ctx.style(), ctx.atlas(), Dimensioni::new(child_width.max(1), 0))
-            .unwrap_or_default();
+        let preferred = ctx.measure_child(children, index, Dimensioni::new(child_width.max(1), 0)).unwrap_or_default();
         let offered_width = child_width.max(preferred.width);
         let measured_width = children
             .child_policy(index)
             .unwrap_or_else(crate::Policy::auto)
             .width
             .measurement_bound(offered_width);
-        let preferred_height = children
-            .measure_child(index, ctx.style(), ctx.atlas(), Dimensioni::new(measured_width, 0))
+        let preferred_height = ctx
+            .measure_child(children, index, Dimensioni::new(measured_width, 0))
             .unwrap_or_default()
             .height;
         let size = ctx
@@ -412,10 +410,10 @@ impl ScrollArea {
 }
 
 impl ContainerWidget for ScrollArea {
-    fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+    fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
         // Measure application content through the virtual surface and add only the panel padding.
         // Scrollbars are responsive affordances and do not inflate intrinsic composite size.
-        let padding = style.padding.max(0);
+        let padding = ctx.style().padding.max(0);
         // inset = leading_padding + trailing_padding = padding * 2.
         let inset = padding.saturating_mul(2);
         let content_width = if available.width > 0 {
@@ -424,8 +422,8 @@ impl ContainerWidget for ScrollArea {
         } else {
             0
         };
-        let content = children
-            .measure_child(Self::VIRTUAL_SURFACE, style, atlas, Dimensioni::new(content_width, 0))
+        let content = ctx
+            .measure_child(children, Self::VIRTUAL_SURFACE, Dimensioni::new(content_width, 0))
             .unwrap_or_default();
         // preferred_extent = content_extent + leading_padding + trailing_padding.
         Dimensioni::new(content.width.saturating_add(inset), content.height.saturating_add(inset))
@@ -598,7 +596,7 @@ mod tests {
     use crate::test_support::test_atlas;
     use crate::ui_node::UiRuntime;
     use crate::{
-        Column, ColumnParameters, Custom, CustomParameters, MouseButton, Policy, Row, RowParameters, SizePolicy, Stack, StackDirection, StackParameters,
+        Column, ColumnParameters, Custom, CustomParameters, MouseButton, Policy, Row, RowParameters, SizePolicy, Stack, StackDirection, StackParameters, Style,
         TextBlock, TextBlockParameters, TextWrap, UNCLIPPED_RECT,
     };
 

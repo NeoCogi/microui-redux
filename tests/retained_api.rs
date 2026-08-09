@@ -131,10 +131,10 @@ struct ExternalContainer {
 }
 
 impl ContainerWidget for ExternalContainer {
-    fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+    fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
         self.measure_calls.set(self.measure_calls.get() + 1);
         self.observed_policy.set(children.child_policy(0));
-        children.measure_child(0, style, atlas, available).unwrap_or_else(|| Dimensioni::new(20, 20))
+        ctx.measure_child(children, 0, available).unwrap_or_else(|| Dimensioni::new(20, 20))
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {

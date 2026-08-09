@@ -34,7 +34,7 @@ use std::rc::Rc;
 
 use crate::{Dimensioni, LeafWidget, TypedWidgetHandle, Widget};
 
-use super::{ChildParticipation, Children, Container, NodeLayout, RuntimeNodeId};
+use super::{ChildParticipation, Children, Container, MeasureCtx, NodeLayout, RuntimeNodeId};
 
 /// One node-local preferred-size result retained for the active measurement pass.
 ///
@@ -205,10 +205,9 @@ impl Node {
     }
 
     /// Measures this node's preferred outer size. Placement policy is applied later by layout.
-    pub(crate) fn measure(&self, style: &crate::Style, atlas: &crate::AtlasHandle, available: Dimensioni, measurement_epoch: Option<u64>) -> Dimensioni {
-        if let Some(epoch) = measurement_epoch
-            && let Some(cached) = self.state.measurement.get()
-            && cached.epoch == epoch
+    pub(crate) fn measure(&self, ctx: &MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
+        if let Some(cached) = self.state.measurement.get()
+            && cached.epoch == ctx.epoch()
             && cached.available.width == available.width
             && cached.available.height == available.height
         {
@@ -224,19 +223,17 @@ impl Node {
             NodeKind::Widget(node) => {
                 let widget = node.widget.try_borrow().unwrap_or_else(|_| widget_borrow_conflict());
                 let framed = widget.effective_widget_opt().intersects(crate::WidgetOption::FRAME);
-                let border_width = if framed { style.frame_border().width.max(0) } else { 0 };
-                let measured_content = widget.measure(style, atlas, crate::ui_node::frame::content_available(available, border_width));
+                let border_width = if framed { ctx.style().frame_border().width.max(0) } else { 0 };
+                let measured_content = widget.measure(ctx.style(), ctx.atlas(), crate::ui_node::frame::content_available(available, border_width));
                 (border_width, measured_content)
             }
-            NodeKind::Container(container) => container.measure_content_with_frame(style, atlas, available, measurement_epoch),
+            NodeKind::Container(container) => container.measure_content_with_frame(ctx, available),
         };
         // Widgets cannot return negative geometry. Node placement policy is intentionally absent:
         // the parent applies it later when allocating this preferred outer size.
         let preferred_content = Dimensioni::new(measured_content.width.max(0), measured_content.height.max(0));
         let preferred = crate::ui_node::frame::outer_preferred(preferred_content, border_width);
-        if let Some(epoch) = measurement_epoch {
-            self.state.measurement.set(Some(MeasurementCache { epoch, available, preferred }));
-        }
+        self.state.measurement.set(Some(MeasurementCache { epoch: ctx.epoch(), available, preferred }));
         preferred
     }
 
@@ -404,8 +401,9 @@ mod tests {
         let style = crate::Style::default();
         let atlas = test_atlas();
 
-        let plain = plain.measure(&style, &atlas, Dimensioni::default(), None);
-        let fixed_measurement = fixed.measure(&style, &atlas, Dimensioni::default(), None);
+        let ctx = MeasureCtx::new(&style, &atlas, 0);
+        let plain = plain.measure(&ctx, Dimensioni::default());
+        let fixed_measurement = fixed.measure(&ctx, Dimensioni::default());
         assert_eq!((plain.width, plain.height), (fixed_measurement.width, fixed_measurement.height));
         let children: Children = [fixed].into_iter().collect();
         assert_eq!(children.child_policy(0), Some(crate::Policy::fixed(300, 200)));

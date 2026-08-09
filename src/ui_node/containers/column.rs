@@ -32,7 +32,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::ui_node::children::ChildrenHandle;
 use crate::{
-    AtlasHandle, Container, ContainerWidget, Dimensioni, Recti, Style, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters,
+    Container, ContainerWidget, Dimensioni, MeasureCtx, Recti, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters,
     WidgetUpdateCtx,
 };
 
@@ -112,9 +112,9 @@ impl Column {
 }
 
 impl ContainerWidget for Column {
-    fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+    fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
         // Column geometry depends only on the authoritative child sequence and shared Style.
-        measure_column(children, style, atlas, available)
+        measure_column(ctx, children, available)
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
@@ -154,8 +154,8 @@ pub(super) fn layout_column(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Chi
         (0..count).map(|index| {
             let policy = children.child_policy(index).unwrap_or_else(crate::Policy::auto);
             let width = policy.width.measurement_bound(rect.width.max(1));
-            let preferred = children
-                .measure_child(index, ctx.style(), ctx.atlas(), Dimensioni::new(width, available_height))
+            let preferred = ctx
+                .measure_child(children, index, Dimensioni::new(width, available_height))
                 .unwrap_or_default()
                 .height;
             (policy.height, preferred)
@@ -168,8 +168,8 @@ pub(super) fn layout_column(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Chi
     for index in 0..count {
         let policy = children.child_policy(index).unwrap_or_else(crate::Policy::auto);
         let width = policy.width.measurement_bound(rect.width.max(1));
-        let preferred = children
-            .measure_child(index, ctx.style(), ctx.atlas(), Dimensioni::new(width, available_height))
+        let preferred = ctx
+            .measure_child(children, index, Dimensioni::new(width, available_height))
             .unwrap_or_default()
             .height;
         let slot = axis.next(policy.height, preferred);
@@ -184,10 +184,10 @@ pub(super) fn layout_column(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Chi
 ///
 /// Width is the widest policy-adjusted child. Height uses the same ordered axis allocation as
 /// layout, including spacing, but does not retain or mutate any sizing state.
-pub(super) fn measure_column(children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+pub(super) fn measure_column(ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
     // Use the same spacing and track policy math as placement so preferred and committed geometry
     // cannot disagree when the parent supplies a finite height.
-    let spacing = style.spacing.max(0);
+    let spacing = ctx.style().spacing.max(0);
     let count = children.len();
     let mut width = 0;
     // A positive bound is divided among tracks after spacing; zero stays the intrinsic marker.
@@ -206,7 +206,7 @@ pub(super) fn measure_column(children: &Children, style: &Style, atlas: &AtlasHa
         (0..count).map(|index| {
             let policy = children.child_policy(index).unwrap_or_else(crate::Policy::auto);
             let child_width = policy.width.measurement_bound(available.width);
-            let child = children.measure_child(index, style, atlas, Dimensioni::new(child_width, 0)).unwrap_or_default();
+            let child = ctx.measure_child(children, index, Dimensioni::new(child_width, 0)).unwrap_or_default();
             width = width.max(policy.width.preferred_extent(child.width, available.width));
             (policy.height, child.height)
         }),
@@ -221,10 +221,7 @@ pub(super) fn measure_column(children: &Children, style: &Style, atlas: &AtlasHa
     for index in 0..count {
         let policy = children.child_policy(index).unwrap_or_else(crate::Policy::auto);
         let child_width = policy.width.measurement_bound(available.width);
-        let preferred = children
-            .measure_child(index, style, atlas, Dimensioni::new(child_width, 0))
-            .unwrap_or_default()
-            .height;
+        let preferred = ctx.measure_child(children, index, Dimensioni::new(child_width, 0)).unwrap_or_default().height;
         axis.next(policy.height, preferred);
     }
     Dimensioni::new(width, axis.extent(count, spacing))

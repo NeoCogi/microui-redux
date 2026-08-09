@@ -31,8 +31,8 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    AtlasHandle, ChildParticipation, Container, ContainerWidget, ControlColor, Dimensioni, MouseButton, Recti, Style, TypedWidgetHandle, UiInputEvent, Widget,
-    WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
+    AtlasHandle, ChildParticipation, Container, ContainerWidget, ControlColor, Dimensioni, MeasureCtx, MouseButton, Recti, Style, TypedWidgetHandle,
+    UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
 use super::{Children, Column, ColumnParameters, ContainerLayoutCtx, Node};
@@ -283,15 +283,15 @@ impl crate::LeafWidget for DisclosureHeader {
 }
 
 impl ContainerWidget for Disclosure {
-    fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+    fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
         // The header always contributes. Body measurement is conditional so collapsed content does
         // not influence root auto-size while its state and nodes remain retained.
-        let header = children.measure_child(Self::HEADER, style, atlas, available).unwrap_or_default();
+        let header = ctx.measure_child(children, Self::HEADER, available).unwrap_or_default();
         if !self.expanded {
             return header;
         }
-        let indent = self.indent(style);
-        let spacing = style.spacing.max(0);
+        let indent = self.indent(ctx.style());
+        let spacing = ctx.style().spacing.max(0);
         let body_width = if available.width > 0 {
             available.width.saturating_sub(indent).max(1)
         } else {
@@ -302,8 +302,8 @@ impl ContainerWidget for Disclosure {
         } else {
             0
         };
-        let body = children
-            .measure_child(Self::BODY, style, atlas, Dimensioni::new(body_width, body_height))
+        let body = ctx
+            .measure_child(children, Self::BODY, Dimensioni::new(body_width, body_height))
             .unwrap_or_default();
         Dimensioni::new(
             header.width.max(body.width.saturating_add(indent)),
@@ -313,8 +313,8 @@ impl ContainerWidget for Disclosure {
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
         // Header is a fixed structural role and always occupies the first visible row.
-        let preferred = children
-            .measure_child(Self::HEADER, ctx.style(), ctx.atlas(), Dimensioni::new(rect.width, rect.height))
+        let preferred = ctx
+            .measure_child(children, Self::HEADER, Dimensioni::new(rect.width, rect.height))
             .unwrap_or_default();
         let header_height = preferred.height.min(rect.height.max(0));
         let _ = ctx.set_child_participation(children, Self::HEADER, ChildParticipation::Active);

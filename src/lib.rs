@@ -189,8 +189,8 @@ pub mod retained {
     pub use crate::render::{CustomRenderArgs, CustomRenderHandle};
     pub use crate::ui_node::{
         ChildParticipation, Children, Column, ColumnParameters, Container, ContainerLayoutCtx, ContainerWidget, Disclosure, DisclosureParameters, FocusPolicy,
-        Grid, GridItem, GridParameters, GridSpan, LeafWidget, Node, Policy, Row, RowParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SizePolicy,
-        Stack, StackDirection, StackParameters, UiInputEvent, Widget, TextWrap, TypedWidgetHandle, WidgetBuilder, WidgetFillOption, WidgetOption,
+        Grid, GridItem, GridParameters, GridSpan, LeafWidget, MeasureCtx, Node, Policy, Row, RowParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters,
+        SizePolicy, Stack, StackDirection, StackParameters, UiInputEvent, Widget, TextWrap, TypedWidgetHandle, WidgetBuilder, WidgetFillOption, WidgetOption,
         WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
     };
     pub use crate::window_manager::{Context, ContextFrame, RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted, WindowOption};
@@ -213,8 +213,8 @@ pub mod prelude {
     pub use crate::retained::{
         ChildParticipation, Children, Column, ColumnParameters, Container, ContainerLayoutCtx, ContainerWidget, Context, ContextFrame, CustomRenderArgs,
         CustomRenderHandle, Disclosure, DisclosureParameters, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, Node, Policy, RootChanged, RootHandle,
-        RootId, RootMutationError, RootChrome, RootSubmitted, Row, RowParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SizePolicy, Stack,
-        LeafWidget, StackDirection, StackParameters, TextWrap, UiInputEvent, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption, WidgetOption,
+        MeasureCtx, RootId, RootMutationError, RootChrome, RootSubmitted, Row, RowParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SizePolicy,
+        Stack, LeafWidget, StackDirection, StackParameters, TextWrap, UiInputEvent, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption, WidgetOption,
         WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx, WindowOption,
     };
     pub use crate::math::{expand_rect, rect, vec2};
@@ -247,9 +247,9 @@ pub use render::TextureId;
 pub use theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, color};
 pub use ui_node::{
     ChildParticipation, Children, Column, ColumnParameters, Container, ContainerLayoutCtx, ContainerWidget, Disclosure, DisclosureParameters, FocusPolicy,
-    Grid, GridItem, GridParameters, GridSpan, LeafWidget, Node, Policy, Row, RowParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SizePolicy,
-    Stack, StackDirection, StackParameters, TextWrap, UiInputEvent, Widget, TypedWidgetHandle, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx,
-    WidgetParameters, WidgetUpdateCtx,
+    Grid, GridItem, GridParameters, GridSpan, LeafWidget, MeasureCtx, Node, Policy, Row, RowParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters,
+    SizePolicy, Stack, StackDirection, StackParameters, TextWrap, UiInputEvent, Widget, TypedWidgetHandle, WidgetBuilder, WidgetFillOption, WidgetOption,
+    WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 pub use widgets::{
     Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters, ColorSwatch,

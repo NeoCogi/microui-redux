@@ -33,7 +33,7 @@ use std::{cell::RefCell, rc::Rc};
 use crate::ui_node::sizing::SizePolicy;
 use crate::ui_node::children::ChildrenHandle;
 use crate::{
-    AtlasHandle, Container, ContainerWidget, Dimensioni, Recti, Style, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters,
+    Container, ContainerWidget, Dimensioni, MeasureCtx, Recti, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters,
     WidgetUpdateCtx,
 };
 
@@ -161,8 +161,8 @@ impl Stack {
 }
 
 impl ContainerWidget for Stack {
-    fn measure(&self, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
-        stack_size(self, children, style, atlas, available)
+    fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
+        stack_size(ctx, self, children, available)
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
@@ -191,12 +191,7 @@ fn layout_stack(ctx: &mut ContainerLayoutCtx<'_>, state: &mut Stack, children: &
     let spacing = ctx.style().spacing.max(0);
     // Establish one item width from the widest intrinsic child before measuring wrapped heights.
     let preferred_width = (0..count)
-        .map(|index| {
-            children
-                .measure_child(index, ctx.style(), ctx.atlas(), Dimensioni::default())
-                .unwrap_or_default()
-                .width
-        })
+        .map(|index| ctx.measure_child(children, index, Dimensioni::default()).unwrap_or_default().width)
         .max()
         .unwrap_or_default();
     let width = state.item_width.preferred_extent(preferred_width, rect.width);
@@ -206,12 +201,12 @@ fn layout_stack(ctx: &mut ContainerLayoutCtx<'_>, state: &mut Stack, children: &
     // track_height = max(container_height - spacing_total, 1).
     let available_height = rect.height.saturating_sub(spacing_total).max(1);
     // The scalar axis holds only shared allocation totals; individual heights are replayed below.
-    let mut axis = stack_axis(state, children, ctx.style(), ctx.atlas(), width, available_height);
+    let mut axis = stack_axis(state, count, available_height, |index| layout_stack_child_height(ctx, children, index, width));
     match state.direction {
         StackDirection::TopToBottom => {
             let mut y = rect.y;
             for index in 0..count {
-                let preferred = stack_child_height(children, index, ctx.style(), ctx.atlas(), width);
+                let preferred = layout_stack_child_height(ctx, children, index, width);
                 let height = axis.next(state.item_height, preferred).advance;
                 let _ = ctx.layout_child(children, index, Recti::new(rect.x, y, width, height));
                 // next_y = current_y + child_height + spacing.
@@ -223,7 +218,7 @@ fn layout_stack(ctx: &mut ContainerLayoutCtx<'_>, state: &mut Stack, children: &
             // bottom_y = container_y + container_height.
             let mut y = rect.y.saturating_add(rect.height);
             for index in 0..count {
-                let preferred = stack_child_height(children, index, ctx.style(), ctx.atlas(), width);
+                let preferred = layout_stack_child_height(ctx, children, index, width);
                 let height = axis.next(state.item_height, preferred).advance;
                 // child_y = previous_y - child_height.
                 y = y.saturating_sub(height);
@@ -239,35 +234,35 @@ fn layout_stack(ctx: &mut ContainerLayoutCtx<'_>, state: &mut Stack, children: &
 ///
 /// The child's own width policy determines the content-measurement bound but is applied to final
 /// geometry later by the generic node layout path.
-fn stack_child_height(children: &Children, index: usize, style: &Style, atlas: &AtlasHandle, width: i32) -> i32 {
+fn layout_stack_child_height(ctx: &ContainerLayoutCtx<'_>, children: &Children, index: usize, width: i32) -> i32 {
     // Measure with the resolved shared width so wrapping contributes the height placement will use.
     let child_width = children.child_policy(index).unwrap_or_else(crate::Policy::auto).width.measurement_bound(width);
-    children
-        .measure_child(index, style, atlas, Dimensioni::new(child_width, 0))
-        .unwrap_or_default()
-        .height
+    ctx.measure_child(children, index, Dimensioni::new(child_width, 0)).unwrap_or_default().height
+}
+
+/// Measures one Stack child height from the immutable measurement phase.
+fn measure_stack_child_height(ctx: &MeasureCtx<'_>, children: &Children, index: usize, width: i32) -> i32 {
+    let child_width = children.child_policy(index).unwrap_or_else(crate::Policy::auto).width.measurement_bound(width);
+    ctx.measure_child(children, index, Dimensioni::new(child_width, 0)).unwrap_or_default().height
 }
 
 /// Builds the scalar vertical cursor for all Stack children at one resolved item width.
-fn stack_axis(state: &Stack, children: &Children, style: &Style, atlas: &AtlasHandle, width: i32, available_height: i32) -> Axis {
+fn stack_axis(state: &Stack, count: usize, available_height: i32, mut preferred_height: impl FnMut(usize) -> i32) -> Axis {
     // Every child uses the same policy but contributes its own width-constrained preference.
-    Axis::new(
-        available_height,
-        (0..children.len()).map(|index| (state.item_height, stack_child_height(children, index, style, atlas, width))),
-    )
+    Axis::new(available_height, (0..count).map(|index| (state.item_height, preferred_height(index))))
 }
 
 /// Measures the preferred Stack extent without mutating or retaining sizing results.
-fn stack_size(state: &Stack, children: &Children, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+fn stack_size(ctx: &MeasureCtx<'_>, state: &Stack, children: &Children, available: Dimensioni) -> Dimensioni {
     // Aggregate the same shared policies used by placement without retaining per-child geometry.
     let count = children.len();
     if count == 0 {
         return Dimensioni::default();
     }
-    let spacing = style.spacing.max(0);
+    let spacing = ctx.style().spacing.max(0);
     // Width must be resolved before height because child text may wrap at the shared width.
     let preferred_width = (0..count)
-        .map(|index| children.measure_child(index, style, atlas, Dimensioni::default()).unwrap_or_default().width)
+        .map(|index| ctx.measure_child(children, index, Dimensioni::default()).unwrap_or_default().width)
         .max()
         .unwrap_or_default();
     let width = state.item_width.preferred_extent(preferred_width, available.width);
@@ -280,14 +275,14 @@ fn stack_size(state: &Stack, children: &Children, style: &Style, atlas: &AtlasHa
     } else {
         0
     };
-    let mut axis = stack_axis(state, children, style, atlas, width, available_height);
+    let mut axis = stack_axis(state, count, available_height, |index| measure_stack_child_height(ctx, children, index, width));
     if available_height == 0 {
         // The construction pass already contains every intrinsic child height.
         return Dimensioni::new(width, axis.intrinsic_extent(count, spacing));
     }
     // Bounded policies require ordered replay so Remainder observes earlier siblings.
     for index in 0..count {
-        axis.next(state.item_height, stack_child_height(children, index, style, atlas, width));
+        axis.next(state.item_height, measure_stack_child_height(ctx, children, index, width));
     }
     Dimensioni::new(width, axis.extent(count, spacing))
 }

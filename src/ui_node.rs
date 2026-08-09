@@ -82,7 +82,7 @@ pub(crate) use runtime::UiRuntime;
 #[cfg(test)]
 pub(crate) use runtime::RuntimeMetrics;
 mod container;
-pub use container::{Container, ContainerLayoutCtx, ContainerWidget};
+pub use container::{Container, ContainerLayoutCtx, ContainerWidget, MeasureCtx};
 mod containers;
 pub use containers::{
     Column, ColumnParameters, Disclosure, DisclosureParameters, Grid, GridItem, GridParameters, GridSpan, Row, RowParameters, ScrollArea, ScrollAreaParameters,
