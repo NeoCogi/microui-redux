@@ -36,6 +36,17 @@ use crate::{Dimensioni, TypedWidgetHandle, Widget};
 
 use super::{ChildParticipation, Children, Container, NodeLayout, RuntimeNodeId};
 
+/// Reports a typed-handle borrow that escaped into retained traversal.
+///
+/// Keep the diagnostic path out of the normal phase-dispatch code: successful traversal is the
+/// overwhelmingly common case, while a conflict is an application contract violation that always
+/// terminates the current operation.
+#[cold]
+#[inline(never)]
+fn widget_borrow_conflict() -> ! {
+    panic!("retained widget invariant violated: a typed access closure must finish before runtime traversal")
+}
+
 #[cfg(test)]
 use super::node_layout::advance_runtime_node_id;
 #[cfg(test)]
@@ -182,14 +193,16 @@ impl Node {
     pub(crate) fn measure(&self, style: &crate::Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
         // Frame geometry is intrinsic to the widget, so remove it from the content bound before
         // dispatch and add it back to the returned content preference afterward.
-        let framed = self
-            .data
-            .with_widget(|widget| widget.effective_widget_opt().intersects(crate::WidgetOption::FRAME));
-        let border_width = if framed { style.frame_border().width.max(0) } else { 0 };
-        // Both leaves and containers expose one Widget measurement entry point through NodeKind.
-        let measured_content = self
-            .data
-            .with_widget(|widget| widget.measure(style, atlas, crate::ui_node::frame::content_available(available, border_width)));
+        // Resolve frame policy and preferred size under one scoped widget borrow. Measurement is a
+        // dominant retained-layout path, so reacquiring the same RefCell merely to read options is
+        // both redundant and measurably expensive for large leaf trees.
+        let (border_width, measured_content) = self.data.with_widget(|widget| {
+            let framed = widget.effective_widget_opt().intersects(crate::WidgetOption::FRAME);
+            let border_width = if framed { style.frame_border().width.max(0) } else { 0 };
+            // Both leaves and containers expose one Widget measurement entry point through NodeKind.
+            let measured_content = widget.measure(style, atlas, crate::ui_node::frame::content_available(available, border_width));
+            (border_width, measured_content)
+        });
         // Widgets cannot return negative geometry. Node placement policy is intentionally absent:
         // the parent applies it later when allocating this preferred outer size.
         let preferred_content = Dimensioni::new(measured_content.width.max(0), measured_content.height.max(0));
@@ -288,10 +301,7 @@ impl NodeKind {
     pub(crate) fn with_widget<R>(&self, f: impl FnOnce(&dyn Widget) -> R) -> R {
         match self {
             Self::Widget(node) => {
-                let widget = node
-                    .widget
-                    .try_borrow()
-                    .expect("retained widget invariant violated: a typed access closure must finish before runtime traversal");
+                let widget = node.widget.try_borrow().unwrap_or_else(|_| widget_borrow_conflict());
                 f(&*widget)
             }
             Self::Container(container) => f(container),
@@ -302,10 +312,7 @@ impl NodeKind {
     pub(crate) fn with_widget_mut<R>(&mut self, f: impl FnOnce(&mut dyn Widget) -> R) -> R {
         match self {
             Self::Widget(node) => {
-                let mut widget = node
-                    .widget
-                    .try_borrow_mut()
-                    .expect("retained widget invariant violated: a typed access closure must finish before runtime traversal");
+                let mut widget = node.widget.try_borrow_mut().unwrap_or_else(|_| widget_borrow_conflict());
                 f(&mut *widget)
             }
             Self::Container(container) => f(container),
