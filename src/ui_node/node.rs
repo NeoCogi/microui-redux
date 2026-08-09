@@ -29,12 +29,24 @@
 //
 
 use crate::render::{CustomRenderHandle, CustomRenderKey, RendererBackend};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::{Dimensioni, LeafWidget, TypedWidgetHandle, Widget};
 
 use super::{ChildParticipation, Children, Container, NodeLayout, RuntimeNodeId};
+
+/// One node-local preferred-size result retained for the active measurement pass.
+///
+/// The available size is part of the key because a container may legitimately query the same
+/// child under multiple constraints while resolving tracks. The pass epoch prevents a result from
+/// surviving widget mutations between top-level measurement/layout operations.
+#[derive(Clone, Copy)]
+struct MeasurementCache {
+    epoch: u64,
+    available: Dimensioni,
+    preferred: Dimensioni,
+}
 
 /// Reports a typed-handle borrow that escaped into retained traversal.
 ///
@@ -75,6 +87,8 @@ pub(crate) struct NodeRuntime {
     pub(crate) policy: crate::Policy,
     /// Parent-layout result consumed uniformly by traversal and dispatch.
     pub(crate) participation: ChildParticipation,
+    /// Last preferred-size result, reused only within one measurement pass and constraint.
+    measurement: Cell<Option<MeasurementCache>>,
 }
 
 impl NodeRuntime {
@@ -179,6 +193,7 @@ impl Node {
                 active: false,
                 policy: crate::Policy::auto(),
                 participation: ChildParticipation::Active,
+                measurement: Cell::new(None),
             },
             data: kind,
         }
@@ -190,7 +205,16 @@ impl Node {
     }
 
     /// Measures this node's preferred outer size. Placement policy is applied later by layout.
-    pub(crate) fn measure(&self, style: &crate::Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
+    pub(crate) fn measure(&self, style: &crate::Style, atlas: &crate::AtlasHandle, available: Dimensioni, measurement_epoch: Option<u64>) -> Dimensioni {
+        if let Some(epoch) = measurement_epoch
+            && let Some(cached) = self.state.measurement.get()
+            && cached.epoch == epoch
+            && cached.available.width == available.width
+            && cached.available.height == available.height
+        {
+            return cached.preferred;
+        }
+
         // Frame geometry is intrinsic to the widget, so remove it from the content bound before
         // dispatch and add it back to the returned content preference afterward.
         // Resolve frame policy and preferred size under one scoped widget borrow. Measurement is a
@@ -204,12 +228,16 @@ impl Node {
                 let measured_content = widget.measure(style, atlas, crate::ui_node::frame::content_available(available, border_width));
                 (border_width, measured_content)
             }
-            NodeKind::Container(container) => container.measure_content_with_frame(style, atlas, available),
+            NodeKind::Container(container) => container.measure_content_with_frame(style, atlas, available, measurement_epoch),
         };
         // Widgets cannot return negative geometry. Node placement policy is intentionally absent:
         // the parent applies it later when allocating this preferred outer size.
         let preferred_content = Dimensioni::new(measured_content.width.max(0), measured_content.height.max(0));
-        crate::ui_node::frame::outer_preferred(preferred_content, border_width)
+        let preferred = crate::ui_node::frame::outer_preferred(preferred_content, border_width);
+        if let Some(epoch) = measurement_epoch {
+            self.state.measurement.set(Some(MeasurementCache { epoch, available, preferred }));
+        }
+        preferred
     }
 
     /// Writes layout as the source of truth.
@@ -376,8 +404,8 @@ mod tests {
         let style = crate::Style::default();
         let atlas = test_atlas();
 
-        let plain = plain.measure(&style, &atlas, Dimensioni::default());
-        let fixed_measurement = fixed.measure(&style, &atlas, Dimensioni::default());
+        let plain = plain.measure(&style, &atlas, Dimensioni::default(), None);
+        let fixed_measurement = fixed.measure(&style, &atlas, Dimensioni::default(), None);
         assert_eq!((plain.width, plain.height), (fixed_measurement.width, fixed_measurement.height));
         let children: Children = [fixed].into_iter().collect();
         assert_eq!(children.child_policy(0), Some(crate::Policy::fixed(300, 200)));

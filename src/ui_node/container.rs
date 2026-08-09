@@ -143,11 +143,20 @@ impl Container {
     }
 
     /// Resolves frame width and measures content under one typed-runtime borrow.
-    pub(crate) fn measure_content_with_frame(&self, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> (i32, Dimensioni) {
+    pub(crate) fn measure_content_with_frame(
+        &self,
+        style: &Style,
+        atlas: &crate::AtlasHandle,
+        available: Dimensioni,
+        measurement_epoch: Option<u64>,
+    ) -> (i32, Dimensioni) {
         let children = self
             .children
             .try_borrow()
             .unwrap_or_else(|_| panic!("retained child invariant violated: collection is mutably borrowed during measurement"));
+        // ContainerWidget deliberately remains unaware of runtime generations. Children carries
+        // the scoped epoch so every recursive measure_child call uses the same node-local cache.
+        children.set_measurement_epoch(measurement_epoch);
         let widget = self.widget.try_borrow().unwrap_or_else(|_| typed_container_borrow_conflict());
         let border_width = if widget.effective_widget_opt().intersects(WidgetOption::FRAME) {
             style.frame_border().width.max(0)

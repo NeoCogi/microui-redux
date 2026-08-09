@@ -295,6 +295,50 @@ fn leaf_layout_reuses_one_authoritative_widget_measurement() {
 }
 
 #[test]
+fn subtree_measurement_is_reused_within_one_layout_pass() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let (probe, counts) = Probe::new("leaf", log.clone());
+    let (container, _) = TraversalContainer::new([Node::widget(probe)], false, log);
+    let mut root = Node::container(container);
+    let mut runtime = UiRuntime::new();
+
+    layout_root(&mut runtime, &mut root, &Style::default(), test_atlas());
+
+    assert_eq!(counts.measures.get(), 1, "placement must reuse the identical recursive measurement");
+}
+
+#[test]
+fn measurement_cache_does_not_survive_the_layout_pass() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let (probe, counts) = Probe::new("leaf", log.clone());
+    let (container, _) = TraversalContainer::new([Node::widget(probe)], false, log);
+    let mut root = Node::container(container);
+    let mut runtime = UiRuntime::new();
+    let style = Style::default();
+
+    layout_root(&mut runtime, &mut root, &style, test_atlas());
+    layout_root(&mut runtime, &mut root, &style, test_atlas());
+
+    assert_eq!(counts.measures.get(), 2, "a new pass must observe application-authored mutations");
+}
+
+#[test]
+fn measurement_cache_keeps_constraints_distinct_within_one_pass() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let (probe, counts) = Probe::new("leaf", log);
+    let (_, mut root) = crate::Column::create(crate::ColumnParameters::new([Node::widget(probe)]));
+    let mut runtime = UiRuntime::new();
+
+    layout_root(&mut runtime, &mut root, &Style::default(), test_atlas());
+
+    assert_eq!(
+        counts.measures.get(),
+        3,
+        "the intrinsic, allocated-track, and final-slot constraints must not share one result"
+    );
+}
+
+#[test]
 fn common_phases_are_parent_first_and_siblings_are_forward() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (first, first_counts) = Probe::new("first", log.clone());

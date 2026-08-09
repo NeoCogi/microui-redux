@@ -60,6 +60,8 @@ pub(crate) struct RuntimeMetrics {
 }
 
 pub(crate) struct UiRuntime {
+    /// Wrapping identity for the current top-level measurement/layout operation.
+    measurement_epoch: u64,
     /// Aggregate root content size in root body coordinates.
     root_content_size: Dimensioni,
     /// Transform from root body coordinates into screen coordinates.
@@ -90,6 +92,7 @@ pub(crate) struct UiRuntime {
 impl Default for UiRuntime {
     fn default() -> Self {
         Self {
+            measurement_epoch: 0,
             root_content_size: Dimensioni::default(),
             root_transform: Transform::root(UNCLIPPED_RECT),
             focus: None,
@@ -111,6 +114,13 @@ impl UiRuntime {
     /// Creates an empty runtime.
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    /// Starts a cache-isolated preferred-size traversal.
+    fn begin_measurement_pass(&mut self) {
+        // Wrapping is intentional: a collision would require 2^64 intervening passes, and avoiding
+        // a branch in this dominant path is more useful than reserving a sentinel value.
+        self.measurement_epoch = self.measurement_epoch.wrapping_add(1);
     }
 
     /// Clears update-cycle metrics before the initial synchronization layout.
@@ -160,12 +170,14 @@ impl UiRuntime {
     /// A zero component requests unconstrained preferred size; a positive component supplies the
     /// programmed measurement bound. Root chrome owns the conversion from application content to
     /// the final outer window extent.
-    pub(crate) fn measure_tree_root(&self, root: &Node, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
+    pub(crate) fn measure_tree_root(&mut self, root: &Node, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
+        self.begin_measurement_pass();
         self.measure_node(root, style, atlas, available)
     }
 
     /// Lays out one persistent root node at its authoritative screen-space rectangle.
     pub(crate) fn layout_tree_root(&mut self, root: &mut Node, style: &Style, atlas: crate::AtlasHandle, outer: Recti, viewport: Recti) {
+        self.begin_measurement_pass();
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.tree_layouts += 1);
         // Root layout establishes the transform reused by subsequent routing, update, and paint.

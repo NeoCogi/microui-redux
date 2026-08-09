@@ -30,7 +30,7 @@
 
 //! Opaque ownership of retained child nodes.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 use crate::Dimensioni;
@@ -45,6 +45,8 @@ use super::Node;
 /// ownership rules.
 pub struct Children {
     pub(super) nodes: Vec<Node>,
+    /// Measurement pass inherited from the owning container node.
+    measurement_epoch: Cell<Option<u64>>,
 }
 
 /// Crate-private weak access used by built-in mutable container state.
@@ -158,7 +160,10 @@ impl Children {
     /// Creates an empty child collection.
     pub const fn new() -> Self {
         // No backing allocation is created until the first node is inserted.
-        Self { nodes: Vec::new() }
+        Self {
+            nodes: Vec::new(),
+            measurement_epoch: Cell::new(None),
+        }
     }
 
     /// Returns the number of owned child nodes.
@@ -176,7 +181,14 @@ impl Children {
     /// Use [`Self::child_policy`] separately when the container's slot calculation needs it.
     pub fn measure_child(&self, index: usize, style: &crate::Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Option<Dimensioni> {
         // Resolve the index internally so callers can inspect geometry without borrowing a Node.
-        self.nodes.get(index).map(|node| node.measure(style, atlas, available))
+        self.nodes
+            .get(index)
+            .map(|node| node.measure(style, atlas, available, self.measurement_epoch.get()))
+    }
+
+    /// Propagates the owning node's active measurement pass into descendant queries.
+    pub(super) fn set_measurement_epoch(&self, epoch: Option<u64>) {
+        self.measurement_epoch.set(epoch);
     }
 
     /// Returns one child's placement policy without exposing the child itself.
@@ -252,7 +264,10 @@ impl Default for Children {
 
 impl FromIterator<Node> for Children {
     fn from_iter<T: IntoIterator<Item = Node>>(iter: T) -> Self {
-        Self { nodes: iter.into_iter().collect() }
+        Self {
+            nodes: iter.into_iter().collect(),
+            measurement_epoch: Cell::new(None),
+        }
     }
 }
 

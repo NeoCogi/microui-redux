@@ -40,7 +40,7 @@ impl UiRuntime {
         self.bump_metric(|metrics| metrics.measures += 1);
         // Node::measure is the only place that adds frame geometry; containers receive the same
         // content-only measurement contract whether reached here or through Children.
-        node.measure(style, atlas, available)
+        node.measure(style, atlas, available, Some(self.measurement_epoch))
     }
 
     /// Lays out one already-borrowed node through direct widget/container dispatch.

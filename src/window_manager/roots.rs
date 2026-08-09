@@ -402,10 +402,8 @@ impl<B: RendererBackend> Context<B> {
                 // programmed outer bound so root chrome can offer the exact remaining body extent
                 // without exposing frame or padding arithmetic to the application.
                 let available = Dimensioni::new(if auto_width { 0 } else { rect.width.max(1) }, if auto_height { 0 } else { rect.height.max(1) });
-                let size = self.roots[index]
-                    .tree
-                    .runtime
-                    .measure_tree_root(&self.roots[index].tree.root, &self.style, atlas, available);
+                let tree = &mut self.roots[index].tree;
+                let size = tree.runtime.measure_tree_root(&tree.root, &self.style, atlas, available);
                 let size = Dimensioni::new(
                     if auto_width { size.width } else { rect.width },
                     if auto_height { size.height } else { rect.height },
