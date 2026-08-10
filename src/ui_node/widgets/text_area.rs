@@ -816,23 +816,23 @@ mod tests {
     use crate::test_support::test_atlas;
 
     #[derive(Debug, Eq, PartialEq)]
-    enum Message {
+    enum RecordedEvent {
         Changed(String, usize),
         Submitted(String),
     }
 
-    fn text_session(text_area: &TextArea) -> crate::Session<Vec<Message>, Message> {
+    fn record_changed(events: &mut Vec<RecordedEvent>, event: &TextAreaChanged) {
+        events.push(RecordedEvent::Changed(event.text.clone(), event.cursor));
+    }
+
+    fn record_submitted(events: &mut Vec<RecordedEvent>, event: &TextAreaSubmitted) {
+        events.push(RecordedEvent::Submitted(event.text.clone()));
+    }
+
+    fn text_session(text_area: &TextArea) -> crate::Session<Vec<RecordedEvent>> {
         let mut session = crate::Session::new();
-        session
-            .connect(text_area.changed(), |event| Message::Changed(event.text, event.cursor))
-            .unwrap();
-        session.connect(text_area.submitted(), |event| Message::Submitted(event.text)).unwrap();
-        session.subscribe(|messages: &mut Vec<Message>, message: &Message, _| {
-            messages.push(match message {
-                Message::Changed(text, cursor) => Message::Changed(text.clone(), *cursor),
-                Message::Submitted(text) => Message::Submitted(text.clone()),
-            });
-        });
+        session.subscribe(text_area.changed(), record_changed).unwrap();
+        session.subscribe(text_area.submitted(), record_submitted).unwrap();
         session
     }
 
@@ -867,9 +867,12 @@ mod tests {
                 UiInputEvent::KeyDown { key: KeyMode::RETURN },
             ],
         );
-        let mut messages = Vec::new();
-        assert!(session.dispatch(&mut messages));
-        assert_eq!(messages, [Message::Changed("line".to_owned(), 4), Message::Submitted("line".to_owned())]);
+        let mut events = Vec::new();
+        assert!(session.dispatch(&mut events));
+        assert_eq!(
+            events,
+            [RecordedEvent::Changed("line".to_owned(), 4), RecordedEvent::Submitted("line".to_owned())]
+        );
     }
 
     #[test]

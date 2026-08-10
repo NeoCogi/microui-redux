@@ -27,106 +27,36 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-//! Application-typed sessions and widget-native event connections.
+//! Typed widget events dispatched directly to application-state methods.
 //!
-//! # Architecture
-//!
-//! This module is the boundary between widget-defined events and an application's message model.
-//! The retained tree and UI runtime do not know the application's `Message` type. A concrete widget
-//! knows only its own native event payloads, while [`Session<State, Message>`](Session) performs
-//! the application-specific conversion and dispatch.
-//!
-//! ```text
-//! retained tree                                             application
-//! ┌─────────────────────────────────┐          ┌────────────────────────────┐
-//! │ concrete widget W               │          │ Session<State, Message>    │
-//! │ ├─ semantic + interaction state │          │ ├─ FIFO Inbox<Message>     │
-//! │ └─ Rc<WidgetEventPort<E>>       │          │ ├─ Connection records      │
-//! │                                 │          │ └─ Subscriber callbacks     │
-//! │      └─ WidgetEventTarget<E> ───┼─ Weak ──►│                            │
-//! └──────────────┬──────────────────┘          └─────────────┬──────────────┘
-//!                │ implements                               │ dispatch
-//!                ▼                                          ▼
-//!        TypedWidget<E>                              &mut State
-//!                │
-//!                └─ WidgetEventHandle<E> (Weak port capability)
-//! ```
-//!
-//! ## Widget side
-//!
-//! A widget author defines an owned native payload such as `SliderChanged` and explicitly
-//! implements [`WidgetEvent`] for it. The concrete widget runtime owns a private
-//! [`WidgetEventPort<E>`](WidgetEventPort) alongside its semantic fields. User input updates the
-//! widget and calls `port.emit(event)` only for user-originated semantic changes; ordinary
-//! programmatic setters remain silent.
-//!
-//! The runtime implements [`TypedWidget<E>`], possibly once for each distinct native event type.
-//! Applications obtain a [`WidgetEventHandle<E>`] through the widget's weak
-//! [`crate::TypedWidgetHandle`] after construction. The event handle contains only a weak pointer
-//! to the selected port; it neither borrows the widget nor keeps it mounted.
-//!
-//! ## Connecting a widget to an application
-//!
-//! [`Session::connect`] consumes an event handle and an application adapter `Fn(E) -> Message`.
-//! Upgrading the handle installs one [`WidgetEventTarget<E>`](WidgetEventTarget) directly in the
-//! selected port. A port accepts exactly one target; application fan-out happens later through
-//! the session's subscribers after every native payload has become the session's one `Message`
-//! type.
-//!
-//! The target boxes the connection-specific closure once because its concrete closure type depends
-//! on the application. It retains `E` statically, captures the adapter, and holds only a weak
-//! reference to the session inbox. No event value is converted through `Any`, and no downcast is
-//! used.
-//!
-//! The session separately stores an erased [`Connection`] record containing widget liveness and
-//! disconnection behavior. This lets one `Session<State, Message>` own connections to
-//! heterogeneous widget and event types without making the retained runtime generic over
-//! `Message`.
-//!
-//! ## Event and dispatch flow
+//! A concrete widget owns one [`WidgetEventPort`] for each native event type it publishes. An
+//! application subscribes a method such as `State::slider_changed` through [`Session::subscribe`].
+//! When the widget emits, its port appends one typed method invocation per subscriber to the
+//! session FIFO. [`Session::dispatch`] invokes those methods after retained widget borrows have
+//! ended.
 //!
 //! ```text
-//! raw input
-//!    │
-//!    ▼
-//! retained widget update mutates S and constructs E
-//!    │
-//!    ▼
-//! WidgetEventPort<E>::emit(E)
-//!    │
-//!    ├─ adapter constructs Message synchronously
-//!    └─ Message is appended to the session FIFO
-//!          │
-//!          │ complete retained update releases all state borrows
-//!          ▼
-//! Session::dispatch
-//!    │
-//!    └─ each subscriber receives (&mut State, &Message, &mut Emit<Message>)
+//! widget.emit(E)
+//!      │
+//!      ├─ queue Subscriber<State, E> for State::method
+//!      └─ queue Subscriber<State, E> for State::other_method
+//!                         │
+//!                         ▼
+//!                  Session<State> FIFO
+//!                         │ dispatch
+//!                         ▼
+//!                       &mut State
 //! ```
 //!
-//! The `Fn(E) -> Message` adapter runs while the emitting widget may still be mutably borrowed. It
-//! is therefore a construction-only adapter: widget access and application effects belong in a
-//! subscriber. [`crate::Context::update_ui_session`] invokes dispatch only after the complete
-//! retained update has released widget borrows and before committing the layout used for the next
-//! queued raw event.
+//! There is no application-wide message enum, mapping adapter, downcast, or `Any` payload. The
+//! queue erases only the invocation behavior required to hold different native event types in one
+//! FIFO. Multiple subscribers receive the same `Rc<E>`, matching C# multicast-event semantics
+//! without requiring `E: Clone`.
 //!
-//! Widget events, [`Session::emit`], and subscriber cascades all append to the same
-//! [`VecDeque<Message>`](VecDeque). Dispatch removes from the front, subscribers run in registration
-//! order, and [`Emit::emit`] appends cascades at the back. This provides one FIFO order across every
-//! message source. A cascade limit terminates accidental subscriber feedback loops.
-//!
-//! ## Ownership and cleanup
-//!
-//! The concrete widget is the sole strong owner of each port. Event handles and session connection
-//! records hold weak port references, so neither can retain a removed widget. Session owns the
-//! inbox, subscriber callbacks, and every [`Connection`]; widget targets and temporary [`Emit`]
-//! values hold weak inbox references, so widgets and callbacks cannot keep a dropped session
-//! alive.
-//! Dropping a session drops its connection records, which remove matching targets from live ports.
-//! Dropping a widget destroys its port immediately but leaves an expired weak connection record in
-//! the session. Dynamic-tree owners call [`Session::prune_expired_connections`] once per topology
-//! replacement batch, avoiding the quadratic cost of scanning all prior connections inside every
-//! `connect` call.
+//! Event handles and session subscription records hold weak widget-port references, so neither
+//! keeps a removed widget alive. A port subscriber holds only a weak session-queue reference, so a
+//! live widget cannot keep a dropped session alive. Dropping or explicitly removing a subscription
+//! detaches it from a live port.
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -136,108 +66,77 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::Widget;
 
-/// Maximum number of application messages dispatched from one raw-input transaction, including
-/// messages recursively emitted by subscribers.
-const MAX_CASCADE_MESSAGES: usize = 1_000_000;
+/// Maximum number of subscriber methods invoked from one dispatch transaction.
+const MAX_SUBSCRIBER_INVOCATIONS: usize = 1_000_000;
 
-/// Allocates identities used to disconnect one session from one widget event port.
-fn next_connection_id() -> u64 {
-    // IDs are process-wide because a delayed/stale disconnection must never match a newer target
-    // installed by another Session. Relaxed ordering is sufficient: the atomic only guarantees
-    // uniqueness and does not publish memory between threads.
-    static NEXT_CONNECTION_ID: AtomicU64 = AtomicU64::new(1);
-    NEXT_CONNECTION_ID
-        // Refuse to wrap because reusing an ID could let an old Connection remove a new target.
+fn next_subscription_id() -> SubscriptionId {
+    // IDs are process-wide because subscriptions from different sessions may share one multicast
+    // port. A stale disconnection must never remove another session's newer subscriber.
+    static NEXT_SUBSCRIPTION_ID: AtomicU64 = AtomicU64::new(1);
+    let id = NEXT_SUBSCRIPTION_ID
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-        .expect("widget event connection id space exhausted")
+        .expect("widget event subscription id space exhausted");
+    SubscriptionId(id)
 }
 
 /// Marker implemented by every native semantic event payload emitted by a widget.
-///
-/// Widget authors define these payloads as part of the widget's typed public contract. The trait
-/// has no behavior: it distinguishes native widget events from application `Message` types while
-/// preserving each payload's concrete type through [`Session::connect`].
 pub trait WidgetEvent: 'static {}
 
 /// A concrete retained widget that owns one typed native event source.
 ///
-/// A widget may implement this trait more than once with different `E` types. Applications obtain
-/// each weak event capability before moving the concrete widget into a type-erased [`crate::Node`].
+/// A widget may implement this trait more than once with different `E` types.
 pub trait TypedWidget<E: WidgetEvent>: Widget {
     /// Returns a weak capability for this widget's `E` event source.
     fn event(&self) -> WidgetEventHandle<E>;
 }
 
-/// Type-erased delivery behavior installed in one native event port.
-///
-/// The wrapper makes the [`WidgetEvent`] constraint local and explicit. Only the callback's concrete
-/// implementation type is erased; its input remains the statically known native event `E`.
-struct WidgetEventTarget<E: WidgetEvent> {
-    callback: Box<dyn Fn(E)>,
+/// Opaque identity returned for one widget-event subscription.
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+pub struct SubscriptionId(u64);
+
+struct PortSubscriber<E> {
+    id: SubscriptionId,
+    enqueue: Box<dyn Fn(Rc<E>)>,
 }
 
-impl<E: WidgetEvent> WidgetEventTarget<E> {
-    fn new(callback: impl Fn(E) + 'static) -> Self {
-        // Box the connection-specific adapter once so the concrete widget does not become generic
-        // over the application's closure type.
-        Self { callback: Box::new(callback) }
-    }
-
-    fn emit(&self, event: E) {
-        // Delivery needs no mutable callback state: queue mutation happens through Inbox's RefCell.
-        // Forward the concrete native event without erasing its value or performing a downcast.
-        (self.callback)(event);
-    }
-}
-
-/// One widget-owned, native event output.
+/// One widget-owned, typed multicast event output.
 ///
-/// This type is framework-facing. Applications obtain a weak [`WidgetEventHandle`] capability from
-/// the concrete widget's [`TypedWidget`] implementation instead of accessing the port itself.
+/// Applications access this port through a weak [`WidgetEventHandle`].
 pub(crate) struct WidgetEventPort<E: WidgetEvent> {
-    target: RefCell<Option<(u64, WidgetEventTarget<E>)>>,
+    subscribers: RefCell<Vec<PortSubscriber<E>>>,
 }
 
 impl<E: WidgetEvent> WidgetEventPort<E> {
     pub(crate) fn new() -> Self {
-        // A widget starts detached; Session::connect installs the only permitted target later.
-        Self { target: RefCell::new(None) }
+        Self { subscribers: RefCell::new(Vec::new()) }
     }
 
-    /// Sends one native widget event into its connected session, when present.
+    /// Queues one invocation for every subscriber in registration order.
     pub(crate) fn emit(&self, event: E) {
-        // The target owns the E -> Message adapter. With no target, the event is intentionally
-        // discarded instead of being buffered in the widget or exposed through polling state.
-        if let Some((_, target)) = &*self.target.borrow() {
-            target.emit(event);
+        let subscribers = self.subscribers.borrow();
+        if subscribers.is_empty() {
+            return;
+        }
+
+        // One shared allocation lets a non-Clone event reach every subscriber. Subscriber
+        // callbacks only append to their session queues and cannot synchronously call State.
+        let event = Rc::new(event);
+        for subscriber in subscribers.iter() {
+            (subscriber.enqueue)(Rc::clone(&event));
         }
     }
 
-    fn connect(&self, id: u64, target: WidgetEventTarget<E>) -> bool {
-        // A native port is point-to-point. Application-level multicast happens after conversion to
-        // Message, so installing a second session target would make ownership and ordering unclear.
-        let mut current = self.target.borrow_mut();
-        if current.is_some() {
-            return false;
-        }
-        // Store the identity beside the callback so only its owning Connection can remove it.
-        *current = Some((id, target));
-        true
+    fn subscribe(&self, id: SubscriptionId, enqueue: impl Fn(Rc<E>) + 'static) {
+        self.subscribers.borrow_mut().push(PortSubscriber { id, enqueue: Box::new(enqueue) });
     }
 
-    fn disconnect(&self, id: u64) {
-        // Ignore stale disconnect requests. In particular, an older Connection must not clear a
-        // target that was installed later with a different process-wide identity.
-        let mut current = self.target.borrow_mut();
-        if current.as_ref().is_some_and(|(target_id, _)| *target_id == id) {
-            *current = None;
-        }
+    fn unsubscribe(&self, id: SubscriptionId) {
+        self.subscribers.borrow_mut().retain(|subscriber| subscriber.id != id);
     }
 }
 
 impl<E: WidgetEvent> Default for WidgetEventPort<E> {
     fn default() -> Self {
-        // Keep Default and the explicit framework constructor on the same detached-state path.
         Self::new()
     }
 }
@@ -251,18 +150,15 @@ pub struct WidgetEventHandle<E: WidgetEvent> {
 
 impl<E: WidgetEvent> WidgetEventHandle<E> {
     pub(crate) fn new(port: &Rc<WidgetEventPort<E>>) -> Self {
-        // The concrete widget remains the sole strong owner of its event source.
         Self { port: Rc::downgrade(port) }
     }
 
-    /// Creates an already-expired endpoint for an expired typed widget handle.
     pub(crate) fn expired() -> Self {
         Self { port: Weak::new() }
     }
 
     /// Returns whether the concrete widget still owns this event source.
     pub fn is_alive(&self) -> bool {
-        // strong_count does not upgrade or borrow the port and therefore cannot affect lifetime.
         self.port.strong_count() != 0
     }
 }
@@ -279,265 +175,226 @@ impl<W: Widget + 'static> crate::TypedWidgetHandle<W> {
 
 impl<E: WidgetEvent> Clone for WidgetEventHandle<E> {
     fn clone(&self) -> Self {
-        // Cloning duplicates only a Weak pointer and never keeps the owning widget mounted.
         Self { port: self.port.clone() }
     }
 }
 
 impl<E: WidgetEvent> fmt::Debug for WidgetEventHandle<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Liveness is the only useful diagnostic exposed by an otherwise opaque capability.
         f.debug_struct("WidgetEventHandle")
             .field("alive", &(self.port.strong_count() != 0))
             .finish_non_exhaustive()
     }
 }
 
-/// Failure to connect a widget event to an application session.
+/// Failure to subscribe an application-state method to a widget event.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum ConnectError {
-    /// The widget has already been removed from the retained tree.
+pub enum SubscribeError {
+    /// The widget that owns the event port has already been removed.
     WidgetExpired,
-    /// This native event already feeds a session. Multicast occurs after conversion to `Message`.
-    AlreadyConnected,
 }
 
-impl fmt::Display for ConnectError {
+impl fmt::Display for SubscribeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Keep user-facing text centralized and stable while Debug continues to expose variants.
-        f.write_str(match self {
-            Self::WidgetExpired => "widget event owner has expired",
-            Self::AlreadyConnected => "widget event is already connected to a session",
-        })
+        f.write_str("widget event owner has expired")
     }
 }
 
-impl std::error::Error for ConnectError {}
+impl std::error::Error for SubscribeError {}
 
-struct Inbox<Message> {
-    pending: VecDeque<Message>,
-}
-
-impl<Message> Default for Inbox<Message> {
-    fn default() -> Self {
-        // VecDeque provides FIFO removal from the front and retains capacity across transactions.
-        Self { pending: VecDeque::new() }
-    }
-}
-
-/// Application-message emission capability supplied to session subscribers.
-pub struct Emit<Message> {
-    inbox: Weak<RefCell<Inbox<Message>>>,
-}
-
-impl<Message> Emit<Message> {
-    /// Appends a message to the current session transaction.
-    ///
-    /// Returns `false` only when the owning session has already been dropped.
-    pub fn emit(&mut self, message: Message) -> bool {
-        // Emit is intentionally weak: a callback must not prolong the lifetime of its Session.
-        let Some(inbox) = self.inbox.upgrade() else {
-            return false;
-        };
-        // Append cascaded messages behind everything already queued. dispatch releases its queue
-        // borrow before invoking subscribers, so this mutable borrow cannot overlap that one.
-        inbox.borrow_mut().pending.push_back(message);
-        true
-    }
-}
-
-/// Opaque identity returned for one application-message subscription.
-#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
-pub struct SubscriptionId(u64);
-
-type SubscriberCallback<State, Message> = Box<dyn FnMut(&mut State, &Message, &mut Emit<Message>)>;
-
-struct Subscriber<State, Message> {
-    id: SubscriptionId,
-    callback: SubscriberCallback<State, Message>,
-}
-
-/// One application-typed semantic message session.
+/// Type-erased invocation stored in one `Session<State>` FIFO.
 ///
-/// A session owns its ordered subscribers, message queue, every widget-event connection installed
-/// through it, and the safe-boundary dispatcher. Neither the renderer Context nor the retained
-/// tree is generic over `State` or `Message`.
-pub struct Session<State, Message> {
-    inbox: Rc<RefCell<Inbox<Message>>>,
-    connections: Vec<Connection>,
-    subscribers: Vec<Subscriber<State, Message>>,
-    next_subscription_id: u64,
+/// `State` is the erased queue's common receiver; each implementation retains its concrete event
+/// type and calls a statically typed method.
+trait SubscriberInvoker<State> {
+    fn invoke(self: Box<Self>, state: &mut State);
 }
 
-impl<State, Message: 'static> Session<State, Message> {
-    /// Creates an empty application message session.
+struct Subscriber<State, E> {
+    event: Rc<E>,
+    method: fn(&mut State, &E),
+}
+
+impl<State, E> SubscriberInvoker<State> for Subscriber<State, E> {
+    fn invoke(self: Box<Self>, state: &mut State) {
+        (self.method)(state, &self.event);
+    }
+}
+
+struct BoundSubscriber<State, Context, E> {
+    context: Rc<Context>,
+    event: Rc<E>,
+    method: fn(&mut State, &Context, &E),
+}
+
+impl<State, Context, E> SubscriberInvoker<State> for BoundSubscriber<State, Context, E> {
+    fn invoke(self: Box<Self>, state: &mut State) {
+        (self.method)(state, &self.context, &self.event);
+    }
+}
+
+type SubscriberQueue<State> = Rc<RefCell<VecDeque<Box<dyn SubscriberInvoker<State>>>>>;
+
+/// Cloneable access to a session queue for state objects that own their own `Session` field.
+///
+/// Cloning this lightweight dispatcher ends the borrow of that field before application methods
+/// receive `&mut State`.
+pub(crate) struct SessionDispatcher<State> {
+    queue: SubscriberQueue<State>,
+}
+
+impl<State> SessionDispatcher<State> {
+    pub(crate) fn dispatch(&self, state: &mut State) -> bool {
+        dispatch_queue(&self.queue, state)
+    }
+}
+
+/// A FIFO of typed widget-event invocations targeting one application state type.
+///
+/// The session owns its widget subscriptions and dispatches native events directly to registered
+/// `State` methods. Neither the renderer nor retained tree becomes generic over `State`.
+pub struct Session<State> {
+    queue: SubscriberQueue<State>,
+    subscriptions: Vec<Box<dyn ErasedSubscription>>,
+}
+
+impl<State: 'static> Session<State> {
+    /// Creates an empty application event session.
     pub fn new() -> Self {
-        // Widget targets and subscriber Emit handles refer to one shared queue. Session keeps the
-        // sole long-lived strong owner; both outward-facing paths receive Weak references.
         Self {
-            inbox: Rc::new(RefCell::new(Inbox::default())),
-            // Connection records are retained so dropping the Session can detach every live port.
-            connections: Vec::new(),
-            // Vec insertion is the subscriber notification order.
-            subscribers: Vec::new(),
-            // Reserve zero as an easy-to-recognize invalid-looking subscription identity.
-            next_subscription_id: 1,
+            queue: Rc::new(RefCell::new(VecDeque::new())),
+            subscriptions: Vec::new(),
         }
     }
 
-    /// Registers a subscriber notified for every application message in registration order.
-    pub fn subscribe(&mut self, callback: impl FnMut(&mut State, &Message, &mut Emit<Message>) + 'static) -> SubscriptionId {
-        // Allocate a stable identity before moving the callback into erased storage. Overflow is a
-        // hard error because reusing an ID could unsubscribe the wrong callback.
-        let id = SubscriptionId(self.next_subscription_id);
-        self.next_subscription_id = self.next_subscription_id.checked_add(1).expect("message subscription id space exhausted");
-        // The box erases only callback implementation type. State and Message remain statically
-        // known, and Vec insertion preserves notification order.
-        self.subscribers.push(Subscriber { id, callback: Box::new(callback) });
-        id
-    }
-
-    /// Removes one prior subscription from this session.
-    pub fn unsubscribe(&mut self, id: SubscriptionId) -> bool {
-        // Retain preserves the relative order of every remaining subscriber. Comparing lengths
-        // reports whether the opaque ID actually matched an entry.
-        let previous_len = self.subscribers.len();
-        self.subscribers.retain(|entry| entry.id != id);
-        self.subscribers.len() != previous_len
-    }
-
-    /// Connects one widget-native event to this session's application message stream.
+    /// Subscribes a `State` method to one native widget event.
     ///
-    /// The `map` closure runs synchronously when the native event is emitted, while the event-owning
-    /// widget state may still be mutably borrowed. It must only construct a `Message` from the event
-    /// and captured values; widget access and application effects belong in a subscriber callback,
-    /// which runs after retained state borrows have ended.
-    ///
-    /// Exactly one session may be connected to a widget event; fan-out belongs in this session's
-    /// subscriber collection after the event has become an application `Message`.
-    pub fn connect<E: WidgetEvent>(&mut self, event: WidgetEventHandle<E>, map: impl Fn(E) -> Message + 'static) -> Result<(), ConnectError> {
-        // Allocate the identity before installing the target because both the port and its later
-        // disconnection closure must agree on the same value.
-        let id = next_connection_id();
-        // A weak queue reference prevents the widget -> target -> inbox path from keeping Session
-        // alive.
-        let weak_inbox = Rc::downgrade(&self.inbox);
-        let target = WidgetEventTarget::new(move |native_event: E| {
-            // Session may already be gone if a target is invoked during teardown. In that case the
-            // native event has no application destination and is discarded.
-            let Some(inbox) = weak_inbox.upgrade() else {
+    /// Each event occurrence is queued while the widget is updating. The method runs later at the
+    /// session dispatch boundary and receives the original concrete event type.
+    pub fn subscribe<E: WidgetEvent>(&mut self, event: WidgetEventHandle<E>, method: fn(&mut State, &E)) -> Result<SubscriptionId, SubscribeError> {
+        let Some(port) = event.port.upgrade() else {
+            return Err(SubscribeError::WidgetExpired);
+        };
+
+        let id = next_subscription_id();
+        let queue = Rc::downgrade(&self.queue);
+        port.subscribe(id, move |event| {
+            let Some(queue) = queue.upgrade() else {
                 return;
             };
-            // Mapping is deliberately synchronous and construction-only. Compute before borrowing
-            // the queue so the adapter never runs under an Inbox RefCell borrow.
-            let message = map(native_event);
-            // Messages from every widget share this FIFO and are delivered later by dispatch.
-            inbox.borrow_mut().pending.push_back(message);
+            queue.borrow_mut().push_back(Box::new(Subscriber { event, method }));
         });
-
-        // Upgrade the widget-owned port without borrowing semantic widget state. Expiration now has
-        // one unambiguous cause: the concrete widget has been removed.
-        let Some(port) = event.port.upgrade() else {
-            return Err(ConnectError::WidgetExpired);
-        };
-        if !port.connect(id, target) {
-            // The port is live, but its point-to-point slot already owns another target.
-            return Err(ConnectError::AlreadyConnected);
-        }
-
-        // Session records only weak port references; the concrete widget remains the sole owner.
-        let owner = Rc::downgrade(&port);
-        let disconnect = Rc::downgrade(&port);
-        // Record cleanup only after installation succeeds, keeping the Vec and widget port in sync.
-        self.connections.push(Connection {
-            is_alive: Box::new(move || owner.strong_count() != 0),
-            disconnect: Some(Box::new(move || {
-                // A live widget can be disconnected without borrowing its semantic state.
-                if let Some(port) = disconnect.upgrade() {
-                    port.disconnect(id);
-                }
-            })),
-        });
-        Ok(())
+        self.subscriptions.push(Box::new(PortSubscription { id, port: Rc::downgrade(&port) }));
+        Ok(id)
     }
 
-    /// Removes connections whose event-owning widgets have left the retained tree.
+    /// Subscribes a `State` method together with application-owned context.
     ///
-    /// Call this once after replacing a dynamic subtree and before connecting its replacement
-    /// endpoints. Cleanup is an explicit topology boundary so connecting a batch of `n` live
-    /// widgets remains O(n), rather than rescanning all preceding connections for every widget.
-    /// Active connections and already queued messages are preserved.
-    pub fn prune_expired_connections(&mut self) {
-        // retain examines each existing weak owner once. Removing an expired record runs its Drop
-        // implementation; the disconnect attempt then becomes a no-op because the port is gone.
-        self.connections.retain(Connection::is_alive);
+    /// This is the direct-method equivalent of a captured C# delegate. The context is allocated
+    /// once when subscribed and shared by queued invocations. It is useful for values such as a
+    /// row index or domain identifier that do not belong in the widget's native event payload.
+    pub fn subscribe_with<E: WidgetEvent, Context: 'static>(
+        &mut self,
+        event: WidgetEventHandle<E>,
+        context: Context,
+        method: fn(&mut State, &Context, &E),
+    ) -> Result<SubscriptionId, SubscribeError> {
+        let Some(port) = event.port.upgrade() else {
+            return Err(SubscribeError::WidgetExpired);
+        };
+
+        let id = next_subscription_id();
+        let queue = Rc::downgrade(&self.queue);
+        let context = Rc::new(context);
+        port.subscribe(id, move |event| {
+            let Some(queue) = queue.upgrade() else {
+                return;
+            };
+            queue.borrow_mut().push_back(Box::new(BoundSubscriber {
+                context: Rc::clone(&context),
+                event,
+                method,
+            }));
+        });
+        self.subscriptions.push(Box::new(PortSubscription { id, port: Rc::downgrade(&port) }));
+        Ok(id)
     }
 
-    /// Enqueues an application-authored message for the next dispatch boundary.
-    pub fn emit(&mut self, message: Message) {
-        // Application-authored and widget-authored messages use the same queue, preserving one
-        // total FIFO order regardless of their source.
-        self.inbox.borrow_mut().pending.push_back(message);
+    /// Removes one subscription from its widget event port.
+    ///
+    /// Invocations already queued before removal remain in FIFO order, matching the invocation-list
+    /// snapshot taken by a synchronous multicast event.
+    pub fn unsubscribe(&mut self, id: SubscriptionId) -> bool {
+        let Some(index) = self.subscriptions.iter().position(|subscription| subscription.id() == id) else {
+            return false;
+        };
+        drop(self.subscriptions.remove(index));
+        true
     }
 
-    /// Dispatches queued messages and subscriber-emitted cascades in FIFO order.
+    /// Removes subscription records whose event-owning widgets have left the retained tree.
+    pub fn prune_expired_subscriptions(&mut self) {
+        self.subscriptions.retain(|subscription| subscription.is_alive());
+    }
+
+    pub(crate) fn dispatcher(&self) -> SessionDispatcher<State> {
+        SessionDispatcher { queue: Rc::clone(&self.queue) }
+    }
+
+    /// Invokes queued subscriber methods in event and subscription registration order.
     pub(crate) fn dispatch(&mut self, state: &mut State) -> bool {
-        // Count original and recursively emitted messages together so a subscriber feedback loop
-        // cannot monopolize a raw-input transaction indefinitely.
-        let mut dispatched = 0usize;
-        loop {
-            // Keep this RefCell borrow in a single statement. It must end before callbacks run so
-            // Emit can append cascaded messages to the same queue without a dynamic borrow panic.
-            let message = self.inbox.borrow_mut().pending.pop_front();
-            // Reaching an empty queue means all cascades produced so far have also been consumed.
-            let Some(message) = message else { break };
-            dispatched += 1;
-            assert!(
-                dispatched <= MAX_CASCADE_MESSAGES,
-                "application message cascade exceeded {MAX_CASCADE_MESSAGES} messages in one input transaction"
-            );
-            // Give callbacks only a weak queue capability. They can enqueue follow-up messages but
-            // cannot dispatch recursively or take ownership of Session.
-            let mut emit = Emit { inbox: Rc::downgrade(&self.inbox) };
-            // Vec order is subscription order. Every subscriber observes the same borrowed message
-            // before dispatch advances to anything appended by a callback.
-            for subscriber in &mut self.subscribers {
-                (subscriber.callback)(state, &message, &mut emit);
-            }
-        }
-        // The caller uses this to distinguish an idle boundary from one that delivered messages.
-        dispatched != 0
+        dispatch_queue(&self.queue, state)
     }
 }
 
-impl<State, Message: 'static> Default for Session<State, Message> {
+fn dispatch_queue<State>(queue: &SubscriberQueue<State>, state: &mut State) -> bool {
+    let mut invoked = 0usize;
+    loop {
+        // End the queue borrow before invoking application code. A method may cause another widget
+        // event to append more work to this same transaction.
+        let subscriber = queue.borrow_mut().pop_front();
+        let Some(subscriber) = subscriber else { break };
+
+        invoked += 1;
+        assert!(
+            invoked <= MAX_SUBSCRIBER_INVOCATIONS,
+            "widget event cascade exceeded {MAX_SUBSCRIBER_INVOCATIONS} subscriber invocations in one input transaction"
+        );
+        subscriber.invoke(state);
+    }
+    invoked != 0
+}
+
+impl<State: 'static> Default for Session<State> {
     fn default() -> Self {
-        // Keep Default behavior identical to the explicit constructor.
         Self::new()
     }
 }
 
-/// Session-owned disconnection behavior. Only behavior is dynamically dispatched; widget event
-/// and application message values remain statically typed.
-struct Connection {
-    is_alive: Box<dyn Fn() -> bool>,
-    disconnect: Option<Box<dyn FnOnce()>>,
+trait ErasedSubscription {
+    fn id(&self) -> SubscriptionId;
+    fn is_alive(&self) -> bool;
 }
 
-impl Connection {
+struct PortSubscription<E: WidgetEvent> {
+    id: SubscriptionId,
+    port: Weak<WidgetEventPort<E>>,
+}
+
+impl<E: WidgetEvent> ErasedSubscription for PortSubscription<E> {
+    fn id(&self) -> SubscriptionId {
+        self.id
+    }
+
     fn is_alive(&self) -> bool {
-        // The closure recovers the concrete typed port hidden by this heterogeneous record.
-        (self.is_alive)()
+        self.port.strong_count() != 0
     }
 }
 
-impl Drop for Connection {
+impl<E: WidgetEvent> Drop for PortSubscription<E> {
     fn drop(&mut self) {
-        // take transfers ownership of the FnOnce and guarantees it cannot be invoked twice, even if
-        // Connection cleanup is later refactored to call this path explicitly before field drops.
-        if let Some(disconnect) = self.disconnect.take() {
-            // The typed closure removes only the target whose ID belongs to this record.
-            disconnect();
+        if let Some(port) = self.port.upgrade() {
+            port.unsubscribe(self.id);
         }
     }
 }
@@ -548,114 +405,107 @@ mod tests {
 
     impl WidgetEvent for i32 {}
 
-    #[derive(Debug, Eq, PartialEq)]
-    enum Message {
-        Changed(i32),
-        Cascaded(i32),
-    }
-
     #[derive(Default)]
     struct State {
         values: Vec<i32>,
+        source: Option<Rc<WidgetEventPort<i32>>>,
+    }
+
+    impl State {
+        fn record(&mut self, event: &i32) {
+            self.values.push(*event);
+        }
+
+        fn cascade(&mut self, event: &i32) {
+            if *event < 10 {
+                self.source.as_ref().unwrap().emit(event + 10);
+            }
+        }
+
+        fn record_with_offset(&mut self, offset: &i32, event: &i32) {
+            self.values.push(offset + event);
+        }
     }
 
     #[test]
-    fn native_widget_events_map_to_typed_messages_and_cascade_fifo() {
-        // Arrange one runtime-owned native port and expose only its weak event capability.
+    fn native_widget_events_queue_typed_state_methods_and_multicast_fifo() {
         let owner = Rc::new(WidgetEventPort::new());
         let event = WidgetEventHandle::new(&owner);
         let mut session = Session::new();
-        // Count adapter calls independently so the test can distinguish mapping time from subscriber
-        // dispatch time.
-        let mapping_calls = Rc::new(std::cell::Cell::new(0));
-        let mapping_calls_in_connection = Rc::clone(&mapping_calls);
-        session
-            .connect(event, move |value| {
-                // Mapping constructs a Message synchronously and performs no widget access.
-                mapping_calls_in_connection.set(mapping_calls_in_connection.get() + 1);
-                Message::Changed(value)
-            })
-            .unwrap();
+        session.subscribe(event.clone(), State::record).unwrap();
+        session.subscribe(event, State::cascade).unwrap();
 
-        // Each Changed message records itself and appends one cascade to the same session FIFO.
-        session.subscribe(|state: &mut State, message: &Message, emit| match message {
-            Message::Changed(value) => {
-                state.values.push(*value);
-                emit.emit(Message::Cascaded(value + 10));
-            }
-            Message::Cascaded(value) => state.values.push(*value),
-        });
-
-        // Act: native emission maps immediately, but no subscriber receives either message yet.
         owner.emit(3);
         owner.emit(4);
-        assert_eq!(mapping_calls.get(), 2, "event adapters must construct messages synchronously");
-        let mut state = State::default();
-        assert!(state.values.is_empty(), "subscribers must remain deferred until dispatch");
-        session.dispatch(&mut state);
+        let mut state = State {
+            source: Some(Rc::clone(&owner)),
+            ..State::default()
+        };
+        assert!(state.values.is_empty(), "state methods must remain deferred until dispatch");
+        assert!(session.dispatch(&mut state));
 
-        // The two original messages remain ahead of both cascades in the shared FIFO.
+        // Each event snapshots both subscribers. Cascades append after already queued invocations.
         assert_eq!(state.values, [3, 4, 13, 14]);
     }
 
     #[test]
-    fn dropping_session_disconnects_widget_event() {
-        // Arrange one port connected to an initial Session.
+    fn bound_subscriber_receives_registration_context() {
+        let owner = Rc::new(WidgetEventPort::new());
+        let mut session = Session::new();
+        session.subscribe_with(WidgetEventHandle::new(&owner), 40, State::record_with_offset).unwrap();
+
+        owner.emit(2);
+        let mut state = State::default();
+        assert!(session.dispatch(&mut state));
+        assert_eq!(state.values, [42]);
+    }
+
+    #[test]
+    fn dropping_session_disconnects_live_widget_subscriptions() {
         let owner = Rc::new(WidgetEventPort::new());
         let event = WidgetEventHandle::new(&owner);
-        let mut session = Session::<(), Message>::new();
-        session.connect(event.clone(), Message::Changed).unwrap();
+        let mut session = Session::<State>::new();
+        session.subscribe(event, State::record).unwrap();
+        assert_eq!(owner.subscribers.borrow().len(), 1);
 
-        // Dropping Session drops its Connection, which removes the matching target from the port.
         drop(session);
-
-        // A second Session can therefore claim the now-empty point-to-point port.
-        let mut replacement = Session::<(), Message>::new();
-        assert_eq!(replacement.connect(event, Message::Changed), Ok(()));
+        assert!(owner.subscribers.borrow().is_empty());
     }
 
     #[test]
-    fn subscriptions_are_registered_and_removed_on_the_session() {
-        let mut session = Session::<usize, Message>::new();
-        let subscription = session.subscribe(|count, _, _| *count += 1);
+    fn unsubscribe_detaches_future_events_but_preserves_queued_invocations() {
+        let owner = Rc::new(WidgetEventPort::new());
+        let mut session = Session::new();
+        let subscription = session.subscribe(WidgetEventHandle::new(&owner), State::record).unwrap();
+
+        owner.emit(1);
         assert!(session.unsubscribe(subscription));
         assert!(!session.unsubscribe(subscription));
+        owner.emit(2);
 
-        session.emit(Message::Changed(1));
-        let mut count = 0;
-        assert!(session.dispatch(&mut count));
-        assert_eq!(count, 0);
+        let mut state = State::default();
+        assert!(session.dispatch(&mut state));
+        assert_eq!(state.values, [1]);
     }
 
     #[test]
-    fn expired_connections_are_pruned_at_an_explicit_topology_boundary() {
-        // Arrange one widget that will leave the tree and one that will remain live.
+    fn expired_subscriptions_are_pruned_at_an_explicit_topology_boundary() {
         let expired_owner = Rc::new(WidgetEventPort::new());
         let expired_event = WidgetEventHandle::new(&expired_owner);
         let live_owner = Rc::new(WidgetEventPort::new());
         let live_event = WidgetEventHandle::new(&live_owner);
         let mut session = Session::new();
 
-        // Connecting the replacement must be O(1), so the stale record intentionally remains until
-        // the caller marks the end of its topology update.
-        session.connect(expired_event, Message::Changed).unwrap();
+        session.subscribe(expired_event, State::record).unwrap();
         drop(expired_owner);
-        session.connect(live_event, Message::Changed).unwrap();
+        session.subscribe(live_event, State::record).unwrap();
 
-        // Explicit pruning removes only the expired record and preserves the live connection.
-        assert_eq!(session.connections.len(), 2, "connect must not rescan existing connections");
-        session.prune_expired_connections();
-        assert_eq!(session.connections.len(), 1);
+        assert_eq!(session.subscriptions.len(), 2, "subscribe must not rescan prior records");
+        session.prune_expired_subscriptions();
+        assert_eq!(session.subscriptions.len(), 1);
 
-        // Prove that retaining the live record also leaves its installed target operational.
         live_owner.emit(7);
         let mut state = State::default();
-        session.subscribe(|state: &mut State, message, _| {
-            // This test is concerned only with native Changed delivery; no cascade is needed.
-            if let Message::Changed(value) = message {
-                state.values.push(*value);
-            }
-        });
         assert!(session.dispatch(&mut state));
         assert_eq!(state.values, [7]);
     }

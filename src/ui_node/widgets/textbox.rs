@@ -472,21 +472,23 @@ mod tests {
     use crate::test_support::test_atlas;
 
     #[derive(Debug, Eq, PartialEq)]
-    enum Message {
+    enum RecordedEvent {
         Changed(String, usize),
         Submitted(String),
     }
 
-    fn text_session(textbox: &Textbox) -> crate::Session<Vec<Message>, Message> {
+    fn record_changed(events: &mut Vec<RecordedEvent>, event: &TextboxChanged) {
+        events.push(RecordedEvent::Changed(event.text.clone(), event.cursor));
+    }
+
+    fn record_submitted(events: &mut Vec<RecordedEvent>, event: &TextboxSubmitted) {
+        events.push(RecordedEvent::Submitted(event.text.clone()));
+    }
+
+    fn text_session(textbox: &Textbox) -> crate::Session<Vec<RecordedEvent>> {
         let mut session = crate::Session::new();
-        session.connect(textbox.changed(), |event| Message::Changed(event.text, event.cursor)).unwrap();
-        session.connect(textbox.submitted(), |event| Message::Submitted(event.text)).unwrap();
-        session.subscribe(|messages: &mut Vec<Message>, message: &Message, _| {
-            messages.push(match message {
-                Message::Changed(text, cursor) => Message::Changed(text.clone(), *cursor),
-                Message::Submitted(text) => Message::Submitted(text.clone()),
-            });
-        });
+        session.subscribe(textbox.changed(), record_changed).unwrap();
+        session.subscribe(textbox.submitted(), record_submitted).unwrap();
         session
     }
 
@@ -539,15 +541,15 @@ mod tests {
         update_textbox(&mut textbox, true, vec![UiInputEvent::Text { text: "e".into() }]);
 
         assert_eq!(textbox.text(), "abcde");
-        let mut messages = Vec::new();
-        assert!(session.dispatch(&mut messages));
+        let mut events = Vec::new();
+        assert!(session.dispatch(&mut events));
         assert_eq!(
-            messages,
+            events,
             [
-                Message::Changed("ab".to_owned(), 2),
-                Message::Changed("abcd".to_owned(), 4),
-                Message::Submitted("abcd".to_owned()),
-                Message::Changed("abcde".to_owned(), 5),
+                RecordedEvent::Changed("ab".to_owned(), 2),
+                RecordedEvent::Changed("abcd".to_owned(), 4),
+                RecordedEvent::Submitted("abcd".to_owned()),
+                RecordedEvent::Changed("abcde".to_owned(), 5),
             ]
         );
     }

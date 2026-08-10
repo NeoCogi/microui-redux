@@ -352,7 +352,7 @@ impl<B: RendererBackend> Context<B> {
         self.update_window_manager_with(dimensions, || false);
     }
 
-    /// Performs the retained update while exposing each safe application-message boundary.
+    /// Performs the retained update while exposing each safe subscriber-dispatch boundary.
     pub(super) fn update_window_manager_with(&mut self, dimensions: Dimensioni, mut after_event: impl FnMut() -> bool) {
         let atlas = self.renderer.atlas();
         let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
@@ -363,8 +363,8 @@ impl<B: RendererBackend> Context<B> {
             entry.tree.runtime.begin_update();
         }
         self.layout_window_manager(viewport, &atlas);
-        // Application-authored messages may already be waiting without a raw input event. If they
-        // mutate retained state, commit that state before routing the first queued event.
+        // Subscriber invocations may already be waiting without a raw input event. If they mutate
+        // retained state, commit that state before routing the first queued event.
         if after_event() {
             self.layout_window_manager(viewport, &atlas);
         }

@@ -248,13 +248,15 @@ keyboard, text, focus, and capture routing, and blocks interaction with other ro
 destroyed. Other roots remain visible and continue to be laid out and painted.
 
 ```rust
-enum Message {
-    NameSubmitted(String),
-}
-
 #[derive(Default)]
 struct Model {
     submitted_names: Vec<String>,
+}
+
+impl Model {
+    fn name_submitted(&mut self, event: &TextboxSubmitted) {
+        self.submitted_names.push(event.text.clone());
+    }
 }
 
 let (name, name_node) = Textbox::create(TextboxParameters::new(""));
@@ -270,10 +272,7 @@ let _root = ctx.create_window("main", rect(20, 20, 240, 120), tree);
 let dimensions = Dimensioni::new(800, 600);
 let info = FrameInfo::try_new(dimensions, color(20, 22, 26, 255))?;
 let mut session = Session::new();
-session.connect(name_submitted, |event| Message::NameSubmitted(event.text))?;
-session.subscribe(|model: &mut Model, message: &Message, _| match message {
-    Message::NameSubmitted(name) => model.submitted_names.push(name.clone()),
-});
+session.subscribe(name_submitted, Model::name_submitted)?;
 let mut model = Model::default();
 ctx.update_ui_session(dimensions, &mut session, &mut model);
 ctx.frame(info).render_ui()?;

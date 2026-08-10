@@ -55,10 +55,13 @@ fn frame_info(dimensions: Dimensioni) -> FrameInfo {
     FrameInfo::try_new(dimensions, color(0, 0, 0, 255)).unwrap()
 }
 
-fn event_counter<E: crate::WidgetEvent>(event: crate::WidgetEventHandle<E>) -> crate::Session<usize, ()> {
+fn increment_event_counter<E>(count: &mut usize, _: &E) {
+    *count += 1;
+}
+
+fn event_counter<E: crate::WidgetEvent>(event: crate::WidgetEventHandle<E>) -> crate::Session<usize> {
     let mut session = crate::Session::new();
-    session.connect(event, |_| ()).unwrap();
-    session.subscribe(|count: &mut usize, _: &(), _| *count += 1);
+    session.subscribe(event, increment_event_counter::<E>).unwrap();
     session
 }
 
@@ -728,15 +731,16 @@ fn button_content(label: &str) -> (crate::WidgetEventHandle<ButtonSubmitted>, No
 }
 
 #[test]
-fn widget_handle_events_map_into_one_typed_session_without_state_polling() {
+fn widget_handle_events_invoke_state_methods_without_polling() {
     #[derive(Default)]
     struct Model {
         submissions: Vec<&'static str>,
     }
 
-    enum Message {
-        FirstSubmitted,
-        SecondSubmitted,
+    impl Model {
+        fn record(&mut self, label: &&'static str, _: &ButtonSubmitted) {
+            self.submissions.push(*label);
+        }
     }
 
     let (first_widget, first) = Button::create(ButtonParameters::new("first"));
@@ -760,12 +764,8 @@ fn widget_handle_events_map_into_one_typed_session_without_state_polling() {
     let second_rect = ctx.debug_root_node_rect(root.id(), second_id).unwrap();
 
     let mut session = crate::Session::new();
-    session.connect(first_submitted, |_| Message::FirstSubmitted).unwrap();
-    session.connect(second_submitted, |_| Message::SecondSubmitted).unwrap();
-    session.subscribe(|model: &mut Model, message: &Message, _emit| match message {
-        Message::FirstSubmitted => model.submissions.push("first"),
-        Message::SecondSubmitted => model.submissions.push("second"),
-    });
+    session.subscribe_with(first_submitted, "first", Model::record).unwrap();
+    session.subscribe_with(second_submitted, "second", Model::record).unwrap();
     let mut model = Model::default();
 
     ctx.mousedown(first_rect.x + 1, first_rect.y + 1, MouseButton::LEFT);
@@ -779,14 +779,16 @@ fn widget_handle_events_map_into_one_typed_session_without_state_polling() {
 }
 
 #[test]
-fn textbox_handle_event_maps_a_complete_snapshot_into_the_session() {
+fn textbox_handle_event_dispatches_a_complete_snapshot_to_state() {
     #[derive(Default)]
     struct Model {
         changes: Vec<(String, usize)>,
     }
 
-    enum Message {
-        Changed(TextboxChanged),
+    impl Model {
+        fn changed(&mut self, event: &TextboxChanged) {
+            self.changes.push((event.text.clone(), event.cursor));
+        }
     }
 
     let (widget, node) = Textbox::create(TextboxParameters::new(""));
@@ -801,10 +803,7 @@ fn textbox_handle_event_maps_a_complete_snapshot_into_the_session() {
     let textbox_rect = ctx.debug_root_node_rect(root.id(), node_id).unwrap();
 
     let mut session = crate::Session::new();
-    session.connect(changed, Message::Changed).unwrap();
-    session.subscribe(|model: &mut Model, message: &Message, _emit| match message {
-        Message::Changed(event) => model.changes.push((event.text.clone(), event.cursor)),
-    });
+    session.subscribe(changed, Model::changed).unwrap();
     let mut model = Model::default();
 
     ctx.mousedown(textbox_rect.x + 1, textbox_rect.y + 1, MouseButton::LEFT);
@@ -812,25 +811,6 @@ fn textbox_handle_event_maps_a_complete_snapshot_into_the_session() {
     ctx.update_ui_session(dimensions, &mut session, &mut model);
 
     assert_eq!(model.changes, [(String::from("é"), "é".len())]);
-}
-
-#[test]
-fn session_dispatches_application_messages_without_raw_input() {
-    enum Message {
-        Increment,
-    }
-
-    let mut ctx = context();
-    let mut session = crate::Session::new();
-    session.emit(Message::Increment);
-    session.subscribe(|count: &mut usize, message: &Message, _emit| match message {
-        Message::Increment => *count += 1,
-    });
-    let mut count = 0;
-
-    ctx.update_ui_session(Dimensioni::new(320, 240), &mut session, &mut count);
-
-    assert_eq!(count, 1);
 }
 
 #[test]
@@ -1006,8 +986,10 @@ fn outside_popup_press_hides_and_records_typed_submission() {
     ctx.set_root_visible(popup.id(), true).unwrap();
     ctx.set_root_rect(popup.id(), rect(20, 20, 80, 60)).unwrap();
     let mut event_session = crate::Session::new();
-    event_session.connect(popup.submitted(), |event| event).unwrap();
-    event_session.subscribe(|events: &mut Vec<RootSubmitted>, event: &RootSubmitted, _| events.push(*event));
+    fn record(events: &mut Vec<RootSubmitted>, event: &RootSubmitted) {
+        events.push(*event);
+    }
+    event_session.subscribe(popup.submitted(), record).unwrap();
     let mut submissions = Vec::new();
     ctx.update_and_render_ui();
 
@@ -1397,16 +1379,19 @@ fn title_drag_and_close_record_typed_root_events() {
         Submitted(RootSubmitted),
     }
 
+    fn record_changed(events: &mut Vec<Event>, event: &RootChanged) {
+        events.push(Event::Changed(event.rect.x, event.rect.y, event.rect.width, event.rect.height));
+    }
+
+    fn record_submitted(events: &mut Vec<Event>, event: &RootSubmitted) {
+        events.push(Event::Submitted(*event));
+    }
+
     let mut ctx = context();
     let root = ctx.create_window("window", rect(30, 30, 140, 100), empty_content());
     let mut session = crate::Session::new();
-    session
-        .connect(root.changed(), |event| {
-            Event::Changed(event.rect.x, event.rect.y, event.rect.width, event.rect.height)
-        })
-        .unwrap();
-    session.connect(root.submitted(), Event::Submitted).unwrap();
-    session.subscribe(|events: &mut Vec<Event>, event: &Event, _| events.push(*event));
+    session.subscribe(root.changed(), record_changed).unwrap();
+    session.subscribe(root.submitted(), record_submitted).unwrap();
     let mut events = Vec::new();
     ctx.update_and_render_ui();
     let (title, _, _) = ctx.debug_root_chrome(root.id()).unwrap();

@@ -417,17 +417,23 @@ mod tests {
         assert!((actual - expected).abs() < 1.0e-5, "expected {expected}, got {actual}");
     }
 
-    fn slider_session(slider: &Slider) -> crate::Session<Vec<Real>, Real> {
+    fn record_slider_change(values: &mut Vec<Real>, event: &SliderChanged) {
+        values.push(event.value);
+    }
+
+    fn record_number_change(values: &mut Vec<Real>, event: &NumberChanged) {
+        values.push(event.value);
+    }
+
+    fn slider_session(slider: &Slider) -> crate::Session<Vec<Real>> {
         let mut session = crate::Session::new();
-        session.connect(slider.changed(), |event| event.value).unwrap();
-        session.subscribe(|values: &mut Vec<Real>, value: &Real, _| values.push(*value));
+        session.subscribe(slider.changed(), record_slider_change).unwrap();
         session
     }
 
-    fn number_session(number: &Number) -> crate::Session<Vec<Real>, Real> {
+    fn number_session(number: &Number) -> crate::Session<Vec<Real>> {
         let mut session = crate::Session::new();
-        session.connect(number.changed(), |event| event.value).unwrap();
-        session.subscribe(|values: &mut Vec<Real>, value: &Real, _| values.push(*value));
+        session.subscribe(number.changed(), record_number_change).unwrap();
         session
     }
 

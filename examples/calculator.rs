@@ -76,11 +76,6 @@ impl CalcButton {
     }
 }
 
-#[derive(Clone, Copy)]
-enum Message {
-    Apply(Action),
-}
-
 struct Calculator {
     display: String,
     accumulator: Option<f64>,
@@ -318,6 +313,12 @@ struct State {
     buttons: [CalcButton; 20],
 }
 
+impl State {
+    fn apply_action(&mut self, action: &Action, _: &ButtonSubmitted) {
+        self.calculator.apply(*action);
+    }
+}
+
 fn main() {
     let atlas = atlas_assets::load_atlas();
     let mut fw = Application::new(atlas.clone(), move |_gl, ctx| {
@@ -375,14 +376,10 @@ fn main() {
     fw.event_loop_session(
         |state, session| {
             for button in &state.buttons {
-                let action = button.action;
                 session
-                    .connect(button.submitted.clone(), move |_| Message::Apply(action))
-                    .expect("calculator button should be alive and unconnected");
+                    .subscribe_with(button.submitted.clone(), button.action, State::apply_action)
+                    .expect("calculator button should remain alive");
             }
-            session.subscribe(|state: &mut State, message: &Message, _emit| match message {
-                Message::Apply(action) => state.calculator.apply(*action),
-            });
         },
         |ctx, state, dim| {
             ctx.set_root_rect(state.root.id(), rect(0, 0, dim.width, dim.height))

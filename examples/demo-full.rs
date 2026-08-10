@@ -1041,21 +1041,6 @@ struct DemoRuntimes {
     background_swatch: Node,
 }
 
-enum Message {
-    BackgroundChanged(usize, Real),
-    StyleColorChanged(usize, Real),
-    StyleValueChanged(usize, Real),
-    SubmitText(String),
-    SubmitButton,
-    TestButton(usize),
-    TreeButton(&'static str),
-    ComboOpen(bool),
-    ComboItem(usize),
-    PopupButton(&'static str),
-    StackDirectionButton(&'static str),
-    WeightButton(&'static str),
-}
-
 struct State {
     bg: [Real; 3],
     bg_slider_states: [TypedWidgetHandle<Slider>; 3],
@@ -1517,31 +1502,23 @@ impl State {
         state
     }
 
-    fn connect_events(&self, session: &mut Session<Self, Message>) {
+    fn subscribe_events(&self, session: &mut Session<Self>) {
         for (index, changed) in self.bg_slider_changed.iter().enumerate() {
-            session
-                .connect(changed.clone(), move |event| Message::BackgroundChanged(index, event.value))
-                .unwrap();
+            session.subscribe_with(changed.clone(), index, Self::background_changed).unwrap();
         }
         for (index, changed) in self.style_color_slider_changed.iter().enumerate() {
-            session
-                .connect(changed.clone(), move |event| Message::StyleColorChanged(index, event.value))
-                .unwrap();
+            session.subscribe_with(changed.clone(), index, Self::style_color_changed).unwrap();
         }
         for (index, changed) in self.style_value_slider_changed.iter().enumerate() {
-            session
-                .connect(changed.clone(), move |event| Message::StyleValueChanged(index, event.value))
-                .unwrap();
+            session.subscribe_with(changed.clone(), index, Self::style_value_changed).unwrap();
         }
 
-        session
-            .connect(self.submit_buf_submitted.clone(), |event| Message::SubmitText(event.text))
-            .unwrap();
-        session.connect(self.submit_button_submitted.clone(), |_| Message::SubmitButton).unwrap();
+        session.subscribe(self.submit_buf_submitted.clone(), Self::text_submitted).unwrap();
+        session.subscribe(self.submit_button_submitted.clone(), Self::submit_button).unwrap();
         for (index, submitted) in self.test_button_submitted.iter().enumerate() {
-            session.connect(submitted.clone(), move |_| Message::TestButton(index)).unwrap();
+            session.subscribe_with(submitted.clone(), index, Self::test_button).unwrap();
         }
-        for (submitted, message) in self.tree_button_submitted.iter().zip([
+        for (submitted, label) in self.tree_button_submitted.iter().zip([
             "Pressed button 1",
             "Pressed button 2",
             "Pressed button 3",
@@ -1549,16 +1526,16 @@ impl State {
             "Pressed button 5",
             "Pressed button 6",
         ]) {
-            session.connect(submitted.clone(), move |_| Message::TreeButton(message)).unwrap();
+            session.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
         }
-        session.connect(self.combo_submitted.clone(), |event| Message::ComboOpen(event.open)).unwrap();
+        session.subscribe(self.combo_submitted.clone(), Self::combo_submitted).unwrap();
         for (index, submitted) in self.combo_item_submitted.iter().enumerate() {
-            session.connect(submitted.clone(), move |_| Message::ComboItem(index)).unwrap();
+            session.subscribe_with(submitted.clone(), index, Self::combo_item).unwrap();
         }
-        for (submitted, message) in self.popup_button_submitted.iter().zip(["Hello", "World"]) {
-            session.connect(submitted.clone(), move |_| Message::PopupButton(message)).unwrap();
+        for (submitted, label) in self.popup_button_submitted.iter().zip(["Hello", "World"]) {
+            session.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
         }
-        for (submitted, message) in self.stack_direction_button_submitted.iter().zip([
+        for (submitted, label) in self.stack_direction_button_submitted.iter().zip([
             "Top->Bottom: call 1",
             "Top->Bottom: call 2",
             "Top->Bottom: call 3",
@@ -1566,9 +1543,9 @@ impl State {
             "Bottom->Top: call 2",
             "Bottom->Top: call 3",
         ]) {
-            session.connect(submitted.clone(), move |_| Message::StackDirectionButton(message)).unwrap();
+            session.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
         }
-        for (submitted, message) in self.weight_button_submitted.iter().zip([
+        for (submitted, label) in self.weight_button_submitted.iter().zip([
             "Weight row: 1",
             "Weight row: 2",
             "Weight row: 3",
@@ -1579,76 +1556,86 @@ impl State {
             "Weight grid: 5",
             "Weight grid: 6",
         ]) {
-            session.connect(submitted.clone(), move |_| Message::WeightButton(message)).unwrap();
+            session.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
         }
-
-        session.subscribe(|state, message, _| state.handle_message(message));
     }
 
-    fn handle_message(&mut self, message: &Message) {
-        match message {
-            Message::BackgroundChanged(index, value) => {
-                self.bg[*index] = *value;
-                self.sync_background_swatch();
+    fn background_changed(&mut self, index: &usize, event: &SliderChanged) {
+        self.bg[*index] = event.value;
+        self.sync_background_swatch();
+    }
+
+    fn style_color_changed(&mut self, index: &usize, event: &SliderChanged) {
+        let color = &mut self.style.colors[*index / 4];
+        let value = event.value as u8;
+        match *index % 4 {
+            0 => color.r = value,
+            1 => color.g = value,
+            2 => color.b = value,
+            _ => color.a = value,
+        }
+    }
+
+    fn style_value_changed(&mut self, index: &usize, event: &SliderChanged) {
+        match index {
+            0 => self.style.padding = event.value as i32,
+            1 => self.style.spacing = event.value as i32,
+            2 => self.style.title_height = event.value as i32,
+            3 => self.style.thumb_size = event.value as i32,
+            4 => self.style.scrollbar_size = event.value as i32,
+            _ => unreachable!("style value slider index is bounded by construction"),
+        }
+    }
+
+    fn text_submitted(&mut self, event: &TextboxSubmitted) {
+        self.submit_log(event.text.clone());
+    }
+
+    fn submit_button(&mut self, _: &ButtonSubmitted) {
+        let text = self
+            .submit_buf_state
+            .try_read(|submit_buf| submit_buf.text().to_owned())
+            .expect("submit textbox state unavailable");
+        self.submit_log(text);
+    }
+
+    fn test_button(&mut self, index: &usize, _: &ButtonSubmitted) {
+        match index {
+            0 => self.write_log("Pressed button 1"),
+            1 => self.write_log("Pressed button 2"),
+            2 => self.write_log("Pressed button 3"),
+            3 => self.open_popup = true,
+            4 => self.write_log("Pressed button 4"),
+            5 if self.dialog_session.is_none() && !self.open_dialog => {
+                self.open_dialog = true;
+                self.write_log("Open dialog!");
             }
-            Message::StyleColorChanged(index, value) => {
-                let color = &mut self.style.colors[*index / 4];
-                let value = *value as u8;
-                match *index % 4 {
-                    0 => color.r = value,
-                    1 => color.g = value,
-                    2 => color.b = value,
-                    _ => color.a = value,
-                }
-            }
-            Message::StyleValueChanged(index, value) => match index {
-                0 => self.style.padding = *value as i32,
-                1 => self.style.spacing = *value as i32,
-                2 => self.style.title_height = *value as i32,
-                3 => self.style.thumb_size = *value as i32,
-                4 => self.style.scrollbar_size = *value as i32,
-                _ => unreachable!("style value slider index is bounded by construction"),
-            },
-            Message::SubmitText(text) => self.submit_log(text.clone()),
-            Message::SubmitButton => {
-                let text = self
-                    .submit_buf_state
-                    .try_read(|submit_buf| submit_buf.text().to_owned())
-                    .expect("submit textbox state unavailable");
-                self.submit_log(text);
-            }
-            Message::TestButton(index) => match index {
-                0 => self.write_log("Pressed button 1"),
-                1 => self.write_log("Pressed button 2"),
-                2 => self.write_log("Pressed button 3"),
-                3 => self.open_popup = true,
-                4 => self.write_log("Pressed button 4"),
-                5 if self.dialog_session.is_none() && !self.open_dialog => {
-                    self.open_dialog = true;
-                    self.write_log("Open dialog!");
-                }
-                5 => {}
-                _ => unreachable!("test button index is bounded by construction"),
-            },
-            Message::TreeButton(message) | Message::PopupButton(message) | Message::StackDirectionButton(message) | Message::WeightButton(message) => {
-                self.write_log(message)
-            }
-            Message::ComboOpen(open) => self.combo_open = *open,
-            Message::ComboItem(index) => {
-                let labels: Vec<String> = self
-                    .combo_item_states
-                    .iter()
-                    .map(|item| item.try_read(|item| item.label().to_owned()).expect("combo item state unavailable"))
-                    .collect();
-                let selected = self
-                    .combo_typed_state
-                    .try_update(|combo| combo.select(*index, &labels))
-                    .expect("combo state unavailable");
-                self.combo_open = false;
-                if let Some(label) = selected {
-                    self.write_log(format!("Selected: {label}").as_str());
-                }
-            }
+            5 => {}
+            _ => unreachable!("test button index is bounded by construction"),
+        }
+    }
+
+    fn log_button(&mut self, label: &&'static str, _: &ButtonSubmitted) {
+        self.write_log(label);
+    }
+
+    fn combo_submitted(&mut self, event: &ComboSubmitted) {
+        self.combo_open = event.open;
+    }
+
+    fn combo_item(&mut self, index: &usize, _: &ListItemSubmitted) {
+        let labels: Vec<String> = self
+            .combo_item_states
+            .iter()
+            .map(|item| item.try_read(|item| item.label().to_owned()).expect("combo item state unavailable"))
+            .collect();
+        let selected = self
+            .combo_typed_state
+            .try_update(|combo| combo.select(*index, &labels))
+            .expect("combo state unavailable");
+        self.combo_open = false;
+        if let Some(label) = selected {
+            self.write_log(format!("Selected: {label}").as_str());
         }
     }
 
@@ -2268,7 +2255,7 @@ fn main() {
     let mut app = Application::new(atlas, |backend: BackendInitContext, ctx| State::new(backend, ctx)).unwrap();
 
     app.event_loop_session(
-        |state, session| state.connect_events(session),
+        |state, session| state.subscribe_events(session),
         |ctx, state, _dimensions| state.process_frame(ctx),
     );
 }

@@ -266,20 +266,18 @@ impl<B: RendererBackend> Context<B> {
         self.ui_commit = Some(dimensions);
     }
 
-    /// Drains input while dispatching one application-typed semantic message session.
+    /// Drains input while dispatching one application-state event session.
     ///
     /// Each raw input event is routed and applied by one complete eligible-tree update. Native
-    /// widget events connected through [`crate::Session::connect`] are mapped to `Message` as they
-    /// are emitted. The messages are delivered synchronously in FIFO order after retained state
-    /// borrows have ended and before the matching layout commit. Subscriber changes made through
-    /// independent typed widget handles therefore affect geometry used to route the next queued raw event.
+    /// widget events subscribed through [`crate::Session::subscribe`] queue their typed `State`
+    /// methods as they are emitted. Those methods run in FIFO order after retained state borrows
+    /// have ended and before the matching layout commit. Changes made through independent typed
+    /// widget handles therefore affect geometry used to route the next queued raw event.
     ///
-    /// Session subscriber callbacks receive `state` and may enqueue further messages through
-    /// [`crate::Emit`]. They cannot access this mutably borrowed Context, preventing a nested update
-    /// or paint traversal. Application-authored messages queued before this call are dispatched
-    /// after the initial synchronization layout and before routing the first raw event.
+    /// Subscriber methods cannot access this mutably borrowed Context, preventing a nested update
+    /// or paint traversal.
     #[track_caller]
-    pub fn update_ui_session<State, Message: 'static>(&mut self, dimensions: Dimensioni, session: &mut crate::Session<State, Message>, state: &mut State) {
+    pub fn update_ui_session<State: 'static>(&mut self, dimensions: Dimensioni, session: &mut crate::Session<State>, state: &mut State) {
         assert!(dimensions.width > 0 && dimensions.height > 0, "update_ui_session dimensions must be positive");
         self.ui_commit = None;
         self.update_window_manager_with(dimensions, || session.dispatch(state));

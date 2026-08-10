@@ -120,12 +120,12 @@ impl<S> Application<S> {
         self.event_loop_with_update(|ctx, _state, dimensions| ctx.update_ui(dimensions), f);
     }
 
-    /// Runs the SDL loop with one application-typed semantic message session.
+    /// Runs the SDL loop with one application-state event session.
     #[allow(dead_code)] // Each example selects either polling or subscriber-driven updates.
-    pub fn event_loop_session<Message, Setup, F>(&mut self, setup: Setup, f: F)
+    pub fn event_loop_session<Setup, F>(&mut self, setup: Setup, f: F)
     where
-        Message: 'static,
-        Setup: FnOnce(&S, &mut Session<S, Message>),
+        S: 'static,
+        Setup: FnOnce(&S, &mut Session<S>),
         F: Fn(&mut MicroUI, &mut S, Dimensioni),
     {
         let mut session = Session::new();
