@@ -55,12 +55,11 @@ fn frame_info(dimensions: Dimensioni) -> FrameInfo {
     FrameInfo::try_new(dimensions, color(0, 0, 0, 255)).unwrap()
 }
 
-fn event_counter<E: crate::WidgetEvent>(event: crate::WidgetEventHandle<E>) -> (crate::Session<()>, crate::Subscribers<usize, ()>) {
+fn event_counter<E: crate::WidgetEvent>(event: crate::WidgetEventHandle<E>) -> crate::Session<usize, ()> {
     let mut session = crate::Session::new();
     session.connect(event, |_| ()).unwrap();
-    let mut subscribers = crate::Subscribers::new();
-    subscribers.subscribe(|count: &mut usize, _: &(), _| *count += 1);
-    (session, subscribers)
+    session.subscribe(|count: &mut usize, _: &(), _| *count += 1);
+    session
 }
 
 struct OrderedProbe {
@@ -428,7 +427,7 @@ fn every_event_layout_commit_updates_hit_geometry_for_the_next_queued_event() {
 #[test]
 fn disclosure_update_commits_child_geometry_before_the_next_queued_press() {
     let (button, child) = button_content("child");
-    let (mut session, mut subscribers) = event_counter(button);
+    let mut session = event_counter(button);
     let mut submissions = 0;
     let (disclosure, node) = Disclosure::create(DisclosureParameters::header("section", false, [child]));
     let mut ctx = context();
@@ -444,7 +443,7 @@ fn disclosure_update_commits_child_geometry_before_the_next_queued_press() {
     ctx.update_ui(dimensions);
 
     assert_eq!(disclosure.try_read(Disclosure::is_expanded), Some(true));
-    assert!(session.dispatch(&mut submissions, &mut subscribers));
+    assert!(session.dispatch(&mut submissions));
     assert_eq!(submissions, 1);
 }
 
@@ -763,8 +762,7 @@ fn widget_handle_events_map_into_one_typed_session_without_state_polling() {
     let mut session = crate::Session::new();
     session.connect(first_submitted, |_| Message::FirstSubmitted).unwrap();
     session.connect(second_submitted, |_| Message::SecondSubmitted).unwrap();
-    let mut subscribers = crate::Subscribers::new();
-    subscribers.subscribe(|model: &mut Model, message: &Message, _emit| match message {
+    session.subscribe(|model: &mut Model, message: &Message, _emit| match message {
         Message::FirstSubmitted => model.submissions.push("first"),
         Message::SecondSubmitted => model.submissions.push("second"),
     });
@@ -775,7 +773,7 @@ fn widget_handle_events_map_into_one_typed_session_without_state_polling() {
     ctx.mousedown(second_rect.x + 1, second_rect.y + 1, MouseButton::LEFT);
     ctx.mouseup(second_rect.x + 1, second_rect.y + 1, MouseButton::LEFT);
     ctx.mousedown(first_rect.x + 1, first_rect.y + 1, MouseButton::LEFT);
-    ctx.update_ui_session(dimensions, &mut session, &mut model, &mut subscribers);
+    ctx.update_ui_session(dimensions, &mut session, &mut model);
 
     assert_eq!(model.submissions, ["first", "second", "first"]);
 }
@@ -804,15 +802,14 @@ fn textbox_handle_event_maps_a_complete_snapshot_into_the_session() {
 
     let mut session = crate::Session::new();
     session.connect(changed, Message::Changed).unwrap();
-    let mut subscribers = crate::Subscribers::new();
-    subscribers.subscribe(|model: &mut Model, message: &Message, _emit| match message {
+    session.subscribe(|model: &mut Model, message: &Message, _emit| match message {
         Message::Changed(event) => model.changes.push((event.text.clone(), event.cursor)),
     });
     let mut model = Model::default();
 
     ctx.mousedown(textbox_rect.x + 1, textbox_rect.y + 1, MouseButton::LEFT);
     ctx.text("é");
-    ctx.update_ui_session(dimensions, &mut session, &mut model, &mut subscribers);
+    ctx.update_ui_session(dimensions, &mut session, &mut model);
 
     assert_eq!(model.changes, [(String::from("é"), "é".len())]);
 }
@@ -826,13 +823,12 @@ fn session_dispatches_application_messages_without_raw_input() {
     let mut ctx = context();
     let mut session = crate::Session::new();
     session.emit(Message::Increment);
-    let mut subscribers = crate::Subscribers::new();
-    subscribers.subscribe(|count: &mut usize, message: &Message, _emit| match message {
+    session.subscribe(|count: &mut usize, message: &Message, _emit| match message {
         Message::Increment => *count += 1,
     });
     let mut count = 0;
 
-    ctx.update_ui_session(Dimensioni::new(320, 240), &mut session, &mut count, &mut subscribers);
+    ctx.update_ui_session(Dimensioni::new(320, 240), &mut session, &mut count);
 
     assert_eq!(count, 1);
 }
@@ -988,7 +984,7 @@ fn showing_a_popup_atomically_hides_the_previous_one() {
     let mut ctx = context();
     let first = ctx.create_popup("first", empty_content());
     let second = ctx.create_popup("second", empty_content());
-    let (mut session, mut subscribers) = event_counter(first.submitted());
+    let mut session = event_counter(first.submitted());
     let mut submissions = 0;
 
     ctx.set_root_visible(first.id(), true).unwrap();
@@ -997,7 +993,7 @@ fn showing_a_popup_atomically_hides_the_previous_one() {
 
     assert_eq!(first.widget().try_read(RootChrome::is_visible), Some(false));
     assert_eq!(second.widget().try_read(RootChrome::is_visible), Some(true));
-    assert!(!session.dispatch(&mut submissions, &mut subscribers));
+    assert!(!session.dispatch(&mut submissions));
     assert_eq!(submissions, 0);
 }
 
@@ -1011,8 +1007,7 @@ fn outside_popup_press_hides_and_records_typed_submission() {
     ctx.set_root_rect(popup.id(), rect(20, 20, 80, 60)).unwrap();
     let mut event_session = crate::Session::new();
     event_session.connect(popup.submitted(), |event| event).unwrap();
-    let mut subscribers = crate::Subscribers::new();
-    subscribers.subscribe(|events: &mut Vec<RootSubmitted>, event: &RootSubmitted, _| events.push(*event));
+    event_session.subscribe(|events: &mut Vec<RootSubmitted>, event: &RootSubmitted, _| events.push(*event));
     let mut submissions = Vec::new();
     ctx.update_and_render_ui();
 
@@ -1020,18 +1015,18 @@ fn outside_popup_press_hides_and_records_typed_submission() {
     ctx.update_and_render_ui();
 
     assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(false));
-    assert!(event_session.dispatch(&mut submissions, &mut subscribers));
+    assert!(event_session.dispatch(&mut submissions));
     assert_eq!(submissions, [RootSubmitted::PopupDismissed]);
     ctx.set_root_visible(popup.id(), true).unwrap();
     ctx.set_root_visible(popup.id(), false).unwrap();
-    assert!(!event_session.dispatch(&mut submissions, &mut subscribers));
+    assert!(!event_session.dispatch(&mut submissions));
 }
 
 #[test]
 fn outside_popup_press_dismisses_then_routes_once_to_the_revealed_root() {
     let mut ctx = context();
     let (button, content) = button_content("behind");
-    let (mut session, mut subscribers) = event_counter(button);
+    let mut session = event_counter(button);
     let mut submissions = 0;
     let window = ctx.create_window("window", rect(0, 0, 180, 120), content);
     ctx.set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
@@ -1047,7 +1042,7 @@ fn outside_popup_press_dismisses_then_routes_once_to_the_revealed_root() {
     ctx.update_ui(Dimensioni::new(320, 240));
 
     assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(false));
-    assert!(session.dispatch(&mut submissions, &mut subscribers));
+    assert!(session.dispatch(&mut submissions));
     assert_eq!(submissions, 1);
 }
 
@@ -1181,13 +1176,13 @@ fn pointer_captured_root_remains_the_keyboard_and_text_input_root() {
 fn visible_dialog_is_the_sole_pointer_root_and_remains_frontmost() {
     let mut ctx = context();
     let (behind_button, behind_content) = button_content("behind");
-    let (mut behind_session, mut behind_subscribers) = event_counter(behind_button);
+    let mut behind_session = event_counter(behind_button);
     let mut behind_submissions = 0;
     let window = ctx.create_window("window", rect(0, 0, 100, 80), behind_content);
     ctx.set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     let (dialog_button, dialog_content) = button_content("dialog");
-    let (mut dialog_session, mut dialog_subscribers) = event_counter(dialog_button);
+    let mut dialog_session = event_counter(dialog_button);
     let mut dialog_submissions = 0;
     let dialog = ctx.create_dialog("dialog", rect(120, 100, 100, 80), dialog_content);
     ctx.set_root_options(dialog.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
@@ -1201,12 +1196,12 @@ fn visible_dialog_is_the_sole_pointer_root_and_remains_frontmost() {
     ctx.mousedown(10, 10, MouseButton::LEFT);
     ctx.mouseup(10, 10, MouseButton::LEFT);
     ctx.update_and_render_ui();
-    assert!(!behind_session.dispatch(&mut behind_submissions, &mut behind_subscribers));
+    assert!(!behind_session.dispatch(&mut behind_submissions));
 
     ctx.mousedown(130, 110, MouseButton::LEFT);
     ctx.mouseup(130, 110, MouseButton::LEFT);
     ctx.update_and_render_ui();
-    assert!(dialog_session.dispatch(&mut dialog_submissions, &mut dialog_subscribers));
+    assert!(dialog_session.dispatch(&mut dialog_submissions));
     assert_eq!(dialog_submissions, 1);
 
     assert!(ctx.bring_root_to_front(window.id()));
@@ -1219,7 +1214,7 @@ fn visible_dialog_is_the_sole_pointer_root_and_remains_frontmost() {
     ctx.mousedown(10, 10, MouseButton::LEFT);
     ctx.mouseup(10, 10, MouseButton::LEFT);
     ctx.update_and_render_ui();
-    assert!(behind_session.dispatch(&mut behind_submissions, &mut behind_subscribers));
+    assert!(behind_session.dispatch(&mut behind_submissions));
     assert_eq!(behind_submissions, 1);
 }
 
@@ -1227,7 +1222,7 @@ fn visible_dialog_is_the_sole_pointer_root_and_remains_frontmost() {
 fn active_dialog_keeps_a_visible_popup_below_and_input_blocked() {
     let mut ctx = context();
     let (popup_button, popup_content) = button_content("popup");
-    let (mut session, mut subscribers) = event_counter(popup_button);
+    let mut session = event_counter(popup_button);
     let mut submissions = 0;
     let popup = ctx.create_popup("popup", popup_content);
     ctx.set_root_options(popup.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
@@ -1247,13 +1242,13 @@ fn active_dialog_keeps_a_visible_popup_below_and_input_blocked() {
     ctx.mousedown(10, 10, MouseButton::LEFT);
     ctx.mouseup(10, 10, MouseButton::LEFT);
     ctx.update_and_render_ui();
-    assert!(!session.dispatch(&mut submissions, &mut subscribers));
+    assert!(!session.dispatch(&mut submissions));
 
     ctx.set_root_visible(dialog.id(), false).unwrap();
     ctx.mousedown(10, 10, MouseButton::LEFT);
     ctx.mouseup(10, 10, MouseButton::LEFT);
     ctx.update_and_render_ui();
-    assert!(session.dispatch(&mut submissions, &mut subscribers));
+    assert!(session.dispatch(&mut submissions));
     assert_eq!(submissions, 1);
 }
 
@@ -1411,8 +1406,7 @@ fn title_drag_and_close_record_typed_root_events() {
         })
         .unwrap();
     session.connect(root.submitted(), Event::Submitted).unwrap();
-    let mut subscribers = crate::Subscribers::new();
-    subscribers.subscribe(|events: &mut Vec<Event>, event: &Event, _| events.push(*event));
+    session.subscribe(|events: &mut Vec<Event>, event: &Event, _| events.push(*event));
     let mut events = Vec::new();
     ctx.update_and_render_ui();
     let (title, _, _) = ctx.debug_root_chrome(root.id()).unwrap();
@@ -1423,11 +1417,11 @@ fn title_drag_and_close_record_typed_root_events() {
     ctx.mousedown(drag_x, drag_y, MouseButton::LEFT);
     ctx.update_and_render_ui();
     assert_eq!(root.widget().try_read(RootChrome::is_moving), Some(true));
-    assert!(!session.dispatch(&mut events, &mut subscribers));
+    assert!(!session.dispatch(&mut events));
 
     ctx.mousemove(drag_x + 10, drag_y + 8);
     ctx.update_and_render_ui();
-    assert!(session.dispatch(&mut events, &mut subscribers));
+    assert!(session.dispatch(&mut events));
     assert_eq!(events, [Event::Changed(40, 38, 140, 100)]);
 
     ctx.mouseup(drag_x + 10, drag_y + 8, MouseButton::LEFT);
@@ -1440,7 +1434,7 @@ fn title_drag_and_close_record_typed_root_events() {
     ctx.mousedown(close_x, close_y, MouseButton::LEFT);
     ctx.update_and_render_ui();
     assert_eq!(root.widget().try_read(RootChrome::is_visible), Some(false));
-    assert!(session.dispatch(&mut events, &mut subscribers));
+    assert!(session.dispatch(&mut events));
     assert_eq!(events, [Event::Changed(40, 38, 140, 100), Event::Submitted(RootSubmitted::Close)]);
 }
 
@@ -1673,8 +1667,8 @@ fn body_input_falls_through_chrome_to_the_application_node() {
     let mut ctx = context();
     let (button, content) = button_content("button");
     let root = ctx.create_window("window", rect(20, 20, 140, 100), content);
-    let (mut button_session, mut button_subscribers) = event_counter(button);
-    let (mut root_session, mut root_subscribers) = event_counter(root.submitted());
+    let mut button_session = event_counter(button);
+    let mut root_session = event_counter(root.submitted());
     let mut button_submissions = 0;
     let mut root_submissions = 0;
     ctx.update_and_render_ui();
@@ -1683,9 +1677,9 @@ fn body_input_falls_through_chrome_to_the_application_node() {
     ctx.mousedown(body.x + body.width / 2, body.y + body.height / 2, MouseButton::LEFT);
     ctx.update_and_render_ui();
 
-    assert!(button_session.dispatch(&mut button_submissions, &mut button_subscribers));
+    assert!(button_session.dispatch(&mut button_submissions));
     assert_eq!(button_submissions, 1);
-    assert!(!root_session.dispatch(&mut root_submissions, &mut root_subscribers));
+    assert!(!root_session.dispatch(&mut root_submissions));
 }
 
 #[test]

@@ -184,7 +184,7 @@ mod window_manager;
 /// This module groups the stable retained concepts used by application code without exposing
 /// low-level renderer details or manual container drawing helpers through default imports.
 pub mod retained {
-    pub use crate::event::{ConnectError, Emit, Session, Subscribers, SubscriptionId, TypedWidget, WidgetEvent, WidgetEventHandle};
+    pub use crate::event::{ConnectError, Emit, Session, SubscriptionId, TypedWidget, WidgetEvent, WidgetEventHandle};
     pub use crate::file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
     pub use crate::render::{CustomRenderArgs, CustomRenderHandle};
     pub use crate::ui_node::{
@@ -201,7 +201,7 @@ pub mod retained {
 /// The prelude intentionally favors retained authoring, widget state, style/input/image types, and
 /// renderer integration. Low-level backend and Renderer types live under [`render`].
 pub mod prelude {
-    pub use crate::event::{ConnectError, Emit, Session, Subscribers, SubscriptionId, TypedWidget, WidgetEvent, WidgetEventHandle};
+    pub use crate::event::{ConnectError, Emit, Session, SubscriptionId, TypedWidget, WidgetEvent, WidgetEventHandle};
     pub use crate::atlas::{
         AtlasHandle, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry, FontId,
         IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON,
@@ -238,7 +238,7 @@ pub use atlas::{
     FontId, IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON,
 };
 pub use window_manager::{Context, ContextFrame, RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted, WindowOption};
-pub use event::{ConnectError, Emit, Session, Subscribers, SubscriptionId, TypedWidget, WidgetEvent, WidgetEventHandle};
+pub use event::{ConnectError, Emit, Session, SubscriptionId, TypedWidget, WidgetEvent, WidgetEventHandle};
 pub use file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
 pub use image::{ImageSource, load_image_bytes};
 pub use input::{KeyCode, KeyMode, MouseButton};

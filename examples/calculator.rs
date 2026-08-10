@@ -373,14 +373,14 @@ fn main() {
     .unwrap();
 
     fw.event_loop_session(
-        |state, session, subscribers| {
+        |state, session| {
             for button in &state.buttons {
                 let action = button.action;
                 session
                     .connect(button.submitted.clone(), move |_| Message::Apply(action))
                     .expect("calculator button should be alive and unconnected");
             }
-            subscribers.subscribe(|state: &mut State, message: &Message, _emit| match message {
+            session.subscribe(|state: &mut State, message: &Message, _emit| match message {
                 Message::Apply(action) => state.calculator.apply(*action),
             });
         },

@@ -477,18 +477,17 @@ mod tests {
         Submitted(String),
     }
 
-    fn text_session(textbox: &Textbox) -> (crate::Session<Message>, crate::Subscribers<Vec<Message>, Message>) {
+    fn text_session(textbox: &Textbox) -> crate::Session<Vec<Message>, Message> {
         let mut session = crate::Session::new();
         session.connect(textbox.changed(), |event| Message::Changed(event.text, event.cursor)).unwrap();
         session.connect(textbox.submitted(), |event| Message::Submitted(event.text)).unwrap();
-        let mut subscribers = crate::Subscribers::new();
-        subscribers.subscribe(|messages: &mut Vec<Message>, message: &Message, _| {
+        session.subscribe(|messages: &mut Vec<Message>, message: &Message, _| {
             messages.push(match message {
                 Message::Changed(text, cursor) => Message::Changed(text.clone(), *cursor),
                 Message::Submitted(text) => Message::Submitted(text.clone()),
             });
         });
-        (session, subscribers)
+        session
     }
 
     fn update_textbox(textbox: &mut Textbox, focused: bool, input: Vec<UiInputEvent>) {
@@ -526,7 +525,7 @@ mod tests {
     #[test]
     fn text_events_dispatch_complete_snapshots_in_update_order() {
         let mut textbox = TextboxBuilder::create_widget(TextboxParameters::new(""));
-        let (mut session, mut subscribers) = text_session(&textbox);
+        let mut session = text_session(&textbox);
 
         update_textbox(
             &mut textbox,
@@ -541,7 +540,7 @@ mod tests {
 
         assert_eq!(textbox.text(), "abcde");
         let mut messages = Vec::new();
-        assert!(session.dispatch(&mut messages, &mut subscribers));
+        assert!(session.dispatch(&mut messages));
         assert_eq!(
             messages,
             [
@@ -556,11 +555,11 @@ mod tests {
     #[test]
     fn programmatic_text_and_cursor_setters_are_silent() {
         let mut textbox = TextboxBuilder::create_widget(TextboxParameters::new("initial"));
-        let (mut session, mut subscribers) = text_session(&textbox);
+        let mut session = text_session(&textbox);
         textbox.set_text("replacement");
         textbox.set_cursor(3);
         textbox.move_cursor_to_end();
         textbox.clear();
-        assert!(!session.dispatch(&mut Vec::new(), &mut subscribers));
+        assert!(!session.dispatch(&mut Vec::new()));
     }
 }

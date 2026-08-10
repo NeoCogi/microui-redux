@@ -35,7 +35,7 @@ use crate::*;
 use common::*;
 use microui_redux::{
     self as microui,
-    prelude::{AtlasHandle, Dimensioni, FrameInfo, Session, Subscribers},
+    prelude::{AtlasHandle, Dimensioni, FrameInfo, Session},
 };
 
 #[cfg(feature = "example-glow")]
@@ -125,16 +125,12 @@ impl<S> Application<S> {
     pub fn event_loop_session<Message, Setup, F>(&mut self, setup: Setup, f: F)
     where
         Message: 'static,
-        Setup: FnOnce(&S, &mut Session<Message>, &mut Subscribers<S, Message>),
+        Setup: FnOnce(&S, &mut Session<S, Message>),
         F: Fn(&mut MicroUI, &mut S, Dimensioni),
     {
         let mut session = Session::new();
-        let mut subscribers = Subscribers::new();
-        setup(&self.state, &mut session, &mut subscribers);
-        self.event_loop_with_update(
-            move |ctx, state, dimensions| ctx.update_ui_session(dimensions, &mut session, state, &mut subscribers),
-            f,
-        );
+        setup(&self.state, &mut session);
+        self.event_loop_with_update(move |ctx, state, dimensions| ctx.update_ui_session(dimensions, &mut session, state), f);
     }
 
     /// Shared SDL driver parameterized by the first retained update performed each frame.

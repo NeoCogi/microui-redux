@@ -43,8 +43,8 @@ use std::{
 use crate::render::RendererBackend;
 use crate::{
     Button, ButtonParameters, ButtonSubmitted, Column, ColumnParameters, Context, IconId, ListItem, ListItemParameters, ListItemSubmitted, Node, Policy, Recti,
-    RootHandle, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Session, SizePolicy, Stack, StackDirection, StackParameters, Subscribers, Textbox,
-    TextboxParameters, TextboxSubmitted, ThemeIcons, TypedWidgetHandle, WidgetEventHandle, WidgetOption, WindowOption,
+    RootHandle, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Session, SizePolicy, Stack, StackDirection, StackParameters, Textbox, TextboxParameters,
+    TextboxSubmitted, ThemeIcons, TypedWidgetHandle, WidgetEventHandle, WidgetOption, WindowOption,
 };
 use crate::ui_node::RuntimeNodeId;
 
@@ -203,8 +203,7 @@ pub(crate) struct FileDialogController {
     go_button: WidgetEventHandle<ButtonSubmitted>,
     ok_button: WidgetEventHandle<ButtonSubmitted>,
     cancel_button: WidgetEventHandle<ButtonSubmitted>,
-    event_session: Session<FileDialogMessage>,
-    event_subscribers: Subscribers<VecDeque<FileDialogMessage>, FileDialogMessage>,
+    event_session: Session<VecDeque<FileDialogMessage>, FileDialogMessage>,
     pending_events: VecDeque<FileDialogMessage>,
     #[cfg_attr(not(test), allow(dead_code))]
     up_button_id: RuntimeNodeId,
@@ -333,13 +332,12 @@ impl FileDialogController {
             ok_button,
             cancel_button,
             event_session: Session::new(),
-            event_subscribers: Subscribers::new(),
             pending_events: VecDeque::new(),
             up_button_id,
             ok_button_id,
             cancel_button_id,
         };
-        controller.event_subscribers.subscribe(|pending, message, _| pending.push_back(message.clone()));
+        controller.event_session.subscribe(|pending, message, _| pending.push_back(message.clone()));
         controller.connect_static_events();
         controller.connect_row_events();
         controller
@@ -577,7 +575,7 @@ impl FileDialogController {
             return ControllerDisposition::Remove;
         }
 
-        self.event_session.dispatch(&mut self.pending_events, &mut self.event_subscribers);
+        self.event_session.dispatch(&mut self.pending_events);
         while let Some(event) = self.pending_events.pop_front() {
             if let Some(completion) = self.apply_event(event) {
                 *status.borrow_mut() = completion;
@@ -704,8 +702,7 @@ mod tests {
         let (button, button_node) = Button::create(ButtonParameters::new("behind"));
         let mut event_session = crate::Session::new();
         event_session.connect(button.submitted(), |_| ()).unwrap();
-        let mut subscribers = crate::Subscribers::new();
-        subscribers.subscribe(|count: &mut usize, _: &(), _| *count += 1);
+        event_session.subscribe(|count: &mut usize, _: &(), _| *count += 1);
         let mut submissions = 0;
         let window = ctx.create_window("window", rect(0, 0, 100, 80), button_node);
         ctx.set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
@@ -719,7 +716,7 @@ mod tests {
         ctx.mouseup(10, 10, MouseButton::LEFT);
         ctx.update_and_render_ui();
 
-        assert!(!event_session.dispatch(&mut submissions, &mut subscribers));
+        assert!(!event_session.dispatch(&mut submissions));
         assert_eq!(submissions, 0);
         assert_eq!(session.status(), FileDialogStatus::Pending);
         assert!(ctx.debug_root_zindex(dialog).unwrap() > ctx.debug_root_zindex(window.id()).unwrap());

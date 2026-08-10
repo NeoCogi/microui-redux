@@ -274,21 +274,15 @@ impl<B: RendererBackend> Context<B> {
     /// borrows have ended and before the matching layout commit. Subscriber changes made through
     /// independent typed widget handles therefore affect geometry used to route the next queued raw event.
     ///
-    /// Subscriber callbacks receive `state` and may enqueue further messages through
+    /// Session subscriber callbacks receive `state` and may enqueue further messages through
     /// [`crate::Emit`]. They cannot access this mutably borrowed Context, preventing a nested update
     /// or paint traversal. Application-authored messages queued before this call are dispatched
     /// after the initial synchronization layout and before routing the first raw event.
     #[track_caller]
-    pub fn update_ui_session<State, Message: 'static>(
-        &mut self,
-        dimensions: Dimensioni,
-        session: &mut crate::Session<Message>,
-        state: &mut State,
-        subscribers: &mut crate::Subscribers<State, Message>,
-    ) {
+    pub fn update_ui_session<State, Message: 'static>(&mut self, dimensions: Dimensioni, session: &mut crate::Session<State, Message>, state: &mut State) {
         assert!(dimensions.width > 0 && dimensions.height > 0, "update_ui_session dimensions must be positive");
         self.ui_commit = None;
-        self.update_window_manager_with(dimensions, || session.dispatch(state, subscribers));
+        self.update_window_manager_with(dimensions, || session.dispatch(state));
         self.ui_commit = Some(dimensions);
     }
 

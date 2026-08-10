@@ -821,20 +821,19 @@ mod tests {
         Submitted(String),
     }
 
-    fn text_session(text_area: &TextArea) -> (crate::Session<Message>, crate::Subscribers<Vec<Message>, Message>) {
+    fn text_session(text_area: &TextArea) -> crate::Session<Vec<Message>, Message> {
         let mut session = crate::Session::new();
         session
             .connect(text_area.changed(), |event| Message::Changed(event.text, event.cursor))
             .unwrap();
         session.connect(text_area.submitted(), |event| Message::Submitted(event.text)).unwrap();
-        let mut subscribers = crate::Subscribers::new();
-        subscribers.subscribe(|messages: &mut Vec<Message>, message: &Message, _| {
+        session.subscribe(|messages: &mut Vec<Message>, message: &Message, _| {
             messages.push(match message {
                 Message::Changed(text, cursor) => Message::Changed(text.clone(), *cursor),
                 Message::Submitted(text) => Message::Submitted(text.clone()),
             });
         });
-        (session, subscribers)
+        session
     }
 
     fn update_text_area(text_area: &mut TextArea, input: Vec<UiInputEvent>) {
@@ -859,7 +858,7 @@ mod tests {
     #[test]
     fn text_area_dispatches_independent_change_and_submission_events() {
         let mut text_area = TextAreaBuilder::create_widget(TextAreaParameters::new(""));
-        let (mut session, mut subscribers) = text_session(&text_area);
+        let mut session = text_session(&text_area);
         update_text_area(
             &mut text_area,
             vec![
@@ -869,19 +868,19 @@ mod tests {
             ],
         );
         let mut messages = Vec::new();
-        assert!(session.dispatch(&mut messages, &mut subscribers));
+        assert!(session.dispatch(&mut messages));
         assert_eq!(messages, [Message::Changed("line".to_owned(), 4), Message::Submitted("line".to_owned())]);
     }
 
     #[test]
     fn programmatic_text_cursor_and_scroll_setters_are_silent() {
         let mut text_area = TextAreaBuilder::create_widget(TextAreaParameters::new("initial"));
-        let (mut session, mut subscribers) = text_session(&text_area);
+        let mut session = text_session(&text_area);
         text_area.set_text("replacement");
         text_area.set_cursor(3);
         text_area.move_cursor_to_end();
         text_area.set_scroll(vec2(5, 7));
         text_area.clear();
-        assert!(!session.dispatch(&mut Vec::new(), &mut subscribers));
+        assert!(!session.dispatch(&mut Vec::new()));
     }
 }

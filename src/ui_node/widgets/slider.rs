@@ -417,20 +417,18 @@ mod tests {
         assert!((actual - expected).abs() < 1.0e-5, "expected {expected}, got {actual}");
     }
 
-    fn slider_session(slider: &Slider) -> (crate::Session<Real>, crate::Subscribers<Vec<Real>, Real>) {
+    fn slider_session(slider: &Slider) -> crate::Session<Vec<Real>, Real> {
         let mut session = crate::Session::new();
         session.connect(slider.changed(), |event| event.value).unwrap();
-        let mut subscribers = crate::Subscribers::new();
-        subscribers.subscribe(|values: &mut Vec<Real>, value: &Real, _| values.push(*value));
-        (session, subscribers)
+        session.subscribe(|values: &mut Vec<Real>, value: &Real, _| values.push(*value));
+        session
     }
 
-    fn number_session(number: &Number) -> (crate::Session<Real>, crate::Subscribers<Vec<Real>, Real>) {
+    fn number_session(number: &Number) -> crate::Session<Vec<Real>, Real> {
         let mut session = crate::Session::new();
         session.connect(number.changed(), |event| event.value).unwrap();
-        let mut subscribers = crate::Subscribers::new();
-        subscribers.subscribe(|values: &mut Vec<Real>, value: &Real, _| values.push(*value));
-        (session, subscribers)
+        session.subscribe(|values: &mut Vec<Real>, value: &Real, _| values.push(*value));
+        session
     }
 
     #[test]
@@ -470,12 +468,12 @@ mod tests {
     #[test]
     fn slider_wheel_snaps_fractional_step_from_lower_bound() {
         let mut slider = SliderBuilder::create_widget(SliderParameters::with_opt(1.15, 1.0, 2.0, 0.2, 2, WidgetOption::FRAME));
-        let (mut session, mut subscribers) = slider_session(&slider);
+        let mut session = slider_session(&slider);
         run_slider_once(&mut slider, rect(0, 0, 100, 20), Vec::new(), true, false, false, Some(vec2(0, 1)));
 
         assert_real_close(slider.value(), 1.4);
         let mut values = Vec::new();
-        assert!(session.dispatch(&mut values, &mut subscribers));
+        assert!(session.dispatch(&mut values));
         assert_eq!(values, [1.4]);
     }
 
@@ -528,10 +526,10 @@ mod tests {
     #[test]
     fn number_drag_records_a_typed_change_and_programmatic_setter_is_silent() {
         let mut number = NumberBuilder::create_widget(NumberParameters::new(0.0, 2.0, 0));
-        let (mut session, mut subscribers) = number_session(&number);
+        let mut session = number_session(&number);
         let mut values = Vec::new();
         number.set_value(4.0);
-        assert!(!session.dispatch(&mut values, &mut subscribers));
+        assert!(!session.dispatch(&mut values));
 
         run_number_once(
             &mut number,
@@ -542,16 +540,16 @@ mod tests {
             }],
         );
         assert_eq!(number.value(), 10.0);
-        assert!(session.dispatch(&mut values, &mut subscribers));
+        assert!(session.dispatch(&mut values));
         assert_eq!(values, [10.0]);
     }
 
     #[test]
     fn slider_programmatic_setter_is_silent() {
         let mut slider = SliderBuilder::create_widget(SliderParameters::new(0.0, -5.0, 5.0));
-        let (mut session, mut subscribers) = slider_session(&slider);
+        let mut session = slider_session(&slider);
         slider.set_value(4.0);
         assert_eq!(slider.value(), 4.0);
-        assert!(!session.dispatch(&mut Vec::new(), &mut subscribers));
+        assert!(!session.dispatch(&mut Vec::new()));
     }
 }

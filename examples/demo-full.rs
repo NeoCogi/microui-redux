@@ -1517,7 +1517,7 @@ impl State {
         state
     }
 
-    fn connect_events(&self, session: &mut Session<Message>, subscribers: &mut Subscribers<Self, Message>) {
+    fn connect_events(&self, session: &mut Session<Self, Message>) {
         for (index, changed) in self.bg_slider_changed.iter().enumerate() {
             session
                 .connect(changed.clone(), move |event| Message::BackgroundChanged(index, event.value))
@@ -1582,7 +1582,7 @@ impl State {
             session.connect(submitted.clone(), move |_| Message::WeightButton(message)).unwrap();
         }
 
-        subscribers.subscribe(|state, message, _| state.handle_message(message));
+        session.subscribe(|state, message, _| state.handle_message(message));
     }
 
     fn handle_message(&mut self, message: &Message) {
@@ -2268,7 +2268,7 @@ fn main() {
     let mut app = Application::new(atlas, |backend: BackendInitContext, ctx| State::new(backend, ctx)).unwrap();
 
     app.event_loop_session(
-        |state, session, subscribers| state.connect_events(session, subscribers),
+        |state, session| state.connect_events(session),
         |ctx, state, _dimensions| state.process_frame(ctx),
     );
 }

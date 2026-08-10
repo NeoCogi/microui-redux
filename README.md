@@ -271,12 +271,11 @@ let dimensions = Dimensioni::new(800, 600);
 let info = FrameInfo::try_new(dimensions, color(20, 22, 26, 255))?;
 let mut session = Session::new();
 session.connect(name_submitted, |event| Message::NameSubmitted(event.text))?;
-let mut subscribers = Subscribers::new();
-subscribers.subscribe(|model: &mut Model, message: &Message, _| match message {
+session.subscribe(|model: &mut Model, message: &Message, _| match message {
     Message::NameSubmitted(name) => model.submitted_names.push(name.clone()),
 });
 let mut model = Model::default();
-ctx.update_ui_session(dimensions, &mut session, &mut model, &mut subscribers);
+ctx.update_ui_session(dimensions, &mut session, &mut model);
 ctx.frame(info).render_ui()?;
 ```
 
