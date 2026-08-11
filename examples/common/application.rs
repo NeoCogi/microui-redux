@@ -35,7 +35,7 @@ use crate::*;
 use common::*;
 use microui_redux::{
     self as microui,
-    prelude::{AtlasHandle, Dimensioni, FrameInfo, Session},
+    prelude::{AtlasHandle, Dimensioni, FrameInfo},
 };
 
 #[cfg(feature = "example-glow")]
@@ -64,7 +64,7 @@ type SelectedBackend = wgpu_renderer::WgpuRenderer;
 // The example app keeps one concrete renderer backend behind the shared microui `Context`. The
 // rest of the example code only talks to `MicroUI`, while backend initialization stays feature-
 // gated in this file.
-type MicroUI = microui::Context<SelectedBackend>;
+type MicroUI<S> = microui::Context<SelectedBackend, S>;
 
 #[cfg(feature = "example-glow")]
 pub type BackendInitContext = Arc<glow::Context>;
@@ -74,11 +74,11 @@ pub type BackendInitContext = Arc<glow::Context>;
 ))]
 pub struct BackendInitContext;
 
-pub struct Application<S> {
+pub struct Application<S: 'static> {
     // Drop renderer-backed state before the SDL window/subsystem. Vulkan and wgpu surfaces
     // borrow native window resources, so the window must outlive `state`, `ctx`, and backend data.
     state: S,
-    ctx: MicroUI,
+    ctx: MicroUI<S>,
     #[cfg(feature = "example-glow")]
     backend: BackendData,
     window: Window,
@@ -86,9 +86,12 @@ pub struct Application<S> {
     sdl_ctx: Sdl,
 }
 
-impl<S> Application<S> {
+impl<S: 'static> Application<S> {
     /// Creates the example application by initializing SDL, the chosen backend, and user state.
-    pub fn new<F: FnMut(BackendInitContext, &mut MicroUI) -> S>(atlas: AtlasHandle, mut init_state: F) -> Result<Self, String> {
+    pub fn new<F: FnMut(BackendInitContext, &mut MicroUI<S>) -> S>(atlas: AtlasHandle, mut init_state: F) -> Result<Self, String>
+    where
+        S: 'static,
+    {
         // SDL/video/window setup is backend-dependent, but state construction always receives a
         // ready-to-use microui `Context` plus any backend-specific initialization payload.
         let sdl_ctx = sdl2::init().map_err(|err| err.to_string())?;
@@ -102,7 +105,7 @@ impl<S> Application<S> {
         ))]
         let BackendBundle { window, renderer } = bundle;
 
-        let mut ctx = microui::Context::new(renderer);
+        let mut ctx = microui::Context::<_, S>::new(renderer);
         Ok(Self {
             state: init_state(init_ctx, &mut ctx),
             ctx,
@@ -116,28 +119,27 @@ impl<S> Application<S> {
 
     /// Runs the SDL event loop, forwarding input into microui and invoking the user frame callback.
     #[allow(dead_code)] // Each example selects either polling or subscriber-driven updates.
-    pub fn event_loop<F: Fn(&mut MicroUI, &mut S, Dimensioni)>(&mut self, f: F) {
-        self.event_loop_with_update(|ctx, _state, dimensions| ctx.update_ui(dimensions), f);
+    pub fn event_loop<F: Fn(&mut MicroUI<S>, &mut S, Dimensioni)>(&mut self, f: F) {
+        self.event_loop_with_update(|ctx, state, dimensions| ctx.update_ui_state(dimensions, state), f);
     }
 
-    /// Runs the SDL loop with one application-state event session.
+    /// Runs the SDL loop with the context-owned application event session.
     #[allow(dead_code)] // Each example selects either polling or subscriber-driven updates.
-    pub fn event_loop_session<Setup, F>(&mut self, setup: Setup, f: F)
+    pub fn event_loop_events<Setup, F>(&mut self, setup: Setup, f: F)
     where
         S: 'static,
-        Setup: FnOnce(&S, &mut Session<S>),
-        F: Fn(&mut MicroUI, &mut S, Dimensioni),
+        Setup: FnOnce(&S, &mut MicroUI<S>),
+        F: Fn(&mut MicroUI<S>, &mut S, Dimensioni),
     {
-        let mut session = Session::new();
-        setup(&self.state, &mut session);
-        self.event_loop_with_update(move |ctx, state, dimensions| ctx.update_ui_session(dimensions, &mut session, state), f);
+        setup(&self.state, &mut self.ctx);
+        self.event_loop_with_update(|ctx, state, dimensions| ctx.update_ui_state(dimensions, state), f);
     }
 
     /// Shared SDL driver parameterized by the first retained update performed each frame.
     fn event_loop_with_update<Update, F>(&mut self, mut update: Update, f: F)
     where
-        Update: FnMut(&mut MicroUI, &mut S, Dimensioni),
-        F: Fn(&mut MicroUI, &mut S, Dimensioni),
+        Update: FnMut(&mut MicroUI<S>, &mut S, Dimensioni),
+        F: Fn(&mut MicroUI<S>, &mut S, Dimensioni),
     {
         #[cfg(feature = "example-glow")]
         {
@@ -254,7 +256,7 @@ impl<S> Application<S> {
                 f(&mut self.ctx, &mut self.state, dimensions);
                 // Application mutations can affect retained state and layout, so synchronize once
                 // more before the paint-only frame is submitted.
-                self.ctx.update_ui(dimensions);
+                update(&mut self.ctx, &mut self.state, dimensions);
                 if let Err(error) = self.ctx.frame(info).render_ui() {
                     eprintln!("[microui-redux][example] frame failed: {error}");
                 }

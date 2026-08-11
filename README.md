@@ -150,7 +150,7 @@ The complete sequence is:
 ```text
 application/resource updates + ordered input calls
         |
-Context::update_ui(dimensions)        drain FIFO; full update + layout after each event
+Context::update_ui[_state](...)       drain FIFO; full update + layout after each event
         |
 Context::frame(FrameInfo)             logical ContextFrame
         |
@@ -237,7 +237,7 @@ cargo run --example backend-frame-cube --features example-wgpu
 
 ### Current retained authoring model
 
-The supported authoring path is retained widget trees registered as context-owned roots. Applications call `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)` once, mutate leaves and containers through weak `TypedWidgetHandle<W>` values, commit updates with `Context::update_ui(...)`, and paint with `Context::frame(FrameInfo).render_ui()?`.
+The supported authoring path is retained widget trees registered as context-owned roots. Applications call `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)` once, mutate leaves and containers through weak `TypedWidgetHandle<W>` values, commit polling contexts with `Context::update_ui(...)` or event-driven contexts with `Context::update_ui_state(...)`, and paint with `Context::frame(FrameInfo).render_ui()?`.
 
 Root creation consumes one persistent application `Node` and returns a non-owning `RootHandle`.
 Roots cannot be replaced while retaining their identity: mutate descendants through a container
@@ -271,12 +271,16 @@ let (_, tree) = Row::create(RowParameters::new(
 let _root = ctx.create_window("main", rect(20, 20, 240, 120), tree);
 let dimensions = Dimensioni::new(800, 600);
 let info = FrameInfo::try_new(dimensions, color(20, 22, 26, 255))?;
-let mut session = Session::new();
-session.subscribe(name_submitted, Model::name_submitted)?;
+ctx.subscribe(name_submitted, Model::name_submitted)?;
 let mut model = Model::default();
-ctx.update_ui_session(dimensions, &mut session, &mut model);
+ctx.update_ui_state(dimensions, &mut model);
 ctx.frame(info).render_ui()?;
 ```
+
+An event-driven context is constructed as `Context::<Backend, Model>::new(backend)`. It owns
+the sole event session for its complete root forest. Each subscribed widget port queues its own
+native payloads, and the context drains those queues into `Model` after retained widget borrows
+have ended. A port accepts one state method; compose additional effects inside that method.
 
 Retained trees are the supported public authoring path. Each non-cloneable `Node` owns one concrete
 leaf or one generic `Container`. A container owns its opaque children and one concrete branch

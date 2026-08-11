@@ -42,9 +42,10 @@ use std::{
 use crate::render::RendererBackend;
 use crate::{
     Button, ButtonParameters, ButtonSubmitted, Column, ColumnParameters, Context, IconId, ListItem, ListItemParameters, ListItemSubmitted, Node, Policy, Recti,
-    RootHandle, RootSubmitted, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Session, SizePolicy, Stack, StackDirection, StackParameters, Textbox,
+    RootHandle, RootSubmitted, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SizePolicy, Stack, StackDirection, StackParameters, Textbox,
     TextboxParameters, TextboxSubmitted, ThemeIcons, TypedWidgetHandle, WidgetEventHandle, WidgetOption, WindowOption,
 };
+use crate::event::WidgetEventListener;
 use crate::ui_node::RuntimeNodeId;
 
 /// One-shot configuration used to open a file dialog.
@@ -160,8 +161,6 @@ struct DialogRows {
     ids: Vec<RuntimeNodeId>,
 }
 
-struct FolderPath(String);
-
 enum ControllerDisposition {
     Pending,
     Remove,
@@ -177,6 +176,8 @@ pub(crate) struct FileDialogController {
     icons: ThemeIcons,
     folder_items: Vec<WidgetEventHandle<ListItemSubmitted>>,
     file_items: Vec<WidgetEventHandle<ListItemSubmitted>>,
+    folder_item_events: Vec<WidgetEventListener<ListItemSubmitted>>,
+    file_item_events: Vec<WidgetEventListener<ListItemSubmitted>>,
     folder_item_ids: Vec<RuntimeNodeId>,
     file_item_ids: Vec<RuntimeNodeId>,
     folder_rows: TypedWidgetHandle<Stack>,
@@ -186,14 +187,14 @@ pub(crate) struct FileDialogController {
     #[cfg_attr(not(test), allow(dead_code))]
     file_scroll: TypedWidgetHandle<ScrollArea>,
     path_box: TypedWidgetHandle<Textbox>,
-    path_box_submitted: WidgetEventHandle<TextboxSubmitted>,
+    path_box_submitted: WidgetEventListener<TextboxSubmitted>,
     file_name_box: TypedWidgetHandle<Textbox>,
-    up_button: WidgetEventHandle<ButtonSubmitted>,
-    home_button: WidgetEventHandle<ButtonSubmitted>,
-    go_button: WidgetEventHandle<ButtonSubmitted>,
-    ok_button: WidgetEventHandle<ButtonSubmitted>,
-    cancel_button: WidgetEventHandle<ButtonSubmitted>,
-    event_session: Session<FileDialogController>,
+    up_button: WidgetEventListener<ButtonSubmitted>,
+    home_button: WidgetEventListener<ButtonSubmitted>,
+    go_button: WidgetEventListener<ButtonSubmitted>,
+    ok_button: WidgetEventListener<ButtonSubmitted>,
+    cancel_button: WidgetEventListener<ButtonSubmitted>,
+    root_submitted: WidgetEventListener<RootSubmitted>,
     #[cfg_attr(not(test), allow(dead_code))]
     up_button_id: RuntimeNodeId,
     #[cfg_attr(not(test), allow(dead_code))]
@@ -215,7 +216,12 @@ impl Drop for FileDialogController {
 }
 
 impl FileDialogController {
-    fn new<B: RendererBackend>(ctx: &mut Context<B>, id: FileDialogSessionId, status: Weak<RefCell<FileDialogStatus>>, request: FileDialogRequest) -> Self {
+    fn new<B: RendererBackend, State: 'static>(
+        ctx: &mut Context<B, State>,
+        id: FileDialogSessionId,
+        status: Weak<RefCell<FileDialogStatus>>,
+        request: FileDialogRequest,
+    ) -> Self {
         let current_working_directory = request.initial_directory;
         let (folders, files) = Self::read_directory(Path::new(&current_working_directory));
         let icons = ctx.style().icons;
@@ -223,14 +229,14 @@ impl FileDialogController {
         let file_rows = Self::make_file_rows(&files, icons.file);
 
         let (up_handle, up_node) = Button::create(ButtonParameters::new("Up"));
-        let up_button = up_handle.submitted();
+        let up_button = up_handle.submitted().listen().unwrap();
         let up_button_id = up_node.id();
         let (home_handle, home_node) = Button::create(ButtonParameters::new("Home"));
-        let home_button = home_handle.submitted();
+        let home_button = home_handle.submitted().listen().unwrap();
         let (path_box, path_node) = Textbox::create(TextboxParameters::new(current_working_directory.clone()));
-        let path_box_submitted = path_box.submitted();
+        let path_box_submitted = path_box.submitted().listen().unwrap();
         let (go_handle, go_node) = Button::create(ButtonParameters::new("Go"));
-        let go_button = go_handle.submitted();
+        let go_button = go_handle.submitted().listen().unwrap();
 
         let (folder_rows_state, folder_rows_node) = Stack::create(StackParameters::new(
             SizePolicy::Remainder(0),
@@ -262,10 +268,10 @@ impl FileDialogController {
 
         let (file_name_box, file_name_node) = Textbox::create(TextboxParameters::new(""));
         let (cancel_handle, cancel_node) = Button::create(ButtonParameters::new("Cancel"));
-        let cancel_button = cancel_handle.submitted();
+        let cancel_button = cancel_handle.submitted().listen().unwrap();
         let cancel_button_id = cancel_node.id();
         let (ok_handle, ok_node) = Button::create(ButtonParameters::new("Open"));
-        let ok_button = ok_handle.submitted();
+        let ok_button = ok_handle.submitted().listen().unwrap();
         let ok_button_id = ok_node.id();
 
         let (_, toolbar) = crate::Row::create(crate::RowParameters::new(
@@ -296,7 +302,11 @@ impl FileDialogController {
             .expect("new file-dialog root must accept options");
         ctx.set_root_visible(root.id(), true).expect("new file-dialog root must become visible");
 
-        let mut controller = Self {
+        let folder_item_events = folder_rows.submitted.iter().cloned().map(|event| event.listen().unwrap()).collect();
+        let file_item_events = file_rows.submitted.iter().cloned().map(|event| event.listen().unwrap()).collect();
+        let root_submitted = root.submitted().listen().unwrap();
+
+        Self {
             id,
             status,
             root,
@@ -306,6 +316,8 @@ impl FileDialogController {
             icons,
             folder_items: folder_rows.submitted,
             file_items: file_rows.submitted,
+            folder_item_events,
+            file_item_events,
             folder_item_ids: folder_rows.ids,
             file_item_ids: file_rows.ids,
             folder_rows: folder_rows_state,
@@ -320,35 +332,10 @@ impl FileDialogController {
             go_button,
             ok_button,
             cancel_button,
-            event_session: Session::new(),
+            root_submitted,
             up_button_id,
             ok_button_id,
             cancel_button_id,
-        };
-        controller.subscribe_static_events();
-        controller.subscribe_row_events();
-        controller
-    }
-
-    fn subscribe_static_events(&mut self) {
-        self.event_session.subscribe(self.up_button.clone(), Self::up_submitted).unwrap();
-        self.event_session.subscribe(self.home_button.clone(), Self::home_submitted).unwrap();
-        self.event_session.subscribe(self.path_box_submitted.clone(), Self::path_submitted).unwrap();
-        self.event_session.subscribe(self.go_button.clone(), Self::go_submitted).unwrap();
-        self.event_session.subscribe(self.ok_button.clone(), Self::accept_submitted).unwrap();
-        self.event_session.subscribe(self.cancel_button.clone(), Self::cancel_submitted).unwrap();
-        self.event_session.subscribe(self.root.submitted(), Self::root_cancelled).unwrap();
-    }
-
-    fn subscribe_row_events(&mut self) {
-        self.event_session.prune_expired_subscriptions();
-        for (item, directory) in self.folder_items.iter().zip(&self.folders) {
-            self.event_session
-                .subscribe_with(item.clone(), FolderPath(directory.clone()), Self::folder_submitted)
-                .unwrap();
-        }
-        for item in &self.file_items {
-            self.event_session.subscribe(item.clone(), Self::file_submitted).unwrap();
         }
     }
 
@@ -440,9 +427,10 @@ impl FileDialogController {
         self.files = files;
         self.folder_items = folder_rows.submitted;
         self.file_items = file_rows.submitted;
+        self.folder_item_events = self.folder_items.iter().cloned().map(|event| event.listen().unwrap()).collect();
+        self.file_item_events = self.file_items.iter().cloned().map(|event| event.listen().unwrap()).collect();
         self.folder_item_ids = folder_rows.ids;
         self.file_item_ids = file_rows.ids;
-        self.subscribe_row_events();
     }
 
     fn navigate_to(&mut self, directory: String) -> bool {
@@ -505,7 +493,7 @@ impl FileDialogController {
         }
     }
 
-    fn up_submitted(&mut self, _: &ButtonSubmitted) {
+    fn up_submitted(&mut self) {
         let parent = Path::new(&self.current_working_directory)
             .parent()
             .map(|path| path.to_string_lossy().into_owned());
@@ -514,7 +502,7 @@ impl FileDialogController {
         }
     }
 
-    fn home_submitted(&mut self, _: &ButtonSubmitted) {
+    fn home_submitted(&mut self) {
         if let Some(home) = Self::home_dir()
             && Path::new(&home).is_dir()
         {
@@ -528,15 +516,15 @@ impl FileDialogController {
         }
     }
 
-    fn go_submitted(&mut self, _: &ButtonSubmitted) {
+    fn go_submitted(&mut self) {
         let input = self.path_box.try_read(|state| state.text().to_owned()).unwrap_or_default();
         if let Some(path) = self.resolve_directory_path(&input) {
             self.navigate_and_refresh(path);
         }
     }
 
-    fn folder_submitted(&mut self, directory: &FolderPath, _: &ListItemSubmitted) {
-        self.navigate_and_refresh(directory.0.clone());
+    fn folder_submitted(&mut self, directory: String) {
+        self.navigate_and_refresh(directory);
     }
 
     fn file_submitted(&mut self, event: &ListItemSubmitted) {
@@ -553,17 +541,17 @@ impl FileDialogController {
         }
     }
 
-    fn accept_submitted(&mut self, _: &ButtonSubmitted) {
+    fn accept_submitted(&mut self) {
         if let Some(completion) = self.accepted_status() {
             self.complete(completion);
         }
     }
 
-    fn cancel_submitted(&mut self, _: &ButtonSubmitted) {
+    fn cancel_submitted(&mut self) {
         self.complete(FileDialogStatus::Cancelled);
     }
 
-    fn root_cancelled(&mut self, _: &RootSubmitted) {
+    fn root_cancelled(&mut self) {
         self.complete(FileDialogStatus::Cancelled);
     }
 
@@ -579,9 +567,48 @@ impl FileDialogController {
             return ControllerDisposition::Remove;
         }
 
-        // Clone the queue capability so State methods may update this controller's own session
-        // subscriptions while they run (for example after replacing directory rows).
-        self.event_session.dispatcher().dispatch(self);
+        enum Action {
+            Up,
+            Home,
+            Path(TextboxSubmitted),
+            Go,
+            Folder(String),
+            File(ListItemSubmitted),
+            Accept,
+            Cancel,
+            Root,
+        }
+
+        // Detach every pending native event before an action mutates the controller or replaces
+        // dynamic row widgets and their listeners.
+        let mut actions = Vec::new();
+        actions.extend(self.up_button.drain().into_iter().map(|_| Action::Up));
+        actions.extend(self.home_button.drain().into_iter().map(|_| Action::Home));
+        actions.extend(self.path_box_submitted.drain().into_iter().map(Action::Path));
+        actions.extend(self.go_button.drain().into_iter().map(|_| Action::Go));
+        for (events, directory) in self.folder_item_events.iter().zip(&self.folders) {
+            actions.extend(events.drain().into_iter().map(|_| Action::Folder(directory.clone())));
+        }
+        for events in &self.file_item_events {
+            actions.extend(events.drain().into_iter().map(Action::File));
+        }
+        actions.extend(self.ok_button.drain().into_iter().map(|_| Action::Accept));
+        actions.extend(self.cancel_button.drain().into_iter().map(|_| Action::Cancel));
+        actions.extend(self.root_submitted.drain().into_iter().map(|_| Action::Root));
+
+        for action in actions {
+            match action {
+                Action::Up => self.up_submitted(),
+                Action::Home => self.home_submitted(),
+                Action::Path(event) => self.path_submitted(&event),
+                Action::Go => self.go_submitted(),
+                Action::Folder(directory) => self.folder_submitted(directory),
+                Action::File(event) => self.file_submitted(&event),
+                Action::Accept => self.accept_submitted(),
+                Action::Cancel => self.cancel_submitted(),
+                Action::Root => self.root_cancelled(),
+            }
+        }
         if !matches!(*status.borrow(), FileDialogStatus::Pending) {
             return ControllerDisposition::Remove;
         }
@@ -599,7 +626,7 @@ fn replace_stack_rows(handle: &TypedWidgetHandle<Stack>, nodes: Vec<Node>) -> Re
     handle.try_update_with(nodes, |state, nodes| state.replace(nodes))?
 }
 
-impl<B: RendererBackend> Context<B> {
+impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// Opens a retained file dialog and returns its read-only polling session.
     pub fn open_file_dialog(&mut self, request: FileDialogRequest) -> FileDialogSession {
         let id = FileDialogSessionId(self.next_file_dialog_id);
@@ -703,12 +730,7 @@ mod tests {
     fn pending_file_dialog_blocks_pointer_input_to_underlying_windows() {
         let mut ctx = context();
         let (button, button_node) = Button::create(ButtonParameters::new("behind"));
-        let mut event_session = crate::Session::new();
-        fn count_submission(count: &mut usize, _: &ButtonSubmitted) {
-            *count += 1;
-        }
-        event_session.subscribe(button.submitted(), count_submission).unwrap();
-        let mut submissions = 0;
+        let submitted = button.submitted().listen().unwrap();
         let window = ctx.create_window("window", rect(0, 0, 100, 80), button_node);
         ctx.set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
             .unwrap();
@@ -721,8 +743,7 @@ mod tests {
         ctx.mouseup(10, 10, MouseButton::LEFT);
         ctx.update_and_render_ui();
 
-        assert!(!event_session.dispatch(&mut submissions));
-        assert_eq!(submissions, 0);
+        assert!(submitted.drain().is_empty());
         assert_eq!(session.status(), FileDialogStatus::Pending);
         assert!(ctx.debug_root_zindex(dialog).unwrap() > ctx.debug_root_zindex(window.id()).unwrap());
     }

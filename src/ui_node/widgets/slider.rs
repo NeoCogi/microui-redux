@@ -425,14 +425,14 @@ mod tests {
         values.push(event.value);
     }
 
-    fn slider_session(slider: &Slider) -> crate::Session<Vec<Real>> {
-        let mut session = crate::Session::new();
+    fn slider_session(slider: &Slider) -> crate::event::EventSession<Vec<Real>> {
+        let mut session = crate::event::EventSession::new();
         session.subscribe(slider.changed(), record_slider_change).unwrap();
         session
     }
 
-    fn number_session(number: &Number) -> crate::Session<Vec<Real>> {
-        let mut session = crate::Session::new();
+    fn number_session(number: &Number) -> crate::event::EventSession<Vec<Real>> {
+        let mut session = crate::event::EventSession::new();
         session.subscribe(number.changed(), record_number_change).unwrap();
         session
     }

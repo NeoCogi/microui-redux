@@ -373,10 +373,10 @@ fn main() {
     })
     .unwrap();
 
-    fw.event_loop_session(
-        |state, session| {
+    fw.event_loop_events(
+        |state, context| {
             for button in &state.buttons {
-                session
+                context
                     .subscribe_with(button.submitted.clone(), button.action, State::apply_action)
                     .expect("calculator button should remain alive");
             }

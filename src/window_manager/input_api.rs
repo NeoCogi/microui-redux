@@ -32,7 +32,7 @@
 
 use super::*;
 
-impl<B: RendererBackend> Context<B> {
+impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// Queues one mouse-pointer position transition without coalescing.
     pub fn mousemove(&mut self, x: i32, y: i32) {
         self.input.mousemove(x, y);

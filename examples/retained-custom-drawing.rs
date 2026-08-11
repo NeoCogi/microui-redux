@@ -160,7 +160,7 @@ fn make_atlas() -> AtlasHandle {
 
 fn main() -> Result<(), String> {
     let backend = NoopRenderer { atlas: make_atlas() };
-    let mut ctx = Context::new(backend);
+    let mut ctx = Context::<_>::new(backend);
     let paint = RetainedPaintBuilder::create_widget(RetainedPaintParameters);
     let tree = Node::widget(paint);
     ctx.create_window("retained custom drawing", rect(12, 12, 132, 84), tree);

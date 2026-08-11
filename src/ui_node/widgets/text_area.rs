@@ -829,8 +829,8 @@ mod tests {
         events.push(RecordedEvent::Submitted(event.text.clone()));
     }
 
-    fn text_session(text_area: &TextArea) -> crate::Session<Vec<RecordedEvent>> {
-        let mut session = crate::Session::new();
+    fn text_session(text_area: &TextArea) -> crate::event::EventSession<Vec<RecordedEvent>> {
+        let mut session = crate::event::EventSession::new();
         session.subscribe(text_area.changed(), record_changed).unwrap();
         session.subscribe(text_area.submitted(), record_submitted).unwrap();
         session

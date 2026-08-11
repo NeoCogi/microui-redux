@@ -72,7 +72,7 @@ impl WindowEntry {
     }
 }
 
-impl<B: RendererBackend> Context<B> {
+impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// Wraps one application node in private root chrome and registers its independent runtime.
     fn register_root(&mut self, kind: WindowKind, name: &str, rect: Recti, content: Node, options: WindowOption, visible: bool) -> RootHandle {
         // Allocate lifecycle identity before construction; IDs are never derived from node identity.
@@ -349,11 +349,16 @@ impl<B: RendererBackend> Context<B> {
 
     /// Performs one synchronization layout, then one full update/layout pair per queued event.
     pub(super) fn update_window_manager(&mut self, dimensions: Dimensioni) {
-        self.update_window_manager_with(dimensions, || false);
+        self.update_window_manager_with(dimensions, &mut (), |_, _| false);
     }
 
     /// Performs the retained update while exposing each safe subscriber-dispatch boundary.
-    pub(super) fn update_window_manager_with(&mut self, dimensions: Dimensioni, mut after_event: impl FnMut() -> bool) {
+    pub(super) fn update_window_manager_with<DispatchState>(
+        &mut self,
+        dimensions: Dimensioni,
+        dispatch_state: &mut DispatchState,
+        mut after_event: impl FnMut(&mut Self, &mut DispatchState) -> bool,
+    ) {
         let atlas = self.renderer.atlas();
         let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
 
@@ -365,7 +370,7 @@ impl<B: RendererBackend> Context<B> {
         self.layout_window_manager(viewport, &atlas);
         // Subscriber invocations may already be waiting without a raw input event. If they mutate
         // retained state, commit that state before routing the first queued event.
-        if after_event() {
+        if after_event(self, dispatch_state) {
             self.layout_window_manager(viewport, &atlas);
         }
 
@@ -381,7 +386,7 @@ impl<B: RendererBackend> Context<B> {
             // Application subscribers run only after the complete cross-root update has released
             // retained borrows. Their state/topology changes are therefore safe and become visible
             // to the layout immediately below, before routing the next raw input event.
-            after_event();
+            after_event(self, dispatch_state);
             self.layout_window_manager(viewport, &atlas);
         }
     }

@@ -106,6 +106,11 @@
 //! widget borrow. If nested traversal reaches that allocation, runtime borrowing reports an
 //! invariant panic. End the closure before calling `update_ui` or `render_ui`.
 //!
+//! Event-driven applications construct `Context::<B, State>::new(backend)`, register each
+//! native widget endpoint through [`Context::subscribe`] or [`Context::subscribe_with`], and call
+//! [`Context::update_ui_state`]. The context owns the only application event session for its
+//! complete root forest. Each event port owns its pending payloads and accepts one state method.
+//!
 //! Update and paint traverse parent before children and siblings in forward order. Later work sees
 //! successful earlier cross-cell mutations, work already completed does not rerun, and each input
 //! transaction's final layout observes the resulting state and topology. Paint is observational
@@ -184,7 +189,7 @@ mod window_manager;
 /// This module groups the stable retained concepts used by application code without exposing
 /// low-level renderer details or manual container drawing helpers through default imports.
 pub mod retained {
-    pub use crate::event::{Session, SubscribeError, SubscriptionId, TypedWidget, WidgetEvent, WidgetEventHandle};
+    pub use crate::event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventHandle};
     pub use crate::file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
     pub use crate::render::{CustomRenderArgs, CustomRenderHandle};
     pub use crate::ui_node::{
@@ -201,7 +206,7 @@ pub mod retained {
 /// The prelude intentionally favors retained authoring, widget state, style/input/image types, and
 /// renderer integration. Low-level backend and Renderer types live under [`render`].
 pub mod prelude {
-    pub use crate::event::{Session, SubscribeError, SubscriptionId, TypedWidget, WidgetEvent, WidgetEventHandle};
+    pub use crate::event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventHandle};
     pub use crate::atlas::{
         AtlasHandle, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry, FontId,
         IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON,
@@ -238,7 +243,7 @@ pub use atlas::{
     FontId, IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON,
 };
 pub use window_manager::{Context, ContextFrame, RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted, WindowOption};
-pub use event::{Session, SubscribeError, SubscriptionId, TypedWidget, WidgetEvent, WidgetEventHandle};
+pub use event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventHandle};
 pub use file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
 pub use image::{ImageSource, load_image_bytes};
 pub use input::{KeyCode, KeyMode, MouseButton};

@@ -59,8 +59,8 @@ fn increment_event_counter<E>(count: &mut usize, _: &E) {
     *count += 1;
 }
 
-fn event_counter<E: crate::WidgetEvent>(event: crate::WidgetEventHandle<E>) -> crate::Session<usize> {
-    let mut session = crate::Session::new();
+fn event_counter<E: crate::WidgetEvent>(event: crate::WidgetEventHandle<E>) -> crate::event::EventSession<usize> {
+    let mut session = crate::event::EventSession::new();
     session.subscribe(event, increment_event_counter::<E>).unwrap();
     session
 }
@@ -366,7 +366,7 @@ fn update_drains_each_input_into_one_full_update_and_one_followup_layout() {
 #[test]
 fn render_preflight_requires_a_matching_commit_and_never_acquires_backend_on_error() {
     let (backend, log) = recording_backend(test_atlas());
-    let mut ctx = Context::new(backend);
+    let mut ctx = Context::<_>::new(backend);
     let root = ctx.create_window("window", rect(10, 10, 120, 90), empty_content());
     let dimensions = Dimensioni::new(320, 240);
 
@@ -754,26 +754,24 @@ fn widget_handle_events_invoke_state_methods_without_polling() {
         SizePolicy::Auto,
         [first, second],
     ));
-    let mut ctx = context();
+    let mut ctx: Context<NoopRenderer, Model> = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, Dimensioni::new(320, 240));
     let root = ctx.create_window("signal", rect(0, 0, 140, 100), content);
     ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     let dimensions = Dimensioni::new(320, 240);
-    ctx.update_ui(dimensions);
+    let mut model = Model::default();
+    ctx.update_ui_state(dimensions, &mut model);
     let first_rect = ctx.debug_root_node_rect(root.id(), first_id).unwrap();
     let second_rect = ctx.debug_root_node_rect(root.id(), second_id).unwrap();
 
-    let mut session = crate::Session::new();
-    session.subscribe_with(first_submitted, "first", Model::record).unwrap();
-    session.subscribe_with(second_submitted, "second", Model::record).unwrap();
-    let mut model = Model::default();
-
+    ctx.subscribe_with(first_submitted, "first", Model::record).unwrap();
+    ctx.subscribe_with(second_submitted, "second", Model::record).unwrap();
     ctx.mousedown(first_rect.x + 1, first_rect.y + 1, MouseButton::LEFT);
     ctx.mouseup(first_rect.x + 1, first_rect.y + 1, MouseButton::LEFT);
     ctx.mousedown(second_rect.x + 1, second_rect.y + 1, MouseButton::LEFT);
     ctx.mouseup(second_rect.x + 1, second_rect.y + 1, MouseButton::LEFT);
     ctx.mousedown(first_rect.x + 1, first_rect.y + 1, MouseButton::LEFT);
-    ctx.update_ui_session(dimensions, &mut session, &mut model);
+    ctx.update_ui_state(dimensions, &mut model);
 
     assert_eq!(model.submissions, ["first", "second", "first"]);
 }
@@ -794,21 +792,19 @@ fn textbox_handle_event_dispatches_a_complete_snapshot_to_state() {
     let (widget, node) = Textbox::create(TextboxParameters::new(""));
     let changed = widget.changed();
     let node_id = node.id();
-    let mut ctx = context();
+    let mut ctx: Context<NoopRenderer, Model> = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, Dimensioni::new(320, 240));
     let root = ctx.create_window("textbox signal", rect(0, 0, 140, 100), node);
     ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     let dimensions = Dimensioni::new(320, 240);
-    ctx.update_ui(dimensions);
+    let mut model = Model::default();
+    ctx.update_ui_state(dimensions, &mut model);
     let textbox_rect = ctx.debug_root_node_rect(root.id(), node_id).unwrap();
 
-    let mut session = crate::Session::new();
-    session.subscribe(changed, Model::changed).unwrap();
-    let mut model = Model::default();
-
+    ctx.subscribe(changed, Model::changed).unwrap();
     ctx.mousedown(textbox_rect.x + 1, textbox_rect.y + 1, MouseButton::LEFT);
     ctx.text("é");
-    ctx.update_ui_session(dimensions, &mut session, &mut model);
+    ctx.update_ui_state(dimensions, &mut model);
 
     assert_eq!(model.changes, [(String::from("é"), "é".len())]);
 }
@@ -985,7 +981,7 @@ fn outside_popup_press_hides_and_records_typed_submission() {
         .unwrap();
     ctx.set_root_visible(popup.id(), true).unwrap();
     ctx.set_root_rect(popup.id(), rect(20, 20, 80, 60)).unwrap();
-    let mut event_session = crate::Session::new();
+    let mut event_session = crate::event::EventSession::new();
     fn record(events: &mut Vec<RootSubmitted>, event: &RootSubmitted) {
         events.push(*event);
     }
@@ -1389,7 +1385,7 @@ fn title_drag_and_close_record_typed_root_events() {
 
     let mut ctx = context();
     let root = ctx.create_window("window", rect(30, 30, 140, 100), empty_content());
-    let mut session = crate::Session::new();
+    let mut session = crate::event::EventSession::new();
     session.subscribe(root.changed(), record_changed).unwrap();
     session.subscribe(root.submitted(), record_submitted).unwrap();
     let mut events = Vec::new();

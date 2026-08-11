@@ -204,7 +204,7 @@ impl LeafWidget for TextureClippingProbe {
 fn main() -> Result<(), String> {
     let events = Rc::new(RefCell::new(Vec::new()));
     let backend = SmokeRenderer::new(make_smoke_atlas(), events.clone());
-    let mut ctx = Context::new(backend);
+    let mut ctx = Context::<_>::new(backend);
     let texture = ctx.try_load_image_rgba(16, 12, &[0xFF; 16 * 12 * 4])?;
     let screen_content = Rc::new(RefCell::new(None));
     let probe = TextureClippingBuilder::create_widget(TextureClippingParameters {

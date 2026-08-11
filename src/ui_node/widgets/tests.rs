@@ -211,14 +211,14 @@ fn record_combo(events: &mut Vec<ClickEvent>, event: &ComboSubmitted) {
 }
 
 #[test]
-fn typed_click_events_dispatch_every_occurrence_in_order() {
+fn typed_click_events_preserve_fifo_within_each_port() {
     let mut checkbox = CheckboxBuilder::create_widget(CheckboxParameters::new("check", false));
     let mut button = ButtonBuilder::create_widget(ButtonParameters::new("button"));
     let mut item = ListItemBuilder::create_widget(ListItemParameters::new("item"));
     let mut list = ListBoxBuilder::create_widget(ListBoxParameters::new("list", None));
     let mut combo = ComboBuilder::create_widget(ComboParameters::new());
 
-    let mut session = crate::Session::new();
+    let mut session = crate::event::EventSession::new();
     session.subscribe(checkbox.changed(), record_checkbox).unwrap();
     session.subscribe(button.submitted(), record_button).unwrap();
     session.subscribe(item.submitted(), record_item).unwrap();
@@ -239,14 +239,14 @@ fn typed_click_events_dispatch_every_occurrence_in_order() {
         events,
         [
             ClickEvent::Checkbox(true),
-            ClickEvent::Button,
-            ClickEvent::Item("item".to_owned()),
-            ClickEvent::ListBox,
-            ClickEvent::Combo(true),
             ClickEvent::Checkbox(false),
             ClickEvent::Button,
+            ClickEvent::Button,
+            ClickEvent::Item("item".to_owned()),
             ClickEvent::Item("item".to_owned()),
             ClickEvent::ListBox,
+            ClickEvent::ListBox,
+            ClickEvent::Combo(true),
             ClickEvent::Combo(false),
         ]
     );
@@ -257,7 +257,7 @@ fn combo_selection_and_item_clamping_emit_only_value_changes() {
     let (state, _node) = Combo::create(ComboParameters::new());
     let labels = ["zero", "one", "two"];
 
-    let mut session = crate::Session::new();
+    let mut session = crate::event::EventSession::new();
     fn record_change(events: &mut Vec<(usize, String)>, event: &ComboChanged) {
         events.push((event.selected, event.label.clone()));
     }
@@ -289,7 +289,7 @@ fn checkbox_and_list_item_programmatic_setters_are_silent() {
     let (item, _item_node) = ListItem::create(ListItemParameters::new("before"));
     fn ignore_checkbox(_: &mut (), _: &CheckboxChanged) {}
     fn ignore_item(_: &mut (), _: &ListItemSubmitted) {}
-    let mut session = crate::Session::<()>::new();
+    let mut session = crate::event::EventSession::<()>::new();
     session.subscribe(checkbox.changed(), ignore_checkbox).unwrap();
     session.subscribe(item.submitted(), ignore_item).unwrap();
 
@@ -309,7 +309,7 @@ fn subscribing_to_an_event_does_not_borrow_semantic_widget_state() {
     let (button, _node) = Button::create(ButtonParameters::new("button"));
     let submitted = button.submitted();
     fn ignore(_: &mut (), _: &ButtonSubmitted) {}
-    let mut session = crate::Session::<()>::new();
+    let mut session = crate::event::EventSession::<()>::new();
 
     let subscribed = button
         .try_update(|_| session.subscribe(submitted, ignore))

@@ -1083,7 +1083,7 @@ struct State {
 }
 
 impl State {
-    pub fn new(_backend: BackendInitContext, ctx: &mut Context<SelectedBackend>) -> Self {
+    pub fn new(_backend: BackendInitContext, ctx: &mut Context<SelectedBackend, Self>) -> Self {
         #[cfg(any(feature = "builder", feature = "png_source"))]
         let image_texture = load_external_image_texture(ctx);
         #[cfg(not(any(feature = "builder", feature = "png_source")))]
@@ -1502,21 +1502,21 @@ impl State {
         state
     }
 
-    fn subscribe_events(&self, session: &mut Session<Self>) {
+    fn subscribe_events(&self, context: &mut Context<SelectedBackend, Self>) {
         for (index, changed) in self.bg_slider_changed.iter().enumerate() {
-            session.subscribe_with(changed.clone(), index, Self::background_changed).unwrap();
+            context.subscribe_with(changed.clone(), index, Self::background_changed).unwrap();
         }
         for (index, changed) in self.style_color_slider_changed.iter().enumerate() {
-            session.subscribe_with(changed.clone(), index, Self::style_color_changed).unwrap();
+            context.subscribe_with(changed.clone(), index, Self::style_color_changed).unwrap();
         }
         for (index, changed) in self.style_value_slider_changed.iter().enumerate() {
-            session.subscribe_with(changed.clone(), index, Self::style_value_changed).unwrap();
+            context.subscribe_with(changed.clone(), index, Self::style_value_changed).unwrap();
         }
 
-        session.subscribe(self.submit_buf_submitted.clone(), Self::text_submitted).unwrap();
-        session.subscribe(self.submit_button_submitted.clone(), Self::submit_button).unwrap();
+        context.subscribe(self.submit_buf_submitted.clone(), Self::text_submitted).unwrap();
+        context.subscribe(self.submit_button_submitted.clone(), Self::submit_button).unwrap();
         for (index, submitted) in self.test_button_submitted.iter().enumerate() {
-            session.subscribe_with(submitted.clone(), index, Self::test_button).unwrap();
+            context.subscribe_with(submitted.clone(), index, Self::test_button).unwrap();
         }
         for (submitted, label) in self.tree_button_submitted.iter().zip([
             "Pressed button 1",
@@ -1526,14 +1526,14 @@ impl State {
             "Pressed button 5",
             "Pressed button 6",
         ]) {
-            session.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
+            context.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
         }
-        session.subscribe(self.combo_submitted.clone(), Self::combo_submitted).unwrap();
+        context.subscribe(self.combo_submitted.clone(), Self::combo_submitted).unwrap();
         for (index, submitted) in self.combo_item_submitted.iter().enumerate() {
-            session.subscribe_with(submitted.clone(), index, Self::combo_item).unwrap();
+            context.subscribe_with(submitted.clone(), index, Self::combo_item).unwrap();
         }
         for (submitted, label) in self.popup_button_submitted.iter().zip(["Hello", "World"]) {
-            session.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
+            context.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
         }
         for (submitted, label) in self.stack_direction_button_submitted.iter().zip([
             "Top->Bottom: call 1",
@@ -1543,7 +1543,7 @@ impl State {
             "Bottom->Top: call 2",
             "Bottom->Top: call 3",
         ]) {
-            session.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
+            context.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
         }
         for (submitted, label) in self.weight_button_submitted.iter().zip([
             "Weight row: 1",
@@ -1556,7 +1556,7 @@ impl State {
             "Weight grid: 5",
             "Weight grid: 6",
         ]) {
-            session.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
+            context.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
         }
     }
 
@@ -2111,35 +2111,35 @@ impl State {
         );
     }
 
-    fn style_window(&mut self, ctx: &mut Context<SelectedBackend>) {
+    fn style_window(&mut self, ctx: &mut Context<SelectedBackend, Self>) {
         for (swatch, color) in self.style_color_swatch_states.iter().zip(self.style.colors.iter()) {
             swatch.try_update(|swatch| swatch.set_fill(*color)).expect("style swatch state unavailable");
         }
         ctx.set_style(&self.style);
     }
 
-    fn log_window(&mut self, _ctx: &mut Context<SelectedBackend>) {
+    fn log_window(&mut self, _ctx: &mut Context<SelectedBackend, Self>) {
         let text = self.logbuf.borrow().clone();
         self.log_text_state
             .try_update_with(text, |log_text, text| log_text.set_text(text))
             .expect("log text state unavailable");
     }
 
-    fn typography_window(&mut self, _ctx: &mut Context<SelectedBackend>) {}
+    fn typography_window(&mut self, _ctx: &mut Context<SelectedBackend, Self>) {}
 
-    fn triangle_window(&mut self, _ctx: &mut Context<SelectedBackend>) {}
+    fn triangle_window(&mut self, _ctx: &mut Context<SelectedBackend, Self>) {}
 
-    fn suzanne_window(&mut self, _ctx: &mut Context<SelectedBackend>) {}
+    fn suzanne_window(&mut self, _ctx: &mut Context<SelectedBackend, Self>) {}
 
-    fn painter_window(&mut self, _ctx: &mut Context<SelectedBackend>) {}
+    fn painter_window(&mut self, _ctx: &mut Context<SelectedBackend, Self>) {}
 
-    fn falloff_window(&mut self, _ctx: &mut Context<SelectedBackend>) {}
+    fn falloff_window(&mut self, _ctx: &mut Context<SelectedBackend, Self>) {}
 
-    fn stack_direction_window(&mut self, _ctx: &mut Context<SelectedBackend>) {}
+    fn stack_direction_window(&mut self, _ctx: &mut Context<SelectedBackend, Self>) {}
 
-    fn weight_window(&mut self, _ctx: &mut Context<SelectedBackend>) {}
+    fn weight_window(&mut self, _ctx: &mut Context<SelectedBackend, Self>) {}
 
-    fn test_window(&mut self, ctx: &mut Context<SelectedBackend>) {
+    fn test_window(&mut self, ctx: &mut Context<SelectedBackend, Self>) {
         {
             let mut win = self.demo_root.widget().try_read(RootChrome::rect).unwrap_or_else(|| rect(40, 40, 300, 450));
             win.width = win.width.max(240);
@@ -2205,7 +2205,7 @@ impl State {
         }
     }
 
-    fn process_frame(&mut self, ctx: &mut Context<SelectedBackend>) {
+    fn process_frame(&mut self, ctx: &mut Context<SelectedBackend, Self>) {
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
@@ -2231,7 +2231,7 @@ impl State {
     }
 }
 
-fn upload_solid_texture(ctx: &mut Context<SelectedBackend>, width: i32, height: i32, rgba: [u8; 4]) -> TextureId {
+fn upload_solid_texture(ctx: &mut Context<SelectedBackend, State>, width: i32, height: i32, rgba: [u8; 4]) -> TextureId {
     let mut pixels = Vec::with_capacity((width * height * 4) as usize);
     for _ in 0..width * height {
         pixels.extend_from_slice(&rgba);
@@ -2239,7 +2239,7 @@ fn upload_solid_texture(ctx: &mut Context<SelectedBackend>, width: i32, height: 
     ctx.load_image_rgba(width, height, &pixels)
 }
 
-fn upload_noise_texture(ctx: &mut Context<SelectedBackend>, width: i32, height: i32) -> TextureId {
+fn upload_noise_texture(ctx: &mut Context<SelectedBackend, State>, width: i32, height: i32) -> TextureId {
     let mut pixels = Vec::with_capacity((width * height * 4) as usize);
     for y in 0..height {
         for x in 0..width {
@@ -2254,8 +2254,8 @@ fn main() {
     let atlas = atlas_assets::load_atlas();
     let mut app = Application::new(atlas, |backend: BackendInitContext, ctx| State::new(backend, ctx)).unwrap();
 
-    app.event_loop_session(
-        |state, session| state.subscribe_events(session),
+    app.event_loop_events(
+        |state, context| state.subscribe_events(context),
         |ctx, state, _dimensions| state.process_frame(ctx),
     );
 }
@@ -2361,7 +2361,7 @@ fn demo_asset_path(relative: &str) -> PathBuf {
 }
 
 #[cfg(any(feature = "builder", feature = "png_source"))]
-fn load_external_image_texture(ctx: &mut Context<SelectedBackend>) -> Option<TextureId> {
+fn load_external_image_texture(ctx: &mut Context<SelectedBackend, State>) -> Option<TextureId> {
     let image_path = demo_asset_path("examples/FACEPALM.png");
     let png_bytes = match fs::read(&image_path) {
         Ok(bytes) => bytes,

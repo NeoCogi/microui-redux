@@ -485,8 +485,8 @@ mod tests {
         events.push(RecordedEvent::Submitted(event.text.clone()));
     }
 
-    fn text_session(textbox: &Textbox) -> crate::Session<Vec<RecordedEvent>> {
-        let mut session = crate::Session::new();
+    fn text_session(textbox: &Textbox) -> crate::event::EventSession<Vec<RecordedEvent>> {
+        let mut session = crate::event::EventSession::new();
         session.subscribe(textbox.changed(), record_changed).unwrap();
         session.subscribe(textbox.submitted(), record_submitted).unwrap();
         session
@@ -525,7 +525,7 @@ mod tests {
     }
 
     #[test]
-    fn text_events_dispatch_complete_snapshots_in_update_order() {
+    fn text_events_preserve_complete_snapshots_and_per_port_fifo() {
         let mut textbox = TextboxBuilder::create_widget(TextboxParameters::new(""));
         let mut session = text_session(&textbox);
 
@@ -548,8 +548,8 @@ mod tests {
             [
                 RecordedEvent::Changed("ab".to_owned(), 2),
                 RecordedEvent::Changed("abcd".to_owned(), 4),
-                RecordedEvent::Submitted("abcd".to_owned()),
                 RecordedEvent::Changed("abcde".to_owned(), 5),
+                RecordedEvent::Submitted("abcd".to_owned()),
             ]
         );
     }
