@@ -31,7 +31,7 @@
 //! Retained list-box widget.
 
 use super::*;
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 /// One-shot construction input for a [`ListBox`].
 pub struct ListBoxParameters {
@@ -98,7 +98,7 @@ pub struct ListBox {
     /// Base widget options.
     opt: WidgetOption,
     /// Runtime-owned source for user submissions.
-    submitted_event: Rc<crate::event::WidgetEventPort<ListBoxSubmitted>>,
+    submitted_event: Rc<RefCell<crate::event::WidgetEventPort<ListBoxSubmitted>>>,
 }
 
 impl ListBox {
@@ -154,7 +154,7 @@ impl Widget for ListBox {
         if !ctx.clicked() {
             return;
         }
-        self.submitted_event.emit(ListBoxSubmitted);
+        self.submitted_event.borrow_mut().emit(ListBoxSubmitted);
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
@@ -181,7 +181,7 @@ impl WidgetBuilder for ListBoxBuilder {
             image: parameters.image,
             font: parameters.font,
             opt: parameters.opt,
-            submitted_event: Rc::new(crate::event::WidgetEventPort::new()),
+            submitted_event: Rc::new(RefCell::new(crate::event::WidgetEventPort::new())),
         }
     }
 }

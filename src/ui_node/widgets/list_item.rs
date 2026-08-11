@@ -33,7 +33,7 @@
 //! `ListItem` represents one selectable row in a retained list.
 
 use super::*;
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 /// One-shot construction input for a [`ListItem`].
 pub struct ListItemParameters {
@@ -123,7 +123,7 @@ pub struct ListItem {
     /// Mutable label displayed for the item.
     label: String,
     /// Runtime-owned source for user submissions.
-    submitted_event: Rc<crate::event::WidgetEventPort<ListItemSubmitted>>,
+    submitted_event: Rc<RefCell<crate::event::WidgetEventPort<ListItemSubmitted>>>,
 }
 
 impl ListItem {
@@ -229,7 +229,7 @@ impl Widget for ListItem {
             return;
         }
         let label = self.label.clone();
-        self.submitted_event.emit(ListItemSubmitted { label });
+        self.submitted_event.borrow_mut().emit(ListItemSubmitted { label });
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
@@ -256,7 +256,7 @@ impl WidgetBuilder for ListItemBuilder {
             font: parameters.font,
             opt: parameters.opt,
             label: parameters.label,
-            submitted_event: Rc::new(crate::event::WidgetEventPort::new()),
+            submitted_event: Rc::new(RefCell::new(crate::event::WidgetEventPort::new())),
         }
     }
 }

@@ -34,7 +34,7 @@
 //! path.
 
 use super::*;
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 #[derive(Clone)]
 /// Describes the content rendered inside a button widget.
@@ -157,7 +157,7 @@ pub struct Button {
     /// Initialization-only fill behavior.
     fill: WidgetFillOption,
     /// Runtime-owned source for user submissions.
-    submitted_event: Rc<crate::event::WidgetEventPort<ButtonSubmitted>>,
+    submitted_event: Rc<RefCell<crate::event::WidgetEventPort<ButtonSubmitted>>>,
 }
 
 impl Button {
@@ -260,7 +260,7 @@ impl Widget for Button {
         if !ctx.clicked() {
             return;
         }
-        self.submitted_event.emit(ButtonSubmitted);
+        self.submitted_event.borrow_mut().emit(ButtonSubmitted);
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
@@ -287,7 +287,7 @@ impl WidgetBuilder for ButtonBuilder {
             font: parameters.font,
             opt: parameters.opt,
             fill: parameters.fill,
-            submitted_event: Rc::new(crate::event::WidgetEventPort::new()),
+            submitted_event: Rc::new(RefCell::new(crate::event::WidgetEventPort::new())),
         }
     }
 }

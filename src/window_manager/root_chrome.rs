@@ -30,7 +30,7 @@
 
 //! Persistent retained root state and the private chrome container.
 
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use crate::render::Painter;
 use crate::{
@@ -104,8 +104,8 @@ pub struct RootChrome {
     rect: Recti,
     visible: bool,
     interaction: RootInteraction,
-    changed_event: Rc<crate::event::WidgetEventPort<RootChanged>>,
-    submitted_event: Rc<crate::event::WidgetEventPort<RootSubmitted>>,
+    changed_event: Rc<RefCell<crate::event::WidgetEventPort<RootChanged>>>,
+    submitted_event: Rc<RefCell<crate::event::WidgetEventPort<RootSubmitted>>>,
     geometry: RootChromeGeometry,
     opt: WidgetOption,
 }
@@ -116,8 +116,8 @@ impl RootChrome {
         options: WindowOption,
         rect: Recti,
         visible: bool,
-        changed_event: Rc<crate::event::WidgetEventPort<RootChanged>>,
-        submitted_event: Rc<crate::event::WidgetEventPort<RootSubmitted>>,
+        changed_event: Rc<RefCell<crate::event::WidgetEventPort<RootChanged>>>,
+        submitted_event: Rc<RefCell<crate::event::WidgetEventPort<RootSubmitted>>>,
     ) -> Self {
         Self {
             name,
@@ -210,7 +210,7 @@ impl RootChrome {
 
     pub(super) fn dismiss_popup(&mut self) {
         self.set_visible_silent(false);
-        self.submitted_event.emit(RootSubmitted::PopupDismissed);
+        self.submitted_event.borrow_mut().emit(RootSubmitted::PopupDismissed);
     }
 }
 
@@ -251,8 +251,8 @@ pub(super) fn create_root_chrome(
     crate::WidgetEventHandle<RootSubmitted>,
     Container,
 ) {
-    let changed_event = Rc::new(crate::event::WidgetEventPort::new());
-    let submitted_event = Rc::new(crate::event::WidgetEventPort::new());
+    let changed_event = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
+    let submitted_event = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
     let widget = RootChrome::new(
         parameters.name,
         parameters.options,
@@ -323,10 +323,10 @@ impl Widget for RootChrome {
         let changed = ((self.rect.x, self.rect.y, self.rect.width, self.rect.height) != (initial.x, initial.y, initial.width, initial.height))
             .then_some(RootChanged { rect: self.rect });
         if let Some(event) = changed {
-            self.changed_event.emit(event);
+            self.changed_event.borrow_mut().emit(event);
         }
         if let Some(event) = submitted {
-            self.submitted_event.emit(event);
+            self.submitted_event.borrow_mut().emit(event);
         }
     }
 
@@ -426,8 +426,8 @@ mod capture_tests {
 
     #[test]
     fn root_chrome_inactive_update_clears_a_stale_local_mode() {
-        let changed_event = Rc::new(crate::event::WidgetEventPort::new());
-        let submitted_event = Rc::new(crate::event::WidgetEventPort::new());
+        let changed_event = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
+        let submitted_event = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
         let mut state = RootChrome::new(
             "root".to_owned(),
             WindowOption::FRAME,

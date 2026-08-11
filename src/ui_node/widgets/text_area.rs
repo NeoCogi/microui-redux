@@ -57,7 +57,7 @@
 use crate::ui_node::scrollbar::{ScrollAxis, ScrollbarGeometry, scrollbar_base, scrollbar_max_scroll};
 use crate::ui_node::text_layout::{TextLine, build_text_lines};
 use crate::*;
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use super::text_edit::{
     apply_text_input, caret_rect, clamp_cursor_boundary, clamp_scroll, cursor_from_x, cursor_x_in_line, font_line_metrics, line_index_for_cursor,
@@ -137,9 +137,9 @@ pub struct TextArea {
     /// Runtime-only derived editing state.
     interaction: TextAreaInteraction,
     /// Runtime-owned source for user-originated text changes.
-    changed_event: Rc<crate::event::WidgetEventPort<TextAreaChanged>>,
+    changed_event: Rc<RefCell<crate::event::WidgetEventPort<TextAreaChanged>>>,
     /// Runtime-owned source for user submissions.
-    submitted_event: Rc<crate::event::WidgetEventPort<TextAreaSubmitted>>,
+    submitted_event: Rc<RefCell<crate::event::WidgetEventPort<TextAreaSubmitted>>>,
 }
 
 /// Snapshot emitted after a user-originated text-area value change.
@@ -345,10 +345,10 @@ impl TextArea {
             || self.interaction.dragging_x != old_dragging_x;
         let _ = (ctx.focused(), changed);
         if let Some(event) = changed_event {
-            self.changed_event.emit(event);
+            self.changed_event.borrow_mut().emit(event);
         }
         if let Some(event) = submitted_event {
-            self.submitted_event.emit(event);
+            self.submitted_event.borrow_mut().emit(event);
         }
     }
 
@@ -804,8 +804,8 @@ impl WidgetBuilder for TextAreaBuilder {
             font: parameters.font,
             opt: parameters.opt,
             interaction: TextAreaInteraction::default(),
-            changed_event: Rc::new(crate::event::WidgetEventPort::new()),
-            submitted_event: Rc::new(crate::event::WidgetEventPort::new()),
+            changed_event: Rc::new(RefCell::new(crate::event::WidgetEventPort::new())),
+            submitted_event: Rc::new(RefCell::new(crate::event::WidgetEventPort::new())),
         }
     }
 }

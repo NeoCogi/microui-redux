@@ -112,35 +112,34 @@ struct PortSubscriber<E: WidgetEvent> {
 ///
 /// Applications access this port through a weak [`WidgetEventHandle`].
 pub(crate) struct WidgetEventPort<E: WidgetEvent> {
-    subscribers: RefCell<Vec<PortSubscriber<E>>>,
+    subscribers: Vec<PortSubscriber<E>>,
 }
 
 impl<E: WidgetEvent> WidgetEventPort<E> {
     pub(crate) fn new() -> Self {
-        Self { subscribers: RefCell::new(Vec::new()) }
+        Self { subscribers: Vec::new() }
     }
 
     /// Queues one invocation for every subscriber in registration order.
-    pub(crate) fn emit(&self, event: E) {
-        let subscribers = self.subscribers.borrow();
-        if subscribers.is_empty() {
+    pub(crate) fn emit(&mut self, event: E) {
+        if self.subscribers.is_empty() {
             return;
         }
 
         // One shared allocation lets a non-Clone event reach every subscriber. Port subscribers
         // only append to their session queues and cannot synchronously call State.
         let event = Rc::new(event);
-        for subscriber in subscribers.iter() {
+        for subscriber in self.subscribers.iter() {
             subscriber.subscriber.enqueue(Rc::clone(&event));
         }
     }
 
-    fn subscribe(&self, id: SubscriptionId, subscriber: impl EventSubscriber<E> + 'static) {
-        self.subscribers.borrow_mut().push(PortSubscriber { id, subscriber: Box::new(subscriber) });
+    fn subscribe(&mut self, id: SubscriptionId, subscriber: impl EventSubscriber<E> + 'static) {
+        self.subscribers.push(PortSubscriber { id, subscriber: Box::new(subscriber) });
     }
 
-    fn unsubscribe(&self, id: SubscriptionId) {
-        self.subscribers.borrow_mut().retain(|subscriber| subscriber.id != id);
+    fn unsubscribe(&mut self, id: SubscriptionId) {
+        self.subscribers.retain(|subscriber| subscriber.id != id);
     }
 }
 
@@ -150,15 +149,17 @@ impl<E: WidgetEvent> Default for WidgetEventPort<E> {
     }
 }
 
+type WeakWidgetEventPort<E> = Weak<RefCell<WidgetEventPort<E>>>;
+
 /// Weak, typed capability identifying one native event source owned by a retained widget.
 ///
 /// Holding or cloning this value does not keep the widget or its event port alive.
 pub struct WidgetEventHandle<E: WidgetEvent> {
-    port: Weak<WidgetEventPort<E>>,
+    port: WeakWidgetEventPort<E>,
 }
 
 impl<E: WidgetEvent> WidgetEventHandle<E> {
-    pub(crate) fn new(port: &Rc<WidgetEventPort<E>>) -> Self {
+    pub(crate) fn new(port: &Rc<RefCell<WidgetEventPort<E>>>) -> Self {
         Self { port: Rc::downgrade(port) }
     }
 
@@ -320,7 +321,7 @@ impl<State: 'static> Session<State> {
         };
 
         let id = next_subscription_id();
-        port.subscribe(
+        port.borrow_mut().subscribe(
             id,
             MethodEventSubscriber {
                 queue: Rc::downgrade(&self.queue),
@@ -347,7 +348,7 @@ impl<State: 'static> Session<State> {
         };
 
         let id = next_subscription_id();
-        port.subscribe(
+        port.borrow_mut().subscribe(
             id,
             BoundMethodEventSubscriber {
                 queue: Rc::downgrade(&self.queue),
@@ -417,7 +418,7 @@ trait ErasedSubscription {
 
 struct PortSubscription<E: WidgetEvent> {
     id: SubscriptionId,
-    port: Weak<WidgetEventPort<E>>,
+    port: WeakWidgetEventPort<E>,
 }
 
 impl<E: WidgetEvent> ErasedSubscription for PortSubscription<E> {
@@ -433,7 +434,7 @@ impl<E: WidgetEvent> ErasedSubscription for PortSubscription<E> {
 impl<E: WidgetEvent> Drop for PortSubscription<E> {
     fn drop(&mut self) {
         if let Some(port) = self.port.upgrade() {
-            port.unsubscribe(self.id);
+            port.borrow_mut().unsubscribe(self.id);
         }
     }
 }
@@ -447,7 +448,7 @@ mod tests {
     #[derive(Default)]
     struct State {
         values: Vec<i32>,
-        source: Option<Rc<WidgetEventPort<i32>>>,
+        source: Option<Rc<RefCell<WidgetEventPort<i32>>>>,
     }
 
     impl State {
@@ -457,7 +458,7 @@ mod tests {
 
         fn cascade(&mut self, event: &i32) {
             if *event < 10 {
-                self.source.as_ref().unwrap().emit(event + 10);
+                self.source.as_ref().unwrap().borrow_mut().emit(event + 10);
             }
         }
 
@@ -468,14 +469,14 @@ mod tests {
 
     #[test]
     fn native_widget_events_queue_typed_state_methods_and_multicast_fifo() {
-        let owner = Rc::new(WidgetEventPort::new());
+        let owner = Rc::new(RefCell::new(WidgetEventPort::new()));
         let event = WidgetEventHandle::new(&owner);
         let mut session = Session::new();
         session.subscribe(event.clone(), State::record).unwrap();
         session.subscribe(event, State::cascade).unwrap();
 
-        owner.emit(3);
-        owner.emit(4);
+        owner.borrow_mut().emit(3);
+        owner.borrow_mut().emit(4);
         let mut state = State {
             source: Some(Rc::clone(&owner)),
             ..State::default()
@@ -489,11 +490,11 @@ mod tests {
 
     #[test]
     fn bound_subscriber_receives_registration_context() {
-        let owner = Rc::new(WidgetEventPort::new());
+        let owner = Rc::new(RefCell::new(WidgetEventPort::new()));
         let mut session = Session::new();
         session.subscribe_with(WidgetEventHandle::new(&owner), 40, State::record_with_offset).unwrap();
 
-        owner.emit(2);
+        owner.borrow_mut().emit(2);
         let mut state = State::default();
         assert!(session.dispatch(&mut state));
         assert_eq!(state.values, [42]);
@@ -501,26 +502,26 @@ mod tests {
 
     #[test]
     fn dropping_session_disconnects_live_widget_subscriptions() {
-        let owner = Rc::new(WidgetEventPort::new());
+        let owner = Rc::new(RefCell::new(WidgetEventPort::new()));
         let event = WidgetEventHandle::new(&owner);
         let mut session = Session::<State>::new();
         session.subscribe(event, State::record).unwrap();
-        assert_eq!(owner.subscribers.borrow().len(), 1);
+        assert_eq!(owner.borrow_mut().subscribers.len(), 1);
 
         drop(session);
-        assert!(owner.subscribers.borrow().is_empty());
+        assert!(owner.borrow_mut().subscribers.is_empty());
     }
 
     #[test]
     fn unsubscribe_detaches_future_events_but_preserves_queued_invocations() {
-        let owner = Rc::new(WidgetEventPort::new());
+        let owner = Rc::new(RefCell::new(WidgetEventPort::new()));
         let mut session = Session::new();
         let subscription = session.subscribe(WidgetEventHandle::new(&owner), State::record).unwrap();
 
-        owner.emit(1);
+        owner.borrow_mut().emit(1);
         assert!(session.unsubscribe(subscription));
         assert!(!session.unsubscribe(subscription));
-        owner.emit(2);
+        owner.borrow_mut().emit(2);
 
         let mut state = State::default();
         assert!(session.dispatch(&mut state));
@@ -529,9 +530,9 @@ mod tests {
 
     #[test]
     fn expired_subscriptions_are_pruned_at_an_explicit_topology_boundary() {
-        let expired_owner = Rc::new(WidgetEventPort::new());
+        let expired_owner = Rc::new(RefCell::new(WidgetEventPort::new()));
         let expired_event = WidgetEventHandle::new(&expired_owner);
-        let live_owner = Rc::new(WidgetEventPort::new());
+        let live_owner = Rc::new(RefCell::new(WidgetEventPort::new()));
         let live_event = WidgetEventHandle::new(&live_owner);
         let mut session = Session::new();
 
@@ -543,7 +544,7 @@ mod tests {
         session.prune_expired_subscriptions();
         assert_eq!(session.subscriptions.len(), 1);
 
-        live_owner.emit(7);
+        live_owner.borrow_mut().emit(7);
         let mut state = State::default();
         assert!(session.dispatch(&mut state));
         assert_eq!(state.values, [7]);

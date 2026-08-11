@@ -55,7 +55,7 @@
 //! The textbox stores a UTF-8 byte cursor and uses shared text-edit helpers to keep cursor movement
 //! and deletion on valid character boundaries.
 use crate::*;
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use super::text_edit::{apply_text_input, caret_rect, centered_line_top, clamp_cursor_boundary, cursor_from_text_x, font_line_metrics, ReturnBehavior};
 
@@ -114,9 +114,9 @@ pub struct Textbox {
     /// Base widget options.
     opt: WidgetOption,
     /// Runtime-owned source for user-originated text changes.
-    changed_event: Rc<crate::event::WidgetEventPort<TextboxChanged>>,
+    changed_event: Rc<RefCell<crate::event::WidgetEventPort<TextboxChanged>>>,
     /// Runtime-owned source for user submissions.
-    submitted_event: Rc<crate::event::WidgetEventPort<TextboxSubmitted>>,
+    submitted_event: Rc<RefCell<crate::event::WidgetEventPort<TextboxSubmitted>>>,
 }
 
 impl Textbox {
@@ -261,10 +261,10 @@ impl Textbox {
         });
         let submitted = outcome.submitted.then(|| TextboxSubmitted { text: self.buf.clone() });
         if let Some(event) = changed {
-            self.changed_event.emit(event);
+            self.changed_event.borrow_mut().emit(event);
         }
         if let Some(event) = submitted {
-            self.submitted_event.emit(event);
+            self.submitted_event.borrow_mut().emit(event);
         }
     }
 
@@ -460,8 +460,8 @@ impl WidgetBuilder for TextboxBuilder {
             cursor,
             font: parameters.font,
             opt: parameters.opt,
-            changed_event: Rc::new(crate::event::WidgetEventPort::new()),
-            submitted_event: Rc::new(crate::event::WidgetEventPort::new()),
+            changed_event: Rc::new(RefCell::new(crate::event::WidgetEventPort::new())),
+            submitted_event: Rc::new(RefCell::new(crate::event::WidgetEventPort::new())),
         }
     }
 }

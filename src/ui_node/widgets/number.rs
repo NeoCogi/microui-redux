@@ -31,7 +31,7 @@
 //! Retained numeric-entry widget.
 
 use crate::*;
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use super::numeric_edit::*;
 
@@ -111,7 +111,7 @@ pub struct Number {
     /// Text editing state for shift-click numeric entry.
     edit: NumberEditState,
     /// Runtime-owned source for user-originated value changes.
-    changed_event: Rc<crate::event::WidgetEventPort<NumberChanged>>,
+    changed_event: Rc<RefCell<crate::event::WidgetEventPort<NumberChanged>>>,
 }
 
 impl Number {
@@ -164,7 +164,7 @@ impl Number {
         }
         let changed = (self.value != last).then_some(NumberChanged { value: self.value });
         if let Some(event) = changed {
-            self.changed_event.emit(event);
+            self.changed_event.borrow_mut().emit(event);
         }
     }
 
@@ -248,7 +248,7 @@ impl WidgetBuilder for NumberBuilder {
             opt: parameters.opt,
             value: if parameters.value.is_finite() { parameters.value } else { 0.0 },
             edit: NumberEditState::default(),
-            changed_event: Rc::new(crate::event::WidgetEventPort::new()),
+            changed_event: Rc::new(RefCell::new(crate::event::WidgetEventPort::new())),
         }
     }
 }

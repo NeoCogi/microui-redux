@@ -33,7 +33,7 @@
 //! The checkbox toggles persistent boolean state on click and paints the atlas check icon when
 //! selected.
 
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use super::*;
 use crate::{WidgetBuilder, WidgetParameters};
@@ -104,7 +104,7 @@ pub struct Checkbox {
     /// Current checked value.
     checked: bool,
     /// Runtime-owned source for user-originated value changes.
-    changed_event: Rc<crate::event::WidgetEventPort<CheckboxChanged>>,
+    changed_event: Rc<RefCell<crate::event::WidgetEventPort<CheckboxChanged>>>,
 }
 
 impl Checkbox {
@@ -209,7 +209,7 @@ impl Widget for Checkbox {
 
         self.checked = !self.checked;
         let checked = self.checked;
-        self.changed_event.emit(CheckboxChanged { checked });
+        self.changed_event.borrow_mut().emit(CheckboxChanged { checked });
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
@@ -236,7 +236,7 @@ impl WidgetBuilder for CheckboxBuilder {
             font: parameters.font,
             opt: parameters.opt,
             checked: parameters.checked,
-            changed_event: Rc::new(crate::event::WidgetEventPort::new()),
+            changed_event: Rc::new(RefCell::new(crate::event::WidgetEventPort::new())),
         }
     }
 }

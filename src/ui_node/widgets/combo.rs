@@ -34,7 +34,7 @@
 //! actual popup traversal.
 
 use super::*;
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 /// One-shot construction input for a [`Combo`].
 pub struct ComboParameters {
@@ -97,9 +97,9 @@ pub struct Combo {
     /// Base widget options.
     opt: WidgetOption,
     /// Runtime-owned source for selection changes.
-    changed_event: Rc<crate::event::WidgetEventPort<ComboChanged>>,
+    changed_event: Rc<RefCell<crate::event::WidgetEventPort<ComboChanged>>>,
     /// Runtime-owned source for header submissions.
-    submitted_event: Rc<crate::event::WidgetEventPort<ComboSubmitted>>,
+    submitted_event: Rc<RefCell<crate::event::WidgetEventPort<ComboSubmitted>>>,
 }
 
 impl Combo {
@@ -187,14 +187,14 @@ impl Combo {
         if self.selected == previous_selected && self.label == previous_label {
             return;
         }
-        self.changed_event.emit(ComboChanged {
+        self.changed_event.borrow_mut().emit(ComboChanged {
             selected: self.selected,
             label: self.label.clone(),
         });
     }
 
     fn emit_changed(&mut self) {
-        self.changed_event.emit(ComboChanged {
+        self.changed_event.borrow_mut().emit(ComboChanged {
             selected: self.selected,
             label: self.label.clone(),
         });
@@ -313,7 +313,7 @@ impl Combo {
             None
         };
         if let Some(event) = submitted {
-            self.submitted_event.emit(event);
+            self.submitted_event.borrow_mut().emit(event);
         }
     }
 
@@ -384,8 +384,8 @@ impl WidgetBuilder for ComboBuilder {
             last_anchor: Recti::default(),
             font: parameters.font,
             opt: parameters.opt,
-            changed_event: Rc::new(crate::event::WidgetEventPort::new()),
-            submitted_event: Rc::new(crate::event::WidgetEventPort::new()),
+            changed_event: Rc::new(RefCell::new(crate::event::WidgetEventPort::new())),
+            submitted_event: Rc::new(RefCell::new(crate::event::WidgetEventPort::new())),
         }
     }
 }
