@@ -48,10 +48,11 @@
 //!                       &mut State
 //! ```
 //!
-//! There is no application-wide message enum, mapping adapter, downcast, or `Any` payload. The
-//! queue erases only the invocation behavior required to hold different native event types in one
-//! FIFO. Multiple subscribers receive the same `Rc<E>`, matching C# multicast-event semantics
-//! without requiring `E: Clone`.
+//! There is no application-wide message enum, mapping adapter, closure-erased callback, downcast,
+//! or `Any` payload. The two dynamic boundaries are explicit traits: `EventSubscriber<E>` lets one
+//! port hold subscribers for different application state types, and `SubscriberInvoker<State>`
+//! lets one session FIFO hold invocations for different native event types. Multiple subscribers
+//! receive the same `Rc<E>`, matching C# multicast-event semantics without requiring `E: Clone`.
 //!
 //! Event handles and session subscription records hold weak widget-port references, so neither
 //! keeps a removed widget alive. A port subscriber holds only a weak session-queue reference, so a
@@ -94,9 +95,17 @@ pub trait TypedWidget<E: WidgetEvent>: Widget {
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 pub struct SubscriptionId(u64);
 
+/// Typed behavior installed in a widget event port.
+///
+/// Implementations expose the queue, state method, and optional bound context as ordinary fields;
+/// only the concrete subscriber implementation is erased by the multicast port.
+trait EventSubscriber<E> {
+    fn enqueue(&self, event: Rc<E>);
+}
+
 struct PortSubscriber<E> {
     id: SubscriptionId,
-    enqueue: Box<dyn Fn(Rc<E>)>,
+    subscriber: Box<dyn EventSubscriber<E>>,
 }
 
 /// One widget-owned, typed multicast event output.
@@ -118,16 +127,16 @@ impl<E: WidgetEvent> WidgetEventPort<E> {
             return;
         }
 
-        // One shared allocation lets a non-Clone event reach every subscriber. Subscriber
-        // callbacks only append to their session queues and cannot synchronously call State.
+        // One shared allocation lets a non-Clone event reach every subscriber. Port subscribers
+        // only append to their session queues and cannot synchronously call State.
         let event = Rc::new(event);
         for subscriber in subscribers.iter() {
-            (subscriber.enqueue)(Rc::clone(&event));
+            subscriber.subscriber.enqueue(Rc::clone(&event));
         }
     }
 
-    fn subscribe(&self, id: SubscriptionId, enqueue: impl Fn(Rc<E>) + 'static) {
-        self.subscribers.borrow_mut().push(PortSubscriber { id, enqueue: Box::new(enqueue) });
+    fn subscribe(&self, id: SubscriptionId, subscriber: impl EventSubscriber<E> + 'static) {
+        self.subscribers.borrow_mut().push(PortSubscriber { id, subscriber: Box::new(subscriber) });
     }
 
     fn unsubscribe(&self, id: SubscriptionId) {
@@ -234,6 +243,40 @@ impl<State, Context, E> SubscriberInvoker<State> for BoundSubscriber<State, Cont
 }
 
 type SubscriberQueue<State> = Rc<RefCell<VecDeque<Box<dyn SubscriberInvoker<State>>>>>;
+type WeakSubscriberQueue<State> = Weak<RefCell<VecDeque<Box<dyn SubscriberInvoker<State>>>>>;
+
+struct MethodEventSubscriber<State, E> {
+    queue: WeakSubscriberQueue<State>,
+    method: fn(&mut State, &E),
+}
+
+impl<State: 'static, E: 'static> EventSubscriber<E> for MethodEventSubscriber<State, E> {
+    fn enqueue(&self, event: Rc<E>) {
+        let Some(queue) = self.queue.upgrade() else {
+            return;
+        };
+        queue.borrow_mut().push_back(Box::new(Subscriber { event, method: self.method }));
+    }
+}
+
+struct BoundMethodEventSubscriber<State, Context, E> {
+    queue: WeakSubscriberQueue<State>,
+    context: Rc<Context>,
+    method: fn(&mut State, &Context, &E),
+}
+
+impl<State: 'static, Context: 'static, E: 'static> EventSubscriber<E> for BoundMethodEventSubscriber<State, Context, E> {
+    fn enqueue(&self, event: Rc<E>) {
+        let Some(queue) = self.queue.upgrade() else {
+            return;
+        };
+        queue.borrow_mut().push_back(Box::new(BoundSubscriber {
+            context: Rc::clone(&self.context),
+            event,
+            method: self.method,
+        }));
+    }
+}
 
 /// Cloneable access to a session queue for state objects that own their own `Session` field.
 ///
@@ -277,13 +320,13 @@ impl<State: 'static> Session<State> {
         };
 
         let id = next_subscription_id();
-        let queue = Rc::downgrade(&self.queue);
-        port.subscribe(id, move |event| {
-            let Some(queue) = queue.upgrade() else {
-                return;
-            };
-            queue.borrow_mut().push_back(Box::new(Subscriber { event, method }));
-        });
+        port.subscribe(
+            id,
+            MethodEventSubscriber {
+                queue: Rc::downgrade(&self.queue),
+                method,
+            },
+        );
         self.subscriptions.push(Box::new(PortSubscription { id, port: Rc::downgrade(&port) }));
         Ok(id)
     }
@@ -304,18 +347,14 @@ impl<State: 'static> Session<State> {
         };
 
         let id = next_subscription_id();
-        let queue = Rc::downgrade(&self.queue);
-        let context = Rc::new(context);
-        port.subscribe(id, move |event| {
-            let Some(queue) = queue.upgrade() else {
-                return;
-            };
-            queue.borrow_mut().push_back(Box::new(BoundSubscriber {
-                context: Rc::clone(&context),
-                event,
+        port.subscribe(
+            id,
+            BoundMethodEventSubscriber {
+                queue: Rc::downgrade(&self.queue),
+                context: Rc::new(context),
                 method,
-            }));
-        });
+            },
+        );
         self.subscriptions.push(Box::new(PortSubscription { id, port: Rc::downgrade(&port) }));
         Ok(id)
     }

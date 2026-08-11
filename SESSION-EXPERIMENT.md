@@ -98,10 +98,15 @@ that subscriber. Multiple methods and multiple sessions may subscribe to the sam
 
 ## Minimal type erasure
 
-There is no application message type, mapping adapter, `Any`, payload downcast, or heterogeneous
-payload map. The session FIFO erases only `SubscriberInvoker<State>` so invocations carrying
-different concrete event types can share one queue. Each invocation still contains its statically
-typed `fn(&mut State, &Event)` method.
+There is no application message type, mapping adapter, closure-erased callback, `Any`, payload
+downcast, or heterogeneous payload map. Both necessary dynamic boundaries are named traits with
+visible implementations:
+
+- `EventSubscriber<Event>` lets a multicast port hold subscribers targeting different application
+  state types. `MethodEventSubscriber` visibly stores its weak queue and state method;
+  `BoundMethodEventSubscriber` additionally stores its shared context.
+- `SubscriberInvoker<State>` lets one session FIFO contain invocations carrying different concrete
+  event types. Each invocation visibly stores its event and statically typed state method.
 
 One emitted event is placed in `Rc<Event>` so every multicast subscriber observes the same value
 without requiring `Event: Clone`. Each subscriber appends one boxed invocation to its session FIFO.
