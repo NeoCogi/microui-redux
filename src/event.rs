@@ -99,11 +99,11 @@ pub struct SubscriptionId(u64);
 ///
 /// Implementations expose the queue, state method, and optional bound context as ordinary fields;
 /// only the concrete subscriber implementation is erased by the multicast port.
-trait EventSubscriber<E> {
+trait EventSubscriber<E: WidgetEvent> {
     fn enqueue(&self, event: Rc<E>);
 }
 
-struct PortSubscriber<E> {
+struct PortSubscriber<E: WidgetEvent> {
     id: SubscriptionId,
     subscriber: Box<dyn EventSubscriber<E>>,
 }
@@ -219,24 +219,24 @@ trait SubscriberInvoker<State> {
     fn invoke(self: Box<Self>, state: &mut State);
 }
 
-struct Subscriber<State, E> {
+struct Subscriber<State, E: WidgetEvent> {
     event: Rc<E>,
     method: fn(&mut State, &E),
 }
 
-impl<State, E> SubscriberInvoker<State> for Subscriber<State, E> {
+impl<State, E: WidgetEvent> SubscriberInvoker<State> for Subscriber<State, E> {
     fn invoke(self: Box<Self>, state: &mut State) {
         (self.method)(state, &self.event);
     }
 }
 
-struct BoundSubscriber<State, Context, E> {
+struct BoundSubscriber<State, Context, E: WidgetEvent> {
     context: Rc<Context>,
     event: Rc<E>,
     method: fn(&mut State, &Context, &E),
 }
 
-impl<State, Context, E> SubscriberInvoker<State> for BoundSubscriber<State, Context, E> {
+impl<State, Context, E: WidgetEvent> SubscriberInvoker<State> for BoundSubscriber<State, Context, E> {
     fn invoke(self: Box<Self>, state: &mut State) {
         (self.method)(state, &self.context, &self.event);
     }
@@ -250,7 +250,7 @@ struct MethodEventSubscriber<State, E> {
     method: fn(&mut State, &E),
 }
 
-impl<State: 'static, E: 'static> EventSubscriber<E> for MethodEventSubscriber<State, E> {
+impl<State: 'static, E: WidgetEvent> EventSubscriber<E> for MethodEventSubscriber<State, E> {
     fn enqueue(&self, event: Rc<E>) {
         let Some(queue) = self.queue.upgrade() else {
             return;
@@ -265,7 +265,7 @@ struct BoundMethodEventSubscriber<State, Context, E> {
     method: fn(&mut State, &Context, &E),
 }
 
-impl<State: 'static, Context: 'static, E: 'static> EventSubscriber<E> for BoundMethodEventSubscriber<State, Context, E> {
+impl<State: 'static, Context: 'static, E: WidgetEvent> EventSubscriber<E> for BoundMethodEventSubscriber<State, Context, E> {
     fn enqueue(&self, event: Rc<E>) {
         let Some(queue) = self.queue.upgrade() else {
             return;
