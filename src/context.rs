@@ -30,7 +30,7 @@
 
 //! Generic application façade over the non-generic retained window manager.
 //!
-//! `Context` owns the backend renderer and typed application event session. Every retained root,
+//! `Context` owns the backend renderer and typed application event dispatcher. Every retained root,
 //! input, layout, modal, style, and display-list operation is delegated to [`WindowManager`].
 
 use crate::window_manager::{RootHandle, RootId, RootMutationError, WindowManager, WindowOption};
@@ -77,8 +77,8 @@ pub struct Context<B: RendererBackend, State: 'static = ()> {
     renderer: Renderer<B>,
     /// Backend- and application-state-independent retained window manager.
     pub(crate) window_manager: WindowManager,
-    /// Sole application event session for this context and its retained widget forest.
-    event_session: crate::event::EventSession<State>,
+    /// Sole application event dispatcher for this context and its retained widget forest.
+    event_dispatcher: crate::event::EventDispatcher<State>,
     /// Drawable size used by retained behavior tests that drive complete frames tersely.
     #[cfg(test)]
     test_dimensions: Dimensioni,
@@ -124,7 +124,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         Self {
             renderer,
             window_manager: WindowManager::new(style),
-            event_session: crate::event::EventSession::new(),
+            event_dispatcher: crate::event::EventDispatcher::new(),
             #[cfg(test)]
             test_dimensions: Dimensioni::new(1, 1),
         }
@@ -191,7 +191,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         assert!(dimensions.width > 0 && dimensions.height > 0, "update_ui_state dimensions must be positive");
         let atlas = self.renderer.atlas();
         self.window_manager
-            .update_with(dimensions, &atlas, state, |state| self.event_session.dispatch(state));
+            .update_with(dimensions, &atlas, state, |state| self.event_dispatcher.dispatch(state));
     }
 
     /// Subscribes the context's application state to one native widget event.
@@ -199,7 +199,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// A widget event port accepts one subscription and returns
     /// [`crate::SubscribeError::AlreadySubscribed`] for another.
     pub fn subscribe<E: crate::WidgetEvent>(&mut self, event: crate::WidgetEventHandle<E>, method: fn(&mut State, &E)) -> Result<(), crate::SubscribeError> {
-        self.event_session.subscribe(event, method)
+        self.event_dispatcher.subscribe(event, method)
     }
 
     /// Subscribes the context's application state with one bound application value.
@@ -212,7 +212,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         context: BoundContext,
         method: fn(&mut State, &BoundContext, &E),
     ) -> Result<(), crate::SubscribeError> {
-        self.event_session.subscribe_with(event, context, method)
+        self.event_dispatcher.subscribe_with(event, context, method)
     }
 }
 

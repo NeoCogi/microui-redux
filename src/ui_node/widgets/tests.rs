@@ -218,12 +218,12 @@ fn typed_click_events_preserve_fifo_within_each_port() {
     let mut list = ListBoxBuilder::create_widget(ListBoxParameters::new("list", None));
     let mut combo = ComboBuilder::create_widget(ComboParameters::new());
 
-    let mut session = crate::event::EventSession::new();
-    session.subscribe(checkbox.changed(), record_checkbox).unwrap();
-    session.subscribe(button.submitted(), record_button).unwrap();
-    session.subscribe(item.submitted(), record_item).unwrap();
-    session.subscribe(list.submitted(), record_list_box).unwrap();
-    session.subscribe(combo.submitted(), record_combo).unwrap();
+    let mut dispatcher = crate::event::EventDispatcher::new();
+    dispatcher.subscribe(checkbox.changed(), record_checkbox).unwrap();
+    dispatcher.subscribe(button.submitted(), record_button).unwrap();
+    dispatcher.subscribe(item.submitted(), record_item).unwrap();
+    dispatcher.subscribe(list.submitted(), record_list_box).unwrap();
+    dispatcher.subscribe(combo.submitted(), record_combo).unwrap();
 
     for _ in 0..2 {
         run_click(&mut checkbox);
@@ -234,7 +234,7 @@ fn typed_click_events_preserve_fifo_within_each_port() {
     }
 
     let mut events = Vec::new();
-    assert!(session.dispatch(&mut events));
+    assert!(dispatcher.dispatch(&mut events));
     assert_eq!(
         events,
         [
@@ -257,11 +257,11 @@ fn combo_selection_and_item_clamping_emit_only_value_changes() {
     let (state, _node) = Combo::create(ComboParameters::new());
     let labels = ["zero", "one", "two"];
 
-    let mut session = crate::event::EventSession::new();
+    let mut dispatcher = crate::event::EventDispatcher::new();
     fn record_change(events: &mut Vec<(usize, String)>, event: &ComboChanged) {
         events.push((event.selected, event.label.clone()));
     }
-    session.subscribe(state.changed(), record_change).unwrap();
+    dispatcher.subscribe(state.changed(), record_change).unwrap();
     let mut events = Vec::new();
 
     state
@@ -271,16 +271,16 @@ fn combo_selection_and_item_clamping_emit_only_value_changes() {
             assert_eq!(combo.select(2, &labels).as_deref(), Some("two"));
         })
         .unwrap();
-    assert!(session.dispatch(&mut events));
+    assert!(dispatcher.dispatch(&mut events));
     assert_eq!(events, [(2, "two".to_owned())]);
 
     state.try_update(|combo| combo.update_items(&labels[..1])).unwrap();
     assert_eq!(state.try_read(Combo::selected), Some(0));
-    assert!(session.dispatch(&mut events));
+    assert!(dispatcher.dispatch(&mut events));
     assert_eq!(events, [(2, "two".to_owned()), (0, "zero".to_owned())]);
 
     state.try_update(|combo| combo.update_items(&labels[..1])).unwrap();
-    assert!(!session.dispatch(&mut events));
+    assert!(!dispatcher.dispatch(&mut events));
 }
 
 #[test]
@@ -289,9 +289,9 @@ fn checkbox_and_list_item_programmatic_setters_are_silent() {
     let (item, _item_node) = ListItem::create(ListItemParameters::new("before"));
     fn ignore_checkbox(_: &mut (), _: &CheckboxChanged) {}
     fn ignore_item(_: &mut (), _: &ListItemSubmitted) {}
-    let mut session = crate::event::EventSession::<()>::new();
-    session.subscribe(checkbox.changed(), ignore_checkbox).unwrap();
-    session.subscribe(item.submitted(), ignore_item).unwrap();
+    let mut dispatcher = crate::event::EventDispatcher::<()>::new();
+    dispatcher.subscribe(checkbox.changed(), ignore_checkbox).unwrap();
+    dispatcher.subscribe(item.submitted(), ignore_item).unwrap();
 
     checkbox
         .try_update(|state| {
@@ -301,7 +301,7 @@ fn checkbox_and_list_item_programmatic_setters_are_silent() {
         })
         .unwrap();
     item.try_update(|state| state.set_label("after")).unwrap();
-    assert!(!session.dispatch(&mut ()));
+    assert!(!dispatcher.dispatch(&mut ()));
 }
 
 #[test]
@@ -309,10 +309,10 @@ fn subscribing_to_an_event_does_not_borrow_semantic_widget_state() {
     let (button, _node) = Button::create(ButtonParameters::new("button"));
     let submitted = button.submitted();
     fn ignore(_: &mut (), _: &ButtonSubmitted) {}
-    let mut session = crate::event::EventSession::<()>::new();
+    let mut dispatcher = crate::event::EventDispatcher::<()>::new();
 
     let subscribed = button
-        .try_update(|_| session.subscribe(submitted, ignore))
+        .try_update(|_| dispatcher.subscribe(submitted, ignore))
         .expect("button state should remain available");
 
     assert!(subscribed.is_ok());

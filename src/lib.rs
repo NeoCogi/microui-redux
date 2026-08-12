@@ -108,7 +108,7 @@
 //!
 //! Event-driven applications construct `Context::<B, State>::new(backend)`, register each
 //! native widget endpoint through [`Context::subscribe`] or [`Context::subscribe_with`], and call
-//! [`Context::update_ui_state`]. The context owns the only application event session for its
+//! [`Context::update_ui_state`]. The context owns the only application event dispatcher for its
 //! complete root forest. Each event port owns its pending payloads and accepts one state method.
 //!
 //! Update and paint traverse parent before children and siblings in forward order. Later work sees

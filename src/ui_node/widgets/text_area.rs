@@ -829,11 +829,11 @@ mod tests {
         events.push(RecordedEvent::Submitted(event.text.clone()));
     }
 
-    fn text_session(text_area: &TextArea) -> crate::event::EventSession<Vec<RecordedEvent>> {
-        let mut session = crate::event::EventSession::new();
-        session.subscribe(text_area.changed(), record_changed).unwrap();
-        session.subscribe(text_area.submitted(), record_submitted).unwrap();
-        session
+    fn text_dispatcher(text_area: &TextArea) -> crate::event::EventDispatcher<Vec<RecordedEvent>> {
+        let mut dispatcher = crate::event::EventDispatcher::new();
+        dispatcher.subscribe(text_area.changed(), record_changed).unwrap();
+        dispatcher.subscribe(text_area.submitted(), record_submitted).unwrap();
+        dispatcher
     }
 
     fn update_text_area(text_area: &mut TextArea, input: Vec<UiInputEvent>) {
@@ -858,7 +858,7 @@ mod tests {
     #[test]
     fn text_area_dispatches_independent_change_and_submission_events() {
         let mut text_area = TextAreaBuilder::create_widget(TextAreaParameters::new(""));
-        let mut session = text_session(&text_area);
+        let mut dispatcher = text_dispatcher(&text_area);
         update_text_area(
             &mut text_area,
             vec![
@@ -868,7 +868,7 @@ mod tests {
             ],
         );
         let mut events = Vec::new();
-        assert!(session.dispatch(&mut events));
+        assert!(dispatcher.dispatch(&mut events));
         assert_eq!(
             events,
             [RecordedEvent::Changed("line".to_owned(), 4), RecordedEvent::Submitted("line".to_owned())]
@@ -878,12 +878,12 @@ mod tests {
     #[test]
     fn programmatic_text_cursor_and_scroll_setters_are_silent() {
         let mut text_area = TextAreaBuilder::create_widget(TextAreaParameters::new("initial"));
-        let mut session = text_session(&text_area);
+        let mut dispatcher = text_dispatcher(&text_area);
         text_area.set_text("replacement");
         text_area.set_cursor(3);
         text_area.move_cursor_to_end();
         text_area.set_scroll(vec2(5, 7));
         text_area.clear();
-        assert!(!session.dispatch(&mut Vec::new()));
+        assert!(!dispatcher.dispatch(&mut Vec::new()));
     }
 }

@@ -485,11 +485,11 @@ mod tests {
         events.push(RecordedEvent::Submitted(event.text.clone()));
     }
 
-    fn text_session(textbox: &Textbox) -> crate::event::EventSession<Vec<RecordedEvent>> {
-        let mut session = crate::event::EventSession::new();
-        session.subscribe(textbox.changed(), record_changed).unwrap();
-        session.subscribe(textbox.submitted(), record_submitted).unwrap();
-        session
+    fn text_dispatcher(textbox: &Textbox) -> crate::event::EventDispatcher<Vec<RecordedEvent>> {
+        let mut dispatcher = crate::event::EventDispatcher::new();
+        dispatcher.subscribe(textbox.changed(), record_changed).unwrap();
+        dispatcher.subscribe(textbox.submitted(), record_submitted).unwrap();
+        dispatcher
     }
 
     fn update_textbox(textbox: &mut Textbox, focused: bool, input: Vec<UiInputEvent>) {
@@ -527,7 +527,7 @@ mod tests {
     #[test]
     fn text_events_preserve_complete_snapshots_and_per_port_fifo() {
         let mut textbox = TextboxBuilder::create_widget(TextboxParameters::new(""));
-        let mut session = text_session(&textbox);
+        let mut dispatcher = text_dispatcher(&textbox);
 
         update_textbox(
             &mut textbox,
@@ -542,7 +542,7 @@ mod tests {
 
         assert_eq!(textbox.text(), "abcde");
         let mut events = Vec::new();
-        assert!(session.dispatch(&mut events));
+        assert!(dispatcher.dispatch(&mut events));
         assert_eq!(
             events,
             [
@@ -557,11 +557,11 @@ mod tests {
     #[test]
     fn programmatic_text_and_cursor_setters_are_silent() {
         let mut textbox = TextboxBuilder::create_widget(TextboxParameters::new("initial"));
-        let mut session = text_session(&textbox);
+        let mut dispatcher = text_dispatcher(&textbox);
         textbox.set_text("replacement");
         textbox.set_cursor(3);
         textbox.move_cursor_to_end();
         textbox.clear();
-        assert!(!session.dispatch(&mut Vec::new()));
+        assert!(!dispatcher.dispatch(&mut Vec::new()));
     }
 }

@@ -1,7 +1,7 @@
 # Context-owned typed events
 
 The retained UI is one transaction domain. A `Context<B, State>` owns the hardware-input FIFO, all
-window/dialog/popup roots, and one typed event session for `State`. Widgets remain independent of
+window/dialog/popup roots, and one typed event dispatcher for `State`. Widgets remain independent of
 the application state type: each concrete widget owns only its native `WidgetEventPort<Event>`.
 
 ## Application API
@@ -49,7 +49,7 @@ Context input FIFO
     -> route one raw event through the eligible root tree
     -> widget mutates local state and appends E to WidgetEventPort<E>
     -> complete cross-root update releases retained widget borrows
-    -> context session drains subscribed ports into &mut State
+    -> context dispatcher drains subscribed ports into &mut State
     -> layout commits before the next raw event is routed
 ```
 
@@ -64,11 +64,12 @@ feedback loops.
 - `WidgetEventHandle<Event>` and context subscription records hold weak port references.
 - Each port accepts one context subscription and discards events while unsubscribed.
 - Removing a widget drops its pending events; dead context bindings are pruned during dispatch.
-- Dropping the context session disconnects its live ports.
+- Dropping the context dispatcher disconnects its live ports.
 - FIFO is preserved within each port. When several ports have pending events at one boundary,
   subscription order determines their dispatch order.
 - One state method owns the effects for one port; application-level fan-out is ordinary method
   composition rather than multicast event infrastructure.
 
-This leaves one dynamic boundary: the context session erases the concrete event type of each port
-dispatcher so a single `Context<B, State>` can subscribe to heterogeneous native widget events.
+This leaves one dynamic boundary: the context dispatcher erases the concrete event type of each
+port subscription so a single `Context<B, State>` can subscribe to heterogeneous native widget
+events.

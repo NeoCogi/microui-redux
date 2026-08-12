@@ -54,7 +54,7 @@
 //!
 //! [`WindowManager`] owns retained roots, ordered input, modal policy, layout state, and display-list
 //! recording. The generic [`crate::Context`] façade owns it alongside the renderer and application
-//! event session.
+//! event dispatcher.
 use bitflags::bitflags;
 
 use crate::input::Input;

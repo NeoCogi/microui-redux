@@ -278,7 +278,7 @@ ctx.frame(info).render_ui()?;
 ```
 
 An event-driven context is constructed as `Context::<Backend, Model>::new(backend)`. It owns
-the sole event session for its complete root forest. Each subscribed widget port queues its own
+the sole event dispatcher for its complete root forest. Each subscribed widget port queues its own
 native payloads, and the context drains those queues into `Model` after retained widget borrows
 have ended. A port accepts one state method; compose additional effects inside that method.
 
