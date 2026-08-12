@@ -53,7 +53,7 @@
 //! ├── owns retained root forest
 //! │      └── owns concrete Widget
 //! │             └── owns Rc<RefCell<WidgetEventPort<E>>>
-//! │                         └── owns Option<VecDeque<E>>
+//! │                         └── owns Option<Vec<E>>
 //! │
 //! └── owns EventSession<State>
 //!        └── owns Vec<Box<dyn EventDispatch<State>>>
@@ -78,7 +78,7 @@
 //!
 //! # The port state machine
 //!
-//! [`WidgetEventPort`] uses `Option<VecDeque<E>>` for both subscription state and storage. It has
+//! [`WidgetEventPort`] uses `Option<Vec<E>>` for both subscription state and storage. It has
 //! exactly two stable states:
 //!
 //! ```text
@@ -202,7 +202,7 @@
 //!
 //! Ordering is exact within one port and deliberately local across ports:
 //!
-//! - one port preserves emission order with `VecDeque<E>`;
+//! - one port preserves emission order with `Vec<E>`;
 //! - the session visits ports in subscription order;
 //! - each visit drains that port's complete currently-pending batch; and
 //! - the session repeats full subscription-order sweeps until no handler receives an event.
@@ -267,7 +267,7 @@
 //!
 //! # Cost model and non-goals
 //!
-//! A disconnected port has no `VecDeque` allocation. Connecting creates an empty queue; for
+//! A disconnected port has no `Vec` allocation. Connecting creates an empty batch; for
 //! non-zero-sized payloads, backing storage is allocated on demand by the first emission. `emit` is
 //! amortized O(1), moves the payload once, and performs no dynamic dispatch. Draining moves the
 //! queue buffer into the dispatch batch; when that batch is dropped, its capacity is released
@@ -285,7 +285,6 @@
 //! of a synchronous, context-local retained UI event mechanism.
 
 use std::cell::RefCell;
-use std::collections::VecDeque;
 use std::fmt;
 use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
@@ -330,7 +329,7 @@ pub trait TypedWidget<E: WidgetEvent>: Widget {
 /// one listener is connected. Keeping those states in one field makes it impossible for the
 /// connection flag and queue lifetime to disagree.
 pub(crate) struct WidgetEventPort<E: WidgetEvent> {
-    pending: Option<VecDeque<E>>,
+    pending: Option<Vec<E>>,
 }
 
 impl<E: WidgetEvent> WidgetEventPort<E> {
@@ -348,7 +347,7 @@ impl<E: WidgetEvent> WidgetEventPort<E> {
     /// Delivery is deferred; this method never invokes application code.
     pub(crate) fn emit(&mut self, event: E) {
         if let Some(pending) = &mut self.pending {
-            pending.push_back(event);
+            pending.push(event);
         }
     }
 
@@ -359,7 +358,7 @@ impl<E: WidgetEvent> WidgetEventPort<E> {
         if self.pending.is_some() {
             return Err(SubscribeError::AlreadySubscribed);
         }
-        self.pending = Some(VecDeque::new());
+        self.pending = Some(Vec::new());
         Ok(())
     }
 
@@ -376,7 +375,7 @@ impl<E: WidgetEvent> WidgetEventPort<E> {
     /// Returning an owned queue ensures the port's `RefCell` borrow ends before a handler runs. An
     /// event emitted recursively by that handler therefore enters the new empty queue and is
     /// observed by a subsequent session sweep.
-    fn drain(&mut self) -> VecDeque<E> {
+    fn drain(&mut self) -> Vec<E> {
         self.pending.as_mut().map(std::mem::take).unwrap_or_default()
     }
 }
@@ -498,7 +497,7 @@ impl<E: WidgetEvent> WidgetEventListener<E> {
     ///
     /// A dead or disconnected port produces an empty queue. The listener itself remains usable as
     /// a liveness record until its owner prunes or drops it.
-    pub(crate) fn drain(&self) -> VecDeque<E> {
+    pub(crate) fn drain(&self) -> Vec<E> {
         self.port.upgrade().map(|port| port.borrow_mut().drain()).unwrap_or_default()
     }
 
