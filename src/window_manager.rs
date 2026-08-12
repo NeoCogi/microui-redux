@@ -50,17 +50,17 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Top-level retained UI context and root-window coordination.
+//! Backend-independent retained root-window coordination.
 //!
-//! `Context` owns the high-level renderer, global input, window-manager state, and the published
-//! retained roots driven by each frame.
+//! [`WindowManager`] owns retained roots, ordered input, modal policy, layout state, and display-list
+//! recording. The generic [`crate::Context`] façade owns it alongside the renderer and application
+//! event session.
 use bitflags::bitflags;
 
 use crate::input::Input;
-use crate::{rect, Dimensioni, ImageSource, KeyCode, KeyMode, MouseButton, Recti, Style, TextureId, UiRuntime};
-use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, DisplayList, FrameInfo, RenderError, Renderer, RendererBackend};
+use crate::render::DisplayList;
+use crate::{Dimensioni, Recti, Style, UiRuntime};
 use roots::WindowEntry;
-mod input_api;
 mod root_chrome;
 mod roots;
 
@@ -89,7 +89,7 @@ bitflags! {
     }
 }
 
-/// Opaque identifier for a root window, dialog, or popup registered with [`Context`].
+/// Opaque identifier for a root window, dialog, or popup registered with [`crate::Context`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RootId(usize);
 
@@ -98,52 +98,6 @@ impl RootId {
     pub(crate) const fn from_raw(raw: usize) -> Self {
         Self(raw)
     }
-}
-
-/// Primary entry point used to drive the UI over a rendering backend.
-///
-/// `Context` is the only public ordered input-queue boundary. Input forwarding calls append raw
-/// transitions without coalescing; [`Context::update_ui`] drains them in call order. The exception
-/// to ordinary root hit routing is the popup boundary: an outside pointer press dismisses the
-/// active popup before the event may continue to the root underneath.
-///
-/// Across ordinary roots, pointer hover and new presses follow topmost hit geometry. Drag, wheel,
-/// keyboard, and text input are confined to the current input root: a root with widget-level
-/// pointer capture remains authoritative, otherwise the front visible root is authoritative.
-/// Captured pointer release still returns to its widget so local drag state is cleaned up.
-///
-/// A visible dialog is modal. It remains above every other root and is the only root eligible for
-/// pointer, keyboard, text, focus, or capture routing until it is hidden or destroyed. Pointer
-/// input outside its rectangle is consumed at the cross-root boundary; other roots remain visible
-/// and continue to participate in layout and paint.
-///
-/// `Context`, its retained state, and its registered custom-render callbacks stay on the thread
-/// that owns the context. The rendering contracts intentionally do not require `Send` or `Sync`;
-/// applications should deliver any cross-thread results before starting a [`ContextFrame`].
-///
-/// A live [`ContextFrame`] exclusively owns the Context borrow, preventing input/resource
-/// mutation or another logical frame until it is rendered or cancelled:
-///
-/// ```compile_fail
-/// use microui_redux::Context;
-/// use microui_redux::render::{FrameInfo, RendererBackend};
-///
-/// fn mutate_during_frame<B: RendererBackend>(context: &mut Context<B>, info: FrameInfo) {
-///     let frame = context.frame(info);
-///     context.mousemove(10, 20);
-///     drop(frame);
-/// }
-/// ```
-pub struct Context<B: RendererBackend, State: 'static = ()> {
-    /// High-level renderer that replays root display lists.
-    renderer: Renderer<B>,
-    /// Backend- and application-state-independent retained window manager.
-    pub(crate) window_manager: WindowManager,
-    /// Sole application event session for this context and its retained widget forest.
-    event_session: crate::event::EventSession<State>,
-    /// Drawable size used by retained behavior tests that drive complete frames tersely.
-    #[cfg(test)]
-    test_dimensions: Dimensioni,
 }
 
 /// Backend- and application-state-independent retained window manager.
@@ -155,7 +109,7 @@ pub(crate) struct WindowManager {
 
     /// Highest z-index allocated to an open window-manager root.
     last_zindex: i32,
-    /// Registered window-manager roots replayed by [`ContextFrame::render_ui`].
+    /// Registered window-manager roots replayed by [`crate::ContextFrame::render_ui`].
     roots: Vec<WindowEntry>,
     /// Visible dialogs in nesting order; the last entry is the sole input root.
     modal_stack: Vec<RootId>,
@@ -165,14 +119,14 @@ pub(crate) struct WindowManager {
     pub(crate) file_dialogs: Vec<crate::file_dialog::FileDialogController>,
     /// Next file-dialog session id counter.
     pub(crate) next_file_dialog_id: usize,
-    /// Ordered input state owned and consumed directly by this Context.
+    /// Ordered input state owned and consumed directly by this window manager.
     input: Input,
     /// Dimensions of the most recent complete update/layout commit.
     ui_commit: Option<Dimensioni>,
 }
 
 impl WindowManager {
-    fn new(style: Style) -> Self {
+    pub(crate) fn new(style: Style) -> Self {
         Self {
             display_list: DisplayList::new(),
             style,
@@ -187,91 +141,77 @@ impl WindowManager {
         }
     }
 
-    fn invalidate_ui_commit(&mut self) {
+    pub(crate) fn invalidate_ui_commit(&mut self) {
         self.ui_commit = None;
     }
 
     pub(crate) fn style(&self) -> &Style {
         &self.style
     }
-}
 
-impl<B: RendererBackend> Context<B> {
-    /// Drains input and commits layout for a polling-only context.
-    #[track_caller]
-    pub fn update_ui(&mut self, dimensions: Dimensioni) {
-        assert!(dimensions.width > 0 && dimensions.height > 0, "update_ui dimensions must be positive");
-        let atlas = self.renderer.atlas();
-        self.window_manager.ui_commit = None;
-        self.window_manager.update(dimensions, &atlas);
-        self.window_manager.ui_commit = Some(dimensions);
+    pub(crate) fn set_style(&mut self, style: Style) {
+        self.style = style;
+        self.invalidate_ui_commit();
     }
 
-    #[cfg(test)]
-    pub(crate) fn new_test(backend: B, dimensions: Dimensioni) -> Self {
-        Self::new_test_state(backend, dimensions)
+    pub(crate) fn mousemove(&mut self, x: i32, y: i32) {
+        self.input.mousemove(x, y);
+        self.invalidate_ui_commit();
     }
 
-    /// Updates and renders once for retained behavior tests.
-    #[cfg(test)]
-    pub(crate) fn update_and_render_ui(&mut self) {
-        let info = FrameInfo::try_new(self.test_dimensions, crate::color(0, 0, 0, 0)).expect("test Context dimensions must be positive");
-        self.update_ui(self.test_dimensions);
-        self.frame(info).render_ui().expect("test backend frame should render");
-    }
-}
-
-impl<B: RendererBackend, State: 'static> Context<B, State> {
-    /// Creates a new UI context with unique ownership of the provided backend.
-    ///
-    /// The default style binds conventional semantic font and icon names from the backend atlas.
-    pub fn new(backend: B) -> Self {
-        // The backend supplies the atlas; the default style then binds semantic assets from it.
-        let renderer = Renderer::new(backend);
-        let style = Style::default().with_named_assets(&renderer.atlas());
-        Self {
-            renderer,
-            window_manager: WindowManager::new(style),
-            event_session: crate::event::EventSession::new(),
-            #[cfg(test)]
-            test_dimensions: Dimensioni::new(1, 1),
-        }
+    pub(crate) fn mousedown(&mut self, x: i32, y: i32, button: crate::MouseButton) {
+        self.input.mousedown(x, y, button);
+        self.invalidate_ui_commit();
     }
 
-    /// Creates a Context whose test-only frame helper uses `dimensions`.
-    #[cfg(test)]
-    pub(crate) fn new_test_state(backend: B, dimensions: Dimensioni) -> Self {
-        let mut context = Self::new(backend);
-        context.test_dimensions = dimensions;
-        context
+    pub(crate) fn mouseup(&mut self, x: i32, y: i32, button: crate::MouseButton) {
+        self.input.mouseup(x, y, button);
+        self.invalidate_ui_commit();
     }
-}
 
-/// Exclusively owned logical UI frame.
-///
-/// This value borrows `Context` to serialize paint/submission, but it does not lock independent
-/// [`crate::TypedWidgetHandle`] or [`RootHandle::widget`] access. Mutating layout-affecting state after the
-/// last update commit makes that commit semantically stale; drop the unsubmitted frame and call
-/// [`Context::update_ui`] or [`Context::update_ui_state`] again before painting. No separate
-/// Context token exists.
-///
-/// Submission consumes the frame, making a second submission unrepresentable:
-///
-/// ```compile_fail
-/// use microui_redux::Context;
-/// use microui_redux::render::{FrameInfo, RendererBackend};
-///
-/// fn submit_twice<B: RendererBackend>(context: &mut Context<B>, info: FrameInfo) {
-///     let frame = context.frame(info);
-///     frame.render_ui().unwrap();
-///     frame.render_ui().unwrap();
-/// }
-/// ```
-#[must_use = "call render_ui() to submit this UI frame; dropping it cancels"]
-pub struct ContextFrame<'a, B: RendererBackend, State: 'static = ()> {
-    context: &'a mut Context<B, State>,
-    info: FrameInfo,
-    completed: bool,
+    pub(crate) fn scroll(&mut self, x: i32, y: i32) {
+        self.input.scroll(x, y);
+        self.invalidate_ui_commit();
+    }
+
+    pub(crate) fn keydown(&mut self, key: crate::KeyMode) {
+        self.input.keydown(key);
+        self.invalidate_ui_commit();
+    }
+
+    pub(crate) fn keyup(&mut self, key: crate::KeyMode) {
+        self.input.keyup(key);
+        self.invalidate_ui_commit();
+    }
+
+    pub(crate) fn keydown_code(&mut self, code: crate::KeyCode) {
+        self.input.keydown_code(code);
+        self.invalidate_ui_commit();
+    }
+
+    pub(crate) fn keyup_code(&mut self, code: crate::KeyCode) {
+        self.input.keyup_code(code);
+        self.invalidate_ui_commit();
+    }
+
+    pub(crate) fn text(&mut self, text: &str) {
+        self.input.text(text);
+        self.invalidate_ui_commit();
+    }
+
+    pub(crate) fn can_render(&self, dimensions: Dimensioni) -> bool {
+        self.ui_commit
+            .is_some_and(|committed| (committed.width, committed.height) == (dimensions.width, dimensions.height))
+            && !self.input.has_pending()
+    }
+
+    pub(crate) fn display_list_mut(&mut self) -> &mut DisplayList {
+        &mut self.display_list
+    }
+
+    pub(crate) fn cancel_frame(&mut self) {
+        self.display_list.clear();
+    }
 }
 
 #[cfg(test)]
@@ -279,223 +219,3 @@ mod p5_baseline;
 
 #[cfg(test)]
 mod root_tests;
-
-impl<B: RendererBackend, State: 'static> Context<B, State> {
-    /// Starts one paint/submission frame for state previously committed by
-    /// [`Context::update_ui`] or [`Context::update_ui_state`].
-    pub fn frame(&mut self, info: FrameInfo) -> ContextFrame<'_, B, State> {
-        ContextFrame { context: self, info, completed: false }
-    }
-
-    /// Drains ordered input, dispatches native widget events, and commits layout for `dimensions`.
-    ///
-    /// One synchronization layout always runs first. Each queued input event then causes exactly
-    /// one route followed by one full eligible-tree update and another layout commit. Geometry
-    /// produced for one event is therefore authoritative when routing the next. With an empty
-    /// queue, the initial layout is the complete synchronization commit. This method performs no
-    /// timer synthesis, painting, or backend submission.
-    ///
-    /// Events retain FIFO order within each widget port. When multiple ports are ready at one
-    /// dispatch boundary, they are drained in subscription order. Dispatch repeats until all
-    /// subscribed ports are empty, including events emitted by application-state methods.
-    ///
-    /// Context-owned input, style, and root mutations invalidate a prior commit automatically.
-    /// Mutations made through weak typed widget handles cannot notify Context; callers
-    /// must invoke this method after those mutations, including when the input queue is empty.
-    /// Callers must finish every typed-access closure first. A closure retains its widget-cell borrow;
-    /// if this traversal reaches that cell and requests an incompatible borrow, built-in runtimes
-    /// panic with the retained-state invariant diagnostic rather than skipping work or committing
-    /// stale state.
-    #[track_caller]
-    pub fn update_ui_state(&mut self, dimensions: Dimensioni, state: &mut State) {
-        assert!(dimensions.width > 0 && dimensions.height > 0, "update_ui_state dimensions must be positive");
-        let atlas = self.renderer.atlas();
-        self.window_manager.ui_commit = None;
-        self.window_manager
-            .update_with(dimensions, &atlas, state, |state| self.event_session.dispatch(state));
-        self.window_manager.ui_commit = Some(dimensions);
-    }
-
-    /// Subscribes the context's application state to one native widget event.
-    ///
-    /// A widget event port accepts one subscription and returns
-    /// [`crate::SubscribeError::AlreadySubscribed`] for another.
-    pub fn subscribe<E: crate::WidgetEvent>(&mut self, event: crate::WidgetEventHandle<E>, method: fn(&mut State, &E)) -> Result<(), crate::SubscribeError> {
-        self.event_session.subscribe(event, method)
-    }
-
-    /// Subscribes the context's application state with one bound application value.
-    ///
-    /// A widget event port accepts one subscription and returns
-    /// [`crate::SubscribeError::AlreadySubscribed`] for another.
-    pub fn subscribe_with<E: crate::WidgetEvent, BoundContext: 'static>(
-        &mut self,
-        event: crate::WidgetEventHandle<E>,
-        context: BoundContext,
-        method: fn(&mut State, &BoundContext, &E),
-    ) -> Result<(), crate::SubscribeError> {
-        self.event_session.subscribe_with(event, context, method)
-    }
-
-    /// Invalidates any layout commit known to have been affected through a Context API.
-    pub(super) fn invalidate_ui_commit(&mut self) {
-        self.window_manager.ui_commit = None;
-    }
-
-    /// Registers one backend-specific callback for retained custom-render nodes.
-    ///
-    /// The callback is observational with respect to retained application state, topology,
-    /// interaction, and layout. It may mutate callback-private rendering caches, but using a
-    /// captured [`TypedWidgetHandle`](crate::TypedWidgetHandle) to mutate retained UI during frame
-    /// execution is a contract violation rather than a deferred-next-frame update.
-    ///
-    /// A callback written for another backend frame type cannot be registered:
-    ///
-    /// ```compile_fail
-    /// use microui_redux::{Context, CustomRenderArgs};
-    /// use microui_redux::render::RendererBackend;
-    ///
-    /// fn register_for_wrong_backend<A, B, F>(context: &mut Context<A>, callback: F)
-    /// where
-    ///     A: RendererBackend,
-    ///     B: RendererBackend,
-    ///     F: for<'frame> FnMut(&mut B::Frame<'frame>, CustomRenderArgs) + 'static,
-    /// {
-    ///     context.register_custom_renderer(callback).unwrap();
-    /// }
-    /// ```
-    ///
-    /// The active frame borrow cannot escape the callback invocation:
-    ///
-    /// ```compile_fail
-    /// use microui_redux::{Context, CustomRenderArgs};
-    /// use microui_redux::render::RendererBackend;
-    ///
-    /// fn retain_frame<B: RendererBackend>(context: &mut Context<B>) {
-    ///     let mut retained = None;
-    ///     context.register_custom_renderer(
-    ///         move |frame: &mut B::Frame<'_>, _args: CustomRenderArgs| {
-    ///             retained = Some(frame);
-    ///         },
-    ///     ).unwrap();
-    /// }
-    /// ```
-    pub fn register_custom_renderer<F>(&mut self, callback: F) -> Result<CustomRenderHandle<B>, CustomRenderRegistryError>
-    where
-        F: for<'frame> FnMut(&mut B::Frame<'frame>, CustomRenderArgs) + 'static,
-    {
-        self.renderer.register_custom_renderer(callback)
-    }
-
-    /// Removes a previously registered custom-render callback.
-    pub fn unregister_custom_renderer(&mut self, handle: CustomRenderHandle<B>) -> Result<(), CustomRenderRegistryError> {
-        self.renderer.unregister_custom_renderer(handle)
-    }
-
-    /// Replaces the current UI style.
-    ///
-    /// Unset/default font and icon fields are rebound automatically from the current atlas when it
-    /// exposes their conventional semantic names. Use [`Style::with_named_assets`] or
-    /// [`Style::bind_named_assets`] when you want to force all semantic roles to those atlas
-    /// bindings explicitly.
-    pub fn set_style(&mut self, style: &Style) {
-        let mut resolved = *style;
-        resolved.bind_default_named_fonts(&self.renderer.atlas());
-        resolved.bind_default_named_icons(&self.renderer.atlas());
-        self.window_manager.style = resolved;
-        self.invalidate_ui_commit();
-    }
-
-    /// Returns the resolved UI style currently used by this context.
-    pub fn style(&self) -> &Style {
-        &self.window_manager.style
-    }
-
-    /// Returns the high-level renderer used for frame execution and resource management.
-    ///
-    /// Application code should prefer the higher-level context image APIs and retained widget
-    /// rendering. Backend integrations can use this accessor for atlas metadata.
-    pub fn renderer(&self) -> &Renderer<B> {
-        &self.renderer
-    }
-
-    /// Attempts to upload an RGBA image to the renderer and returns its [`TextureId`].
-    ///
-    /// Dimensions and byte length are validated before an id is allocated. Backend upload errors
-    /// are returned without recording texture state in the renderer.
-    pub fn try_load_image_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> Result<TextureId, String> {
-        self.renderer.try_load_texture_rgba(width, height, pixels)
-    }
-
-    /// Uploads an RGBA image to the renderer and returns its [`TextureId`].
-    ///
-    /// Panics if the RGBA dimensions/byte length are invalid or the backend rejects the upload.
-    /// Prefer [`Context::try_load_image_rgba`] when callers can handle upload failure.
-    #[track_caller]
-    pub fn load_image_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> TextureId {
-        self.try_load_image_rgba(width, height, pixels).expect("failed to upload RGBA image")
-    }
-
-    /// Deletes a previously uploaded texture.
-    ///
-    /// Deleting an unknown or already-freed handle triggers a debug assertion and is an idempotent
-    /// no-op in release builds.
-    pub fn free_image(&mut self, id: TextureId) {
-        self.renderer.free_texture(id);
-    }
-
-    /// Uploads texture data described by `source`. PNG decoding is only available when the
-    /// `png_source` (or `builder`) feature is enabled.
-    pub fn load_image_from(&mut self, source: ImageSource) -> Result<TextureId, String> {
-        match source {
-            ImageSource::Raw { width, height, pixels } => self.try_load_image_rgba(width, height, pixels),
-            #[cfg(any(feature = "builder", feature = "png_source"))]
-            ImageSource::Png { bytes } => {
-                let (width, height, colors) = crate::image::load_image_bytes(ImageSource::Png { bytes }).map_err(|error| error.to_string())?;
-                let width = i32::try_from(width).map_err(|_| String::from("PNG width exceeds supported range"))?;
-                let height = i32::try_from(height).map_err(|_| String::from("PNG height exceeds supported range"))?;
-                let rgba: Vec<u8> = colors.into_iter().flat_map(|color| [color.x, color.y, color.z, color.w]).collect();
-                self.try_load_image_rgba(width, height, rgba.as_slice())
-            }
-        }
-    }
-}
-
-impl<B: RendererBackend, State: 'static> ContextFrame<'_, B, State> {
-    /// Consumes this logical frame, paints the last committed UI once, and submits it once.
-    ///
-    /// Returns [`RenderError::UiUpdateRequired`] before paint or backend acquisition when no commit
-    /// exists for these dimensions or when raw input is pending. This operation is paint-only: it
-    /// does not route input, update semantic state, run layout, synthesize timers, or produce a
-    /// generic frame-result/resource-state object. Widget paint is observational with respect to
-    /// application-authored semantic state, topology, interaction, and committed layout. Built-in
-    /// widgets may publish framework-owned, paint-derived read-only geometry for later use or update
-    /// private rendering caches; custom-render callbacks may update callback-private rendering
-    /// caches only. Neither kind of cache can alter the current commit.
-    pub fn render_ui(mut self) -> Result<(), RenderError> {
-        let dimensions = self.info.dimensions();
-        let commit_matches = self
-            .context
-            .window_manager
-            .ui_commit
-            .is_some_and(|committed| (committed.width, committed.height) == (dimensions.width, dimensions.height));
-        if !commit_matches || self.context.window_manager.input.has_pending() {
-            self.completed = true;
-            return Err(RenderError::UiUpdateRequired);
-        }
-        let atlas = self.context.renderer.atlas();
-        self.context.window_manager.paint(self.info.dimensions(), &atlas);
-        let Context { renderer, window_manager, .. } = &mut *self.context;
-        let result = renderer.render(self.info, &mut window_manager.display_list);
-        self.completed = true;
-        result
-    }
-}
-
-impl<B: RendererBackend, State: 'static> Drop for ContextFrame<'_, B, State> {
-    fn drop(&mut self) {
-        if !self.completed {
-            self.context.window_manager.display_list.clear();
-        }
-    }
-}

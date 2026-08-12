@@ -171,6 +171,7 @@
 //! [`render`].
 
 pub mod atlas;
+mod context;
 mod event;
 mod file_dialog;
 pub mod image;
@@ -198,7 +199,8 @@ pub mod retained {
         SizePolicy, Stack, StackDirection, StackParameters, UiInputEvent, Widget, TextWrap, TypedWidgetHandle, WidgetBuilder, WidgetFillOption, WidgetOption,
         WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
     };
-    pub use crate::window_manager::{Context, ContextFrame, RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted, WindowOption};
+    pub use crate::context::{Context, ContextFrame};
+    pub use crate::window_manager::{RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted, WindowOption};
 }
 
 /// Common imports for retained UI applications.
@@ -242,7 +244,8 @@ pub use atlas::{
     AtlasHandle, AtlasSource, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry,
     FontId, IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON,
 };
-pub use window_manager::{Context, ContextFrame, RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted, WindowOption};
+pub use context::{Context, ContextFrame};
+pub use window_manager::{RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted, WindowOption};
 pub use event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventHandle};
 pub use file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
 pub use image::{ImageSource, load_image_bytes};

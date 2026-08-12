@@ -39,9 +39,8 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use crate::render::RendererBackend;
 use crate::{
-    Button, ButtonParameters, ButtonSubmitted, Column, ColumnParameters, Context, IconId, ListItem, ListItemParameters, ListItemSubmitted, Node, Policy, Recti,
+    Button, ButtonParameters, ButtonSubmitted, Column, ColumnParameters, IconId, ListItem, ListItemParameters, ListItemSubmitted, Node, Policy, Recti,
     RootHandle, RootSubmitted, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SizePolicy, Stack, StackDirection, StackParameters, Textbox,
     TextboxParameters, TextboxSubmitted, ThemeIcons, TypedWidgetHandle, WidgetEventHandle, WidgetOption, WindowOption,
 };
@@ -623,7 +622,7 @@ fn replace_stack_rows(handle: &TypedWidgetHandle<Stack>, nodes: Vec<Node>) -> Re
 }
 
 impl WindowManager {
-    fn open_file_dialog(&mut self, request: FileDialogRequest) -> FileDialogSession {
+    pub(crate) fn open_file_dialog(&mut self, request: FileDialogRequest) -> FileDialogSession {
         let id = FileDialogSessionId(self.next_file_dialog_id);
         self.next_file_dialog_id = self.next_file_dialog_id.checked_add(1).expect("file-dialog session id counter overflowed");
         let status = Rc::new(RefCell::new(FileDialogStatus::Pending));
@@ -632,7 +631,7 @@ impl WindowManager {
         FileDialogSession { id, status }
     }
 
-    fn cancel_file_dialog(&mut self, session: &FileDialogSession) -> bool {
+    pub(crate) fn cancel_file_dialog(&mut self, session: &FileDialogSession) -> bool {
         let Some(index) = self.file_dialogs.iter().position(|dialog| dialog.belongs_to(session)) else {
             return false;
         };
@@ -660,25 +659,11 @@ impl WindowManager {
     }
 }
 
-impl<B: RendererBackend, State: 'static> Context<B, State> {
-    /// Opens a retained file dialog and returns its read-only polling session.
-    pub fn open_file_dialog(&mut self, request: FileDialogRequest) -> FileDialogSession {
-        self.window_manager.open_file_dialog(request)
-    }
-
-    /// Cancels a pending session owned by this Context.
-    ///
-    /// Returns `false` when the session is terminal or belongs to another Context.
-    pub fn cancel_file_dialog(&mut self, session: &FileDialogSession) -> bool {
-        self.window_manager.cancel_file_dialog(session)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_support::{AllocationMeasurement, NoopRenderer, test_atlas};
-    use crate::{Button, ButtonParameters, Dimensioni, MouseButton, Vec2i, WindowOption, rect};
+    use crate::{Button, ButtonParameters, Context, Dimensioni, MouseButton, Vec2i, WindowOption, rect};
     use std::{
         fs,
         time::{Instant, SystemTime, UNIX_EPOCH},
