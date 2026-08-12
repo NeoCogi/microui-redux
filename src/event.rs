@@ -118,7 +118,7 @@
 //!      │
 //!      ├── upgrade the handle's Weak port reference
 //!      ├── connect the port and create its exclusive listener
-//!      ├── retain the concrete method or bound-context closure
+//!      ├── retain the concrete method or bound-method handler
 //!      └── erase Subscription<State, E, Handler>
 //!                         as Box<dyn EventDispatch<State>>
 //! ```
@@ -160,11 +160,11 @@
 //! The type erasure applies only to the dispatcher stored in the heterogeneous session vector:
 //!
 //! ```text
-//! Subscription<State, ButtonSubmitted, fn(...)> ───┐
-//! Subscription<State, SliderChanged, closure> ─────┼──> dyn EventDispatch<State>
-//! Subscription<State, TextboxChanged, fn(...)> ────┘
+//! Subscription<State, ButtonSubmitted, fn(...)> ───────────────┐
+//! Subscription<State, SliderChanged, BoundEventHandler<...>> ──┼──> dyn EventDispatch<State>
+//! Subscription<State, TextboxChanged, fn(...)> ────────────────┘
 //!
-//!                         E remains concrete ─────────> handler(&mut State, &E)
+//!                              E remains concrete ─────────> EventHandler::handle
 //! ```
 //!
 //! Payloads are never converted to `Any`, cloned for a subscriber, or wrapped in `Rc`. A port has
@@ -273,11 +273,12 @@
 //! queue buffer into the dispatch batch; when that batch is dropped, its capacity is released
 //! rather than retained by the port.
 //!
-//! Each subscription adds one vector entry and one boxed concrete [`Subscription`]. Dispatch first
-//! scans the `S` subscriptions to prune dead widgets, then visits every subscription once per
-//! cascade sweep and invokes handlers once per delivered event. With `D` delivered events and `R`
-//! sweeps, the work is O(`D + S * R`). Ordinary non-cascading delivery uses one productive sweep
-//! followed by one empty sweep.
+//! Each subscription adds one vector entry and one boxed concrete [`Subscription`]. The handler is
+//! statically dispatched inside that subscription; only [`EventDispatch`] is dynamically
+//! dispatched. Session dispatch first scans the `S` subscriptions to prune dead widgets, then
+//! visits every subscription once per cascade sweep and invokes handlers once per delivered event.
+//! With `D` delivered events and `R` sweeps, the work is O(`D + S * R`). Ordinary non-cascading
+//! delivery uses one productive sweep followed by one empty sweep.
 //!
 //! Queues are not bounded, coalesced, deduplicated, prioritized, persisted, or synchronized across
 //! threads. The cascade limit guards handler feedback during dispatch but is not backpressure for a
@@ -518,6 +519,37 @@ impl<E: WidgetEvent> Drop for WidgetEventListener<E> {
     }
 }
 
+/// Typed invocation contract between one event payload and the application state.
+///
+/// Implementations may carry immutable registration context, but invocation mutates only the
+/// supplied application `State`. The trait therefore uses `&self`, making stateless handler
+/// behavior part of the event-system contract instead of accepting an arbitrary stateful closure.
+trait EventHandler<State, E: WidgetEvent> {
+    /// Applies one concrete event payload to the application state.
+    fn handle(&self, state: &mut State, event: &E);
+}
+
+/// A plain `fn(&mut State, &E)` is already a complete typed event handler.
+impl<State, E: WidgetEvent> EventHandler<State, E> for fn(&mut State, &E) {
+    fn handle(&self, state: &mut State, event: &E) {
+        self(state, event);
+    }
+}
+
+/// Explicit adapter for a state method registered with one immutable bound value.
+///
+/// This is the concrete representation created by `subscribe_with`; no callable closure is stored.
+struct BoundEventHandler<State, BoundContext, E: WidgetEvent> {
+    context: BoundContext,
+    method: fn(&mut State, &BoundContext, &E),
+}
+
+impl<State, BoundContext, E: WidgetEvent> EventHandler<State, E> for BoundEventHandler<State, BoundContext, E> {
+    fn handle(&self, state: &mut State, event: &E) {
+        (self.method)(state, &self.context, event);
+    }
+}
+
 /// Object-safe boundary allowing one state session to store heterogeneous event subscriptions.
 ///
 /// `State` remains common to the whole vector; the implementation retains each concrete event and
@@ -526,14 +558,14 @@ trait EventDispatch<State> {
     /// Reports whether the concrete widget still owns the subscribed port.
     fn is_alive(&self) -> bool;
     /// Drains one port batch into `state` and returns the number of delivered payloads.
-    fn dispatch(&mut self, state: &mut State) -> usize;
+    fn dispatch(&self, state: &mut State) -> usize;
 }
 
 /// Concrete binding between one typed port listener and one typed state handler.
 ///
-/// `Handler` is either the method pointer supplied to `subscribe` or the closure created by
-/// `subscribe_with`. `PhantomData` records the handler's `State` relationship even though the state
-/// value is borrowed only when dispatch runs.
+/// `Handler` is either the method pointer supplied to `subscribe` or the explicit
+/// [`BoundEventHandler`] created by `subscribe_with`. `PhantomData` records the handler's `State`
+/// relationship even though the state value is borrowed only when dispatch runs.
 struct Subscription<State, E: WidgetEvent, Handler> {
     listener: WidgetEventListener<E>,
     handler: Handler,
@@ -543,7 +575,7 @@ struct Subscription<State, E: WidgetEvent, Handler> {
 impl<State, E, Handler> EventDispatch<State> for Subscription<State, E, Handler>
 where
     E: WidgetEvent,
-    Handler: FnMut(&mut State, &E),
+    Handler: EventHandler<State, E>,
 {
     /// Delegates widget lifetime observation to the weak listener.
     fn is_alive(&self) -> bool {
@@ -554,11 +586,11 @@ where
     ///
     /// Detaching before the first invocation is essential: handler code may cause widgets to emit
     /// without colliding with a live mutable borrow of this port.
-    fn dispatch(&mut self, state: &mut State) -> usize {
+    fn dispatch(&self, state: &mut State) -> usize {
         let events = self.listener.drain();
         let count = events.len();
         for event in events {
-            (self.handler)(state, &event);
+            self.handler.handle(state, &event);
         }
         count
     }
@@ -582,7 +614,7 @@ impl<State: 'static> EventSession<State> {
 
     /// Registers a state method as the sole consumer of one event port.
     ///
-    /// The function pointer itself is stored as the concrete handler, requiring no closure
+    /// The function pointer implements [`EventHandler`] directly, requiring no adapter or closure
     /// allocation beyond the subscription's existing trait-object allocation.
     pub(crate) fn subscribe<E: WidgetEvent>(&mut self, event: WidgetEventHandle<E>, method: fn(&mut State, &E)) -> Result<(), SubscribeError> {
         self.add(event, method)
@@ -590,23 +622,22 @@ impl<State: 'static> EventSession<State> {
 
     /// Registers a state method together with one subscription-owned application value.
     ///
-    /// The small closure adapts `fn(&mut State, &Context, &E)` to the same concrete
-    /// `FnMut(&mut State, &E)` representation used by ordinary subscriptions. `Context` here means
-    /// the bound value's type and is unrelated to [`crate::Context`].
-    pub(crate) fn subscribe_with<E: WidgetEvent, Context: 'static>(
+    /// [`BoundEventHandler`] stores both the value and the typed method explicitly. `BoundContext`
+    /// means the bound value's type and is unrelated to [`crate::Context`].
+    pub(crate) fn subscribe_with<E: WidgetEvent, BoundContext: 'static>(
         &mut self,
         event: WidgetEventHandle<E>,
-        context: Context,
-        method: fn(&mut State, &Context, &E),
+        context: BoundContext,
+        method: fn(&mut State, &BoundContext, &E),
     ) -> Result<(), SubscribeError> {
-        self.add(event, move |state, event| method(state, &context, event))
+        self.add(event, BoundEventHandler { context, method })
     }
 
     /// Connects the port and appends its concrete subscription in sweep order.
     ///
     /// The fallible connection is completed before `Vec::push`; a failed subscription therefore
     /// leaves the session unchanged.
-    fn add<E: WidgetEvent, Handler: FnMut(&mut State, &E) + 'static>(&mut self, event: WidgetEventHandle<E>, handler: Handler) -> Result<(), SubscribeError> {
+    fn add<E: WidgetEvent, Handler: EventHandler<State, E> + 'static>(&mut self, event: WidgetEventHandle<E>, handler: Handler) -> Result<(), SubscribeError> {
         self.subscriptions.push(Box::new(Subscription {
             listener: event.listen()?,
             handler,
@@ -631,7 +662,7 @@ impl<State: 'static> EventSession<State> {
         let mut dispatched = 0usize;
         loop {
             let before = dispatched;
-            for subscription in &mut self.subscriptions {
+            for subscription in &self.subscriptions {
                 dispatched = dispatched
                     .checked_add(subscription.dispatch(state))
                     .expect("widget event dispatch count overflowed");
