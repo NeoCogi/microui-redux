@@ -72,7 +72,7 @@ impl WindowEntry {
     }
 }
 
-impl<B: RendererBackend, State: 'static> Context<B, State> {
+impl WindowManager {
     /// Wraps one application node in private root chrome and registers its independent runtime.
     fn register_root(&mut self, kind: WindowKind, name: &str, rect: Recti, content: Node, options: WindowOption, visible: bool) -> RootHandle {
         // Allocate lifecycle identity before construction; IDs are never derived from node identity.
@@ -348,18 +348,18 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     }
 
     /// Performs one synchronization layout, then one full update/layout pair per queued event.
-    pub(super) fn update_window_manager(&mut self, dimensions: Dimensioni) {
-        self.update_window_manager_with(dimensions, &mut (), |_, _| false);
+    pub(super) fn update(&mut self, dimensions: Dimensioni, atlas: &crate::AtlasHandle) {
+        self.update_with(dimensions, atlas, &mut (), |_| false);
     }
 
     /// Performs the retained update while exposing each safe subscriber-dispatch boundary.
-    pub(super) fn update_window_manager_with<DispatchState>(
+    pub(super) fn update_with<DispatchState>(
         &mut self,
         dimensions: Dimensioni,
+        atlas: &crate::AtlasHandle,
         dispatch_state: &mut DispatchState,
-        mut after_event: impl FnMut(&mut Self, &mut DispatchState) -> bool,
+        mut after_event: impl FnMut(&mut DispatchState) -> bool,
     ) {
-        let atlas = self.renderer.atlas();
         let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
 
         // This pre-layout pass removes abandoned sessions even when no input was queued.
@@ -367,18 +367,18 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         for entry in &mut self.roots {
             entry.tree.runtime.begin_update();
         }
-        self.layout_window_manager(viewport, &atlas);
+        self.layout(viewport, atlas);
         // Subscriber invocations may already be waiting without a raw input event. If they mutate
         // retained state, commit that state before routing the first queued event.
-        if after_event(self, dispatch_state) {
-            self.layout_window_manager(viewport, &atlas);
+        if after_event(dispatch_state) {
+            self.layout(viewport, atlas);
         }
 
         loop {
             let event = self.input.pop_event();
             let Some(event) = event else { break };
             let input = self.input.snapshot();
-            self.update_window_manager_for_event(&atlas, &event, input);
+            self.update_for_event(atlas, &event, input);
             // Dialog controls are ordinary retained widgets. Consume their committed actions only
             // after the complete cross-root update and before the matching layout commit.
             self.process_file_dialogs();
@@ -386,13 +386,13 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
             // Application subscribers run only after the complete cross-root update has released
             // retained borrows. Their state/topology changes are therefore safe and become visible
             // to the layout immediately below, before routing the next raw input event.
-            after_event(self, dispatch_state);
-            self.layout_window_manager(viewport, &atlas);
+            after_event(dispatch_state);
+            self.layout(viewport, atlas);
         }
     }
 
     /// Synchronizes auto-size and layout for every visible root.
-    fn layout_window_manager(&mut self, viewport: Recti, atlas: &crate::AtlasHandle) {
+    fn layout(&mut self, viewport: Recti, atlas: &crate::AtlasHandle) {
         self.roots.sort_by_key(|entry| entry.z_index);
 
         for index in 0..self.roots.len() {
@@ -438,7 +438,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     }
 
     /// Routes and applies one normalized event, visiting every eligible tree exactly once.
-    fn update_window_manager_for_event(&mut self, atlas: &crate::AtlasHandle, event: &crate::UiInputEvent, input: crate::input::InputSnapshot) {
+    fn update_for_event(&mut self, atlas: &crate::AtlasHandle, event: &crate::UiInputEvent, input: crate::input::InputSnapshot) {
         if self.modal_stack.is_empty() && matches!(event, crate::UiInputEvent::MouseDown { .. }) {
             self.dismiss_outside_popup(input.mouse_pos);
         }
@@ -555,9 +555,8 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     }
 
     /// Paints and records the already committed trees without updating or laying them out.
-    pub(super) fn paint_window_manager(&mut self, dimensions: Dimensioni) {
+    pub(super) fn paint(&mut self, dimensions: Dimensioni, atlas: &crate::AtlasHandle) {
         self.display_list.clear();
-        let atlas = self.renderer.atlas();
         let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
         self.roots.sort_by_key(|entry| entry.z_index);
         for entry in &mut self.roots {
@@ -574,7 +573,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
                 .paint_tree_root(&mut entry.tree.root, &mut self.display_list, &self.style, atlas.clone());
             entry
                 .root_widget
-                .try_read(|state| record_root_overlay(&mut self.display_list, viewport, state, &self.style, &atlas))
+                .try_read(|state| record_root_overlay(&mut self.display_list, viewport, state, &self.style, atlas))
                 .expect("registered root state unavailable during overlay paint");
         }
     }
@@ -692,19 +691,11 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     }
 
     #[cfg(test)]
-    pub(crate) fn debug_root_body(&self, root: RootId) -> Option<Recti> {
+    pub(crate) fn debug_root_body(&self, root: RootId, atlas: &crate::AtlasHandle) -> Option<Recti> {
         let entry = self.roots.iter().find(|entry| entry.id == root)?;
-        entry.root_widget.try_read(|state| {
-            root_chrome_geometry(
-                state.rect(),
-                Dimensioni::default(),
-                state.name(),
-                state.options(),
-                &self.style,
-                &self.renderer.atlas(),
-            )
-            .body
-        })
+        entry
+            .root_widget
+            .try_read(|state| root_chrome_geometry(state.rect(), Dimensioni::default(), state.name(), state.options(), &self.style, atlas).body)
     }
 
     #[cfg(test)]
@@ -741,18 +732,131 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     }
 
     #[cfg(test)]
-    pub(crate) fn debug_root_chrome(&self, root: RootId) -> Option<(Option<Recti>, Option<Recti>, Option<Recti>)> {
+    pub(crate) fn debug_root_chrome(&self, root: RootId, atlas: &crate::AtlasHandle) -> Option<(Option<Recti>, Option<Recti>, Option<Recti>)> {
         let entry = self.roots.iter().find(|entry| entry.id == root)?;
         entry.root_widget.try_read(|state| {
-            let geometry = root_chrome_geometry(
-                state.rect(),
-                Dimensioni::default(),
-                state.name(),
-                state.options(),
-                &self.style,
-                &self.renderer.atlas(),
-            );
+            let geometry = root_chrome_geometry(state.rect(), Dimensioni::default(), state.name(), state.options(), &self.style, atlas);
             (geometry.title, geometry.close, geometry.resize)
         })
+    }
+}
+
+impl<B: RendererBackend, State: 'static> Context<B, State> {
+    /// Creates an open retained window around one uniquely owned application node.
+    ///
+    /// The returned handle is weak; `Context` owns the root until explicit destruction.
+    pub fn create_window(&mut self, name: &str, rect: Recti, content: Node) -> RootHandle {
+        self.window_manager.create_window(name, rect, content)
+    }
+
+    /// Creates a hidden retained dialog around one uniquely owned application node.
+    ///
+    /// Show it with [`Context::set_root_visible`]. A visible dialog becomes the active modal root:
+    /// it stays frontmost and is the only root eligible for input until hidden or destroyed.
+    /// Hiding preserves all descendant state.
+    pub fn create_dialog(&mut self, name: &str, rect: Recti, content: Node) -> RootHandle {
+        self.window_manager.create_dialog(name, rect, content)
+    }
+
+    /// Creates a hidden auto-sized popup around one uniquely owned application node.
+    ///
+    /// Showing places it at the current pointer position. An outside press hides it and records a
+    /// submission before ordinary routing may continue beneath the popup boundary. While a dialog
+    /// is active, a shown popup remains visible but is kept below the dialog and receives no input.
+    pub fn create_popup(&mut self, name: &str, content: Node) -> RootHandle {
+        self.window_manager.create_popup(name, content)
+    }
+
+    /// Replaces a root rectangle silently while retaining any compatible captured chrome mode.
+    pub fn set_root_rect(&mut self, root: RootId, rect: Recti) -> Result<(), RootMutationError> {
+        self.window_manager.set_root_rect(root, rect)
+    }
+
+    /// Replaces a root size silently without changing its origin.
+    pub fn set_root_size(&mut self, root: RootId, size: Dimensioni) -> Result<(), RootMutationError> {
+        self.window_manager.set_root_size(root, size)
+    }
+
+    /// Replaces root chrome options silently.
+    pub fn set_root_options(&mut self, root: RootId, options: WindowOption) -> Result<(), RootMutationError> {
+        self.window_manager.set_root_options(root, options)
+    }
+
+    /// Shows or hides a retained root, preserving its tree and concrete widget state.
+    ///
+    /// Showing a dialog pushes it onto the modal stack. Hiding the active dialog restores the
+    /// previous visible dialog, if any; otherwise ordinary cross-root routing resumes.
+    ///
+    /// This is distinct from [`Context::destroy_root`], which drops the complete retained owner.
+    pub fn set_root_visible(&mut self, root: RootId, visible: bool) -> Result<(), RootMutationError> {
+        self.window_manager.set_root_visible(root, visible)
+    }
+
+    /// Raises a registered root and reports whether it exists.
+    ///
+    /// The active modal dialog remains above every other root raised through this operation.
+    pub fn bring_root_to_front(&mut self, root: RootId) -> bool {
+        self.window_manager.bring_root_to_front(root)
+    }
+
+    /// Permanently unregisters a root and releases its complete retained tree.
+    ///
+    /// Destroying the active dialog restores the previous visible dialog, if any;
+    /// otherwise ordinary cross-root routing resumes.
+    ///
+    /// There is intentionally no root-content replacement operation. Destroy and recreate a root
+    /// to install a different root owner, or mutate descendants through their typed widget handles.
+    pub fn destroy_root(&mut self, root: RootId) -> bool {
+        self.window_manager.destroy_root(root)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_rendered_root_names(&self) -> Vec<String> {
+        self.window_manager.debug_rendered_root_names()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_root_zindex(&self, root: RootId) -> Option<i32> {
+        self.window_manager.debug_root_zindex(root)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_modal_root(&self) -> Option<RootId> {
+        self.window_manager.debug_modal_root()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_root_body(&self, root: RootId) -> Option<Recti> {
+        self.window_manager.debug_root_body(root, &self.renderer.atlas())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_root_content_size(&self, root: RootId) -> Option<Dimensioni> {
+        self.window_manager.debug_root_content_size(root)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_root_runtime_metrics(&self, root: RootId) -> Option<crate::ui_node::RuntimeMetrics> {
+        self.window_manager.debug_root_runtime_metrics(root)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_root_has_pointer_capture(&self, root: RootId) -> Option<bool> {
+        self.window_manager.debug_root_has_pointer_capture(root)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_root_node_count(&self, root: RootId) -> Option<usize> {
+        self.window_manager.debug_root_node_count(root)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_root_node_rect(&self, root: RootId, node: crate::ui_node::RuntimeNodeId) -> Option<Recti> {
+        self.window_manager.debug_root_node_rect(root, node)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_root_chrome(&self, root: RootId) -> Option<(Option<Recti>, Option<Recti>, Option<Recti>)> {
+        self.window_manager.debug_root_chrome(root, &self.renderer.atlas())
     }
 }

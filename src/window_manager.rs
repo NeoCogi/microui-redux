@@ -137,9 +137,20 @@ impl RootId {
 pub struct Context<B: RendererBackend, State: 'static = ()> {
     /// High-level renderer that replays root display lists.
     renderer: Renderer<B>,
+    /// Backend- and application-state-independent retained window manager.
+    pub(crate) window_manager: WindowManager,
+    /// Sole application event session for this context and its retained widget forest.
+    event_session: crate::event::EventSession<State>,
+    /// Drawable size used by retained behavior tests that drive complete frames tersely.
+    #[cfg(test)]
+    test_dimensions: Dimensioni,
+}
+
+/// Backend- and application-state-independent retained window manager.
+pub(crate) struct WindowManager {
     /// Reusable operation storage for window-manager frame and chrome drawing.
     display_list: DisplayList,
-    /// Context-owned style used by all roots and scroll areas.
+    /// Window-manager-owned style used by all roots and scroll areas.
     style: Style,
 
     /// Highest z-index allocated to an open window-manager root.
@@ -156,13 +167,33 @@ pub struct Context<B: RendererBackend, State: 'static = ()> {
     pub(crate) next_file_dialog_id: usize,
     /// Ordered input state owned and consumed directly by this Context.
     input: Input,
-    /// Sole application event session for this context and its retained widget forest.
-    event_session: crate::event::EventSession<State>,
     /// Dimensions of the most recent complete update/layout commit.
     ui_commit: Option<Dimensioni>,
-    /// Drawable size used by retained behavior tests that drive complete frames tersely.
-    #[cfg(test)]
-    test_dimensions: Dimensioni,
+}
+
+impl WindowManager {
+    fn new(style: Style) -> Self {
+        Self {
+            display_list: DisplayList::new(),
+            style,
+            last_zindex: 0,
+            roots: Vec::default(),
+            modal_stack: Vec::new(),
+            next_root_id: 1,
+            file_dialogs: Vec::new(),
+            next_file_dialog_id: 1,
+            input: Input::default(),
+            ui_commit: None,
+        }
+    }
+
+    fn invalidate_ui_commit(&mut self) {
+        self.ui_commit = None;
+    }
+
+    pub(crate) fn style(&self) -> &Style {
+        &self.style
+    }
 }
 
 impl<B: RendererBackend> Context<B> {
@@ -170,9 +201,10 @@ impl<B: RendererBackend> Context<B> {
     #[track_caller]
     pub fn update_ui(&mut self, dimensions: Dimensioni) {
         assert!(dimensions.width > 0 && dimensions.height > 0, "update_ui dimensions must be positive");
-        self.ui_commit = None;
-        self.update_window_manager(dimensions);
-        self.ui_commit = Some(dimensions);
+        let atlas = self.renderer.atlas();
+        self.window_manager.ui_commit = None;
+        self.window_manager.update(dimensions, &atlas);
+        self.window_manager.ui_commit = Some(dimensions);
     }
 
     #[cfg(test)]
@@ -199,17 +231,8 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         let style = Style::default().with_named_assets(&renderer.atlas());
         Self {
             renderer,
-            display_list: DisplayList::new(),
-            style,
-            last_zindex: 0,
-            roots: Vec::default(),
-            modal_stack: Vec::new(),
-            next_root_id: 1,
-            file_dialogs: Vec::new(),
-            next_file_dialog_id: 1,
-            input: Input::default(),
+            window_manager: WindowManager::new(style),
             event_session: crate::event::EventSession::new(),
-            ui_commit: None,
             #[cfg(test)]
             test_dimensions: Dimensioni::new(1, 1),
         }
@@ -286,9 +309,11 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     #[track_caller]
     pub fn update_ui_state(&mut self, dimensions: Dimensioni, state: &mut State) {
         assert!(dimensions.width > 0 && dimensions.height > 0, "update_ui_state dimensions must be positive");
-        self.ui_commit = None;
-        self.update_window_manager_with(dimensions, state, |context, state| context.event_session.dispatch(state));
-        self.ui_commit = Some(dimensions);
+        let atlas = self.renderer.atlas();
+        self.window_manager.ui_commit = None;
+        self.window_manager
+            .update_with(dimensions, &atlas, state, |state| self.event_session.dispatch(state));
+        self.window_manager.ui_commit = Some(dimensions);
     }
 
     /// Subscribes the context's application state to one native widget event.
@@ -314,7 +339,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
 
     /// Invalidates any layout commit known to have been affected through a Context API.
     pub(super) fn invalidate_ui_commit(&mut self) {
-        self.ui_commit = None;
+        self.window_manager.ui_commit = None;
     }
 
     /// Registers one backend-specific callback for retained custom-render nodes.
@@ -377,13 +402,13 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         let mut resolved = *style;
         resolved.bind_default_named_fonts(&self.renderer.atlas());
         resolved.bind_default_named_icons(&self.renderer.atlas());
-        self.style = resolved;
+        self.window_manager.style = resolved;
         self.invalidate_ui_commit();
     }
 
     /// Returns the resolved UI style currently used by this context.
     pub fn style(&self) -> &Style {
-        &self.style
+        &self.window_manager.style
     }
 
     /// Returns the high-level renderer used for frame execution and resource management.
@@ -451,15 +476,17 @@ impl<B: RendererBackend, State: 'static> ContextFrame<'_, B, State> {
         let dimensions = self.info.dimensions();
         let commit_matches = self
             .context
+            .window_manager
             .ui_commit
             .is_some_and(|committed| (committed.width, committed.height) == (dimensions.width, dimensions.height));
-        if !commit_matches || self.context.input.has_pending() {
+        if !commit_matches || self.context.window_manager.input.has_pending() {
             self.completed = true;
             return Err(RenderError::UiUpdateRequired);
         }
-        self.context.paint_window_manager(self.info.dimensions());
-        let Context { renderer, display_list, .. } = &mut *self.context;
-        let result = renderer.render(self.info, display_list);
+        let atlas = self.context.renderer.atlas();
+        self.context.window_manager.paint(self.info.dimensions(), &atlas);
+        let Context { renderer, window_manager, .. } = &mut *self.context;
+        let result = renderer.render(self.info, &mut window_manager.display_list);
         self.completed = true;
         result
     }
@@ -468,7 +495,7 @@ impl<B: RendererBackend, State: 'static> ContextFrame<'_, B, State> {
 impl<B: RendererBackend, State: 'static> Drop for ContextFrame<'_, B, State> {
     fn drop(&mut self) {
         if !self.completed {
-            self.context.display_list.clear();
+            self.context.window_manager.display_list.clear();
         }
     }
 }

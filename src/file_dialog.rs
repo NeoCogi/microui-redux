@@ -47,6 +47,7 @@ use crate::{
 };
 use crate::event::WidgetEventListener;
 use crate::ui_node::RuntimeNodeId;
+use crate::window_manager::WindowManager;
 
 /// One-shot configuration used to open a file dialog.
 #[derive(Clone, Debug)]
@@ -216,12 +217,7 @@ impl Drop for FileDialogController {
 }
 
 impl FileDialogController {
-    fn new<B: RendererBackend, State: 'static>(
-        ctx: &mut Context<B, State>,
-        id: FileDialogSessionId,
-        status: Weak<RefCell<FileDialogStatus>>,
-        request: FileDialogRequest,
-    ) -> Self {
+    fn new(ctx: &mut WindowManager, id: FileDialogSessionId, status: Weak<RefCell<FileDialogStatus>>, request: FileDialogRequest) -> Self {
         let current_working_directory = request.initial_directory;
         let (folders, files) = Self::read_directory(Path::new(&current_working_directory));
         let icons = ctx.style().icons;
@@ -626,9 +622,8 @@ fn replace_stack_rows(handle: &TypedWidgetHandle<Stack>, nodes: Vec<Node>) -> Re
     handle.try_update_with(nodes, |state, nodes| state.replace(nodes))?
 }
 
-impl<B: RendererBackend, State: 'static> Context<B, State> {
-    /// Opens a retained file dialog and returns its read-only polling session.
-    pub fn open_file_dialog(&mut self, request: FileDialogRequest) -> FileDialogSession {
+impl WindowManager {
+    fn open_file_dialog(&mut self, request: FileDialogRequest) -> FileDialogSession {
         let id = FileDialogSessionId(self.next_file_dialog_id);
         self.next_file_dialog_id = self.next_file_dialog_id.checked_add(1).expect("file-dialog session id counter overflowed");
         let status = Rc::new(RefCell::new(FileDialogStatus::Pending));
@@ -637,10 +632,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         FileDialogSession { id, status }
     }
 
-    /// Cancels a pending session owned by this Context.
-    ///
-    /// Returns `false` when the session is terminal or belongs to another Context.
-    pub fn cancel_file_dialog(&mut self, session: &FileDialogSession) -> bool {
+    fn cancel_file_dialog(&mut self, session: &FileDialogSession) -> bool {
         let Some(index) = self.file_dialogs.iter().position(|dialog| dialog.belongs_to(session)) else {
             return false;
         };
@@ -668,6 +660,20 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     }
 }
 
+impl<B: RendererBackend, State: 'static> Context<B, State> {
+    /// Opens a retained file dialog and returns its read-only polling session.
+    pub fn open_file_dialog(&mut self, request: FileDialogRequest) -> FileDialogSession {
+        self.window_manager.open_file_dialog(request)
+    }
+
+    /// Cancels a pending session owned by this Context.
+    ///
+    /// Returns `false` when the session is terminal or belongs to another Context.
+    pub fn cancel_file_dialog(&mut self, session: &FileDialogSession) -> bool {
+        self.window_manager.cancel_file_dialog(session)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -688,7 +694,8 @@ mod tests {
     }
 
     fn controller<'a>(ctx: &'a Context<NoopRenderer>, session: &FileDialogSession) -> &'a FileDialogController {
-        ctx.file_dialogs
+        ctx.window_manager
+            .file_dialogs
             .iter()
             .find(|dialog| dialog.belongs_to(session))
             .expect("pending session must have a controller")
@@ -814,12 +821,13 @@ mod tests {
             open_rect.y,
             open_rect.width,
             open_rect.height,
-            ctx.file_dialogs
+            ctx.window_manager
+                .file_dialogs
                 .first()
                 .and_then(|dialog| dialog.file_name_box.try_read(|state| state.text().to_owned()))
         );
         assert_eq!(session.status(), expected);
-        assert!(ctx.file_dialogs.is_empty());
+        assert!(ctx.window_manager.file_dialogs.is_empty());
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -927,7 +935,7 @@ mod tests {
         assert!(root_widget.is_alive());
         ctx.update_ui(Dimensioni::new(900, 700));
         assert!(!root_widget.is_alive());
-        assert!(ctx.file_dialogs.is_empty());
+        assert!(ctx.window_manager.file_dialogs.is_empty());
     }
 
     #[test]
@@ -962,7 +970,7 @@ mod tests {
         };
         scroll.try_update(|state| state.set_offset(Vec2i::new(0, 40))).unwrap();
         fs::write(dir.join("new-file.txt"), b"row").unwrap();
-        ctx.file_dialogs[0].refresh_entries();
+        ctx.window_manager.file_dialogs[0].refresh_entries();
         assert!(!old_row.is_alive());
         assert!(path.is_alive());
         assert!(folder_scroll.is_alive());
@@ -974,7 +982,7 @@ mod tests {
         for entry in fs::read_dir(&dir).unwrap() {
             fs::remove_file(entry.unwrap().path()).unwrap();
         }
-        ctx.file_dialogs[0].refresh_entries();
+        ctx.window_manager.file_dialogs[0].refresh_entries();
         ctx.update_ui(Dimensioni::new(900, 700));
         assert_eq!(scroll.try_read(|state| (state.offset().x, state.offset().y)), Some((0, 0)));
         fs::remove_dir_all(dir).unwrap();
@@ -1001,7 +1009,7 @@ mod tests {
         let root = controller(&ctx, &session).root.id();
         let node_count = ctx.debug_root_node_count(root).unwrap();
         let measurement = AllocationMeasurement::begin();
-        ctx.process_file_dialogs();
+        ctx.window_manager.process_file_dialogs();
         let allocations = measurement.finish();
         assert_eq!(allocations.events, 0);
         assert_eq!(ctx.debug_root_node_count(root), Some(node_count));
@@ -1038,7 +1046,7 @@ mod tests {
         // The controller itself must perform no hidden state allocation or topology work while
         // pending and idle. The full UI row below separately records layout and paint allocations.
         let controller_measurement = AllocationMeasurement::begin();
-        ctx.process_file_dialogs();
+        ctx.window_manager.process_file_dialogs();
         let controller_allocations = controller_measurement.finish();
         assert_eq!(controller_allocations.events, 0);
         assert_eq!(ctx.debug_root_node_count(root), Some(node_count));
@@ -1057,7 +1065,7 @@ mod tests {
         fs::write(dir.join("new-file.txt"), b"refresh").unwrap();
         let refresh_measurement = AllocationMeasurement::begin();
         let refresh_started = Instant::now();
-        ctx.file_dialogs[0].refresh_entries();
+        ctx.window_manager.file_dialogs[0].refresh_entries();
         ctx.update_and_render_ui();
         let refresh_elapsed = refresh_started.elapsed();
         let refresh_allocations = refresh_measurement.finish();
