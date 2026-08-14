@@ -79,7 +79,10 @@ impl AtlasHandle {
             .find_map(|(idx, (icon_name, _))| (icon_name == name).then_some(IconId(idx)))
     }
 
-    /// Returns glyph metrics for the specified character, if available.
+    /// Returns exact glyph metrics for the specified character, if available.
+    ///
+    /// This lookup does not apply the underscore fallback used by [`AtlasHandle::draw_string`] and
+    /// [`AtlasHandle::get_text_size`].
     pub fn get_char_entry(&self, font: FontId, c: char) -> Option<CharEntry> {
         self.0.fonts[font.0].1.entries.get(&c).cloned()
     }
@@ -149,12 +152,19 @@ impl AtlasHandle {
         }
     }
 
-    /// Walks each glyph in the string and invokes the closure with draw information.
+    /// Walks each Unicode scalar value in the string and invokes the closure with draw information.
+    ///
+    /// Newline and carriage return advance to another line without invoking the closure. A missing
+    /// character uses the selected font's `_` entry. If underscore is also absent, a synthetic
+    /// 8-by-8 entry at the atlas origin is used. The callback still receives the original character.
     pub fn draw_string<DrawFunction: FnMut(char, Vec2i, Recti, Recti)>(&self, font: FontId, text: &str, mut f: DrawFunction) {
         self.walk_glyphs(font, text, |chr, advance, dst, src, _| f(chr, advance, dst, src));
     }
 
-    /// Measures the bounding box of the provided text.
+    /// Measures the bounding box of the provided UTF-8 text.
+    ///
+    /// Measurement uses the same newline and missing-character fallback rules as
+    /// [`AtlasHandle::draw_string`].
     pub fn get_text_size(&self, font: FontId, text: &str) -> Dimensioni {
         let mut res = Dimensioni::new(0, 0);
         let line_height = self.get_font_height(font) as i32;

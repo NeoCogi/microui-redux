@@ -53,7 +53,8 @@
 //! Retained text-block widget.
 //!
 //! Text blocks render static or application-mutated text while participating in the same
-//! measurement and paint pipeline as interactive controls.
+//! measurement and paint pipeline as interactive controls. They retain arbitrary UTF-8; visible
+//! glyph coverage and missing-character fallback come from the selected atlas font.
 
 use crate::ui_node::text_layout::{baseline_aligned_top, build_display_text_lines, text_block_size};
 use crate::*;

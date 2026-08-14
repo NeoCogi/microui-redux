@@ -50,10 +50,11 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! UTF-8 safe text editing primitives shared by textbox and text-area widgets.
+//! UTF-8-safe text editing primitives shared by textbox and text-area widgets.
 //!
 //! The helpers in this file keep cursor indices on valid byte boundaries, apply keyboard/text
-//! input, and translate pointer positions into cursor locations.
+//! input, and translate pointer positions into cursor locations. Cursor movement and deletion use
+//! Unicode scalar-value boundaries, not grapheme-cluster boundaries.
 use crate::ui_node::text_layout::TextLine;
 use crate::{rect, AtlasHandle, FontId, KeyCode, KeyMode, Recti};
 
@@ -119,7 +120,7 @@ pub(crate) fn caret_rect(x: i32, baseline_y: i32, metrics: FontLineMetrics, clip
     rect(x, caret_top, 1, (caret_bottom - caret_top).max(1))
 }
 
-/// Clamps a byte cursor to the nearest previous valid UTF-8 character boundary.
+/// Clamps a byte cursor to the nearest previous Unicode scalar-value boundary.
 pub(crate) fn clamp_cursor_boundary(buf: &str, cursor: usize) -> usize {
     let mut cursor = cursor.min(buf.len());
     while cursor > 0 && !buf.is_char_boundary(cursor) {

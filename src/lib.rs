@@ -111,6 +111,18 @@
 //! [`Context::update_ui_state`]. The context owns the only application event dispatcher for its
 //! complete root forest. Each event port owns its pending payloads and accepts one state method.
 //!
+//! # Text encoding and glyph coverage
+//!
+//! Public text uses Rust [`str`] and [`String`] values and is therefore valid UTF-8. Textbox and
+//! text-area cursors are byte indices kept on Unicode scalar-value boundaries; movement and
+//! deletion operate on scalar values rather than grapheme clusters.
+//!
+//! Rendering coverage belongs to the selected atlas font. The built-in atlas builder bakes
+//! printable ASCII (`U+0020` through `U+007E`). A missing character uses the font's underscore
+//! glyph; custom [`AtlasSource`] tables may provide arbitrary Unicode scalar values and should
+//! include `_`. The renderer does not perform script shaping, bidirectional reordering, grapheme
+//! segmentation, kerning, or fallback-font selection.
+//!
 //! Update and paint traverse parent before children and siblings in forward order. Later work sees
 //! successful earlier cross-cell mutations, work already completed does not rerun, and each input
 //! transaction's final layout observes the resulting state and topology. Paint is observational

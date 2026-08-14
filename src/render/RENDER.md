@@ -188,10 +188,18 @@ focus, input, or the active `Style`.
 ### Text
 
 `Painter::text` records a UTF-8 string and its selected `FontId`; glyph lookup and final clipping
-happen during renderer execution. Text storage and cursor boundaries remain UTF-8-safe, but glyph
-coverage is atlas-dependent. The built-in builder currently bakes only printable ASCII; missing
-characters fall back to the underscore glyph. Applications can supply a serialized `AtlasSource`
-with a broader glyph table.
+happen during renderer execution. Text storage is UTF-8-safe, while glyph coverage is
+atlas-dependent. Rendering and measurement iterate Unicode scalar values. A missing character
+uses the selected font's underscore entry; if underscore is also absent, the runtime uses a
+synthetic 8-by-8 entry at the atlas origin. Applications supplying a serialized `AtlasSource`
+should therefore include `_` in every font.
+
+The built-in builder bakes printable ASCII (`U+0020` through `U+007E`) only. Serialized atlas
+sources can describe arbitrary Unicode scalar values, but the renderer does not perform grapheme
+segmentation, script shaping, bidirectional reordering, kerning, or fallback-font selection.
+Textbox and text-area cursor operations also work on scalar-value boundaries rather than
+user-perceived grapheme clusters. `TextWrap::Word` uses ASCII spaces as wrap opportunities and does
+not split an overlong individual word.
 
 Retained text widgets center the font baseline inside their cells, and each line receives a small
 vertical pad so glyphs do not touch widget borders. `TextBlock` supports wrapped multi-line content

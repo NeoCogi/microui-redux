@@ -172,8 +172,8 @@ impl<'a> Painter<'a> {
 
     /// Records one UTF-8 string at a local position using the selected atlas font's glyph coverage.
     ///
-    /// Text measurement remains outside Painter; final glyph lookup, fallback, and clipping are
-    /// performed by Renderer.
+    /// Text measurement remains outside Painter. Renderer performs final glyph lookup, clipping,
+    /// and the same underscore substitution used by [`crate::AtlasHandle::get_text_size`].
     pub fn text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
         if text.is_empty() || color.a == 0 || !self.clip.has_positive_area() {
             return;

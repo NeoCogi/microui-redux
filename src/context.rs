@@ -332,6 +332,9 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     }
 
     /// Queues one UTF-8 text transition, including an empty string.
+    ///
+    /// Widgets retain the complete string. Rendering remains limited to glyphs in the selected
+    /// atlas font and substitutes underscore metrics for missing characters.
     pub fn text(&mut self, text: &str) {
         self.window_manager.text(text);
     }

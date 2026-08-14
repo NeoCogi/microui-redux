@@ -29,6 +29,9 @@
 //
 
 //! Build-time atlas construction helpers.
+//!
+//! Each configured font is rasterized for printable ASCII (`U+0020` through `U+007E`) only. Use a
+//! serialized [`super::AtlasSource`] when an application needs a different or broader glyph set.
 
 use super::*;
 mod packer;
@@ -85,7 +88,7 @@ pub struct Config<'a> {
     pub default_font: String,
     /// Legacy fallback font size used when [`Config::fonts`] is empty.
     pub default_font_size: usize,
-    /// Fonts baked into the atlas.
+    /// Fonts baked into the atlas for the printable ASCII range.
     ///
     /// Use the conventional keys `body`, `small`, `title`, `heading`, and `mono`
     /// to populate the built-in semantic roles through [`Style::bind_named_fonts`].
@@ -153,13 +156,14 @@ impl Builder {
         Ok(IconId(id))
     }
 
-    /// Adds a font at the requested size and returns its [`FontId`].
+    /// Adds the printable ASCII range of a font at the requested size and returns its [`FontId`].
     pub fn add_font(&mut self, path: &str, size: usize) -> Result<FontId> {
         let name = format!("{}-{}", Self::format_path(path), size);
         self.add_font_named(name.as_str(), path, size)
     }
 
-    /// Adds a font with an explicit atlas key and returns its [`FontId`].
+    /// Adds the printable ASCII range of a font under an explicit atlas key and returns its
+    /// [`FontId`].
     pub fn add_font_named(&mut self, name: &str, path: &str, size: usize) -> Result<FontId> {
         if self.atlas.fonts.iter().any(|(existing, _)| existing == name) {
             return Err(Error::new(ErrorKind::Other, format!("Font name '{}' already exists in the atlas", name)));
@@ -168,7 +172,8 @@ impl Builder {
         let mut entries = HashMap::new();
         let mut min_y = i32::MAX;
         let mut max_y = -i32::MAX;
-        // MicroUI text rendering only needs printable ASCII glyphs from the baked atlas.
+        // The built-in builder deliberately covers printable ASCII. AtlasSource remains the path
+        // for callers that need arbitrary Unicode scalar values.
         for i in 32..127 {
             let ch = i as u8 as char;
             let (metrics, bitmap) = font.rasterize(ch, size as f32);

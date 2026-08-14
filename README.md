@@ -447,11 +447,30 @@ update. Commit semantic changes before creating the frame.
 - Font sizes are selected by choosing another baked font variant, not by scaling one bitmap font at runtime.
 - `examples/demo-full` uses this directly: `NORMAL.ttf` for control/body text, `BOLD.ttf` for window titles, and `CONSOLE.ttf` for the log window’s input/output text.
 
-Text storage, input, cursor movement, and slicing are UTF-8-safe. The built-in atlas builder currently
-bakes only printable ASCII (`U+0020` through `U+007E`), however. A character missing from the
-selected font falls back to the baked underscore glyph. Applications that need broader Unicode
-coverage must provide an `AtlasSource` containing those glyphs; there is not yet a configurable
-glyph-range option in `builder::Config`.
+### Text encoding and glyph coverage
+
+All public text enters the library as Rust `str` or `String` values and is therefore valid UTF-8.
+Textboxes and text areas retain arbitrary UTF-8 and keep their byte cursor on Unicode scalar-value
+boundaries. Left/right movement and deletion operate on one scalar value at a time, not on a
+user-perceived grapheme cluster. Combining sequences and multi-scalar emoji can therefore require
+more than one cursor or deletion operation.
+
+Rendering coverage is a separate atlas concern. Text measurement and drawing iterate Unicode
+scalar values and use the same lookup rules:
+
+- a character present in the selected atlas font uses its own glyph metrics and rectangle;
+- a missing character uses the selected font's underscore (`_`) entry;
+- if underscore is also absent, the runtime uses a synthetic 8-by-8 fallback rectangle at the
+  atlas origin.
+
+The built-in atlas builder bakes only printable ASCII (`U+0020` through `U+007E`), which includes
+underscore. `AtlasSource` can describe arbitrary Unicode scalar values, so applications needing
+broader coverage must provide their own glyph table and should always include `_`. There is not
+yet a configurable glyph-range option in `builder::Config`.
+
+The text pipeline does not perform grapheme segmentation, script shaping, bidirectional
+reordering, kerning, or fallback-font selection. `TextWrap::Word` wraps only at ASCII space
+boundaries; an individual word is not split when it exceeds the available width.
 
 An application-provided atlas must have at least one font and must reserve icon index zero for an
 opaque white tile used by solid geometry. The standard style also expects the semantic icon names
@@ -586,7 +605,7 @@ is selected.
     - [x] Runtime construction, generated Rust embedding, and external PNG loading share serialized atlas metadata.
 - [x] Documented the alpha API and known limitations.
     - [x] Documented the context-owned typed-event architecture.
-    - [x] Documented that the built-in builder bakes printable ASCII while text editing remains UTF-8-safe.
+    - [x] Documented UTF-8 editing, atlas glyph coverage, scalar-value fallback, and text-layout limits.
     - [x] Documented the trusted atlas-metadata contract, external-atlas workflow, and UTF-8 file-dialog path boundary.
 
 ### Version 0.7.0

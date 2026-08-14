@@ -53,7 +53,9 @@
 //! Multiline text-area widget state and editing behavior.
 //!
 //! Text areas share the UTF-8 editing core with textboxes but track line layout, vertical scroll,
-//! and mouse-driven cursor placement across multiple wrapped lines.
+//! and mouse-driven cursor placement across multiple wrapped lines. Editing operates on Unicode
+//! scalar values rather than grapheme clusters; rendering uses the selected atlas's glyph coverage
+//! and missing-character fallback.
 use crate::ui_node::scrollbar::{ScrollAxis, ScrollbarGeometry, scrollbar_base, scrollbar_max_scroll};
 use crate::ui_node::text_layout::{TextLine, build_text_lines};
 use crate::*;
@@ -122,7 +124,7 @@ impl TextAreaParameters {
 pub struct TextArea {
     /// Current text buffer.
     buf: String,
-    /// Current UTF-8 byte cursor.
+    /// Current byte cursor, always positioned at a Unicode scalar-value boundary.
     cursor: usize,
     /// Current scroll offset.
     scroll: Vec2i,
@@ -147,7 +149,7 @@ pub struct TextArea {
 pub struct TextAreaChanged {
     /// Complete text value after applying the triggering input event.
     pub text: String,
-    /// UTF-8 byte cursor after applying the triggering input event.
+    /// Scalar-aligned byte cursor after applying the triggering input event.
     pub cursor: usize,
 }
 
@@ -183,12 +185,12 @@ impl TextArea {
         self.reset_preferred_x = true;
     }
 
-    /// Returns the current cursor byte position.
+    /// Returns the current byte cursor at a Unicode scalar-value boundary.
     pub fn cursor(&self) -> usize {
         self.cursor
     }
 
-    /// Moves the cursor to a valid UTF-8 boundary within the current text.
+    /// Moves the cursor to the nearest preceding Unicode scalar-value boundary in the current text.
     pub fn set_cursor(&mut self, cursor: usize) {
         self.cursor = clamp_cursor_boundary(&self.buf, cursor);
         self.reset_preferred_x = true;
@@ -227,12 +229,12 @@ impl TypedWidgetHandle<TextArea> {
         self.try_update(TextArea::clear)
     }
 
-    /// Returns the UTF-8 byte cursor while the widget is retained.
+    /// Returns the scalar-aligned byte cursor while the widget is retained.
     pub fn cursor(&self) -> Option<usize> {
         self.try_read(TextArea::cursor)
     }
 
-    /// Moves the retained cursor to a valid UTF-8 boundary.
+    /// Moves the retained cursor to the nearest preceding Unicode scalar-value boundary.
     pub fn set_cursor(&self, cursor: usize) -> Option<()> {
         self.try_update(|widget| widget.set_cursor(cursor))
     }

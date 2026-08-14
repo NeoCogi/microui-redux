@@ -29,6 +29,10 @@
 //
 
 //! Texture atlas handles, baked icon/font metadata, and construction helpers.
+//!
+//! Text is indexed by Rust [`char`] values. The built-in `builder` module bakes printable ASCII only;
+//! serialized [`AtlasSource`] values can provide any Unicode scalar values. Runtime measurement
+//! and drawing substitute the selected font's underscore entry for a missing character.
 
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
@@ -55,7 +59,10 @@ struct Font {
     baseline: i32,
     /// Requested font size in pixels.
     font_size: usize,
-    /// Glyph entries for the printable ASCII range baked into the atlas.
+    /// Glyph entries available in this font.
+    ///
+    /// The built-in builder populates printable ASCII; serialized sources may provide arbitrary
+    /// Unicode scalar values.
     entries: HashMap<char, CharEntry>,
 }
 

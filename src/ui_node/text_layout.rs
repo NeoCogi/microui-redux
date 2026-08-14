@@ -53,7 +53,8 @@
 //! Shared text measurement, wrapping, and control alignment helpers.
 //!
 //! Text widgets and simple display widgets use these routines to keep UTF-8 line slicing,
-//! baseline alignment, and control text placement consistent.
+//! baseline alignment, and control text placement consistent. Measurement follows
+//! [`AtlasHandle::get_text_size`], including its missing-character fallback.
 use crate::{vec2, AtlasHandle, Dimensioni, FontId, Recti, Style, Vec2i, WidgetOption};
 
 /// Controls how text should wrap when rendered inside a container.
@@ -61,7 +62,9 @@ use crate::{vec2, AtlasHandle, Dimensioni, FontId, Recti, Style, Vec2i, WidgetOp
 pub enum TextWrap {
     /// Render text on a single line without wrapping.
     None,
-    /// Wrap text at word boundaries when it exceeds the cell width.
+    /// Wrap text at ASCII space boundaries when it exceeds the cell width.
+    ///
+    /// An individual word is never split, even when it is wider than the available width.
     Word,
 }
 

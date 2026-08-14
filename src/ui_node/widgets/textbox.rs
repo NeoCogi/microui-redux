@@ -53,7 +53,8 @@
 //! Single-line textbox widget and shared textbox update/paint helpers.
 //!
 //! The textbox stores a UTF-8 byte cursor and uses shared text-edit helpers to keep cursor movement
-//! and deletion on valid character boundaries.
+//! and deletion on valid Unicode scalar-value boundaries. It retains characters that are absent
+//! from the selected atlas; measurement and painting render those through the atlas fallback.
 use crate::*;
 use std::{cell::RefCell, rc::Rc};
 
@@ -107,7 +108,7 @@ impl TextboxParameters {
 pub struct Textbox {
     /// Current text buffer.
     buf: String,
-    /// Current UTF-8 byte cursor.
+    /// Current byte cursor, always positioned at a Unicode scalar-value boundary.
     cursor: usize,
     /// Initialization-only font.
     font: FontChoice,
@@ -137,12 +138,12 @@ impl Textbox {
         self.cursor = 0;
     }
 
-    /// Returns the current cursor byte position.
+    /// Returns the current byte cursor at a Unicode scalar-value boundary.
     pub fn cursor(&self) -> usize {
         self.cursor
     }
 
-    /// Moves the cursor to a valid UTF-8 boundary within the current text.
+    /// Moves the cursor to the nearest preceding Unicode scalar-value boundary in the current text.
     pub fn set_cursor(&mut self, cursor: usize) {
         self.cursor = clamp_cursor_boundary(&self.buf, cursor);
     }
@@ -169,12 +170,12 @@ impl TypedWidgetHandle<Textbox> {
         self.try_update(Textbox::clear)
     }
 
-    /// Returns the UTF-8 byte cursor while the widget is retained.
+    /// Returns the scalar-aligned byte cursor while the widget is retained.
     pub fn cursor(&self) -> Option<usize> {
         self.try_read(Textbox::cursor)
     }
 
-    /// Moves the retained cursor to a valid UTF-8 boundary.
+    /// Moves the retained cursor to the nearest preceding Unicode scalar-value boundary.
     pub fn set_cursor(&self, cursor: usize) -> Option<()> {
         self.try_update(|widget| widget.set_cursor(cursor))
     }
@@ -200,7 +201,7 @@ impl TypedWidgetHandle<Textbox> {
 pub struct TextboxChanged {
     /// Complete text value after applying the triggering input event.
     pub text: String,
-    /// UTF-8 byte cursor after applying the triggering input event.
+    /// Scalar-aligned byte cursor after applying the triggering input event.
     pub cursor: usize,
 }
 

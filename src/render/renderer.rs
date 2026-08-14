@@ -322,7 +322,8 @@ impl<B: RendererBackend> DisplayListExecutor<'_, '_, B> {
         }
     }
 
-    /// Expands a UTF-8 string through the selected atlas font and submits available glyphs.
+    /// Expands a UTF-8 string through the selected atlas font, applying its missing-character
+    /// fallback, and submits the resulting glyph rectangles.
     fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color, clip: Recti) {
         let frame = &mut self.frame;
         let atlas_dim = self.atlas_dim;

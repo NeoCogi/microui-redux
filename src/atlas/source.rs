@@ -42,7 +42,10 @@ pub struct FontEntry<'a> {
     pub baseline: i32,
     /// Requested pixel size.
     pub font_size: usize,
-    /// Glyph metadata table.
+    /// Glyph metadata table keyed by Unicode scalar value.
+    ///
+    /// Runtime drawing substitutes the `_` entry for a missing character. Include underscore when
+    /// the table does not cover every character an application may display.
     pub entries: &'a [(char, CharEntry)],
 }
 
@@ -69,6 +72,9 @@ pub struct AtlasSource<'a> {
     /// entry, identified by [`crate::WHITE_ICON`], when drawing solid geometry.
     pub icons: &'a [(&'a str, Recti)],
     /// Fonts baked into the atlas.
+    ///
+    /// Unlike the built-in builder's printable-ASCII output, these tables may contain arbitrary
+    /// Unicode scalar values.
     pub fonts: &'a [(&'a str, FontEntry<'a>)],
     /// Encoding of [`AtlasSource::pixels`].
     pub format: SourceFormat,
