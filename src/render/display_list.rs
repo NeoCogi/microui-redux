@@ -68,7 +68,7 @@ pub(super) enum DrawKind {
         /// Fill color.
         color: Color,
     },
-    /// Draws one UTF-8 text run.
+    /// Draws one UTF-8 string through an atlas font.
     Text {
         /// Font used for the text run.
         font: FontId,

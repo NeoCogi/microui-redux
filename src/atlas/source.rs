@@ -123,6 +123,11 @@ impl AtlasHandle {
     }
 
     /// Attempts to reconstruct an atlas from a serialized [`AtlasSource`].
+    ///
+    /// This validates pixel decoding and the declared image dimensions. It does not currently
+    /// validate icon/glyph rectangles, semantic asset names, font metrics, or the required opaque
+    /// white tile at icon index zero. Treat metadata as trusted and satisfy the [`AtlasSource`]
+    /// field contracts before constructing the handle.
     pub fn try_from<'a>(source: &AtlasSource<'a>) -> std::io::Result<Self> {
         let width = i32::try_from(source.width).map_err(|_| Error::new(ErrorKind::Other, "Atlas width exceeds i32::MAX"))?;
         let height = i32::try_from(source.height).map_err(|_| Error::new(ErrorKind::Other, "Atlas height exceeds i32::MAX"))?;

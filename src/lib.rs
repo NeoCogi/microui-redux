@@ -148,8 +148,8 @@
 //! Retained layout is resolved from context-owned UI nodes, container sizing policies, and widget
 //! measurement results.
 //! Retained application logic uses typed weak widget handles returned beside mounted nodes.
-//! The [`retained`] module and repository examples document the `0.8.0-pre-alpha` retained-authoring
-//! API.
+//! The [`retained`] module and repository examples document the 0.8 alpha retained-authoring API.
+//! The source tree remains versioned `0.8.0-pre-alpha` until alpha release metadata is finalized.
 //!
 //! # Rendering pipeline
 //!

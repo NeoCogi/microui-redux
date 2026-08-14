@@ -32,6 +32,10 @@
 //! Opening a dialog constructs its retained shell once. Context advances navigation, selection,
 //! and completion after each queued input event; applications only retain a [`FileDialogSession`]
 //! and inspect [`FileDialogSession::status`] after [`crate::Context::update_ui`].
+//!
+//! Paths cross the public API as UTF-8 [`String`] values. On platforms that permit non-UTF-8 paths,
+//! directory entries are converted lossily. Accepting a typed name is lexical: the dialog does not
+//! require the resulting path to exist or to identify a regular file.
 
 use std::{
     cell::RefCell,
@@ -114,7 +118,10 @@ impl Default for FileDialogRequest {
     }
 }
 
-/// File selected by an accepted dialog.
+/// Path accepted by a file dialog.
+///
+/// Acceptance does not imply that the path exists or identifies a regular file. Applications that
+/// require those conditions must validate [`FileDialogResult::file_path`] after completion.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FileDialogResult {
     /// Selected basename suitable for display.

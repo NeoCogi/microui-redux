@@ -170,9 +170,10 @@ impl<'a> Painter<'a> {
         self.fill_rect(Recti::new(right_x, middle_y, width, middle_height), color);
     }
 
-    /// Records one UTF-8 text run at a local position.
+    /// Records one UTF-8 string at a local position using the selected atlas font's glyph coverage.
     ///
-    /// Text measurement remains outside Painter; final glyph clipping is performed by Renderer.
+    /// Text measurement remains outside Painter; final glyph lookup, fallback, and clipping are
+    /// performed by Renderer.
     pub fn text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
         if text.is_empty() || color.a == 0 || !self.clip.has_positive_area() {
             return;

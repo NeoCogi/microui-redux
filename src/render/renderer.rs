@@ -322,7 +322,7 @@ impl<B: RendererBackend> DisplayListExecutor<'_, '_, B> {
         }
     }
 
-    /// Expands and submits a UTF-8 text run without retaining glyph scratch.
+    /// Expands a UTF-8 string through the selected atlas font and submits available glyphs.
     fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color, clip: Recti) {
         let frame = &mut self.frame;
         let atlas_dim = self.atlas_dim;

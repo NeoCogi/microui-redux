@@ -174,7 +174,7 @@ The main primitives are:
 | --- | --- |
 | `fill_rect` | Semantic atlas-backed solid rectangle |
 | `stroke_rect` | Inside-aligned rectangle border recorded as fills |
-| `text` | UTF-8 text run expanded through the atlas during execution |
+| `text` | UTF-8 string expanded through the selected atlas font during execution |
 | `icon` | Atlas icon |
 | `image` | External texture identified by `TextureId` |
 | `stroke_line` | Tessellated solid line |
@@ -187,12 +187,15 @@ focus, input, or the active `Style`.
 
 ### Text
 
-`Painter::text` records a UTF-8 run and its selected `FontId`; glyph lookup and
-final clipping happen during renderer execution. Retained text widgets center
-the font baseline inside their cells, and each line receives a small vertical
-pad so glyphs do not touch widget borders. `TextBlock` supports wrapped
-multi-line content while preserving outer padding without inserting additional
-spacing between lines.
+`Painter::text` records a UTF-8 string and its selected `FontId`; glyph lookup and final clipping
+happen during renderer execution. Text storage and cursor boundaries remain UTF-8-safe, but glyph
+coverage is atlas-dependent. The built-in builder currently bakes only printable ASCII; missing
+characters fall back to the underscore glyph. Applications can supply a serialized `AtlasSource`
+with a broader glyph table.
+
+Retained text widgets center the font baseline inside their cells, and each line receives a small
+vertical pad so glyphs do not touch widget borders. `TextBlock` supports wrapped multi-line content
+while preserving outer padding without inserting additional spacing between lines.
 
 ## Coordinates and clipping
 

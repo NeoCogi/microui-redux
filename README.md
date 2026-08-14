@@ -1,30 +1,62 @@
-# Rxi's Microui Port to Idiomatic Rust
+# microui-redux
+
 [![Crate](https://img.shields.io/crates/v/microui-redux.svg)](https://crates.io/crates/microui-redux)
 
-This project started as a C2Rust conversion of Rxi's MicroUI and has since grown into a Rust-first UI toolkit. It keeps Microui's compact rendering model while moving UI authoring onto unique owning `Node` trees, typed weak widget and composite handles, context-owned roots, and backend-agnostic rendering hooks. Runtime node identity is private.
+`microui-redux` is a retained, backend-agnostic Rust GUI toolkit inspired by
+[rxi/microui](https://github.com/rxi/microui). It keeps microui's compact rendering model while
+using unique owning `Node` trees, typed weak widget handles, context-owned roots, and typed backend
+frames.
 
-Compared to [microui-rs](https://github.com/neocogi/microui-rs), this crate embraces std types, reusable retained trees, and richer widgets such as custom rendering callbacks, dialogs, and a file dialog.
+> **Development status:** this source tree is being prepared for the 0.8 alpha. Its package metadata
+> still identifies it as `0.8.0-pre-alpha`; the alpha version will be finalized as a separate
+> release step. The 0.8 line is a breaking retained-API redesign and is not API-compatible with
+> 0.7.
 
-The current API model and upgrade notes are summarized below and demonstrated by the retained
-examples in this repository.
+Compared with [microui-rs](https://github.com/neocogi/microui-rs), this crate embraces standard
+library types, reusable retained trees, and richer widgets such as custom rendering callbacks,
+dialogs, and a file dialog.
+
+## Documentation
+
+- [Rendering and backend integration](src/render/RENDER.md)
+- [Typed event architecture](#context-owned-typed-events)
+- [Version history](#version-080-pre-alpha)
+- [`simple` example](examples/simple.rs) and
+  [`retained-custom-drawing` example](examples/retained-custom-drawing.rs)
+
+## Dependency and backend
+
+During this prerelease documentation pass, the package version remains:
+
+```toml
+[dependencies]
+microui-redux = "0.8.0-pre-alpha"
+```
+
+`microui-redux` does not create a native window or graphics device. Applications provide a
+`RendererBackend`; the repository examples contain SDL-based Glow, Vulkan, and WGPU integrations.
+The `example-*` features enable those repository examples and are not a runtime backend-selection
+API for downstream applications.
 
 ## Demo
-Clone and build the demo (enable exactly one backend feature):
-```
-$ cargo run --example demo-full --features example-vulkan   # Vulkan backend
-# or
-$ cargo run --example demo-full --features example-glow     # Glow backend
-# or
-$ cargo run --example demo-full --features example-wgpu     # WGPU backend
+
+Clone the repository and run the demo with exactly one backend feature:
+
+```bash
+cargo run --example demo-full --features example-vulkan
+cargo run --example demo-full --features example-glow
+cargo run --example demo-full --features example-wgpu
 ```
 
-`example-backend` is only a shared gate for example code paths; it is **not** runnable by itself.
+`example-backend` is only a shared gate for example code paths; it is not runnable by itself.
 Running with only `--features example-backend` will fail intentionally at compile time.
 
-`demo-full` now loads `examples/FACEPALM.png` and `assets/suzanne.obj` from disk at runtime (no `include_bytes!` for those files).
+`demo-full` loads `examples/FACEPALM.png` and `assets/suzanne.obj` from disk at runtime. Run it
+from the repository root so those relative paths resolve.
 
 For a smaller release executable with runtime-loaded assets, build without default features and
 enable exactly one backend plus `builder`:
+
 ```bash
 cargo build \
   --release \
@@ -38,20 +70,11 @@ demo image is read from `examples/FACEPALM.png`, and the Suzanne mesh is read fr
 `assets/suzanne.obj`. To inspect real binary section size rather than asset size, use
 `size -A target/release/examples/demo-full`.
 
-If `atlas.png` has already been generated, the demo can skip runtime font/icon atlas construction
-and load the atlas image from disk instead:
-```bash
-cargo build \
-  --release \
-  --example demo-full \
-  --no-default-features \
-  --features "example-glow external-atlas"
-```
-
 For the smallest Linux executable, use the `build-min-size` Cargo alias with nightly. It builds for
 a dedicated `x86_64-unknown-linux-min-size` platform target, rebuilds `std`, uses immediate-abort
 panics, omits Rust unwind tables and panic formatting details, and strips symbols and the linker
 build ID. Normal builds remain on their selected toolchain and platform:
+
 ```bash
 cargo +nightly build-min-size \
   --example demo-full \
@@ -64,9 +87,10 @@ feature and package-selection arguments; replace `example-glow` with `example-vu
 `example-wgpu` when needed. It requires the nightly `rust-src` component (`rustup component add
 rust-src --toolchain nightly`).
 
-![random](res/microui-0.6.png)
+![microui-redux demo with retained windows and controls](res/microui.png)
 
 ## Key Concepts
+
 - **Context**: owns the high-level `Renderer`, the only ordered input queue, and retained root windows. Applications enqueue through Context methods, call `update_ui(dimensions)` to drain input and commit layout, use typed widget handles between traversals, synchronize again if a mutation can affect layout, then call `frame(FrameInfo).render_ui()?` to paint and submit once.
 - **Container**: the generic retained branch owner. It stores one erased concrete `ContainerWidget` and one authoritative opaque `Children` collection. The concrete widget owns semantic state, configuration, event ports, and layout policy; only the generic container owns children strongly.
 - **Layout engine + flows**: parent container widgets measure and assign child rectangles through scoped child-aware APIs and `ContainerLayoutCtx`. Row, Grid, Column, Stack, Disclosure, and ScrollArea expose their configuration and weak topology capabilities directly through `TypedWidgetHandle<W>`.
@@ -295,6 +319,59 @@ payloads, and the typed handle projects the corresponding weak `WidgetEventHandl
 exposing or owning the erased node. Disclosure headers remain real addressable leaf children, while
 the concrete `Disclosure` widget owns expansion state and the weak body-topology capability.
 
+### Context-owned typed events
+
+The retained UI is one transaction domain. A `Context<B, State>` owns the hardware-input FIFO, all
+window/dialog/popup roots, and one typed event dispatcher for `State`. Widgets remain independent
+of the application state type: each concrete widget owns only its native
+`WidgetEventPort<Event>`.
+
+The example above registers native widget endpoints with `Context::subscribe`. Bound application
+values can be attached without changing native widget payloads:
+
+```rust
+context.subscribe_with(slider.changed(), index, Model::slider_changed)?;
+```
+
+There is no public standalone `Session`. Polling-only contexts use `Context<B>` and
+`Context::update_ui`; event-driven contexts use `Context<B, State>` and
+`Context::update_ui_state`.
+
+```text
+Context input FIFO
+    -> route one raw event through the eligible root tree
+    -> widget mutates local state and appends E to WidgetEventPort<E>
+    -> complete cross-root update releases retained widget borrows
+    -> context dispatcher drains subscribed ports into &mut State
+    -> layout commits before the next raw event is routed
+```
+
+The initial synchronization pass also drains events queued by programmatic widget changes, even
+when no raw input is waiting. Dispatch repeats until every subscribed port is empty, so finite
+events emitted by state methods complete in the same transaction. A cascade limit detects
+accidental feedback loops. The limit is checked after each drained subscription batch, so one
+large batch may cross the threshold before the dispatcher panics.
+
+Event ownership and ordering follow these rules:
+
+- A widget is the sole strong owner of its typed event ports.
+- `WidgetEventHandle<Event>` and context subscription records hold weak port references.
+- Each port accepts one context subscription and discards events while unsubscribed.
+- Removing a widget drops its pending events; dead context bindings are pruned during dispatch.
+- Dropping the context dispatcher disconnects its live ports.
+- FIFO is preserved within each port. When several ports have pending events at one boundary,
+  subscription order determines their dispatch order.
+- One state method owns the effects for one port; application-level fan-out is ordinary method
+  composition rather than multicast event infrastructure.
+
+There is intentionally no total chronology across independent ports. An event emitted into a
+subscription later in the current sweep can run during that sweep; one emitted into the current
+or an earlier subscription runs in the next sweep. Application logic that requires a total order
+should express it inside one state method or one event type.
+
+The context dispatcher is the one dynamic boundary. It erases the concrete event type of each
+subscription so one `Context<B, State>` can subscribe to heterogeneous native widget events.
+
 ### Retained node identity
 
 Each owning `Node` receives a private, process-unique runtime identity before mounting. Moving a
@@ -363,11 +440,24 @@ captured typed widget handle during either callback violates the contract; it is
 update. Commit semantic changes before creating the frame.
 
 ## Fonts and typography
+
 - Atlas building supports multiple baked fonts and sizes through `atlas::builder::FontAsset`, and the same config can drive both runtime atlas construction and offline/prebuilt atlas export.
 - `Context::new(...)` binds the conventional atlas font keys `body`, `small`, `title`, `heading`, and `mono`, plus the built-in semantic icon keys, onto the default `Style`. `Context::set_style(...)` also rebinds font and icon fields that are still left at their default values, so tweaking colors or spacing on top of `Style::default()` preserves the atlas's semantic bindings.
 - Text-bearing widget Parameters expose `.font(FontChoice)`, so you can either select a semantic role (`FontRole::Heading.into()`) or a concrete baked font ID (`atlas.font_id("caption").unwrap().into()`).
 - Font sizes are selected by choosing another baked font variant, not by scaling one bitmap font at runtime.
 - `examples/demo-full` uses this directly: `NORMAL.ttf` for control/body text, `BOLD.ttf` for window titles, and `CONSOLE.ttf` for the log window’s input/output text.
+
+Text storage, input, cursor movement, and slicing are UTF-8-safe. The built-in atlas builder currently
+bakes only printable ASCII (`U+0020` through `U+007E`), however. A character missing from the
+selected font falls back to the baked underscore glyph. Applications that need broader Unicode
+coverage must provide an `AtlasSource` containing those glyphs; there is not yet a configurable
+glyph-range option in `builder::Config`.
+
+An application-provided atlas must have at least one font and must reserve icon index zero for an
+opaque white tile used by solid geometry. The standard style also expects the semantic icon names
+`close`, `expand`, `collapse`, `check`, `expand_down`, `open_folder`, `closed_folder`, and `file`.
+The current loader does not validate the complete contract, so treat atlas metadata as trusted
+input and keep every glyph/icon rectangle within the declared texture dimensions.
 
 ```rust
 use microui_redux::{atlas::builder, prelude::*};
@@ -429,11 +519,12 @@ let (_title, title_node) = TextBlock::create(
 If `fonts` is empty, `builder::Config` falls back to `default_font` + `default_font_size` for the old single-font atlas layout.
 
 ## Cargo features
+
 - `builder` *(default)* – enables the runtime atlas builder and PNG decoding helpers used by the examples.
 - `png_source` – accepts PNG-compressed serialized atlases and `ImageSource::Png { .. }`; pixels are decoded to RGBA when loaded.
 - `save-to-rust` – enables `AtlasHandle::to_rust_files` to emit the current atlas as Rust code for embedding.
 - `prebuilt-atlas` – opt-in example atlas embedding; without it, examples build their atlas at runtime.
-- `external-atlas` – lets examples load `atlas.png` from disk with compiled atlas metadata instead of building or embedding its pixels.
+- `external-atlas` – example-only loader for a repository-root `atlas.png` paired with the checked-in `examples/common/external_atlas_metadata.rs` metadata.
 - `example-backend` – shared internal gate used by examples; pair it with exactly one concrete backend.
 - `example-glow` / `example-vulkan` / `example-wgpu` – concrete example backends; choose exactly one when running examples.
 
@@ -449,20 +540,57 @@ Equivalent command using the shared gate explicitly:
 To embed the generated atlas instead, add `prebuilt-atlas` explicitly:
 `cargo run --example demo-full --no-default-features --features "example-vulkan prebuilt-atlas"`
 
+`external-atlas` is a repository-development path, not a self-contained package feature. It expects
+an existing `atlas.png` whose pixels match the checked-in metadata exactly; `atlas.png` is ignored
+by Git and excluded from the crate package. The repository does not currently provide a command
+that regenerates this pair. Prefer `builder` or `prebuilt-atlas` unless you maintain both files
+together.
+
 To export an atlas as Rust, enable `save-to-rust` (and `png_source` when serializing PNG-backed atlas data) and call `AtlasHandle::to_rust_files`. The helper binary requires `builder`, `save-to-rust`, and `png_source`:
 `cargo run --bin atlas_export --features "builder save-to-rust png_source" -- --output path/to/atlas.rs`
 
 ### Version 0.8.0-pre-alpha
 
-`0.8.0-pre-alpha` is the current in-development UI-node/runtime refactor. It establishes the
-direction for unique owning nodes, merged concrete leaf widgets, typed weak application handles,
-public custom containers, one-event update commits, and paint-only rendering. The README, crate
-rustdoc, and retained examples document the implemented API.
+`0.8.0-pre-alpha` is the current alpha candidate. It is a breaking retained-API redesign relative
+to `0.7.0`. The manifest and this heading must be updated together when the final alpha identifier
+is selected.
 
-This is intentionally a pre-alpha version: downstream users should expect further breaking changes
-before `0.8.0` and should evaluate a snapshot against its API documentation and examples.
+- [x] Replaced retained tree building with unique owning `Node` values.
+    - [x] Built-in leaf and container constructors return `(TypedWidgetHandle<W>, Node)`.
+    - [x] Moving or mounting a node transfers its single owner; typed widget handles remain weak.
+    - [x] Public runtime node identity and generic interaction-result lookup were removed.
+- [x] Merged semantic state and runtime behavior into concrete widgets.
+    - [x] Each widget owns its parameters-derived state, native event ports, measurement, update, and paint behavior.
+    - [x] `LeafWidget` defines intrinsic measurement and `ContainerWidget` defines child-aware layout.
+    - [x] `Row`, `Column`, `Grid`, `Stack`, `Disclosure`, and `ScrollArea` expose retained mutation through typed handles.
+- [x] Made `Context` the retained transaction boundary.
+    - [x] Context owns the ordered input FIFO, complete root forest, renderer, and application event dispatcher.
+    - [x] `update_ui` and `update_ui_state` commit layout after every queued input event.
+    - [x] `ContextFrame::render_ui` is paint-only and rejects missing, stale, or dimension-mismatched commits before backend acquisition.
+- [x] Added context-owned typed application events.
+    - [x] Widgets expose weak `WidgetEventHandle<E>` endpoints for their native event types.
+    - [x] `Context<B, State>::subscribe` and `subscribe_with` dispatch into application state after retained widget borrows end.
+    - [x] Removed the public standalone event `Session`; polling-only applications continue to use `Context<B>`.
+- [x] Extracted backend-independent retained root management.
+    - [x] Windows, dialogs, and popups remain context-owned until explicit destruction.
+    - [x] `RootHandle` exposes typed chrome state and events without extending root lifetime.
+    - [x] Modal routing, popup dismissal, focus, capture, root movement, and resizing share one retained window manager.
+- [x] Unified rendering behind recorded painter operations and typed backend frames.
+    - [x] `Painter` records backend-neutral work into the framework-owned display list.
+    - [x] `RendererBackend::Frame<'a>` gives each backend one exclusive submission frame.
+    - [x] Typed custom-render callbacks receive the concrete selected backend frame without a shared backend handle.
+    - [x] Glow, Vulkan, and WGPU repository examples use the same retained application lifecycle.
+- [x] Expanded atlas and typography support.
+    - [x] Atlas configuration supports multiple named font variants and semantic font roles.
+    - [x] Default styles bind conventional font and icon names from the backend atlas.
+    - [x] Runtime construction, generated Rust embedding, and external PNG loading share serialized atlas metadata.
+- [x] Documented the alpha API and known limitations.
+    - [x] Documented the context-owned typed-event architecture.
+    - [x] Documented that the built-in builder bakes printable ASCII while text editing remains UTF-8-safe.
+    - [x] Documented the trusted atlas-metadata contract, external-atlas workflow, and UTF-8 file-dialog path boundary.
 
 ### Version 0.7.0
+
 Version `0.7.0` is the context-owned retained-root release. Compared to `0.6.1`, it completes the retained migration by moving root lifetime, interaction identity, and frame traversal into the context instead of requiring applications to resubmit each root every frame.
 
 - [x] Moved retained root lifetime into `Context`.
@@ -496,6 +624,7 @@ Version `0.7.0` is the context-owned retained-root release. Compared to `0.6.1`,
     - [x] Runtime modules, private structs, enums, and functions now have rustdoc or implementation comments, and the retained behavior is covered by focused tests.
 
 ### Version 0.6.x
+
 Version `0.6.0` introduced retained `WidgetTree` authoring on top of the older per-frame root submission loop. Compared to `0.5.0`, `0.6.x` replaced immediate/closure widget authoring with reusable retained trees, widget handles, committed interaction results, custom graphics primitives, and multi-font atlas support.
 
 - [x] `Context::window`, `Context::dialog`, and `Context::popup` accepted retained trees instead of UI-building closures.
@@ -507,6 +636,7 @@ Version `0.6.0` introduced retained `WidgetTree` authoring on top of the older p
 - [x] Version `0.6.1` switched demos to runtime atlas construction by default and made prebuilt atlas embedding opt-in.
 
 ### Version 0.5
+
 - [x] Widget identity moved fully to pointer-based IDs.
     - [x] Removed `with_id`; focus/hover now use widget trait-object/state pointers.
 - [x] Layout refactor: introduced `LayoutEngine` + specialized flows (`RowFlow`, `StackFlow`) instead of a one-size-fits-all manager.
@@ -521,6 +651,7 @@ Version `0.6.0` introduced retained `WidgetTree` authoring on top of the older p
 - [x] Added directional stack demo window and expanded documentation/comments for layout and WGPU renderer.
 
 ### Version 0.4
+
 - [x] Stateful widgets
     - [x] Stateful widgets for core controls (button, list item, checkbox, textbox, slider, number, custom).
     - [x] Pointer-based widget IDs; InputSnapshot threaded through widgets and cached per frame.
@@ -535,36 +666,37 @@ Version `0.6.0` introduced retained `WidgetTree` authoring on top of the older p
 - [x] `Container::style` now uses `Rc<Style>`.
 
 ### Version 0.3
+
 - [x] Use `std` (`Vec`, `parse`, ...)
 - [x] Containers contain clip stack and command list
 - [x] Move `begin_*`, `end_*` functions to closures
-- [x] Move to AtlasRenderer Trait
-- [x] Remove/Refactor `Pool`
+- [x] Move to `AtlasRenderer` trait
+- [x] Remove/refactor `Pool`
 - [x] Change layout code
-- [x] Treenode as tree
-- [x] Manage windows lifetime & ownership outside of context (use root windows)
-- [x] Manage containers lifetime & ownership outside of contaienrs
-- [x] Software based textured rectangle clipping
-- [x] Add Atlasser to the code
-    - [x] Runtime atlasser
-        - [x] Icon
-        - [x] Font (Hash Table)
-    - [x] Separate Atlas Builder from the Atlas
-    - [x] Builder feature
-    - [x] Save Atlas to rust
-    - [x] Atlas loader from const rust
-- [x] Image widget
-- [x] Png Atlas source
-- [x] Pass-Through rendering command (for 3D viewports)
-- [x] Custom Rendering widget
-    - [x] Mouse input event
-    - [x] Keyboard event
-    - [x] Text event
-    - [x] Drag outside of the region
+- [x] Add tree nodes
+- [x] Manage window lifetime and ownership outside Context through root windows
+- [x] Manage container lifetime and ownership outside containers
+- [x] Add software-based textured rectangle clipping
+- [x] Add atlas support
+    - [x] Runtime atlas builder
+        - [x] Icons
+        - [x] Font hash tables
+    - [x] Separate atlas construction from runtime lookup
+    - [x] Add the `builder` feature
+    - [x] Save an atlas as Rust source
+    - [x] Load an atlas from constant Rust data
+- [x] Add the image widget
+- [x] Add PNG atlas sources
+- [x] Add pass-through rendering commands for 3D viewports
+- [x] Add custom rendering widgets
+    - [x] Mouse input events
+    - [x] Keyboard events
+    - [x] Text events
+    - [x] Dragging outside the region
     - [x] Rendering
-- [x] Dialog support
-- [x] File dialog
-- [x] API/Examples loop/iterations
+- [x] Add dialog support
+- [x] Add the file dialog
+- [x] Iterate on APIs and examples
     - [x] Simple example
-    - [x] Full api use example (3d/dialog/..)
-- [x] Documentation
+    - [x] Full API example with 3D rendering and dialogs
+- [x] Add documentation
