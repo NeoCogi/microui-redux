@@ -32,22 +32,21 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{Dimensioni, Recti, Style, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption};
 
-use super::{ChildParticipation, Children, NodeLayout, NodeRuntime, UiRuntime};
+use super::{ChildParticipation, Children, MeasurementState, NodeLayout, NodeRuntime, UiRuntime};
 
 /// Immutable services shared by one recursive preferred-size traversal.
 ///
-/// The context owns phase-local resources and the private cache epoch. Containers use
-/// [`Self::measure_child`] instead of storing traversal metadata in their retained child owner.
+/// Containers use [`Self::measure_child`] instead of storing traversal metadata in their retained
+/// child owner. Persistent node caches provide reuse across traversals.
 pub struct MeasureCtx<'a> {
     style: &'a Style,
     atlas: &'a crate::AtlasHandle,
-    epoch: u64,
 }
 
 impl<'a> MeasureCtx<'a> {
     /// Creates one runtime-scoped measurement context.
-    pub(crate) fn new(style: &'a Style, atlas: &'a crate::AtlasHandle, epoch: u64) -> Self {
-        Self { style, atlas, epoch }
+    pub(crate) fn new(style: &'a Style, atlas: &'a crate::AtlasHandle) -> Self {
+        Self { style, atlas }
     }
 
     /// Returns the active UI style.
@@ -64,11 +63,6 @@ impl<'a> MeasureCtx<'a> {
     pub fn measure_child(&self, children: &Children, index: usize, available: Dimensioni) -> Option<Dimensioni> {
         // Resolve and recurse behind the opaque collection boundary; only derived geometry leaves.
         children.get(index).map(|node| node.measure(self, available))
-    }
-
-    /// Returns the private identity shared by every query in this traversal.
-    pub(crate) fn epoch(&self) -> u64 {
-        self.epoch
     }
 }
 
@@ -102,6 +96,8 @@ pub struct Container {
     children: Rc<RefCell<Children>>,
     /// Sole persistent strong owner of the concrete typed container widget.
     widget: Rc<RefCell<dyn ContainerWidget>>,
+    /// Stable cache state shared with this container's node, children, and typed handle.
+    measurement: Rc<RefCell<MeasurementState>>,
 }
 
 impl Container {
@@ -127,9 +123,27 @@ impl Container {
     where
         W: ContainerWidget + 'static,
     {
-        let handle = TypedWidgetHandle::new(&widget);
+        Self::from_shared_owner_with_measurement(children, widget, MeasurementState::new())
+    }
+
+    /// Adopts a concrete widget and cache state prepared for an internal composition link.
+    pub(crate) fn from_shared_owner_with_measurement<W>(
+        children: Rc<RefCell<Children>>,
+        widget: Rc<RefCell<W>>,
+        measurement: Rc<RefCell<MeasurementState>>,
+    ) -> (TypedWidgetHandle<W>, Self)
+    where
+        W: ContainerWidget + 'static,
+    {
+        children.borrow_mut().bind_owner(&measurement);
+        let handle = TypedWidgetHandle::new(&widget, &measurement);
         let widget: Rc<RefCell<dyn ContainerWidget>> = widget;
-        (handle, Self { children, widget })
+        (handle, Self { children, widget, measurement })
+    }
+
+    /// Returns the cache state adopted by the enclosing owning node.
+    pub(crate) fn measurement(&self) -> &Rc<RefCell<MeasurementState>> {
+        &self.measurement
     }
 
     /// Returns whether the installed surface supports one dispatcher-selected event.

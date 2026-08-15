@@ -142,7 +142,7 @@ impl NodeLayout {
 }
 
 /// Node-local transform and viewport exposed to child nodes.
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug)]
 pub(crate) struct ChildLayout {
     /// Translation from child content coordinates into this node's local coordinates.
     pub(crate) offset: Vec2i,
@@ -154,6 +154,12 @@ impl ChildLayout {
     /// Builds child-layout data from a node-local viewport.
     pub(crate) fn new(clip: Recti) -> Self {
         Self { offset: Vec2i::default(), clip }
+    }
+}
+
+impl Default for ChildLayout {
+    fn default() -> Self {
+        Self::new(Recti::default())
     }
 }
 

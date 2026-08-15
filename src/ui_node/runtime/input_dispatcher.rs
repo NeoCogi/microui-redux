@@ -128,20 +128,28 @@ impl UiRuntime {
     /// container state borrow is active. A replacement node cannot inherit a stale target because
     /// every owning node has a fresh ID.
     pub(super) fn sanitize_transient_targets(&mut self, roots: &mut [Node]) {
-        self.focus = self.focus.filter(|id| contains_active_node_in(roots, *id));
-        self.hover = self.hover.filter(|id| contains_active_node_in(roots, *id));
-        if self.routed_event.as_ref().is_some_and(|(id, _)| !contains_active_node_in(roots, *id)) {
+        self.focus = self.focus.filter(|id| contains_active_node_in(roots, *id, self.root_transform));
+        self.hover = self.hover.filter(|id| contains_active_node_in(roots, *id, self.root_transform));
+        if self
+            .routed_event
+            .as_ref()
+            .is_some_and(|(id, _)| !contains_active_node_in(roots, *id, self.root_transform))
+        {
             self.routed_event = None;
         }
 
-        let capture_valid = self.capture.is_none_or(|id| contains_active_node_in(roots, id));
+        let capture_valid = self.capture.is_none_or(|id| contains_active_node_in(roots, id, self.root_transform));
         if !capture_valid {
             self.invalidate_pointer_capture();
         }
 
-        debug_assert!(self.focus.is_none_or(|id| contains_active_node_in(roots, id)));
-        debug_assert!(self.hover.is_none_or(|id| contains_active_node_in(roots, id)));
-        debug_assert!(self.routed_event.as_ref().is_none_or(|(id, _)| contains_active_node_in(roots, *id)));
+        debug_assert!(self.focus.is_none_or(|id| contains_active_node_in(roots, id, self.root_transform)));
+        debug_assert!(self.hover.is_none_or(|id| contains_active_node_in(roots, id, self.root_transform)));
+        debug_assert!(
+            self.routed_event
+                .as_ref()
+                .is_none_or(|(id, _)| contains_active_node_in(roots, *id, self.root_transform))
+        );
         debug_assert!(self.capture.is_none() || capture_valid);
     }
 
@@ -206,7 +214,7 @@ impl UiRuntime {
 
     /// Routes keyboard/text input to the focused node only.
     fn route_focus_input_event_to_target(&mut self, roots: &mut [Node], style: &Style, event: &UiInputEvent) -> bool {
-        let Some(focus) = self.focus.filter(|id| contains_active_node_in(roots, *id)) else {
+        let Some(focus) = self.focus.filter(|id| contains_active_node_in(roots, *id, self.root_transform)) else {
             return false;
         };
         // Focus input bypasses pointer targeting and goes directly to the retained focus owner.
@@ -271,6 +279,7 @@ impl UiRuntime {
                         children
                             .iter()
                             .rev()
+                            .filter(|child| child.intersects_clip(child_transform))
                             .find_map(|child| self.hit_test_pointer_node_ref(child, child_transform, pos))
                     })
                 })
@@ -296,6 +305,7 @@ impl UiRuntime {
                 children
                     .iter()
                     .rev()
+                    .filter(|child| child.intersects_clip(child_transform))
                     .find_map(|child| self.hit_test_pointer_node_ref(child, child_transform, pos))
             })
         {
@@ -341,6 +351,7 @@ impl UiRuntime {
         let (owner, result) = current.with_children_mut(|children| {
             children
                 .iter_mut()
+                .filter(|child| child.intersects_clip(child_transform))
                 .find_map(|child| self.route_input_event_to_target_path_from(child, target, child_transform, style, event))
         })??;
         if result.is_consumed() {
@@ -387,6 +398,7 @@ impl UiRuntime {
         current.with_children_mut(|children| {
             children
                 .iter_mut()
+                .filter(|child| child.intersects_clip(child_parent))
                 .find_map(|child| self.route_input_event_to_target_from(child, target, child_parent, style, event))
         })?
     }

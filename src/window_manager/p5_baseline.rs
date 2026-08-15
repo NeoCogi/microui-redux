@@ -172,9 +172,10 @@ fn ui_node_p5_baseline_runtime() {
         let children = (0..99).map(|index| TextBlock::create(TextBlockParameters::new(format!("node-{index}"))).1);
         Column::create(ColumnParameters::new(children)).1
     });
-    let scroll = measure_scenario("scroll area with 20 content widgets", 21, || {
+    let scroll = measure_scenario("scroll area with 20 content widgets", 22, || {
         let children = (0..20).map(|index| TextBlock::create(TextBlockParameters::new(format!("row-{index}"))).1);
-        ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, children)).1
+        let content = Column::create(ColumnParameters::new(children)).1;
+        ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, content)).1
     });
 
     println!(

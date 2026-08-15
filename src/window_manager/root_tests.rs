@@ -157,9 +157,10 @@ impl Widget for CommitProbe {
         &self.opt
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, event: Option<&UiInputEvent>) {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, event: Option<&UiInputEvent>) {
         if let Some(grow_to) = self.grow_to.take() {
             self.intrinsic_height = grow_to;
+            ctx.request_measurement();
         }
         if matches!(event, Some(UiInputEvent::MouseDown { .. })) {
             self.presses += 1;
@@ -516,11 +517,12 @@ fn collapsed_disclosure_skips_descendant_phases_and_drops_targets_only_on_remova
 #[test]
 fn nested_scroll_bubbles_at_the_inner_boundary_and_moves_only_the_outer_area() {
     let inner_content = Node::widget(Custom::create(CustomParameters::new("inner content"))).with_policy(Policy::fixed(50, 180));
-    let (inner, inner_node) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, [inner_content]));
+    let (inner, inner_node) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, inner_content));
     let inner_node = inner_node.with_policy(Policy::fixed(60, 60));
     let inner_id = inner_node.id();
     let outer_tail = Node::widget(Custom::create(CustomParameters::new("outer tail"))).with_policy(Policy::fixed(60, 120));
-    let (outer, content) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, [inner_node, outer_tail]));
+    let (_, outer_content) = Column::create(ColumnParameters::new([inner_node, outer_tail]));
+    let (outer, content) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, outer_content));
 
     let mut ctx = context();
     let root = ctx.create_window("window", rect(0, 0, 100, 100), content);
@@ -844,11 +846,11 @@ fn every_root_kind_adds_exactly_one_private_chrome_node() {
 #[test]
 fn one_child_scroll_area_retains_its_three_structural_children() {
     let child = Node::widget(Custom::create(CustomParameters::new("content")));
-    let (_, content) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, [child]));
+    let (_, content) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child));
     let mut ctx = context();
     let root = ctx.create_window("scroll", rect(0, 0, 100, 80), content);
 
-    // The application child lives below a virtual surface, beside two real scrollbar widgets.
+    // The application child lives below a scroll surface, beside two real scrollbar widgets.
     // Root chrome is the sixth retained node and remains separate from the application composite.
     assert_eq!(ctx.debug_root_node_count(root.id()), Some(6));
 }
@@ -1048,7 +1050,7 @@ fn warmed_container_measurement_and_layout_allocate_nothing() {
         [child("stack")],
     ));
     let (_, disclosure) = Disclosure::create(DisclosureParameters::header("expanded", true, [child("disclosure")]));
-    let (_, scroll) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, [child("scroll")]));
+    let (_, scroll) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child("scroll")));
     let (_, content) = Column::create(ColumnParameters::new([row, grid, stack, disclosure, scroll]));
     let mut ctx = context();
     ctx.create_window("allocation probe", rect(10, 10, 300, 220), content);

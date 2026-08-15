@@ -121,6 +121,7 @@ impl crate::LeafWidget for HoldFocusProbe {
 
 struct TraversalContainer {
     children: ChildrenHandle,
+    measurements: Cell<usize>,
     visible: bool,
     hide_during_update: bool,
     log: Rc<RefCell<Vec<String>>>,
@@ -132,6 +133,7 @@ impl TraversalContainer {
         let children = Rc::new(RefCell::new(children.into_iter().collect()));
         let widget = TraversalContainer {
             children: ChildrenHandle::new(&children),
+            measurements: Cell::new(0),
             visible: true,
             hide_during_update,
             log,
@@ -144,6 +146,7 @@ impl TraversalContainer {
 
 impl ContainerWidget for TraversalContainer {
     fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
+        self.measurements.set(self.measurements.get() + 1);
         (0..children.len())
             .filter_map(|index| ctx.measure_child(children, index, available))
             .fold(Dimensioni::default(), |size, child| {
@@ -168,10 +171,11 @@ impl Widget for TraversalContainer {
         &self.opt
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
         self.log.borrow_mut().push("container:update".to_owned());
-        if self.hide_during_update {
+        if self.hide_during_update && self.visible {
             self.visible = false;
+            ctx.request_layout();
         }
     }
 
@@ -308,18 +312,54 @@ fn subtree_measurement_is_reused_within_one_layout_pass() {
 }
 
 #[test]
-fn measurement_cache_does_not_survive_the_layout_pass() {
+fn retained_measurement_cache_survives_layout_passes_and_invalidates_ancestors() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (probe, counts) = Probe::new("leaf", log.clone());
-    let (container, _) = TraversalContainer::new([Node::widget(probe)], false, log);
+    let (probe, probe_node) = Node::typed_widget(probe);
+    let (container, container_state) = TraversalContainer::new([probe_node], false, log);
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
+    let atlas = test_atlas();
 
-    layout_root(&mut runtime, &mut root, &style, test_atlas());
-    layout_root(&mut runtime, &mut root, &style, test_atlas());
+    layout_root(&mut runtime, &mut root, &style, atlas.clone());
+    layout_root(&mut runtime, &mut root, &style, atlas.clone());
+    assert_eq!(counts.measures.get(), 1, "an unchanged retained leaf must reuse its measurement across passes");
+    assert_eq!(container_state.try_read(|state| state.measurements.get()), Some(1));
 
-    assert_eq!(counts.measures.get(), 2, "a new pass must observe application-authored mutations");
+    probe.try_update(|_| {}).unwrap();
+    layout_root(&mut runtime, &mut root, &style, atlas);
+    assert_eq!(counts.measures.get(), 2, "typed mutation must invalidate the retained leaf measurement");
+    assert_eq!(
+        container_state.try_read(|state| state.measurements.get()),
+        Some(2),
+        "child invalidation must clear its dependent container cache"
+    );
+}
+
+#[test]
+fn child_topology_mutation_invalidates_its_container_without_a_container_update() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let (first, first_counts) = Probe::new("first", log.clone());
+    let (container, container_state) = TraversalContainer::new([Node::widget(first)], false, log.clone());
+    let children = container_state.try_read(|state| state.children.clone()).unwrap();
+    let mut root = Node::container(container);
+    let mut runtime = UiRuntime::new();
+    let style = Style::default();
+    let atlas = test_atlas();
+
+    layout_root(&mut runtime, &mut root, &style, atlas.clone());
+    layout_root(&mut runtime, &mut root, &style, atlas.clone());
+    assert_eq!(container_state.try_read(|state| state.measurements.get()), Some(1));
+    assert_eq!(first_counts.measures.get(), 1);
+
+    let (second, second_counts) = Probe::new("second", log);
+    assert!(children.try_push(Node::widget(second)).is_ok());
+    layout_root(&mut runtime, &mut root, &style, atlas);
+
+    assert_eq!(container_state.try_read(|state| state.measurements.get()), Some(2));
+    assert_eq!(first_counts.measures.get(), 1, "unchanged descendants retain their own cached measurements");
+    assert_eq!(second_counts.measures.get(), 1);
 }
 
 #[test]
@@ -367,6 +407,38 @@ fn common_phases_are_parent_first_and_siblings_are_forward() {
     assert_eq!(log.borrow().as_slice(), expected.as_slice());
     assert_eq!((first_counts.updates.get(), first_counts.paints.get()), (1, 1));
     assert_eq!((second_counts.updates.get(), second_counts.paints.get()), (1, 1));
+}
+
+#[test]
+fn routed_event_without_geometry_change_preserves_all_measurements() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let (probe, counts) = Probe::new("leaf", log.clone());
+    let (container, container_state) = TraversalContainer::new([Node::widget(probe)], false, log);
+    let mut root = Node::container(container);
+    let mut runtime = UiRuntime::new();
+    let style = Style::default();
+    let atlas = test_atlas();
+
+    runtime.begin_update();
+    layout_root(&mut runtime, &mut root, &style, atlas.clone());
+    let leaf_measurements = counts.measures.get();
+    let container_measurements = container_state.try_read(|state| state.measurements.get()).unwrap();
+
+    let event = UiInputEvent::MouseMove {
+        pos: Vec2i::new(20, 30),
+        delta: Vec2i::new(1, 0),
+    };
+    runtime.begin_input_event(true, &event);
+    assert!(
+        runtime
+            .route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &event)
+            .is_some()
+    );
+    runtime.update_tree_root(&mut root, &style, atlas.clone(), empty_input());
+    layout_root(&mut runtime, &mut root, &style, atlas);
+
+    assert_eq!(counts.measures.get(), leaf_measurements);
+    assert_eq!(container_state.try_read(|state| state.measurements.get()), Some(container_measurements));
 }
 
 #[test]

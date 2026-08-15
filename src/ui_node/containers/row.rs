@@ -293,7 +293,7 @@ mod tests {
     fn row_measurement_and_bounded_allocation_share_track_sizing() {
         let style = Style { spacing: 3, ..Style::default() };
         let atlas = test_atlas();
-        let ctx = MeasureCtx::new(&style, &atlas, 0);
+        let ctx = MeasureCtx::new(&style, &atlas);
         let children: Children = [
             Node::widget(Custom::create(CustomParameters::new("left"))),
             Node::widget(Custom::create(CustomParameters::new("right side"))),

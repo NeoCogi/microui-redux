@@ -45,10 +45,10 @@ use std::{
 
 use crate::{
     Button, ButtonParameters, ButtonSubmitted, Column, ColumnParameters, IconId, ListItem, ListItemParameters, ListItemSubmitted, Node, Policy, Recti,
-    RootHandle, RootSubmitted, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SizePolicy, Stack, StackDirection, StackParameters, Textbox,
-    TextboxParameters, TextboxSubmitted, ThemeIcons, TypedWidgetHandle, WidgetEventHandle, WidgetOption, WindowOption,
+    RootHandle, RootSubmitted, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SizePolicy, Textbox, TextboxParameters, TextboxSubmitted, ThemeIcons,
+    TypedWidgetHandle, WidgetEventHandle, WidgetOption, WindowOption,
 };
-use crate::event::WidgetEventListener;
+use crate::event::{WidgetEventListener, WidgetEventPort};
 use crate::ui_node::RuntimeNodeId;
 use crate::window_manager::WindowManager;
 
@@ -164,7 +164,6 @@ impl FileDialogSession {
 
 struct DialogRows {
     nodes: Vec<Node>,
-    submitted: Vec<WidgetEventHandle<ListItemSubmitted>>,
     ids: Vec<RuntimeNodeId>,
 }
 
@@ -181,18 +180,18 @@ pub(crate) struct FileDialogController {
     folders: Vec<String>,
     files: Vec<String>,
     icons: ThemeIcons,
-    folder_items: Vec<WidgetEventHandle<ListItemSubmitted>>,
-    file_items: Vec<WidgetEventHandle<ListItemSubmitted>>,
-    folder_item_events: Vec<WidgetEventListener<ListItemSubmitted>>,
-    file_item_events: Vec<WidgetEventListener<ListItemSubmitted>>,
-    folder_item_ids: Vec<RuntimeNodeId>,
-    file_item_ids: Vec<RuntimeNodeId>,
-    folder_rows: TypedWidgetHandle<Stack>,
-    file_rows: TypedWidgetHandle<Stack>,
+    folder_column: TypedWidgetHandle<Column>,
+    file_column: TypedWidgetHandle<Column>,
     #[cfg_attr(not(test), allow(dead_code))]
     folder_scroll: TypedWidgetHandle<ScrollArea>,
     #[cfg_attr(not(test), allow(dead_code))]
     file_scroll: TypedWidgetHandle<ScrollArea>,
+    folder_item_port: Rc<RefCell<WidgetEventPort<ListItemSubmitted>>>,
+    file_item_port: Rc<RefCell<WidgetEventPort<ListItemSubmitted>>>,
+    folder_item_events: WidgetEventListener<ListItemSubmitted>,
+    file_item_events: WidgetEventListener<ListItemSubmitted>,
+    folder_item_ids: Vec<RuntimeNodeId>,
+    file_item_ids: Vec<RuntimeNodeId>,
     path_box: TypedWidgetHandle<Textbox>,
     path_box_submitted: WidgetEventListener<TextboxSubmitted>,
     file_name_box: TypedWidgetHandle<Textbox>,
@@ -227,8 +226,12 @@ impl FileDialogController {
         let current_working_directory = request.initial_directory;
         let (folders, files) = Self::read_directory(Path::new(&current_working_directory));
         let icons = ctx.style().icons;
-        let folder_rows = Self::make_folder_rows(&current_working_directory, &folders, icons.closed_folder);
-        let file_rows = Self::make_file_rows(&files, icons.file);
+        let folder_item_port = Rc::new(RefCell::new(WidgetEventPort::new()));
+        let file_item_port = Rc::new(RefCell::new(WidgetEventPort::new()));
+        let folder_item_events = WidgetEventHandle::new(&folder_item_port).listen().unwrap();
+        let file_item_events = WidgetEventHandle::new(&file_item_port).listen().unwrap();
+        let folder_rows = Self::make_folder_rows(&current_working_directory, &folders, icons.closed_folder, &folder_item_port);
+        let file_rows = Self::make_file_rows(&files, icons.file, &file_item_port);
 
         let (up_handle, up_node) = Button::create(ButtonParameters::new("Up"));
         let up_button = up_handle.submitted().listen().unwrap();
@@ -240,32 +243,17 @@ impl FileDialogController {
         let (go_handle, go_node) = Button::create(ButtonParameters::new("Go"));
         let go_button = go_handle.submitted().listen().unwrap();
 
-        let (folder_rows_state, folder_rows_node) = Stack::create(StackParameters::new(
-            SizePolicy::Remainder(0),
-            SizePolicy::Auto,
-            StackDirection::TopToBottom,
-            folder_rows.nodes,
-        ));
+        let folder_item_ids = folder_rows.ids;
+        let file_item_ids = file_rows.ids;
+        let (folder_column, folder_content) = Column::create(ColumnParameters::new(std::iter::once(Self::static_item("Folders")).chain(folder_rows.nodes)));
+        let (file_column, file_content) = Column::create(ColumnParameters::new(std::iter::once(Self::static_item("Files")).chain(file_rows.nodes)));
         let (folder_scroll, folder_scroll_node) = ScrollArea::create(ScrollAreaParameters::new(
             ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL,
-            [
-                Self::static_item("Folders"),
-                folder_rows_node.with_policy(Policy::new(SizePolicy::Remainder(0), SizePolicy::Auto)),
-            ],
-        ));
-
-        let (file_rows_state, file_rows_node) = Stack::create(StackParameters::new(
-            SizePolicy::Remainder(0),
-            SizePolicy::Auto,
-            StackDirection::TopToBottom,
-            file_rows.nodes,
+            folder_content,
         ));
         let (file_scroll, file_scroll_node) = ScrollArea::create(ScrollAreaParameters::new(
             ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL,
-            [
-                Self::static_item("Files"),
-                file_rows_node.with_policy(Policy::new(SizePolicy::Remainder(0), SizePolicy::Auto)),
-            ],
+            file_content,
         ));
 
         let (file_name_box, file_name_node) = Textbox::create(TextboxParameters::new(""));
@@ -304,8 +292,6 @@ impl FileDialogController {
             .expect("new file-dialog root must accept options");
         ctx.set_root_visible(root.id(), true).expect("new file-dialog root must become visible");
 
-        let folder_item_events = folder_rows.submitted.iter().cloned().map(|event| event.listen().unwrap()).collect();
-        let file_item_events = file_rows.submitted.iter().cloned().map(|event| event.listen().unwrap()).collect();
         let root_submitted = root.submitted().listen().unwrap();
 
         Self {
@@ -316,16 +302,16 @@ impl FileDialogController {
             folders,
             files,
             icons,
-            folder_items: folder_rows.submitted,
-            file_items: file_rows.submitted,
-            folder_item_events,
-            file_item_events,
-            folder_item_ids: folder_rows.ids,
-            file_item_ids: file_rows.ids,
-            folder_rows: folder_rows_state,
-            file_rows: file_rows_state,
+            folder_column,
+            file_column,
             folder_scroll,
             file_scroll,
+            folder_item_port,
+            file_item_port,
+            folder_item_events,
+            file_item_events,
+            folder_item_ids,
+            file_item_ids,
             path_box,
             path_box_submitted,
             file_name_box,
@@ -367,72 +353,70 @@ impl FileDialogController {
         (folders, files)
     }
 
-    fn make_folder_rows(cwd: &str, folders: &[String], folder_icon: IconId) -> DialogRows {
+    fn folder_label<'a>(cwd: &str, folder: &'a str) -> &'a str {
+        let parent = Path::new(cwd).parent().map(|path| path.to_string_lossy().into_owned());
+        if parent.as_deref() == Some(folder) {
+            ".."
+        } else {
+            Path::new(folder).file_name().and_then(|name| name.to_str()).unwrap_or(folder)
+        }
+    }
+
+    fn make_folder_rows(cwd: &str, folders: &[String], folder_icon: IconId, submitted_event: &Rc<RefCell<WidgetEventPort<ListItemSubmitted>>>) -> DialogRows {
         if folders.is_empty() {
             return DialogRows {
                 nodes: vec![Self::static_item("No folders")],
-                submitted: Vec::new(),
                 ids: Vec::new(),
             };
         }
-        let parent = Path::new(cwd).parent().map(|path| path.to_string_lossy().into_owned());
         let mut nodes = Vec::with_capacity(folders.len());
-        let mut submitted = Vec::with_capacity(folders.len());
         let mut ids = Vec::with_capacity(folders.len());
         for folder in folders {
-            let label = if parent.as_deref() == Some(folder.as_str()) {
-                ".."
-            } else {
-                Path::new(folder).file_name().and_then(|name| name.to_str()).unwrap_or(folder)
-            };
-            let (item, node) = ListItem::create(ListItemParameters::with_icon(label, folder_icon));
-            submitted.push(item.submitted());
+            let label = Self::folder_label(cwd, folder);
+            let (_, node) = ListItem::create_with_event_port(ListItemParameters::with_icon(label, folder_icon), Rc::clone(submitted_event));
             ids.push(node.id());
             nodes.push(node);
         }
-        DialogRows { nodes, submitted, ids }
+        DialogRows { nodes, ids }
     }
 
-    fn make_file_rows(files: &[String], file_icon: IconId) -> DialogRows {
+    fn make_file_rows(files: &[String], file_icon: IconId, submitted_event: &Rc<RefCell<WidgetEventPort<ListItemSubmitted>>>) -> DialogRows {
         if files.is_empty() {
             return DialogRows {
                 nodes: vec![Self::static_item("No files")],
-                submitted: Vec::new(),
                 ids: Vec::new(),
             };
         }
         let mut nodes = Vec::with_capacity(files.len());
-        let mut submitted = Vec::with_capacity(files.len());
         let mut ids = Vec::with_capacity(files.len());
         for file in files {
-            let (item, node) = ListItem::create(ListItemParameters::with_icon(file, file_icon));
-            submitted.push(item.submitted());
+            let (_, node) = ListItem::create_with_event_port(ListItemParameters::with_icon(file, file_icon), Rc::clone(submitted_event));
             ids.push(node.id());
             nodes.push(node);
         }
-        DialogRows { nodes, submitted, ids }
+        DialogRows { nodes, ids }
     }
 
     fn refresh_entries(&mut self) {
         let (folders, files) = Self::read_directory(Path::new(&self.current_working_directory));
-        let folder_rows = Self::make_folder_rows(&self.current_working_directory, &folders, self.icons.closed_folder);
-        let file_rows = Self::make_file_rows(&files, self.icons.file);
-
-        if let Err(rejected) = replace_stack_rows(&self.folder_rows, folder_rows.nodes) {
-            panic!("file-dialog folder row container unavailable with {} replacement nodes", rejected.len());
+        let folder_rows = Self::make_folder_rows(&self.current_working_directory, &folders, self.icons.closed_folder, &self.folder_item_port);
+        let file_rows = Self::make_file_rows(&files, self.icons.file, &self.file_item_port);
+        let folder_ids = folder_rows.ids;
+        let file_ids = file_rows.ids;
+        if let Err(rejected) = replace_column_rows(
+            &self.folder_column,
+            std::iter::once(Self::static_item("Folders")).chain(folder_rows.nodes).collect(),
+        ) {
+            panic!("file-dialog folder column unavailable with {} replacement nodes", rejected.len());
         }
-        if let Err(rejected) = replace_stack_rows(&self.file_rows, file_rows.nodes) {
-            panic!("file-dialog file row container unavailable with {} replacement nodes", rejected.len());
+        if let Err(rejected) = replace_column_rows(&self.file_column, std::iter::once(Self::static_item("Files")).chain(file_rows.nodes).collect()) {
+            panic!("file-dialog file column unavailable with {} replacement nodes", rejected.len());
         }
 
         self.folders = folders;
         self.files = files;
-        self.folder_items = folder_rows.submitted;
-        self.file_items = file_rows.submitted;
-        self.folder_item_events = self.folder_items.iter().cloned().map(|event| event.listen().unwrap()).collect();
-        self.file_item_events = self.file_items.iter().cloned().map(|event| event.listen().unwrap()).collect();
-        self.folder_item_ids = folder_rows.ids;
-        self.file_item_ids = file_rows.ids;
+        self.folder_item_ids = folder_ids;
+        self.file_item_ids = file_ids;
     }
 
     fn navigate_to(&mut self, directory: String) -> bool {
@@ -525,13 +509,20 @@ impl FileDialogController {
         }
     }
 
-    fn folder_submitted(&mut self, directory: String) {
-        self.navigate_and_refresh(directory);
+    fn folder_submitted(&mut self, event: ListItemSubmitted) {
+        let directory = self
+            .folders
+            .iter()
+            .find(|folder| Self::folder_label(&self.current_working_directory, folder) == event.label)
+            .cloned();
+        if let Some(directory) = directory {
+            self.navigate_and_refresh(directory);
+        }
     }
 
-    fn file_submitted(&mut self, event: &ListItemSubmitted) {
+    fn file_submitted(&mut self, event: ListItemSubmitted) {
         self.file_name_box
-            .try_update_with(event.label.clone(), |state, name| state.set_text(name))
+            .try_update_with(event.label, |state, name| state.set_text(name))
             .expect("file-dialog filename box must remain mounted");
     }
 
@@ -574,7 +565,7 @@ impl FileDialogController {
             Home,
             Path(TextboxSubmitted),
             Go,
-            Folder(String),
+            Folder(ListItemSubmitted),
             File(ListItemSubmitted),
             Accept,
             Cancel,
@@ -588,12 +579,8 @@ impl FileDialogController {
         actions.extend(self.home_button.drain().into_iter().map(|_| Action::Home));
         actions.extend(self.path_box_submitted.drain().into_iter().map(Action::Path));
         actions.extend(self.go_button.drain().into_iter().map(|_| Action::Go));
-        for (events, directory) in self.folder_item_events.iter().zip(&self.folders) {
-            actions.extend(events.drain().into_iter().map(|_| Action::Folder(directory.clone())));
-        }
-        for events in &self.file_item_events {
-            actions.extend(events.drain().into_iter().map(Action::File));
-        }
+        actions.extend(self.folder_item_events.drain().into_iter().map(Action::Folder));
+        actions.extend(self.file_item_events.drain().into_iter().map(Action::File));
         actions.extend(self.ok_button.drain().into_iter().map(|_| Action::Accept));
         actions.extend(self.cancel_button.drain().into_iter().map(|_| Action::Cancel));
         actions.extend(self.root_submitted.drain().into_iter().map(|_| Action::Root));
@@ -605,7 +592,7 @@ impl FileDialogController {
                 Action::Path(event) => self.path_submitted(&event),
                 Action::Go => self.go_submitted(),
                 Action::Folder(directory) => self.folder_submitted(directory),
-                Action::File(event) => self.file_submitted(&event),
+                Action::File(event) => self.file_submitted(event),
                 Action::Accept => self.accept_submitted(),
                 Action::Cancel => self.cancel_submitted(),
                 Action::Root => self.root_cancelled(),
@@ -623,8 +610,7 @@ impl FileDialogController {
 }
 
 #[allow(clippy::result_large_err)]
-fn replace_stack_rows(handle: &TypedWidgetHandle<Stack>, nodes: Vec<Node>) -> Result<(), Vec<Node>> {
-    // Flatten state-cell and child-owner availability while preserving every replacement node.
+fn replace_column_rows(handle: &TypedWidgetHandle<Column>, nodes: Vec<Node>) -> Result<(), Vec<Node>> {
     handle.try_update_with(nodes, |state, nodes| state.replace(nodes))?
 }
 
@@ -670,7 +656,7 @@ impl WindowManager {
 mod tests {
     use super::*;
     use crate::test_support::{AllocationMeasurement, NoopRenderer, test_atlas};
-    use crate::{Button, ButtonParameters, Context, Dimensioni, MouseButton, Vec2i, WindowOption, rect};
+    use crate::{Button, ButtonParameters, Context, Dimensioni, MouseButton, WindowOption, rect};
     use std::{
         fs,
         time::{Instant, SystemTime, UNIX_EPOCH},
@@ -881,7 +867,7 @@ mod tests {
         let mut ctx = context();
         let session = ctx.open_file_dialog(FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
         ctx.update_and_render_ui();
-        let (root, child_node, old_row, path_box) = {
+        let (root, child_node, folder_scroll, path_box) = {
             let dialog = controller(&ctx, &session);
             let index = dialog
                 .folders
@@ -891,7 +877,7 @@ mod tests {
             (
                 dialog.root.id(),
                 dialog.folder_item_ids[index],
-                dialog.folder_items[index].clone(),
+                dialog.folder_scroll.clone(),
                 dialog.path_box.clone(),
             )
         };
@@ -899,7 +885,7 @@ mod tests {
         let dialog = controller(&ctx, &session);
         assert_eq!(Path::new(&dialog.current_working_directory), child);
         assert_eq!(dialog.files, ["inside.txt"]);
-        assert!(!old_row.is_alive());
+        assert!(folder_scroll.is_alive());
         assert!(path_box.is_alive());
         fs::remove_dir_all(dir).unwrap();
     }
@@ -940,7 +926,7 @@ mod tests {
     }
 
     #[test]
-    fn refresh_replaces_only_rows_and_preserves_then_clamps_scroll() {
+    fn refresh_replaces_only_model_data_and_preserves_then_clamps_scroll() {
         let dir = unique_temp_dir("refresh");
         fs::create_dir_all(&dir).unwrap();
         for index in 0..60 {
@@ -949,10 +935,9 @@ mod tests {
         let mut ctx = context();
         let session = ctx.open_file_dialog(FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
         ctx.update_ui(Dimensioni::new(900, 700));
-        let (old_row, path, folder_scroll, scroll, root, shell_count) = {
+        let (path, folder_scroll, file_scroll, root, shell_count) = {
             let dialog = controller(&ctx, &session);
             (
-                dialog.file_items[0].clone(),
                 dialog.path_box.clone(),
                 dialog.folder_scroll.clone(),
                 dialog.file_scroll.clone(),
@@ -960,15 +945,14 @@ mod tests {
                 ctx.debug_root_node_count(dialog.root.id()).unwrap(),
             )
         };
-        scroll.try_update(|state| state.set_offset(Vec2i::new(0, 40))).unwrap();
+        file_scroll.try_update(|state| state.set_offset(crate::vec2(0, 40))).unwrap();
         fs::write(dir.join("new-file.txt"), b"row").unwrap();
         ctx.window_manager.file_dialogs[0].refresh_entries();
-        assert!(!old_row.is_alive());
         assert!(path.is_alive());
         assert!(folder_scroll.is_alive());
-        assert!(scroll.is_alive());
+        assert!(file_scroll.is_alive());
         ctx.update_ui(Dimensioni::new(900, 700));
-        assert_eq!(scroll.try_read(|state| (state.offset().x, state.offset().y)), Some((0, 40)));
+        assert_eq!(file_scroll.try_read(|state| state.offset().y), Some(40));
         assert_eq!(ctx.debug_root_node_count(root), Some(shell_count + 1));
 
         for entry in fs::read_dir(&dir).unwrap() {
@@ -976,17 +960,17 @@ mod tests {
         }
         ctx.window_manager.file_dialogs[0].refresh_entries();
         ctx.update_ui(Dimensioni::new(900, 700));
-        assert_eq!(scroll.try_read(|state| (state.offset().x, state.offset().y)), Some((0, 0)));
+        assert_eq!(file_scroll.try_read(|state| state.offset().y), Some(0));
         fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
-    fn unavailable_row_replacement_returns_every_unmounted_node() {
-        let (stack, owner) = Stack::create(StackParameters::new(SizePolicy::Auto, SizePolicy::Auto, StackDirection::TopToBottom, []));
-        let rejected = stack
+    fn unavailable_column_replacement_returns_every_node() {
+        let (column, owner) = Column::create(ColumnParameters::new([]));
+        let rejected = column
             .try_read(|_| {
                 let replacements = vec![FileDialogController::static_item("one"), FileDialogController::static_item("two")];
-                replace_stack_rows(&stack, replacements).expect_err("active read must reject mutation")
+                replace_column_rows(&column, replacements).expect_err("active read must reject mutation")
             })
             .unwrap();
         assert_eq!(rejected.len(), 2);
@@ -1013,7 +997,7 @@ mod tests {
     fn ui_node_p5_baseline_file_dialog() {
         let dir = unique_temp_dir("p5-baseline");
         fs::create_dir_all(&dir).unwrap();
-        for index in 0..8 {
+        for index in 0..300 {
             fs::write(dir.join(format!("file-{index}.txt")), b"baseline").unwrap();
         }
         for index in 0..4 {
@@ -1025,12 +1009,12 @@ mod tests {
         ctx.update_and_render_ui();
         ctx.update_and_render_ui();
 
-        let (root, node_count, old_row, persistent_path) = {
+        let (root, node_count, persistent_scroll, persistent_path) = {
             let dialog = controller(&ctx, &session);
             (
                 dialog.root.id(),
                 ctx.debug_root_node_count(dialog.root.id()).unwrap(),
-                dialog.file_items[0].clone(),
+                dialog.file_scroll.clone(),
                 dialog.path_box.clone(),
             )
         };
@@ -1051,7 +1035,18 @@ mod tests {
         let idle_metrics = ctx.debug_root_runtime_metrics(root).unwrap();
         assert_eq!(idle_metrics.tree_layouts, 1);
         assert_eq!(idle_metrics.updates, 0);
-        assert_eq!(idle_metrics.paints, node_count as u64);
+        assert!(idle_metrics.paints <= node_count as u64);
+        assert_eq!(ctx.debug_root_node_count(root), Some(node_count));
+
+        ctx.mousemove(100, 100);
+        let event_measurement = AllocationMeasurement::begin();
+        let event_started = Instant::now();
+        ctx.update_and_render_ui();
+        let event_elapsed = event_started.elapsed();
+        let event_allocations = event_measurement.finish();
+        let event_metrics = ctx.debug_root_runtime_metrics(root).unwrap();
+        assert_eq!(event_metrics.tree_layouts, 2);
+        assert_eq!(event_metrics.updates, event_metrics.paints);
         assert_eq!(ctx.debug_root_node_count(root), Some(node_count));
 
         fs::write(dir.join("new-file.txt"), b"refresh").unwrap();
@@ -1067,8 +1062,8 @@ mod tests {
         assert_eq!(refresh_node_count, node_count + 1);
         assert_eq!(refresh_metrics.tree_layouts, 1);
         assert_eq!(refresh_metrics.updates, 0);
-        assert_eq!(refresh_metrics.paints, refresh_node_count as u64);
-        assert!(!old_row.is_alive());
+        assert!(refresh_metrics.paints <= refresh_node_count as u64);
+        assert!(persistent_scroll.is_alive());
         assert!(persistent_path.is_alive());
         assert_eq!(controller(&ctx, &session).root.id(), root, "refresh must retain the root");
         assert_eq!(session.status(), FileDialogStatus::Pending);
@@ -1086,6 +1081,18 @@ mod tests {
             idle_metrics.updates,
             idle_metrics.paints,
             idle_elapsed.as_nanos(),
+        );
+        println!(
+            "| file dialog mouse move | {} | {} | {} | 0 | {} | {} | {} | {} | {} | {} |",
+            node_count,
+            event_allocations.events,
+            event_allocations.bytes,
+            event_metrics.tree_layouts,
+            event_metrics.measures,
+            event_metrics.layouts,
+            event_metrics.updates,
+            event_metrics.paints,
+            event_elapsed.as_nanos(),
         );
         println!(
             "| file dialog refresh | {} | {} | {} | 0 | {} | {} | {} | {} | {} | {} |",

@@ -1080,7 +1080,7 @@ mod tests {
             layout: GridLayout::default(),
         };
         let atlas = test_atlas();
-        let ctx = MeasureCtx::new(&style, &atlas, 0);
+        let ctx = MeasureCtx::new(&style, &atlas);
         let measured = grid_size(&ctx, &empty, &children, Dimensioni::default());
         assert_eq!(measured.width, 12);
         assert_eq!(measured.height, 20);

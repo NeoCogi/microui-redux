@@ -108,14 +108,15 @@ fn every_builtin_container_returns_a_typed_handle_and_completed_node() {
     let (row, row_node) = Row::create(RowParameters::new([], SizePolicy::Auto, []));
     let (grid, grid_node) = Grid::create(GridParameters::new([], [], std::iter::empty::<Node>()));
     let (stack, stack_node) = Stack::create(StackParameters::new(SizePolicy::Auto, SizePolicy::Auto, StackDirection::TopToBottom, []));
-    let (scroll, scroll_node) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, []));
+    let (_, scroll_content) = Column::create(ColumnParameters::new([]));
+    let (scroll, scroll_node) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, scroll_content));
     let (column, column_node) = Column::create(ColumnParameters::new([row_node, grid_node, stack_node, scroll_node]));
     let (disclosure, root_node) = Disclosure::create(DisclosureParameters::header("group", true, [column_node]));
 
     assert_eq!(row.try_read(|state| state.len()), Some(Some(0)));
     assert_eq!(grid.try_read(|state| state.len()), Some(Some(0)));
     assert_eq!(stack.try_read(|state| state.len()), Some(Some(0)));
-    assert_eq!(scroll.try_read(|state| state.len()), Some(Some(0)));
+    assert!(scroll.is_alive());
     assert_eq!(column.try_read(|state| state.len()), Some(Some(4)));
     assert_eq!(disclosure.try_read(|state| state.len()), Some(Some(1)));
     drop(root_node);

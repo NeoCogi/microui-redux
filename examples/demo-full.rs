@@ -903,7 +903,8 @@ impl DemoNodes {
     }
 
     fn scroll_area(&mut self, opt: ScrollAreaOption, f: impl FnOnce(&mut Self)) {
-        let (_, node) = ScrollArea::create(ScrollAreaParameters::new(opt, Self::children(f)));
+        let (_, content) = Column::create(ColumnParameters::new(Self::children(f)));
+        let (_, node) = ScrollArea::create(ScrollAreaParameters::new(opt, content));
         self.push(node);
     }
 
@@ -953,7 +954,8 @@ impl DemoNode<'_> {
     }
 
     fn scroll_area(self, opt: ScrollAreaOption, f: impl FnOnce(&mut DemoNodes)) {
-        let (_, node) = ScrollArea::create(ScrollAreaParameters::new(opt, DemoNodes::children(f)));
+        let (_, content) = Column::create(ColumnParameters::new(DemoNodes::children(f)));
+        let (_, node) = ScrollArea::create(ScrollAreaParameters::new(opt, content));
         self.nodes.push(node.with_policy(self.policy));
     }
 }

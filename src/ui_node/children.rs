@@ -33,7 +33,7 @@
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
-use super::Node;
+use super::{MeasurementState, Node};
 
 /// Opaque ordered owner of unique retained child nodes.
 ///
@@ -43,6 +43,8 @@ use super::Node;
 /// ownership rules.
 pub struct Children {
     pub(super) nodes: Vec<Node>,
+    /// Weak link to the cache owned by the enclosing container node.
+    owner: Weak<RefCell<MeasurementState>>,
 }
 
 /// Crate-private weak access used by built-in mutable container state.
@@ -156,7 +158,7 @@ impl Children {
     /// Creates an empty child collection.
     pub const fn new() -> Self {
         // No backing allocation is created until the first node is inserted.
-        Self { nodes: Vec::new() }
+        Self { nodes: Vec::new(), owner: Weak::new() }
     }
 
     /// Returns the number of owned child nodes.
@@ -178,7 +180,9 @@ impl Children {
     /// Appends one still-unmounted node and commits this collection as its owner.
     pub(crate) fn push(&mut self, node: Node) {
         // Moving the unique Node into the vector establishes this collection as its owner.
+        self.attach(&node);
         self.nodes.push(node);
+        self.invalidate_owner();
     }
 
     /// Inserts a node at `index`, returning it unchanged when the index exceeds `len`.
@@ -188,7 +192,9 @@ impl Children {
         if index > self.nodes.len() {
             return Err(node);
         }
+        self.attach(&node);
         self.nodes.insert(index, node);
+        self.invalidate_owner();
         Ok(())
     }
 
@@ -199,18 +205,49 @@ impl Children {
             return false;
         }
         self.nodes.remove(index);
+        self.invalidate_owner();
         true
     }
 
     /// Drops every currently owned child.
     pub(crate) fn clear(&mut self) {
+        if self.nodes.is_empty() {
+            return;
+        }
         self.nodes.clear();
+        self.invalidate_owner();
     }
 
     /// Replaces all children in iterator order, dropping the previous owners.
     pub(crate) fn replace(&mut self, nodes: impl IntoIterator<Item = Node>) {
         // Collect the replacement sequence once, then drop the previous vector and its subtrees.
-        self.nodes = nodes.into_iter().collect();
+        let nodes: Vec<_> = nodes.into_iter().collect();
+        for node in &nodes {
+            self.attach(node);
+        }
+        self.nodes = nodes;
+        self.invalidate_owner();
+    }
+
+    /// Binds this collection and all children supplied during construction to their owner.
+    pub(crate) fn bind_owner(&mut self, owner: &Rc<RefCell<MeasurementState>>) {
+        debug_assert!(self.owner.upgrade().is_none(), "a retained child collection cannot be rebound");
+        self.owner = Rc::downgrade(owner);
+        for node in &self.nodes {
+            node.state.measurement.borrow_mut().set_parent(owner);
+        }
+    }
+
+    fn attach(&self, node: &Node) {
+        if let Some(owner) = self.owner.upgrade() {
+            node.state.measurement.borrow_mut().set_parent(&owner);
+        }
+    }
+
+    fn invalidate_owner(&self) {
+        if let Some(owner) = self.owner.upgrade() {
+            owner.borrow_mut().invalidate();
+        }
     }
 
     /// Iterates children for framework traversal without making attached nodes public.
@@ -218,7 +255,7 @@ impl Children {
         self.nodes.iter()
     }
 
-    /// Iterates children mutably for framework traversal only.
+    /// Iterates children mutably for framework traversal.
     pub(crate) fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut Node> {
         self.nodes.iter_mut()
     }
@@ -242,7 +279,10 @@ impl Default for Children {
 
 impl FromIterator<Node> for Children {
     fn from_iter<T: IntoIterator<Item = Node>>(iter: T) -> Self {
-        Self { nodes: iter.into_iter().collect() }
+        Self {
+            nodes: iter.into_iter().collect(),
+            owner: Weak::new(),
+        }
     }
 }
 

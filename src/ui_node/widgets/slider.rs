@@ -231,6 +231,7 @@ impl Slider {
         value = clamp_slider_value(value, self.low, self.high);
         self.value = value;
         if last != value {
+            ctx.request_measurement();
             self.changed_event.borrow_mut().emit(SliderChanged { value });
         }
     }

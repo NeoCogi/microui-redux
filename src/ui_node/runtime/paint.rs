@@ -91,7 +91,10 @@ impl UiRuntime {
         if traverse_children {
             // Children paint after their ordinary parent surface, matching reverse-order hit tests.
             node.with_children_mut(|children| {
-                for child in children.iter_mut().filter(|child| node_is_visible(child)) {
+                for child in children
+                    .iter_mut()
+                    .filter(|child| node_is_visible(child) && child.intersects_clip(child_transform))
+                {
                     self.paint_node_ref(child, child_transform, display_list, style, atlas.clone());
                 }
             });

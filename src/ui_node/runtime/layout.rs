@@ -40,17 +40,21 @@ impl UiRuntime {
         self.bump_metric(|metrics| metrics.measures += 1);
         // Node::measure is the only place that adds frame geometry; containers receive the same
         // content-only measurement contract whether reached here or through Children.
-        node.measure(&MeasureCtx::new(style, atlas, self.measurement_epoch), available)
+        node.measure(&MeasureCtx::new(style, atlas), available)
+    }
+
+    fn measure_node_for_layout(&self, node: &Node, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> (Dimensioni, bool) {
+        #[cfg(test)]
+        self.bump_metric(|metrics| metrics.measures += 1);
+        node.measure_with_cache_status(&MeasureCtx::new(style, atlas), available)
     }
 
     /// Lays out one already-borrowed node through direct widget/container dispatch.
     pub(in crate::ui_node) fn layout_node_ref(&mut self, node: &mut Node, style: &Style, atlas: &crate::AtlasHandle, rect: Recti) -> Dimensioni {
-        #[cfg(test)]
-        self.bump_metric(|metrics| metrics.layouts += 1);
         let framed = node_is_framed(node);
         // Query content preference at the offered slot before the parent-owned node policy chooses
         // the actual outer allocation.
-        let preferred = self.measure_node(node, style, atlas, Dimensioni::new(rect.width.max(1), rect.height.max(1)));
+        let (preferred, measurement_cached) = self.measure_node_for_layout(node, style, atlas, Dimensioni::new(rect.width.max(1), rect.height.max(1)));
         let policy = node.state.policy;
         let outer = Recti::new(
             rect.x,
@@ -58,19 +62,17 @@ impl UiRuntime {
             policy.width.allocated_extent(rect.width),
             policy.height.allocated_extent(rect.height),
         );
-        self.layout_node_outer_ref(node, style, atlas, framed, outer, preferred)
+        self.layout_node_outer_ref(node, style, atlas, framed, outer, preferred, measurement_cached)
     }
 
     /// Lays out a node whose parent/root flow has already resolved its size policy.
     pub(super) fn layout_allocated_node_ref(&mut self, node: &mut Node, style: &Style, atlas: &crate::AtlasHandle, rect: Recti) -> Dimensioni {
-        #[cfg(test)]
-        self.bump_metric(|metrics| metrics.layouts += 1);
         let framed = node_is_framed(node);
         // Preserve the established measure/layout phase contract while keeping the resolved root
         // allocation authoritative.
-        let preferred = self.measure_node(node, style, atlas, Dimensioni::new(rect.width.max(1), rect.height.max(1)));
+        let (preferred, measurement_cached) = self.measure_node_for_layout(node, style, atlas, Dimensioni::new(rect.width.max(1), rect.height.max(1)));
         let outer = Recti::new(rect.x, rect.y, rect.width.max(0), rect.height.max(0));
-        self.layout_node_outer_ref(node, style, atlas, framed, outer, preferred)
+        self.layout_node_outer_ref(node, style, atlas, framed, outer, preferred, measurement_cached)
     }
 
     /// Applies frame/content geometry and delegates layout for one resolved outer allocation.
@@ -82,7 +84,15 @@ impl UiRuntime {
         framed: bool,
         outer: Recti,
         preferred: Dimensioni,
+        measurement_cached: bool,
     ) -> Dimensioni {
+        let previous = node.state.layout.allocation;
+        let same_allocation = previous.x == outer.x && previous.y == outer.y && previous.width == outer.width && previous.height == outer.height;
+        if measurement_cached && same_allocation && !node.state.measurement.borrow().layout_is_dirty() {
+            return Dimensioni::new(outer.width, outer.height);
+        }
+        #[cfg(test)]
+        self.bump_metric(|metrics| metrics.layouts += 1);
         // Store every rectangle in node-local coordinates except the outer allocation, which stays
         // parent-local. Transform traversal later composes those two coordinate spaces once.
         let local_outer = Recti::new(0, 0, outer.width, outer.height);
@@ -125,6 +135,7 @@ impl UiRuntime {
             );
             node.set_layout(node.state.layout.with_content_size(content_size));
         }
+        node.state.measurement.borrow_mut().validate_layout();
         Dimensioni::new(outer.width, outer.height)
     }
 }

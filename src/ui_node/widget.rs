@@ -61,7 +61,7 @@ use rs_math3d::Dimensioni;
 
 use crate::atlas::AtlasHandle;
 use crate::theme::Style;
-use super::UiInputEvent;
+use super::{MeasurementState, UiInputEvent};
 pub use super::widget_context::{WidgetPaintCtx, WidgetUpdateCtx};
 
 bitflags! {
@@ -141,18 +141,25 @@ pub trait WidgetParameters: 'static {}
 /// therefore makes every typed handle expire instead of keeping an invisible widget alive.
 pub struct TypedWidgetHandle<W: Widget + 'static> {
     widget: Weak<RefCell<W>>,
+    measurement: Weak<RefCell<MeasurementState>>,
 }
 
 impl<W: Widget + 'static> Clone for TypedWidgetHandle<W> {
     fn clone(&self) -> Self {
-        Self { widget: self.widget.clone() }
+        Self {
+            widget: self.widget.clone(),
+            measurement: self.measurement.clone(),
+        }
     }
 }
 
 impl<W: Widget + 'static> TypedWidgetHandle<W> {
     /// Creates a weak typed view of the allocation that will be erased into a retained node.
-    pub(crate) fn new(widget: &Rc<RefCell<W>>) -> Self {
-        Self { widget: Rc::downgrade(widget) }
+    pub(crate) fn new(widget: &Rc<RefCell<W>>, measurement: &Rc<RefCell<MeasurementState>>) -> Self {
+        Self {
+            widget: Rc::downgrade(widget),
+            measurement: Rc::downgrade(measurement),
+        }
     }
 
     /// Reports whether the retained tree still owns this widget.
@@ -174,7 +181,10 @@ impl<W: Widget + 'static> TypedWidgetHandle<W> {
     pub fn try_update<R>(&self, f: impl FnOnce(&mut W) -> R) -> Option<R> {
         let widget = self.widget.upgrade()?;
         let mut widget = widget.try_borrow_mut().ok()?;
-        Some(f(&mut widget))
+        let result = f(&mut widget);
+        drop(widget);
+        self.invalidate_measurement();
+        Some(result)
     }
 
     /// Mutates a widget while preserving an owned input when access cannot begin.
@@ -187,7 +197,23 @@ impl<W: Widget + 'static> TypedWidgetHandle<W> {
             Ok(widget) => widget,
             Err(_) => return Err(input),
         };
-        Ok(f(&mut widget, input))
+        let result = f(&mut widget, input);
+        drop(widget);
+        self.invalidate_measurement();
+        Ok(result)
+    }
+
+    /// Mutates derived or interaction state known not to affect preferred measurement.
+    pub(crate) fn try_update_without_measurement<R>(&self, f: impl FnOnce(&mut W) -> R) -> Option<R> {
+        let widget = self.widget.upgrade()?;
+        let mut widget = widget.try_borrow_mut().ok()?;
+        Some(f(&mut widget))
+    }
+
+    fn invalidate_measurement(&self) {
+        if let Some(measurement) = self.measurement.upgrade() {
+            measurement.borrow_mut().invalidate();
+        }
     }
 }
 
@@ -225,7 +251,10 @@ pub trait Widget {
     /// eligible widget receives `None`. Held state is available from [`WidgetUpdateCtx`]. The
     /// update context intentionally cannot record drawing commands. Implementations that retain a
     /// local drag mode must reconcile it from [`WidgetUpdateCtx::active`] on every call; pointer
-    /// capture is runtime-owned and has no separate widget lifecycle callback.
+    /// capture is runtime-owned and has no separate widget lifecycle callback. An implementation
+    /// that changes intrinsic geometry during this phase must call
+    /// [`WidgetUpdateCtx::request_measurement`]; a placement-only change calls
+    /// [`WidgetUpdateCtx::request_layout`].
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>);
     /// Records paint commands through paint-only capabilities.
     ///

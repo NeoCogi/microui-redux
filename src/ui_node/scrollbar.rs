@@ -298,7 +298,7 @@ impl RetainedScrollbar {
     /// Creates one independently targetable scrollbar and its weak layout capability.
     ///
     /// The returned node strongly owns the state through the widget. Its sibling parent layout gets
-    /// only a weak handle used to configure range and visibility after measuring virtual content.
+    /// only a weak handle used to configure range and visibility after measuring scroll content.
     pub(crate) fn create(axis: ScrollAxis) -> (TypedWidgetHandle<Self>, Node) {
         // Start inactive; the parent layout activates the bar only when overflow is committed.
         let widget = Self {
@@ -329,6 +329,7 @@ impl Widget for RetainedScrollbar {
         // Resolve one geometry snapshot for the complete event so hit testing and delta mapping use
         // identical track/thumb/range values.
         let Some(geometry) = self.geometry() else { return };
+        let previous = self.offset;
         match input {
             Some(UiInputEvent::MouseDown { pos, button }) if button.intersects(MouseButton::LEFT) && geometry.track().contains(pos) => {
                 // Clicking outside the thumb recenters it. Runtime capture established for this
@@ -344,6 +345,9 @@ impl Widget for RetainedScrollbar {
                 self.offset = self.offset.saturating_add(geometry.drag_delta(*delta)).clamp(0, self.max_offset());
             }
             _ => {}
+        }
+        if self.offset != previous {
+            ctx.request_layout();
         }
     }
 

@@ -361,7 +361,8 @@ fn create_container(parameters: DisclosureParameters) -> (TypedWidgetHandle<Disc
         expanded: parameters.expanded,
         variant: parameters.variant,
     }));
-    let handle = TypedWidgetHandle::new(&widget);
+    let measurement = crate::ui_node::MeasurementState::new();
+    let handle = TypedWidgetHandle::new(&widget, &measurement);
     let header = DisclosureHeader {
         disclosure: handle.clone(),
         label: parameters.label,
@@ -369,7 +370,7 @@ fn create_container(parameters: DisclosureParameters) -> (TypedWidgetHandle<Disc
         opt: parameters.opt,
     };
     let children = Rc::new(RefCell::new([body, Node::widget_internal(header)].into_iter().collect()));
-    let (_, container) = Container::from_shared_owner(children, widget);
+    let (_, container) = Container::from_shared_owner_with_measurement(children, widget, measurement);
     (handle, container)
 }
 

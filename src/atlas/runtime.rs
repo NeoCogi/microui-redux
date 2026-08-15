@@ -33,6 +33,11 @@
 use super::*;
 
 impl AtlasHandle {
+    /// Reports whether two handles reference the same immutable atlas allocation.
+    pub(crate) fn ptr_eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+
     /// Returns the atlas texture width in pixels.
     pub fn width(&self) -> usize {
         self.0.width

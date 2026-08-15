@@ -76,7 +76,7 @@ pub use node_layout::ChildParticipation;
 pub(crate) use node_layout::{NodeLayout, RuntimeNodeId, Transform};
 mod node;
 pub use node::Node;
-pub(crate) use node::{NodeKind, NodeRuntime};
+pub(crate) use node::{MeasurementState, NodeKind, NodeRuntime};
 mod runtime;
 pub(crate) use runtime::UiRuntime;
 #[cfg(test)]

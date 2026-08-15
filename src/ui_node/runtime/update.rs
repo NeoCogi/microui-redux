@@ -84,10 +84,18 @@ impl UiRuntime {
             input.key_codes,
         );
         node.data.with_widget_mut(|widget| widget.update(&mut widget_ctx, event.as_ref()));
+        if widget_ctx.measurement_requested() {
+            node.state.invalidate_measurement();
+        } else if widget_ctx.layout_requested() {
+            node.state.invalidate_layout();
+        }
         let traverse_children = node.is_container();
         if traverse_children {
             node.with_children_mut(|children| {
-                for child in children.iter_mut().filter(|child| node_is_visible(child)) {
+                for child in children
+                    .iter_mut()
+                    .filter(|child| node_is_visible(child) && child.intersects_clip(child_transform))
+                {
                     // Forward order is observable by deliberate cross-cell mutation: a later child
                     // sees successful earlier changes, while an already-updated child is not rerun.
                     // The mandatory post-event layout observes the final state/topology. Rendering

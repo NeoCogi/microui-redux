@@ -60,8 +60,6 @@ pub(crate) struct RuntimeMetrics {
 }
 
 pub(crate) struct UiRuntime {
-    /// Wrapping identity for the current top-level measurement/layout operation.
-    measurement_epoch: u64,
     /// Aggregate root content size in root body coordinates.
     root_content_size: Dimensioni,
     /// Transform from root body coordinates into screen coordinates.
@@ -92,7 +90,6 @@ pub(crate) struct UiRuntime {
 impl Default for UiRuntime {
     fn default() -> Self {
         Self {
-            measurement_epoch: 0,
             root_content_size: Dimensioni::default(),
             root_transform: Transform::root(UNCLIPPED_RECT),
             focus: None,
@@ -114,13 +111,6 @@ impl UiRuntime {
     /// Creates an empty runtime.
     pub(crate) fn new() -> Self {
         Self::default()
-    }
-
-    /// Starts a cache-isolated preferred-size traversal.
-    fn begin_measurement_pass(&mut self) {
-        // Wrapping is intentional: a collision would require 2^64 intervening passes, and avoiding
-        // a branch in this dominant path is more useful than reserving a sentinel value.
-        self.measurement_epoch = self.measurement_epoch.wrapping_add(1);
     }
 
     /// Clears update-cycle metrics before the initial synchronization layout.
@@ -171,13 +161,11 @@ impl UiRuntime {
     /// programmed measurement bound. Root chrome owns the conversion from application content to
     /// the final outer window extent.
     pub(crate) fn measure_tree_root(&mut self, root: &Node, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
-        self.begin_measurement_pass();
         self.measure_node(root, style, atlas, available)
     }
 
     /// Lays out one persistent root node at its authoritative screen-space rectangle.
     pub(crate) fn layout_tree_root(&mut self, root: &mut Node, style: &Style, atlas: crate::AtlasHandle, outer: Recti, viewport: Recti) {
-        self.begin_measurement_pass();
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.tree_layouts += 1);
         // Root layout establishes the transform reused by subsequent routing, update, and paint.
@@ -275,14 +263,14 @@ impl UiRuntime {
 }
 
 /// Returns whether a node participates in traversal through every ancestor visibility gate.
-fn contains_active_node_in(roots: &[Node], id: RuntimeNodeId) -> bool {
-    roots.iter().any(|root| contains_active_node(root, id))
+fn contains_active_node_in(roots: &[Node], id: RuntimeNodeId, root_transform: Transform) -> bool {
+    roots.iter().any(|root| contains_active_node(root, id, root_transform))
 }
 
-fn contains_active_node(node: &Node, id: RuntimeNodeId) -> bool {
+fn contains_active_node(node: &Node, id: RuntimeNodeId, parent_transform: Transform) -> bool {
     // A disabled or hidden child filters its complete subtree from dispatcher-owned identities.
     // Roots use the default active value, so the same predicate is valid at every depth.
-    if !node.state.participation.accepts_input() {
+    if !node.state.participation.accepts_input() || !node.intersects_clip(parent_transform) {
         return false;
     }
     if node.id() == id {
@@ -291,7 +279,13 @@ fn contains_active_node(node: &Node, id: RuntimeNodeId) -> bool {
     if !node_children_visible(node) {
         return false;
     }
-    node.with_children(|children| children.iter().any(|child| contains_active_node(child, id)))
+    let child_transform = parent_transform.push(node.state.layout);
+    node.with_children(|children| {
+        children
+            .iter()
+            .filter(|child| child.intersects_clip(child_transform))
+            .any(|child| contains_active_node(child, id, child_transform))
+    })
 }
 
 fn node_children_visible(node: &Node) -> bool {

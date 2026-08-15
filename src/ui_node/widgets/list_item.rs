@@ -133,6 +133,21 @@ impl ListItem {
         Node::typed_widget(widget)
     }
 
+    /// Constructs a list item that emits through an enclosing list view's shared port.
+    pub(crate) fn create_with_event_port(
+        parameters: ListItemParameters,
+        submitted_event: Rc<RefCell<crate::event::WidgetEventPort<ListItemSubmitted>>>,
+    ) -> (TypedWidgetHandle<Self>, Node) {
+        let widget = Self {
+            icon: parameters.icon,
+            font: parameters.font,
+            opt: parameters.opt,
+            label: parameters.label,
+            submitted_event,
+        };
+        Node::typed_widget(widget)
+    }
+
     /// Returns the current label.
     pub fn label(&self) -> &str {
         &self.label

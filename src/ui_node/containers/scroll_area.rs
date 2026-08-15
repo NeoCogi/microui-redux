@@ -32,7 +32,6 @@ use std::{cell::RefCell, rc::Rc};
 
 use bitflags::bitflags;
 
-use crate::ui_node::children::ChildrenHandle;
 use crate::ui_node::scrollbar::{RetainedScrollbar, ScrollAxis, scrollbar_base};
 use crate::{
     ChildParticipation, Container, ContainerWidget, ControlColor, Dimensioni, FocusPolicy, MeasureCtx, Recti, TypedWidgetHandle, UiInputEvent, Vec2i, Widget,
@@ -56,8 +55,8 @@ bitflags! {
 
 /// One-shot construction input for a retained scroll area.
 pub struct ScrollAreaParameters {
-    /// Nodes transferred into the virtual-surface child during construction.
-    children: Children,
+    /// The ordinary content node viewed through the scroll surface.
+    content: Node,
     /// Immutable presentation options for the completed composite.
     opt: ScrollAreaOption,
 }
@@ -65,12 +64,9 @@ pub struct ScrollAreaParameters {
 impl WidgetParameters for ScrollAreaParameters {}
 
 impl ScrollAreaParameters {
-    /// Creates a scroll area that owns `children` in iterator order.
-    pub fn new(opt: ScrollAreaOption, children: impl IntoIterator<Item = Node>) -> Self {
-        Self {
-            children: children.into_iter().collect(),
-            opt,
-        }
+    /// Creates a scroll area that owns one ordinary content node.
+    pub fn new(opt: ScrollAreaOption, content: Node) -> Self {
+        Self { content, opt }
     }
 }
 
@@ -109,13 +105,7 @@ fn inset_rect(rect: Recti, amount: i32) -> Recti {
 }
 
 /// Concrete application-facing widget for the three-child ScrollArea composite.
-///
-/// The concrete parent and virtual-surface containers remain the only strong topology owners.
-/// This widget holds weak capabilities for content mutation and for the two real scrollbar child
-/// widgets; cloning an application handle therefore cannot keep any removed subtree alive.
 pub struct ScrollArea {
-    /// Weak topology capability for the virtual-surface child.
-    content: ChildrenHandle,
     /// Weak typed widget capability for the horizontal scrollbar child.
     horizontal: TypedWidgetHandle<RetainedScrollbar>,
     /// Weak typed widget capability for the vertical scrollbar child.
@@ -129,45 +119,6 @@ pub struct ScrollArea {
 }
 
 impl ScrollArea {
-    /// Returns the number of content nodes, or `None` when topology is unavailable.
-    pub fn len(&self) -> Option<usize> {
-        self.content.len()
-    }
-
-    /// Returns whether the virtual surface owns no content nodes.
-    pub fn is_empty(&self) -> Option<bool> {
-        self.content.is_empty()
-    }
-
-    /// Appends one still-unmounted content node without exposing structural children.
-    pub fn push(&mut self, node: Node) -> Result<(), Node> {
-        self.content.try_push(node)
-    }
-
-    /// Inserts a content node or returns its exact owner when insertion is unavailable.
-    #[allow(clippy::result_large_err)]
-    pub fn insert(&mut self, index: usize, node: Node) -> Result<(), Node> {
-        self.content.try_insert(index, node)
-    }
-
-    /// Drops one indexed content owner and reports whether it existed.
-    pub fn remove_drop(&mut self, index: usize) -> Option<bool> {
-        self.content.try_remove_drop(index)
-    }
-
-    /// Drops every content node while preserving the composite's three structural children.
-    pub fn clear(&mut self) -> Option<()> {
-        self.content.try_clear()
-    }
-
-    /// Replaces all content nodes in iterator order.
-    pub fn replace<I>(&mut self, nodes: I) -> Result<(), I>
-    where
-        I: IntoIterator<Item = Node>,
-    {
-        self.content.try_replace(nodes)
-    }
-
     /// Returns the offsets owned by the two scrollbar child widgets.
     pub fn offset(&self) -> Vec2i {
         Vec2i::new(Self::axis_offset(&self.horizontal), Self::axis_offset(&self.vertical))
@@ -182,7 +133,6 @@ impl ScrollArea {
         };
         Self::set_axis_offset(&self.horizontal, offset.x);
         Self::set_axis_offset(&self.vertical, offset.y);
-        self.geometry.offset = offset;
     }
 
     /// Returns whether layout may activate the scrollbar children.
@@ -221,9 +171,9 @@ impl ScrollArea {
     }
 
     /// Applies one atomic two-axis wheel delta against committed scrollbar ranges.
-    fn scroll_by(&mut self, delta: Vec2i) {
+    fn scroll_by(&mut self, delta: Vec2i) -> bool {
         if !self.accepts_scroll_delta(delta) {
-            return;
+            return false;
         }
         let offset = self.offset();
         let maximum = self.max_offset();
@@ -232,6 +182,7 @@ impl ScrollArea {
             offset.x.saturating_add(delta.x).clamp(0, maximum.x),
             offset.y.saturating_add(delta.y).clamp(0, maximum.y),
         ));
+        true
     }
 
     /// Reads one live structural scrollbar without taking ownership of its state.
@@ -244,7 +195,7 @@ impl ScrollArea {
     /// Writes a requested offset through the scrollbar's weak typed widget capability.
     fn set_axis_offset(handle: &TypedWidgetHandle<RetainedScrollbar>, offset: i32) {
         handle
-            .try_update(|state| state.set_offset(offset))
+            .try_update_without_measurement(|state| state.set_offset(offset))
             .expect("ScrollArea structural scrollbar must be available outside traversal")
     }
 
@@ -261,7 +212,7 @@ impl ScrollArea {
         // Pointer capture is runtime-owned, so deactivation has no widget-local drag lease to
         // clear; hidden participation invalidates the corresponding runtime identity during layout.
         handle
-            .try_update(|state| {
+            .try_update_without_measurement(|state| {
                 state.set_offset(0);
                 state.deactivate();
             })
@@ -283,10 +234,12 @@ impl Widget for ScrollArea {
         }
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         // Routing guarantees that only an accepted wheel event reaches this surface.
         let Some(UiInputEvent::Scroll { delta, .. }) = input else { return };
-        self.scroll_by(*delta);
+        if self.scroll_by(*delta) {
+            ctx.request_layout();
+        }
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
@@ -309,33 +262,37 @@ impl Widget for ScrollArea {
     }
 }
 
-/// Geometry policy for content owned by the virtual-surface structural child.
-struct VirtualSurface {
+/// The transform boundary between the viewport and its ordinary content node.
+struct ScrollSurface {
     /// Scroll translation is read from the real horizontal child widget.
     horizontal: TypedWidgetHandle<RetainedScrollbar>,
     /// Scroll translation is read from the real vertical child widget.
     vertical: TypedWidgetHandle<RetainedScrollbar>,
 }
 
-impl ContainerWidget for VirtualSurface {
+impl ContainerWidget for ScrollSurface {
     fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
-        // Vertical content remains intrinsically unbounded while width can constrain wrapping.
-        super::column::measure_column(ctx, children, Dimensioni::new(available.width, 0))
+        ctx.measure_child(children, 0, Dimensioni::new(available.width, 0)).unwrap_or_default()
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
-        // Child allocations remain in stable logical coordinates. Only the descendant transform
-        // changes when scrollbar state changes, so scrolling never rewrites application topology.
-        let extent = layout_virtual_content(ctx, children, Dimensioni::new(rect.width, rect.height));
+        let preferred = ctx.measure_child(children, 0, Dimensioni::new(rect.width.max(1), 0)).unwrap_or_default();
+        let policy = ctx.child_policy(children, 0).unwrap_or_else(crate::Policy::auto);
+        let content_rect = Recti::new(
+            0,
+            0,
+            rect.width.max(policy.width.preferred_extent(preferred.width, rect.width)).max(0),
+            policy.height.preferred_extent(preferred.height, rect.height).max(0),
+        );
+        let _ = ctx.layout_child(children, 0, content_rect);
         let offset = Vec2i::new(ScrollArea::axis_offset(&self.horizontal), ScrollArea::axis_offset(&self.vertical));
-        // Translation changes traversal coordinates only; content allocations remain stable.
         ctx.set_children_viewport(rect, Vec2i::new(-offset.x, -offset.y));
-        ctx.set_content_size(extent);
+        ctx.set_content_size(Dimensioni::new(content_rect.width, content_rect.height));
         ctx.set_child_overflow_propagation(false);
     }
 }
 
-impl Widget for VirtualSurface {
+impl Widget for ScrollSurface {
     fn widget_opt(&self) -> &WidgetOption {
         &WidgetOption::NO_INTERACT
     }
@@ -345,44 +302,9 @@ impl Widget for VirtualSurface {
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
 
-/// Places a vertical sequence inside the virtual surface and returns its logical extent.
-fn layout_virtual_content(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, view: Dimensioni) -> Dimensioni {
-    // This is a vertical intrinsic flow, not another retained container object. It operates on the
-    // virtual surface's authoritative Children for exactly one placement call.
-    let child_width = view.width.max(0);
-    let spacing = ctx.style().spacing.max(0);
-    let mut y: i32 = 0;
-    let mut width = 0;
-    for index in 0..children.len() {
-        // Preserve intrinsic horizontal overflow while constraining responsive children to at
-        // least the viewport width. A second measurement observes wrapping at the committed width.
-        let preferred = ctx.measure_child(children, index, Dimensioni::new(child_width.max(1), 0)).unwrap_or_default();
-        let offered_width = child_width.max(preferred.width);
-        let measured_width = children
-            .child_policy(index)
-            .unwrap_or_else(crate::Policy::auto)
-            .width
-            .measurement_bound(offered_width);
-        let preferred_height = ctx
-            .measure_child(children, index, Dimensioni::new(measured_width, 0))
-            .unwrap_or_default()
-            .height;
-        let size = ctx
-            .layout_child(children, index, Recti::new(0, y, offered_width, preferred_height))
-            .unwrap_or_default();
-        width = width.max(offered_width.max(size.width));
-        // next_y = current_y + child_height, followed by spacing when another child remains.
-        y = y.saturating_add(size.height);
-        if index + 1 < children.len() {
-            y = y.saturating_add(spacing);
-        }
-    }
-    Dimensioni::new(width.max(0), y.max(0))
-}
-
 impl ScrollArea {
-    /// Virtual surface containing every application-provided content node.
-    const VIRTUAL_SURFACE: usize = 0;
+    /// Transform surface containing the application-provided content node.
+    const SURFACE: usize = 0;
     /// Independently targetable horizontal scrollbar widget.
     const HORIZONTAL: usize = 1;
     /// Independently targetable vertical scrollbar widget.
@@ -393,7 +315,7 @@ impl ScrollArea {
         // Apply the requested offset before configuring the new range; configure performs the final
         // clamp and resets drag geometry using the current widget-local track.
         handle
-            .try_update(|state| {
+            .try_update_without_measurement(|state| {
                 state.set_offset(requested_offset);
                 state.configure(Recti::new(0, 0, track.width, track.height), view_len, content_len, min_thumb_len);
             })
@@ -404,14 +326,14 @@ impl ScrollArea {
     fn deactivate_bar(handle: &TypedWidgetHandle<RetainedScrollbar>) {
         // Retain the child node and handle identity while clearing geometry, offset, and drag state.
         handle
-            .try_update(RetainedScrollbar::deactivate)
+            .try_update_without_measurement(RetainedScrollbar::deactivate)
             .expect("ScrollArea layout requires its retained scrollbar child");
     }
 }
 
 impl ContainerWidget for ScrollArea {
     fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
-        // Measure application content through the virtual surface and add only the panel padding.
+        // Measure application content through the scroll surface and add only panel padding.
         // Scrollbars are responsive affordances and do not inflate intrinsic composite size.
         let padding = ctx.style().padding.max(0);
         // inset = leading_padding + trailing_padding = padding * 2.
@@ -423,7 +345,7 @@ impl ContainerWidget for ScrollArea {
             0
         };
         let content = ctx
-            .measure_child(children, Self::VIRTUAL_SURFACE, Dimensioni::new(content_width, 0))
+            .measure_child(children, Self::SURFACE, Dimensioni::new(content_width, 0))
             .unwrap_or_default();
         // preferred_extent = content_extent + leading_padding + trailing_padding.
         Dimensioni::new(content.width.saturating_add(inset), content.height.saturating_add(inset))
@@ -439,12 +361,16 @@ impl ContainerWidget for ScrollArea {
         let enabled = self.scrolling_enabled;
         let requested = Vec2i::new(ScrollArea::axis_offset(&self.horizontal), ScrollArea::axis_offset(&self.vertical));
         let bars_usable = enabled && bar_size > 0 && surface.width > 0 && surface.height > 0;
-        let mut has_horizontal = false;
-        let mut has_vertical = false;
+        let mut has_horizontal = bars_usable && self.geometry.horizontal.is_some();
+        let mut has_vertical = bars_usable && self.geometry.vertical.is_some();
+        let mut visited_states = 0_u8;
 
-        // Scrollbar presence has four monotonic states. Each speculative placement updates the
-        // virtual child's logical content size, which can induce the perpendicular scrollbar.
-        for _ in 0..4 {
+        // Start from the last committed state so an unchanged retained tree keeps the same width
+        // constraint and reuses its child-measurement cache. There are only four bar states; if
+        // perpendicular induction creates a two-state cycle, commit their union.
+        for _ in 0..5 {
+            let state_bit = 1_u8 << ((has_horizontal as u8) | ((has_vertical as u8) << 1));
+            visited_states |= state_bit;
             let vertical_width = if has_vertical { bar_size.min(surface.width) } else { 0 };
             let horizontal_height = if has_horizontal { bar_size.min(surface.height) } else { 0 };
             // body_extent = surface_extent - occupied_scrollbar_extent.
@@ -457,16 +383,25 @@ impl ContainerWidget for ScrollArea {
             let view = inset_rect(body, padding);
             // Speculatively lay out content at this candidate viewport to discover logical extent.
             let child_rect = Recti::new(rect.x + view.x, rect.y + view.y, view.width, view.height);
-            let _ = ctx.layout_child(children, Self::VIRTUAL_SURFACE, child_rect);
-            let extent = ctx.child_content_size(children, Self::VIRTUAL_SURFACE).unwrap_or_default();
+            let _ = ctx.layout_child(children, Self::SURFACE, child_rect);
+            let extent = ctx.child_content_size(children, Self::SURFACE).unwrap_or_default();
 
-            let next_vertical = has_vertical || (bars_usable && extent.height > view.height);
-            let next_horizontal = has_horizontal || (bars_usable && extent.width > view.width);
+            let next_vertical = bars_usable && extent.height > view.height;
+            let next_horizontal = bars_usable && extent.width > view.width;
             if next_vertical != has_vertical || next_horizontal != has_horizontal {
-                // Presence only moves from false to true, guaranteeing convergence in this loop.
-                has_vertical = next_vertical;
-                has_horizontal = next_horizontal;
-                continue;
+                let next_bit = 1_u8 << ((next_horizontal as u8) | ((next_vertical as u8) << 1));
+                if visited_states & next_bit != 0 {
+                    let previous = (has_horizontal, has_vertical);
+                    has_horizontal |= next_horizontal;
+                    has_vertical |= next_vertical;
+                    if (has_horizontal, has_vertical) != previous {
+                        continue;
+                    }
+                } else {
+                    has_horizontal = next_horizontal;
+                    has_vertical = next_vertical;
+                    continue;
+                }
             }
 
             let vertical_track = scrollbar_base(ScrollAxis::Vertical, body, vertical_width);
@@ -512,9 +447,14 @@ impl ContainerWidget for ScrollArea {
                 let _ = ctx.set_child_participation(children, Self::HORIZONTAL, ChildParticipation::Hidden);
             }
 
-            // Re-place after bar configuration so the virtual transform observes clamped offsets.
-            let _ = ctx.layout_child(children, Self::VIRTUAL_SURFACE, child_rect);
             let offset = Vec2i::new(ScrollArea::axis_offset(&self.horizontal), ScrollArea::axis_offset(&self.vertical));
+            // Only a changed translation invalidates the otherwise retained content placement.
+            if offset.x != self.geometry.offset.x || offset.y != self.geometry.offset.y {
+                if let Some(surface) = children.get_mut(Self::SURFACE) {
+                    surface.state.invalidate_layout();
+                }
+                let _ = ctx.layout_child(children, Self::SURFACE, child_rect);
+            }
             let maximum = Vec2i::new(
                 self.horizontal.try_read(RetainedScrollbar::max_offset).unwrap_or(0),
                 self.vertical.try_read(RetainedScrollbar::max_offset).unwrap_or(0),
@@ -530,14 +470,14 @@ impl ContainerWidget for ScrollArea {
                 corner,
             };
             // The parent clips the three structural children to its surface. Scrolling translation
-            // is owned exclusively by the nested virtual surface.
+            // is owned exclusively by the nested scroll surface.
             ctx.set_children_viewport(rect, Vec2i::default());
             ctx.set_content_size(Dimensioni::new(surface.width, surface.height));
             ctx.set_child_overflow_propagation(false);
             return;
         }
 
-        unreachable!("ScrollArea scrollbar presence must converge within four states")
+        unreachable!("ScrollArea scrollbar presence must converge across four possible states")
     }
 
     fn accepts_event(&self, event: &UiInputEvent) -> bool {
@@ -549,7 +489,7 @@ impl ContainerWidget for ScrollArea {
 impl ScrollArea {
     /// Creates the composite and returns its weak typed widget handle plus completed node.
     ///
-    /// The completed parent always owns exactly three structural children: a virtual content
+    /// The completed parent always owns exactly three structural children: a scrolling content
     /// container and two real scrollbar widgets. The concrete `ScrollArea` is the parent
     /// `ContainerWidget`; the generic `Container` remains the structural owner.
     pub fn create(parameters: ScrollAreaParameters) -> (TypedWidgetHandle<ScrollArea>, Node) {
@@ -563,18 +503,15 @@ impl ScrollArea {
         // Build independently addressable scrollbar children and retain only weak typed handles.
         let (horizontal, horizontal_node) = RetainedScrollbar::create(ScrollAxis::Horizontal);
         let (vertical, vertical_node) = RetainedScrollbar::create(ScrollAxis::Vertical);
-        // Allocate application content once; the virtual container receives the strong owner below.
-        let content = Rc::new(RefCell::new(parameters.children));
-        let content_handle = ChildrenHandle::new(&content);
-
-        let virtual_widget = VirtualSurface {
+        // The surface owns exactly one ordinary content node and contributes no layout policy.
+        let content = Rc::new(RefCell::new([parameters.content].into_iter().collect()));
+        let surface_widget = ScrollSurface {
             horizontal: horizontal.clone(),
             vertical: vertical.clone(),
         };
-        let (_, virtual_surface) = Container::from_shared(content, virtual_widget);
+        let (_, surface_container) = Container::from_shared(content, surface_widget);
 
         let widget = ScrollArea {
-            content: content_handle,
             horizontal: horizontal.clone(),
             vertical: vertical.clone(),
             scrolling_enabled: enabled,
@@ -582,7 +519,7 @@ impl ScrollArea {
             opt: surface_opt,
         };
         let children = Rc::new(RefCell::new(
-            [Node::container(virtual_surface), horizontal_node, vertical_node].into_iter().collect(),
+            [Node::container(surface_container), horizontal_node, vertical_node].into_iter().collect(),
         ));
         let (handle, container) = Container::from_shared(children, widget);
         (handle, Node::container(container))
@@ -593,7 +530,7 @@ impl ScrollArea {
 mod tests {
     use super::*;
     use crate::input::Input;
-    use crate::test_support::test_atlas;
+    use crate::test_support::{AllocationMeasurement, test_atlas};
     use crate::ui_node::UiRuntime;
     use crate::{
         Column, ColumnParameters, Custom, CustomParameters, MouseButton, Policy, Row, RowParameters, SizePolicy, Stack, StackDirection, StackParameters, Style,
@@ -603,7 +540,7 @@ mod tests {
     /// Lays out one fixed content node and returns the parent layout's committed summary.
     fn laid_out_geometry(child_size: Dimensioni, surface: Recti, style: Style, requested_offset: Vec2i) -> ScrollAreaGeometry {
         let child = Node::widget(Custom::create(CustomParameters::new("child"))).with_policy(Policy::fixed(child_size.width, child_size.height));
-        let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, [child]));
+        let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child));
         scroll.try_update(|state| state.set_offset(requested_offset)).unwrap();
 
         let mut runtime = UiRuntime::new();
@@ -613,32 +550,74 @@ mod tests {
     }
 
     #[test]
-    fn scroll_area_keeps_three_structural_children_and_content_behind_virtual_surface() {
+    fn scroll_area_keeps_one_arbitrary_content_node_behind_its_surface() {
         let child = Custom::create(CustomParameters::new("child"));
         let (child_state, child) = Node::typed_widget(child);
-        let (scroll, node) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, [child]));
+        let (scroll, node) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, child));
 
-        assert_eq!(scroll.try_read(ScrollArea::len), Some(Some(1)));
         assert_eq!(
             node.debug_node_count(),
             5,
-            "parent, virtual surface, two bars, and content are all retained nodes"
+            "parent, scroll surface, two bars, and arbitrary content are retained nodes"
         );
         scroll.try_update(|state| state.set_offset(Vec2i::new(-4, 12))).unwrap();
         assert_eq!(scroll.try_read(|state| (state.offset().x, state.offset().y)), Some((0, 12)));
         scroll.try_update(|state| state.set_scrolling_enabled(false)).unwrap();
         assert_eq!(scroll.try_read(|state| (state.offset().x, state.offset().y)), Some((0, 0)));
 
-        assert_eq!(scroll.try_update(|state| state.remove_drop(0)), Some(Some(true)));
-        assert!(!child_state.is_alive());
         drop(node);
+        assert!(!child_state.is_alive());
         assert!(!scroll.is_alive());
+    }
+
+    #[test]
+    fn ordinary_column_content_reuses_retained_measurements_while_scrolling() {
+        let mut first_id = None;
+        let rows = (0..1_000).map(|index| {
+            let node = Node::widget(Custom::create(CustomParameters::new(format!("row-{index}"))))
+                .with_policy(Policy::new(SizePolicy::Remainder(0), SizePolicy::Fixed(20)));
+            first_id.get_or_insert(node.id());
+            node
+        });
+        let (_, content) = Column::create(ColumnParameters::new(rows));
+        let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, content));
+        assert_eq!(root.debug_node_count(), 1_005, "all retained row nodes remain owned by their column");
+
+        let style = Style {
+            padding: 0,
+            spacing: 2,
+            scrollbar_size: 10,
+            ..Style::default()
+        };
+        let viewport = Recti::new(0, 0, 200, 120);
+        let mut runtime = UiRuntime::new();
+        let atlas = test_atlas();
+        runtime.begin_update();
+        runtime.layout_tree_root(&mut root, &style, atlas.clone(), viewport, UNCLIPPED_RECT);
+        let first_id = first_id.unwrap();
+        let before = runtime.debug_node_rect(std::slice::from_ref(&root), first_id).unwrap();
+
+        runtime.begin_update();
+        let allocation = AllocationMeasurement::begin();
+        runtime.layout_tree_root(&mut root, &style, atlas.clone(), viewport, UNCLIPPED_RECT);
+        let allocations = allocation.finish();
+        let metrics = runtime.debug_metrics();
+        assert_eq!(allocations.events, 0);
+        assert_eq!(metrics.measures, 1);
+        assert_eq!(metrics.layouts, 0);
+
+        scroll.try_update(|state| state.set_offset(Vec2i::new(0, 10_000))).unwrap();
+        runtime.begin_update();
+        runtime.layout_tree_root(&mut root, &style, atlas, viewport, UNCLIPPED_RECT);
+        let after = runtime.debug_node_rect(std::slice::from_ref(&root), first_id).unwrap();
+        assert!(after.y < before.y);
+        assert_eq!(root.debug_node_count(), 1_005);
     }
 
     #[test]
     fn disabling_scrolling_revokes_scrollbar_capture_through_participation() {
         let child = Node::widget(Custom::create(CustomParameters::new("child"))).with_policy(Policy::fixed(200, 200));
-        let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, [child]));
+        let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child));
         let style = Style {
             padding: 0,
             scrollbar_size: 10,
@@ -722,7 +701,7 @@ mod tests {
             SizePolicy::Auto,
             [label, text_column],
         ));
-        let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, [row]));
+        let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, row));
         let style = Style {
             padding: 0,
             spacing: 4,
@@ -760,7 +739,7 @@ mod tests {
     fn frame_origin_and_scroll_translation_are_applied_exactly_once() {
         let child = Node::widget(Custom::create(CustomParameters::new("child"))).with_policy(Policy::fixed(160, 200));
         let child_id = child.id();
-        let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, [child]));
+        let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, child));
         let mut runtime = UiRuntime::new();
         let style = Style {
             frame_border_width: 3,

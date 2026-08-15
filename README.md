@@ -93,7 +93,7 @@ rust-src --toolchain nightly`).
 
 - **Context**: owns the high-level `Renderer`, the only ordered input queue, and retained root windows. Applications enqueue through Context methods, call `update_ui(dimensions)` to drain input and commit layout, use typed widget handles between traversals, synchronize again if a mutation can affect layout, then call `frame(FrameInfo).render_ui()?` to paint and submit once.
 - **Container**: the generic retained branch owner. It stores one erased concrete `ContainerWidget` and one authoritative opaque `Children` collection. The concrete widget owns semantic state, configuration, event ports, and layout policy; only the generic container owns children strongly.
-- **Layout engine + flows**: parent container widgets measure and assign child rectangles through scoped child-aware APIs and `ContainerLayoutCtx`. Row, Grid, Column, Stack, Disclosure, and ScrollArea expose their configuration and weak topology capabilities directly through `TypedWidgetHandle<W>`.
+- **Layout engine + flows**: parent container widgets measure and assign child rectangles through scoped child-aware APIs and `ContainerLayoutCtx`. Row, Grid, Column, Stack, and Disclosure expose their layout configuration and topology through `TypedWidgetHandle<W>`; ScrollArea accepts one arbitrary content node and owns only viewport state.
 - **Widget**: the common update/paint contract. A leaf additionally implements `LeafWidget` for intrinsic measurement; a branch implements `ContainerWidget` for child-aware measurement and placement. Concrete widgets combine semantic values, interaction state, native event ports, and runtime phases; `*Parameters` are only one-shot initialization.
 - **Node**: the non-cloneable owner of one concrete leaf or container runtime. Leaf storage is erased to `Rc<RefCell<dyn LeafWidget>>`; container storage erases to `Rc<RefCell<dyn ContainerWidget>>`. Applications and coordinating widgets may retain a weak `TypedWidgetHandle<W>` without affecting node lifetime. A `Node` receives private process-unique identity when constructed and transfers exactly once into a root or opaque `Children` collection; attached nodes cannot be detached or reparented.
 - **Rendering**: widgets obtain a local `Painter` from `WidgetPaintCtx`; retained traversal owns the internal display list, and `Renderer` executes it through one exclusively borrowed `RendererBackend::Frame`. The portable target supports drawables up to 8192x8192 and geometry up to four maximum drawable spans beyond the viewport; see the [render subsystem guide](src/render/RENDER.md#supported-coordinate-domain) for the complete coordinate contract and integration API.
@@ -383,10 +383,16 @@ after node erasure, while root chrome exposes its rectangle, visibility, and act
 
 Registered roots can be configured with `Context::set_root_options(...)` and `WindowOption` to
 control window chrome. Root overflow does not scroll implicitly; construct a `ScrollArea` with
-`ScrollAreaOption::ENABLE_SCROLL` and use its `TypedWidgetHandle<ScrollArea>` for offset or membership changes.
+`ScrollAreaOption::ENABLE_SCROLL` around one content node and use its `TypedWidgetHandle<ScrollArea>`
+for offset changes. The content may be any leaf or container; its own layout policy remains outside
+ScrollArea. Every retained node caches preferred measurements and placement across layout passes. A
+geometry change clears that node and its weakly linked ancestor caches, while topology operations
+do this automatically. Ordinary traversal rejects nodes whose retained rectangles do not intersect
+the inherited viewport, regardless of which container owns them.
 
 ### Preferred sizing and retained layout
 - Every built-in leaf reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout), while every container measures against its authoritative child collection.
+- Widgets that change intrinsic geometry from `Widget::update` call `WidgetUpdateCtx::request_measurement`; placement-only changes call `WidgetUpdateCtx::request_layout`. Interaction and paint-only state leave both retained caches intact.
 - `LeafWidget::measure` and `ContainerWidget::measure` report preferred content, not an allocation. A positive input axis may be used for wrapping; a non-positive axis requests the unconstrained preferred size. `Node` placement policy is applied later by its parent layout.
 - Auto-sized roots measure both axes intrinsically. Flexible `Fraction`, `Weight`, and `Remainder` tracks contribute content minima until a bounded allocation exists; `Fixed` tracks remain exact and may expose child overflow.
 - `Context::update_ui` first synchronizes layout, then drains input in API-call order. Every event runs one complete eligible-tree `Widget::update` traversal and one follow-up layout, so geometry changed by one event is authoritative for routing the next.
@@ -626,7 +632,7 @@ Version `0.7.0` is the context-owned retained-root release. Compared to `0.6.1`,
     - [x] Built-in widgets and examples capture events directly from concrete typed widget runtimes.
 - [x] Reworked retained layout, scroll areas, and root chrome.
     - [x] `SizePolicy::Weight` now uses sibling share ratios, and `SizePolicy::Fraction` covers explicit proportional sizing.
-    - [x] `ScrollArea` is the retained nested-scroll and membership API; its scrollbars are real structural leaf widgets.
+    - [x] `ScrollArea` is a retained viewport around one arbitrary content node; its scrollbars are real structural leaf widgets.
     - [x] Root auto-size, popup placement/close behavior, dialog z-order, scrollbars, and bottom-right resize handling were aligned with retained traversal.
 - [x] Tightened drawing, texture, atlas, and backend behavior.
     - [x] Renderer display-list execution batches ordinary draw operations while preserving custom render and retained scroll-area boundaries.
