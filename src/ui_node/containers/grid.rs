@@ -449,7 +449,8 @@ struct GridLayout {
 trait GridMeasureCtx {
     fn style(&self) -> &Style;
     fn atlas(&self) -> &AtlasHandle;
-    fn measure_child(&self, children: &Children, index: usize, available: Dimensioni) -> Option<Dimensioni>;
+    fn child_policy(&self, index: usize) -> Option<crate::Policy>;
+    fn measure_child(&mut self, index: usize, available: Dimensioni) -> Option<Dimensioni>;
 }
 
 impl GridMeasureCtx for MeasureCtx<'_> {
@@ -461,28 +462,41 @@ impl GridMeasureCtx for MeasureCtx<'_> {
         MeasureCtx::atlas(self)
     }
 
-    fn measure_child(&self, children: &Children, index: usize, available: Dimensioni) -> Option<Dimensioni> {
-        MeasureCtx::measure_child(self, children, index, available)
+    fn child_policy(&self, index: usize) -> Option<crate::Policy> {
+        MeasureCtx::child_policy(self, index)
+    }
+
+    fn measure_child(&mut self, index: usize, available: Dimensioni) -> Option<Dimensioni> {
+        MeasureCtx::measure_child(self, index, available)
     }
 }
 
-impl GridMeasureCtx for ContainerLayoutCtx<'_> {
+struct GridLayoutMeasureCtx<'a, 'runtime> {
+    ctx: &'a mut ContainerLayoutCtx<'runtime>,
+    children: &'a mut Children,
+}
+
+impl GridMeasureCtx for GridLayoutMeasureCtx<'_, '_> {
     fn style(&self) -> &Style {
-        ContainerLayoutCtx::style(self)
+        self.ctx.style()
     }
 
     fn atlas(&self) -> &AtlasHandle {
-        ContainerLayoutCtx::atlas(self)
+        self.ctx.atlas()
     }
 
-    fn measure_child(&self, children: &Children, index: usize, available: Dimensioni) -> Option<Dimensioni> {
-        ContainerLayoutCtx::measure_child(self, children, index, available)
+    fn child_policy(&self, index: usize) -> Option<crate::Policy> {
+        self.ctx.child_policy(self.children, index)
+    }
+
+    fn measure_child(&mut self, index: usize, available: Dimensioni) -> Option<Dimensioni> {
+        self.ctx.measure_child(self.children, index, available)
     }
 }
 
 impl ContainerWidget for Grid {
-    fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
-        grid_size(ctx, self, children, available)
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
+        grid_size(ctx, self, available)
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
@@ -514,11 +528,14 @@ fn layout_grid(state: &Grid, children: &mut Children, ctx: &mut ContainerLayoutC
 
     // Resolve and retain each column width once for both row measurement and final placement.
     let available_width = available_tracks(rect.width, columns, spacing);
-    resolve_columns_into(ctx, state, children, available_width, &mut layout.columns);
-
-    // Row preferences are measured using the resolved column spans, then allocated vertically.
     let available_height = available_tracks(rect.height, rows, spacing);
-    resolve_rows_into(ctx, state, children, available_height, &layout.columns, &mut layout.rows);
+    {
+        let mut measure = GridLayoutMeasureCtx { ctx, children };
+        resolve_columns_into(&mut measure, state, available_width, &mut layout.columns);
+
+        // Row preferences are measured using the resolved column spans, then allocated vertically.
+        resolve_rows_into(&mut measure, state, available_height, &layout.columns, &mut layout.rows);
+    }
 
     // Placement and both track vectors are now authoritative for this layout commit.
     for placement in state.items.placements.iter().copied() {
@@ -535,19 +552,19 @@ fn layout_grid(state: &Grid, children: &mut Children, ctx: &mut ContainerLayoutC
 ///
 /// The pure measurement path resolves scalar column spans on demand when measuring row content.
 /// This costs recomputation but preserves `Widget::measure(&self)` and performs no allocation.
-fn grid_size(ctx: &MeasureCtx<'_>, state: &Grid, children: &Children, available: Dimensioni) -> Dimensioni {
+fn grid_size(ctx: &mut MeasureCtx<'_>, state: &Grid, available: Dimensioni) -> Dimensioni {
     let spacing = ctx.style().spacing.max(0);
     let (columns, rows) = grid_dimensions(state);
     let available_width = available_tracks(available.width, columns, spacing);
     // Column preferences depend only on intrinsic child widths and Grid column spans.
     let width = measured_tracks(&state.column_tracks, columns, available_width, spacing, |index| {
-        preferred_column(ctx, state, children, index, spacing)
+        preferred_column(ctx, state, index, spacing)
     });
     let available_height = available_tracks(available.height, rows, spacing);
     // Row preferences additionally depend on each child's resolved column-span width.
     let height = measured_tracks(&state.row_tracks, rows, available_height, spacing, |index| {
-        preferred_row(ctx, state, children, index, spacing, |placement| {
-            resolved_column_span(ctx, state, children, spacing, available_width, placement)
+        preferred_row(ctx, state, index, spacing, |ctx, placement| {
+            resolved_column_span(ctx, state, spacing, available_width, placement)
         })
     });
     Dimensioni::new(width, height)
@@ -587,7 +604,7 @@ fn available_tracks(available: i32, count: usize, spacing: i32) -> i32 {
 }
 
 /// Computes one column's intrinsic minimum from its fallback and spanning children.
-fn preferred_column(ctx: &impl GridMeasureCtx, state: &Grid, children: &Children, index: usize, spacing: i32) -> i32 {
+fn preferred_column(ctx: &mut impl GridMeasureCtx, state: &Grid, index: usize, spacing: i32) -> i32 {
     let fallback = super::default_cell_width(ctx.style());
     let mut preferred = track_policy(&state.column_tracks, index).intrinsic_extent(fallback);
 
@@ -598,10 +615,7 @@ fn preferred_column(ctx: &impl GridMeasureCtx, state: &Grid, children: &Children
         if index < placement.column || index >= column_end {
             continue;
         }
-        let minimum = ctx
-            .measure_child(children, placement.child_index, Dimensioni::default())
-            .unwrap_or_default()
-            .width;
+        let minimum = ctx.measure_child(placement.child_index, Dimensioni::default()).unwrap_or_default().width;
         preferred = preferred.max(contribution_for_track(
             &state.column_tracks,
             index,
@@ -620,7 +634,7 @@ fn preferred_column(ctx: &impl GridMeasureCtx, state: &Grid, children: &Children
 /// Layout supplies widths from its resolved column vector. Immutable measurement supplies a pure
 /// scalar resolver. Keeping that choice at the call site prevents this helper from knowing about
 /// caches, phases, or mutable container state.
-fn preferred_row(ctx: &impl GridMeasureCtx, state: &Grid, children: &Children, index: usize, spacing: i32, child_width: impl Fn(GridPlacement) -> i32) -> i32 {
+fn preferred_row<C: GridMeasureCtx>(ctx: &mut C, state: &Grid, index: usize, spacing: i32, mut child_width: impl FnMut(&mut C, GridPlacement) -> i32) -> i32 {
     let fallback = super::default_cell_height(ctx.style(), ctx.atlas());
     let mut preferred = track_policy(&state.row_tracks, index).intrinsic_extent(fallback);
     // Measure only children crossing this row, at the width of their complete column span.
@@ -630,14 +644,14 @@ fn preferred_row(ctx: &impl GridMeasureCtx, state: &Grid, children: &Children, i
         if index < placement.row || index >= row_end {
             continue;
         }
-        let width = child_width(placement);
-        let width = children
+        let width = child_width(ctx, placement);
+        let width = ctx
             .child_policy(placement.child_index)
             .unwrap_or_else(crate::Policy::auto)
             .width
             .measurement_bound(width);
         let minimum = ctx
-            .measure_child(children, placement.child_index, Dimensioni::new(width.max(1), 0))
+            .measure_child(placement.child_index, Dimensioni::new(width.max(1), 0))
             .unwrap_or_default()
             .height;
         preferred = preferred.max(contribution_for_track(
@@ -698,20 +712,15 @@ fn contribution_for_track(policies: &[SizePolicy], index: usize, start: usize, s
     base.saturating_add(increment)
 }
 
-/// Resolves the width of one child's column span during immutable Grid measurement.
+/// Resolves the width of one child's column span during Grid preferred-size measurement.
 ///
 /// No resolved-width vector is available in `measure(&self)`, so this function replays the scalar
 /// column allocator and accumulates only the requested span.
-fn resolved_column_span(ctx: &impl GridMeasureCtx, state: &Grid, children: &Children, spacing: i32, available_width: i32, placement: GridPlacement) -> i32 {
+fn resolved_column_span(ctx: &mut impl GridMeasureCtx, state: &Grid, spacing: i32, available_width: i32, placement: GridPlacement) -> i32 {
     let columns = state.column_tracks.len().max(1);
     let mut axis = Axis::new(
         available_width,
-        (0..columns).map(|index| {
-            (
-                track_policy(&state.column_tracks, index),
-                preferred_column(ctx, state, children, index, spacing),
-            )
-        }),
+        (0..columns).map(|index| (track_policy(&state.column_tracks, index), preferred_column(ctx, state, index, spacing))),
     );
     let mut width = 0_i32;
     // All preceding columns must be replayed because Remainder depends on ordered consumption.
@@ -719,10 +728,7 @@ fn resolved_column_span(ctx: &impl GridMeasureCtx, state: &Grid, children: &Chil
     let placement_end = placement.column.saturating_add(placement.column_span);
     for index in 0..columns {
         let size = axis
-            .next(
-                track_policy(&state.column_tracks, index),
-                preferred_column(ctx, state, children, index, spacing),
-            )
+            .next(track_policy(&state.column_tracks, index), preferred_column(ctx, state, index, spacing))
             .advance;
         if index >= placement.column && index < placement_end {
             // span_width = previous_span_width + resolved_track_width.
@@ -737,20 +743,21 @@ fn resolved_column_span(ctx: &impl GridMeasureCtx, state: &Grid, children: &Chil
 }
 
 /// Fills the layout-phase column buffer with resolved widths.
-fn resolve_columns_into(ctx: &impl GridMeasureCtx, state: &Grid, children: &Children, available_width: i32, columns: &mut Vec<i32>) {
+fn resolve_columns_into(ctx: &mut impl GridMeasureCtx, state: &Grid, available_width: i32, columns: &mut Vec<i32>) {
     let count = state.column_tracks.len().max(1);
+    let spacing = ctx.style().spacing.max(0);
     columns.clear();
-    columns.extend((0..count).map(|index| preferred_column(ctx, state, children, index, ctx.style().spacing.max(0))));
+    columns.extend((0..count).map(|index| preferred_column(ctx, state, index, spacing)));
     resolve_tracks(&state.column_tracks, available_width, columns);
 }
 
 /// Fills the layout-phase row buffer using already resolved column widths.
-fn resolve_rows_into(ctx: &impl GridMeasureCtx, state: &Grid, children: &Children, available_height: i32, columns: &[i32], rows: &mut Vec<i32>) {
+fn resolve_rows_into(ctx: &mut impl GridMeasureCtx, state: &Grid, available_height: i32, columns: &[i32], rows: &mut Vec<i32>) {
     let (_, count) = grid_dimensions(state);
     let spacing = ctx.style().spacing.max(0);
     rows.clear();
     rows.extend((0..count).map(|index| {
-        preferred_row(ctx, state, children, index, spacing, |placement| {
+        preferred_row(ctx, state, index, spacing, |_ctx, placement| {
             track_span(columns, placement.column, placement.column_span, spacing)
         })
     }));
@@ -1070,7 +1077,7 @@ mod tests {
         assert_eq!(contribution_for_track(&rows, 0, 0, 2, 0, style.spacing, 40), 8);
         assert_eq!(contribution_for_track(&rows, 1, 0, 2, 0, style.spacing, 40), 30);
 
-        let children = Children::new();
+        let mut children = Children::new();
         let topology = Rc::new(RefCell::new(Children::new()));
         let empty = Grid {
             children: ChildrenHandle::new(&topology),
@@ -1080,8 +1087,8 @@ mod tests {
             layout: GridLayout::default(),
         };
         let atlas = test_atlas();
-        let ctx = MeasureCtx::new(&style, &atlas);
-        let measured = grid_size(&ctx, &empty, &children, Dimensioni::default());
+        let mut ctx = MeasureCtx::new(&style, &atlas, &mut children);
+        let measured = grid_size(&mut ctx, &empty, Dimensioni::default());
         assert_eq!(measured.width, 12);
         assert_eq!(measured.height, 20);
     }

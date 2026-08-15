@@ -349,7 +349,7 @@ impl ContainerWidget for RootChrome {
         event_position(event).is_some_and(|position| self.geometry.hit_test(position).is_some()) && !matches!(event, UiInputEvent::Scroll { .. })
     }
 
-    fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
         // Resolve chrome-only minimum/insets first, then measure the one application child inside
         // that body. Auto-size and placement therefore share root_chrome_geometry.
         let minimum = root_chrome_geometry(Recti::default(), Dimensioni::default(), &self.name, self.options, ctx.style(), ctx.atlas()).minimum_outer;
@@ -363,10 +363,9 @@ impl ContainerWidget for RootChrome {
             inset_available(available.width, horizontal_chrome),
             inset_available(available.height, vertical_chrome),
         );
-        let policy = children.child_policy(0).unwrap_or_else(crate::Policy::auto);
+        let policy = ctx.child_policy(0).unwrap_or_else(crate::Policy::auto);
         let child = ctx
             .measure_child(
-                children,
                 0,
                 Dimensioni::new(
                     policy.width.measurement_bound(child_available.width),

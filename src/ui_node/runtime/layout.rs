@@ -35,18 +35,18 @@ use crate::math::RectExt;
 
 impl UiRuntime {
     /// Measures one already-borrowed node through the authoritative private node path.
-    pub(in crate::ui_node) fn measure_node(&self, node: &Node, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
+    pub(in crate::ui_node) fn measure_node(&self, node: &mut Node, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.measures += 1);
         // Node::measure is the only place that adds frame geometry; containers receive the same
         // content-only measurement contract whether reached here or through Children.
-        node.measure(&MeasureCtx::new(style, atlas), available)
+        node.measure(style, atlas, available)
     }
 
-    fn measure_node_for_layout(&self, node: &Node, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> (Dimensioni, bool) {
+    fn measure_node_for_layout(&self, node: &mut Node, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> (Dimensioni, bool) {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.measures += 1);
-        node.measure_with_cache_status(&MeasureCtx::new(style, atlas), available)
+        node.measure_with_cache_status(style, atlas, available)
     }
 
     /// Lays out one already-borrowed node through direct widget/container dispatch.
@@ -88,7 +88,7 @@ impl UiRuntime {
     ) -> Dimensioni {
         let previous = node.state.layout.allocation;
         let same_allocation = previous.x == outer.x && previous.y == outer.y && previous.width == outer.width && previous.height == outer.height;
-        if measurement_cached && same_allocation && !node.state.measurement.borrow().layout_is_dirty() {
+        if measurement_cached && same_allocation && !node.state.layout_is_dirty() {
             return Dimensioni::new(outer.width, outer.height);
         }
         #[cfg(test)]
@@ -135,7 +135,7 @@ impl UiRuntime {
             );
             node.set_layout(node.state.layout.with_content_size(content_size));
         }
-        node.state.measurement.borrow_mut().validate_layout();
+        node.state.validate_layout();
         Dimensioni::new(outer.width, outer.height)
     }
 }

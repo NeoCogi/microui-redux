@@ -436,6 +436,7 @@ impl UiRuntime {
                     .widget
                     .try_borrow()
                     .expect("retained widget invariant violated during input dispatch")
+                    .widget
                     .effective_widget_opt();
                 self.dispatch_widget_input(&node.state, local_rect, local_clip, opt, true, &local_event)
             }

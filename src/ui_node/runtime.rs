@@ -160,7 +160,8 @@ impl UiRuntime {
     /// A zero component requests unconstrained preferred size; a positive component supplies the
     /// programmed measurement bound. Root chrome owns the conversion from application content to
     /// the final outer window extent.
-    pub(crate) fn measure_tree_root(&mut self, root: &Node, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
+    pub(crate) fn measure_tree_root(&mut self, root: &mut Node, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
+        root.synchronize_measurement_invalidation();
         self.measure_node(root, style, atlas, available)
     }
 
@@ -168,6 +169,7 @@ impl UiRuntime {
     pub(crate) fn layout_tree_root(&mut self, root: &mut Node, style: &Style, atlas: crate::AtlasHandle, outer: Recti, viewport: Recti) {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.tree_layouts += 1);
+        root.synchronize_measurement_invalidation();
         // Root layout establishes the transform reused by subsequent routing, update, and paint.
         self.root_transform = Transform::root(viewport);
         self.layout_allocated_node_ref(root, style, &atlas, outer);

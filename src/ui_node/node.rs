@@ -30,12 +30,12 @@
 
 use crate::render::{CustomRenderHandle, CustomRenderKey, RendererBackend};
 use std::cell::RefCell;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
 use crate::math::RectExt;
 use crate::{AtlasHandle, Dimensioni, FontId, IconId, LeafWidget, Recti, Style, TypedWidgetHandle, Widget};
 
-use super::{ChildParticipation, Children, Container, MeasureCtx, NodeLayout, RuntimeNodeId};
+use super::{ChildParticipation, Children, Container, NodeLayout, RuntimeNodeId, WidgetStorage};
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub(crate) struct MeasurementStyleKey {
@@ -87,55 +87,34 @@ struct MeasurementEntry {
     preferred: Dimensioni,
 }
 
-/// Shared measurement cache and weak retained-parent link for one node.
+/// Bounded preferred-size cache owned directly by one retained node.
 ///
-/// The node owns this state strongly. Its children and typed handle retain only weak references,
-/// so invalidation can walk toward the root without introducing a topology ownership cycle.
-pub(crate) struct MeasurementState {
-    parent: Weak<RefCell<MeasurementState>>,
+/// Four retained entries cover the small set of constraints produced by responsive parent flows.
+/// Clearing preserves the vector's capacity, so warmed invalidation reuses its storage.
+struct MeasurementCache {
     entries: Vec<MeasurementEntry>,
     layout_dirty: bool,
 }
 
-impl MeasurementState {
-    pub(crate) fn new() -> Rc<RefCell<Self>> {
-        Rc::new(RefCell::new(Self {
-            parent: Weak::new(),
-            entries: Vec::new(),
-            layout_dirty: true,
-        }))
+impl MeasurementCache {
+    fn new() -> Self {
+        Self { entries: Vec::new(), layout_dirty: true }
     }
 
-    /// Installs the retained parent after this unique node is transferred into its child owner.
-    pub(crate) fn set_parent(&mut self, parent: &Rc<RefCell<Self>>) {
-        debug_assert!(self.parent.upgrade().is_none(), "an attached node cannot be reparented");
-        self.parent = Rc::downgrade(parent);
-    }
-
-    /// Clears this node's measurements and every cached result that depends on it.
-    pub(crate) fn invalidate(&mut self) {
+    fn invalidate(&mut self) {
         self.entries.clear();
         self.layout_dirty = true;
-        let parent = self.parent.upgrade();
-        if let Some(parent) = parent {
-            parent.borrow_mut().invalidate();
-        }
     }
 
-    /// Marks retained placement stale without discarding preferred measurements.
-    pub(crate) fn invalidate_layout(&mut self) {
+    fn invalidate_layout(&mut self) {
         self.layout_dirty = true;
-        let parent = self.parent.upgrade();
-        if let Some(parent) = parent {
-            parent.borrow_mut().invalidate_layout();
-        }
     }
 
-    pub(crate) fn layout_is_dirty(&self) -> bool {
+    fn layout_is_dirty(&self) -> bool {
         self.layout_dirty
     }
 
-    pub(crate) fn validate_layout(&mut self) {
+    fn validate_layout(&mut self) {
         self.layout_dirty = false;
     }
 
@@ -194,8 +173,10 @@ pub(crate) struct NodeRuntime {
     pub(crate) policy: crate::Policy,
     /// Parent-layout result consumed uniformly by traversal and dispatch.
     pub(crate) participation: ChildParticipation,
-    /// Persistent preferred sizes and weak retained-parent invalidation link.
-    pub(crate) measurement: Rc<RefCell<MeasurementState>>,
+    /// Persistent preferred sizes owned directly by this retained node.
+    measurement: MeasurementCache,
+    /// Whether this node has received its first authoritative allocation.
+    placed: bool,
 }
 
 impl NodeRuntime {
@@ -210,11 +191,20 @@ impl NodeRuntime {
     }
 
     pub(crate) fn invalidate_measurement(&mut self) {
-        self.measurement.borrow_mut().invalidate();
+        self.measurement.invalidate();
     }
 
     pub(crate) fn invalidate_layout(&mut self) {
-        self.measurement.borrow_mut().invalidate_layout();
+        self.measurement.invalidate_layout();
+    }
+
+    pub(crate) fn layout_is_dirty(&self) -> bool {
+        self.measurement.layout_is_dirty()
+    }
+
+    pub(crate) fn validate_layout(&mut self) {
+        self.measurement.validate_layout();
+        self.placed = true;
     }
 }
 
@@ -273,19 +263,17 @@ impl Node {
     fn mount_widget<W: LeafWidget + 'static>(widget: W, custom_render: Option<crate::render::CustomRenderKey>) -> (TypedWidgetHandle<W>, Self) {
         // Allocate once while the concrete type is known, then erase only the strong reference
         // retained by the node. Both references therefore address the same RefCell allocation.
-        let widget = Rc::new(RefCell::new(widget));
-        let measurement = MeasurementState::new();
-        let handle = TypedWidgetHandle::new(&widget, &measurement);
-        let widget: Rc<RefCell<dyn LeafWidget>> = widget;
-        let node = Self::from_kind_with_measurement(NodeKind::Widget(WidgetNode::new(widget, custom_render)), measurement);
+        let widget = Rc::new(RefCell::new(WidgetStorage::new(widget)));
+        let handle = TypedWidgetHandle::new(&widget);
+        let widget: Rc<RefCell<WidgetStorage<dyn LeafWidget>>> = widget;
+        let node = Self::from_kind(NodeKind::Widget(WidgetNode::new(widget, custom_render)));
         (handle, node)
     }
 
     /// Creates a branch node from one complete concrete container owner.
     pub fn container(container: Container) -> Self {
         // Container is already the complete child/layout owner; Node adds only common runtime state.
-        let measurement = container.measurement().clone();
-        Self::from_kind_with_measurement(NodeKind::Container(container), measurement)
+        Self::from_kind(NodeKind::Container(container))
     }
 
     /// Replaces this still-unmounted node's generic parent placement policy.
@@ -297,7 +285,7 @@ impl Node {
         self
     }
 
-    fn from_kind_with_measurement(kind: NodeKind, measurement: Rc<RefCell<MeasurementState>>) -> Self {
+    fn from_kind(kind: NodeKind) -> Self {
         // Identity is allocated once at the final owning boundary and survives every subsequent move
         // of the non-Clone Node through unmounted construction and retained insertion.
         Self {
@@ -310,7 +298,8 @@ impl Node {
                 active: false,
                 policy: crate::Policy::auto(),
                 participation: ChildParticipation::Active,
-                measurement,
+                measurement: MeasurementCache::new(),
+                placed: false,
             },
             data: kind,
         }
@@ -324,8 +313,9 @@ impl Node {
     /// Tests retained bounds against an inherited screen-space viewport.
     pub(crate) fn intersects_clip(&self, parent_transform: Transform) -> bool {
         let allocation = self.state.layout.allocation;
-        if (allocation.width <= 0 || allocation.height <= 0) && self.state.measurement.borrow().layout_is_dirty() {
-            // A node inserted during an update participates once before its first placement.
+        if !self.state.placed || self.data.is_measurement_dirty() {
+            // New nodes and directly mutated later subtrees participate before layout commits
+            // their resulting geometry.
             return true;
         }
         let content = self.state.layout.content_size;
@@ -339,14 +329,14 @@ impl Node {
     }
 
     /// Measures this node's preferred outer size. Placement policy is applied later by layout.
-    pub(crate) fn measure(&self, ctx: &MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
-        self.measure_with_cache_status(ctx, available).0
+    pub(crate) fn measure(&mut self, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
+        self.measure_with_cache_status(style, atlas, available).0
     }
 
     /// Measures and reports whether the retained result satisfied this exact query.
-    pub(crate) fn measure_with_cache_status(&self, ctx: &MeasureCtx<'_>, available: Dimensioni) -> (Dimensioni, bool) {
-        let style = MeasurementStyleKey::new(ctx.style());
-        if let Some(cached) = self.state.measurement.borrow().lookup(available, style, ctx.atlas()) {
+    pub(crate) fn measure_with_cache_status(&mut self, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> (Dimensioni, bool) {
+        let style_key = MeasurementStyleKey::new(style);
+        if let Some(cached) = self.state.measurement.lookup(available, style_key, atlas) {
             return (cached, true);
         }
 
@@ -355,27 +345,43 @@ impl Node {
         // Resolve frame policy and preferred size under one scoped widget borrow. Measurement is a
         // dominant retained-layout path, so reacquiring the same RefCell merely to read options is
         // both redundant and measurably expensive for large leaf trees.
-        let (border_width, measured_content) = match &self.data {
+        let (border_width, measured_content) = match &mut self.data {
             NodeKind::Widget(node) => {
                 let widget = node.widget.try_borrow().unwrap_or_else(|_| widget_borrow_conflict());
-                let framed = widget.effective_widget_opt().intersects(crate::WidgetOption::FRAME);
-                let border_width = if framed { ctx.style().frame_border().width.max(0) } else { 0 };
-                let measured_content = widget.measure(ctx.style(), ctx.atlas(), crate::ui_node::frame::content_available(available, border_width));
+                let framed = widget.widget.effective_widget_opt().intersects(crate::WidgetOption::FRAME);
+                let border_width = if framed { style.frame_border().width.max(0) } else { 0 };
+                let measured_content = widget
+                    .widget
+                    .measure(style, atlas, crate::ui_node::frame::content_available(available, border_width));
                 (border_width, measured_content)
             }
-            NodeKind::Container(container) => container.measure_content_with_frame(ctx, available),
+            NodeKind::Container(container) => container.measure_content_with_frame(style, atlas, available),
         };
         // Widgets cannot return negative geometry. Node placement policy is intentionally absent:
         // the parent applies it later when allocating this preferred outer size.
         let preferred_content = Dimensioni::new(measured_content.width.max(0), measured_content.height.max(0));
         let preferred = crate::ui_node::frame::outer_preferred(preferred_content, border_width);
-        self.state.measurement.borrow_mut().insert(MeasurementEntry {
+        self.state.measurement.insert(MeasurementEntry {
             available,
-            style,
-            atlas: ctx.atlas().clone(),
+            style: style_key,
+            atlas: atlas.clone(),
             preferred,
         });
         (preferred, false)
+    }
+
+    /// Consumes widget mutation markers and invalidates each changed node's ancestor path.
+    pub(crate) fn synchronize_measurement_invalidation(&mut self) -> bool {
+        let mut measurement_dirty = self.data.take_measurement_dirty();
+        self.with_children_mut(|children| {
+            for child in children.iter_mut() {
+                measurement_dirty |= child.synchronize_measurement_invalidation();
+            }
+        });
+        if measurement_dirty {
+            self.state.invalidate_measurement();
+        }
+        measurement_dirty
     }
 
     /// Writes layout as the source of truth.
@@ -440,14 +446,14 @@ impl Node {
 /// Thin retained leaf owner for one erased widget and optional custom-render metadata.
 pub(crate) struct WidgetNode {
     /// Sole persistent strong widget owner, erased without changing its allocation.
-    pub(crate) widget: Rc<RefCell<dyn LeafWidget>>,
+    pub(crate) widget: Rc<RefCell<WidgetStorage<dyn LeafWidget>>>,
     /// Optional custom backend render callback for custom-render leaves.
     custom_render: Option<CustomRenderKey>,
 }
 
 impl WidgetNode {
     /// Erases one concrete runtime at the retained leaf boundary.
-    pub(crate) fn new(widget: Rc<RefCell<dyn LeafWidget>>, custom_render: Option<CustomRenderKey>) -> Self {
+    pub(crate) fn new(widget: Rc<RefCell<WidgetStorage<dyn LeafWidget>>>, custom_render: Option<CustomRenderKey>) -> Self {
         Self { widget, custom_render }
     }
 
@@ -471,7 +477,7 @@ impl NodeKind {
         match self {
             Self::Widget(node) => {
                 let widget = node.widget.try_borrow().unwrap_or_else(|_| widget_borrow_conflict());
-                f(&*widget)
+                f(&widget.widget)
             }
             Self::Container(container) => container.with_widget(f),
         }
@@ -482,9 +488,27 @@ impl NodeKind {
         match self {
             Self::Widget(node) => {
                 let mut widget = node.widget.try_borrow_mut().unwrap_or_else(|_| widget_borrow_conflict());
-                f(&mut *widget)
+                f(&mut widget.widget)
             }
             Self::Container(container) => container.with_widget_mut(f),
+        }
+    }
+
+    pub(crate) fn is_measurement_dirty(&self) -> bool {
+        match self {
+            Self::Widget(node) => node.widget.try_borrow().unwrap_or_else(|_| widget_borrow_conflict()).is_measurement_dirty(),
+            Self::Container(container) => container.is_measurement_dirty(),
+        }
+    }
+
+    pub(crate) fn take_measurement_dirty(&mut self) -> bool {
+        match self {
+            Self::Widget(node) => node
+                .widget
+                .try_borrow_mut()
+                .unwrap_or_else(|_| widget_borrow_conflict())
+                .take_measurement_dirty(),
+            Self::Container(container) => container.take_measurement_dirty(),
         }
     }
 }
@@ -536,15 +560,14 @@ mod tests {
 
     #[test]
     fn measurement_reports_content_and_leaves_placement_policy_to_the_parent() {
-        let (_, plain) = text_node("same content");
+        let (_, mut plain) = text_node("same content");
         let (_, fixed) = text_node("same content");
-        let fixed = fixed.with_policy(crate::Policy::fixed(300, 200));
+        let mut fixed = fixed.with_policy(crate::Policy::fixed(300, 200));
         let style = crate::Style::default();
         let atlas = test_atlas();
 
-        let ctx = MeasureCtx::new(&style, &atlas);
-        let plain = plain.measure(&ctx, Dimensioni::default());
-        let fixed_measurement = fixed.measure(&ctx, Dimensioni::default());
+        let plain = plain.measure(&style, &atlas, Dimensioni::default());
+        let fixed_measurement = fixed.measure(&style, &atlas, Dimensioni::default());
         assert_eq!((plain.width, plain.height), (fixed_measurement.width, fixed_measurement.height));
         let children: Children = [fixed].into_iter().collect();
         assert_eq!(children.child_policy(0), Some(crate::Policy::fixed(300, 200)));

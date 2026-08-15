@@ -283,10 +283,10 @@ impl crate::LeafWidget for DisclosureHeader {
 }
 
 impl ContainerWidget for Disclosure {
-    fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
         // The header always contributes. Body measurement is conditional so collapsed content does
         // not influence root auto-size while its state and nodes remain retained.
-        let header = ctx.measure_child(children, Self::HEADER, available).unwrap_or_default();
+        let header = ctx.measure_child(Self::HEADER, available).unwrap_or_default();
         if !self.expanded {
             return header;
         }
@@ -302,9 +302,7 @@ impl ContainerWidget for Disclosure {
         } else {
             0
         };
-        let body = ctx
-            .measure_child(children, Self::BODY, Dimensioni::new(body_width, body_height))
-            .unwrap_or_default();
+        let body = ctx.measure_child(Self::BODY, Dimensioni::new(body_width, body_height)).unwrap_or_default();
         Dimensioni::new(
             header.width.max(body.width.saturating_add(indent)),
             header.height.saturating_add(spacing).saturating_add(body.height),
@@ -356,13 +354,12 @@ impl Widget for Disclosure {
 /// Builds the fixed body/header structure before wrapping it in the public owning node.
 fn create_container(parameters: DisclosureParameters) -> (TypedWidgetHandle<Disclosure>, Container) {
     let (content, body) = Column::create(ColumnParameters::new(parameters.children.nodes));
-    let widget = Rc::new(RefCell::new(Disclosure {
+    let widget = Rc::new(RefCell::new(crate::ui_node::WidgetStorage::new(Disclosure {
         content,
         expanded: parameters.expanded,
         variant: parameters.variant,
-    }));
-    let measurement = crate::ui_node::MeasurementState::new();
-    let handle = TypedWidgetHandle::new(&widget, &measurement);
+    })));
+    let handle = TypedWidgetHandle::new(&widget);
     let header = DisclosureHeader {
         disclosure: handle.clone(),
         label: parameters.label,
@@ -370,7 +367,7 @@ fn create_container(parameters: DisclosureParameters) -> (TypedWidgetHandle<Disc
         opt: parameters.opt,
     };
     let children = Rc::new(RefCell::new([body, Node::widget_internal(header)].into_iter().collect()));
-    let (_, container) = Container::from_shared_owner_with_measurement(children, widget, measurement);
+    let (_, container) = Container::from_shared_owner(children, widget);
     (handle, container)
 }
 

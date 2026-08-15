@@ -31,7 +31,7 @@
 //! Root registry, cross-root policy, and persistent tree traversal.
 
 use super::*;
-use crate::{Node, RootHandle, RootMutationError, RootChrome, TypedWidgetHandle, Vec2i, rect};
+use crate::{MouseButton, Node, RootHandle, RootMutationError, RootChrome, TypedWidgetHandle, UiInputEvent, Vec2i, rect};
 
 use super::root_chrome::{create_root_chrome, record_root_overlay, root_handle, RootChromeParameters};
 #[cfg(test)]
@@ -46,8 +46,89 @@ pub(super) enum WindowKind {
 
 /// One persistent retained tree and its traversal-local runtime state.
 pub(super) struct WidgetTree {
-    pub(super) root: Node,
-    pub(super) runtime: UiRuntime,
+    root: Node,
+    runtime: UiRuntime,
+}
+
+impl WidgetTree {
+    fn new(root: Node) -> Self {
+        Self { root, runtime: UiRuntime::new() }
+    }
+
+    fn begin_update(&mut self) {
+        self.runtime.begin_update();
+    }
+
+    fn clear_transient_targets(&mut self) {
+        self.runtime.clear_transient_targets();
+    }
+
+    fn measure(&mut self, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
+        self.runtime.measure_tree_root(&mut self.root, style, atlas, available)
+    }
+
+    fn layout(&mut self, style: &Style, atlas: crate::AtlasHandle, rect: Recti, viewport: Recti) {
+        self.runtime.layout_tree_root(&mut self.root, style, atlas, rect, viewport);
+    }
+
+    fn has_capture(&self) -> bool {
+        self.runtime.capture.is_some()
+    }
+
+    fn begin_input_event(&mut self, pointer_input_enabled: bool, event: &UiInputEvent) {
+        self.runtime.begin_input_event(pointer_input_enabled, event);
+    }
+
+    fn route_captured_pointer(&mut self, style: &Style, mouse_buttons: MouseButton, event: &UiInputEvent) -> Option<bool> {
+        self.runtime
+            .route_captured_pointer_input_event(std::slice::from_mut(&mut self.root), style, mouse_buttons, event)
+    }
+
+    fn accepts_pointer_input(&self) -> bool {
+        self.runtime.accepts_pointer_input()
+    }
+
+    fn route_pointer(&mut self, style: &Style, event: &UiInputEvent, root_chrome_hit: bool, mouse_buttons: MouseButton) {
+        let transform = self.runtime.root_transform();
+        if let Some((owner, result)) = self
+            .runtime
+            .route_root_input_event_to_node_ref(&mut self.root, transform, style, event, root_chrome_hit)
+        {
+            self.runtime.update_pointer_capture(owner, result, event, mouse_buttons);
+        }
+    }
+
+    fn route_focus(&mut self, style: &Style, event: &UiInputEvent) {
+        self.runtime.route_focus_input_event(std::slice::from_mut(&mut self.root), style, event);
+    }
+
+    fn update(&mut self, style: &Style, atlas: crate::AtlasHandle, input: crate::input::InputSnapshot) {
+        self.runtime.update_tree_root(&mut self.root, style, atlas, input);
+    }
+
+    fn paint(&mut self, display_list: &mut crate::render::DisplayList, style: &Style, atlas: crate::AtlasHandle) {
+        self.runtime.paint_tree_root(&mut self.root, display_list, style, atlas);
+    }
+
+    #[cfg(test)]
+    fn content_size(&self) -> Dimensioni {
+        self.runtime.debug_root_content_size()
+    }
+
+    #[cfg(test)]
+    fn metrics(&self) -> crate::ui_node::RuntimeMetrics {
+        self.runtime.debug_metrics()
+    }
+
+    #[cfg(test)]
+    fn node_count(&self) -> usize {
+        self.root.debug_node_count()
+    }
+
+    #[cfg(test)]
+    fn node_rect(&self, node: crate::ui_node::RuntimeNodeId) -> Option<Recti> {
+        self.runtime.debug_node_rect(std::slice::from_ref(&self.root), node)
+    }
 }
 
 /// Lifecycle and cross-root metadata for one retained tree.
@@ -65,7 +146,7 @@ impl WindowEntry {
         // Generic descendant widgets reconcile private modes from their next inactive update.
         // RootChrome is different because callers can observe `is_active` immediately after a
         // window-manager operation, so its mode changes in the same ownership transaction.
-        self.tree.runtime.clear_transient_targets();
+        self.tree.clear_transient_targets();
         self.root_widget
             .try_update(RootChrome::clear_interaction_silent)
             .expect("registered root widget unavailable while clearing transient targets");
@@ -101,7 +182,7 @@ impl WindowManager {
             kind,
             z_index,
             root_widget: root_widget.clone(),
-            tree: WidgetTree { root, runtime: UiRuntime::new() },
+            tree: WidgetTree::new(root),
         });
         // New topology requires a layout commit before rendering or pointer routing.
         self.invalidate_ui_commit();
@@ -366,7 +447,7 @@ impl WindowManager {
         // This pre-layout pass removes abandoned sessions even when no input was queued.
         self.process_file_dialogs();
         for entry in &mut self.roots {
-            entry.tree.runtime.begin_update();
+            entry.tree.begin_update();
         }
         self.layout(viewport, atlas);
         // Subscriber invocations may already be waiting without a raw input event. If they mutate
@@ -410,7 +491,7 @@ impl WindowManager {
                 // without exposing frame or padding arithmetic to the application.
                 let available = Dimensioni::new(if auto_width { 0 } else { rect.width.max(1) }, if auto_height { 0 } else { rect.height.max(1) });
                 let tree = &mut self.roots[index].tree;
-                let size = tree.runtime.measure_tree_root(&tree.root, &self.style, atlas, available);
+                let size = tree.measure(&self.style, atlas, available);
                 let size = Dimensioni::new(
                     if auto_width { size.width } else { rect.width },
                     if auto_height { size.height } else { rect.height },
@@ -432,10 +513,7 @@ impl WindowManager {
                 continue;
             }
 
-            entry
-                .tree
-                .runtime
-                .layout_tree_root(&mut entry.tree.root, &self.style, atlas.clone(), rect, viewport);
+            entry.tree.layout(&self.style, atlas.clone(), rect, viewport);
         }
     }
 
@@ -453,7 +531,7 @@ impl WindowManager {
             // A new press may target any root. Transfer global pointer ownership before routing so
             // no previous root can retain a widget-level capture alongside the new press target.
             for entry in &mut self.roots {
-                if entry.id != root && entry.tree.runtime.capture.is_some() {
+                if entry.id != root && entry.tree.has_capture() {
                     entry.clear_transient_targets();
                 }
             }
@@ -474,7 +552,7 @@ impl WindowManager {
                 .try_read(RootChrome::is_visible)
                 .expect("registered root state unavailable before input update");
             if visible && modal_root.is_none_or(|modal| modal == entry.id) {
-                entry.tree.runtime.begin_input_event(pointer_root == Some(entry.id), event);
+                entry.tree.begin_input_event(pointer_root == Some(entry.id), event);
             }
         }
 
@@ -485,18 +563,13 @@ impl WindowManager {
                 .then(|| {
                     self.roots
                         .iter()
-                        .position(|entry| self.modal_stack.last().is_none_or(|modal| *modal == entry.id) && entry.tree.runtime.capture.is_some())
+                        .position(|entry| self.modal_stack.last().is_none_or(|modal| *modal == entry.id) && entry.tree.has_capture())
                 })
                 .flatten();
             let mut capture_handled = false;
             if let Some(index) = capture_index {
                 let entry = &mut self.roots[index];
-                let roots = std::slice::from_mut(&mut entry.tree.root);
-                capture_handled = entry
-                    .tree
-                    .runtime
-                    .route_captured_pointer_input_event(roots, &self.style, input.mouse_buttons, event)
-                    .is_some();
+                capture_handled = entry.tree.route_captured_pointer(&self.style, input.mouse_buttons, event).is_some();
             }
 
             if !capture_handled
@@ -504,24 +577,16 @@ impl WindowManager {
                 && let Some(index) = self.roots.iter().position(|entry| entry.id == root)
             {
                 let entry = &mut self.roots[index];
-                if entry.tree.runtime.accepts_pointer_input() {
+                if entry.tree.accepts_pointer_input() {
                     // Root chrome is a window-manager overlay, not a customizable container hit
                     // surface. Resolve it here before generic allocation-based tree targeting.
                     let root_chrome_hit = entry
                         .root_widget
                         .try_read(|state| event.position().is_some_and(|pos| state.pointer_hits_chrome(pos)))
                         .expect("registered root state unavailable during pointer targeting");
-                    let transform = entry.tree.runtime.root_transform();
-                    if let Some((owner, result)) =
-                        entry
-                            .tree
-                            .runtime
-                            .route_root_input_event_to_node_ref(&mut entry.tree.root, transform, &self.style, event, root_chrome_hit)
-                    {
-                        // Capture is updated only after the selected target and its ancestors have
-                        // finished classifying the event.
-                        entry.tree.runtime.update_pointer_capture(owner, result, event, input.mouse_buttons);
-                    }
+                    // Capture is updated only after the selected target and its ancestors have
+                    // finished classifying the event.
+                    entry.tree.route_pointer(&self.style, event, root_chrome_hit, input.mouse_buttons);
                 }
             }
         } else if event.is_focus_input()
@@ -529,8 +594,7 @@ impl WindowManager {
             && let Some(index) = self.roots.iter().position(|entry| entry.id == root)
         {
             let entry = &mut self.roots[index];
-            let roots = std::slice::from_mut(&mut entry.tree.root);
-            entry.tree.runtime.route_focus_input_event(roots, &self.style, event);
+            entry.tree.route_focus(&self.style, event);
         }
 
         self.roots.sort_by_key(|entry| entry.z_index);
@@ -544,7 +608,7 @@ impl WindowManager {
                 entry.clear_transient_targets();
                 continue;
             }
-            entry.tree.runtime.update_tree_root(&mut entry.tree.root, &self.style, atlas.clone(), input);
+            entry.tree.update(&self.style, atlas.clone(), input);
 
             let visible = entry
                 .root_widget
@@ -569,10 +633,7 @@ impl WindowManager {
             if !visible {
                 continue;
             }
-            entry
-                .tree
-                .runtime
-                .paint_tree_root(&mut entry.tree.root, &mut self.display_list, &self.style, atlas.clone());
+            entry.tree.paint(&mut self.display_list, &self.style, atlas.clone());
             entry
                 .root_widget
                 .try_read(|state| record_root_overlay(&mut self.display_list, viewport, state, &self.style, atlas))
@@ -649,7 +710,7 @@ impl WindowManager {
         self.modal_stack
             .last()
             .copied()
-            .or_else(|| self.roots.iter().find(|entry| entry.tree.runtime.capture.is_some()).map(|entry| entry.id))
+            .or_else(|| self.roots.iter().find(|entry| entry.tree.has_capture()).map(|entry| entry.id))
             .or_else(|| self.front_input_root())
     }
 
@@ -702,35 +763,29 @@ impl WindowManager {
 
     #[cfg(test)]
     pub(crate) fn debug_root_content_size(&self, root: RootId) -> Option<Dimensioni> {
-        self.roots
-            .iter()
-            .find(|entry| entry.id == root)
-            .map(|entry| entry.tree.runtime.debug_root_content_size())
+        self.roots.iter().find(|entry| entry.id == root).map(|entry| entry.tree.content_size())
     }
 
     #[cfg(test)]
     pub(crate) fn debug_root_runtime_metrics(&self, root: RootId) -> Option<crate::ui_node::RuntimeMetrics> {
-        self.roots.iter().find(|entry| entry.id == root).map(|entry| entry.tree.runtime.debug_metrics())
+        self.roots.iter().find(|entry| entry.id == root).map(|entry| entry.tree.metrics())
     }
 
     #[cfg(test)]
     pub(crate) fn debug_root_has_pointer_capture(&self, root: RootId) -> Option<bool> {
-        self.roots
-            .iter()
-            .find(|entry| entry.id == root)
-            .map(|entry| entry.tree.runtime.capture.is_some())
+        self.roots.iter().find(|entry| entry.id == root).map(|entry| entry.tree.has_capture())
     }
 
     #[cfg(test)]
     pub(crate) fn debug_root_node_count(&self, root: RootId) -> Option<usize> {
         let entry = self.roots.iter().find(|entry| entry.id == root)?;
-        Some(entry.tree.root.debug_node_count())
+        Some(entry.tree.node_count())
     }
 
     #[cfg(test)]
     pub(crate) fn debug_root_node_rect(&self, root: RootId, node: crate::ui_node::RuntimeNodeId) -> Option<Recti> {
         let entry = self.roots.iter().find(|entry| entry.id == root)?;
-        entry.tree.runtime.debug_node_rect(std::slice::from_ref(&entry.tree.root), node)
+        entry.tree.node_rect(node)
     }
 
     #[cfg(test)]

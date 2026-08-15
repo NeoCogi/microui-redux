@@ -145,10 +145,10 @@ impl TraversalContainer {
 }
 
 impl ContainerWidget for TraversalContainer {
-    fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
         self.measurements.set(self.measurements.get() + 1);
-        (0..children.len())
-            .filter_map(|index| ctx.measure_child(children, index, available))
+        (0..ctx.child_count())
+            .filter_map(|index| ctx.measure_child(index, available))
             .fold(Dimensioni::default(), |size, child| {
                 Dimensioni::new(size.width.max(child.width), size.height.max(child.height))
             })
@@ -205,7 +205,7 @@ impl CaptureContainer {
 }
 
 impl ContainerWidget for CaptureContainer {
-    fn measure(&self, _ctx: &MeasureCtx<'_>, _children: &Children, _available: Dimensioni) -> Dimensioni {
+    fn measure(&self, _ctx: &mut MeasureCtx<'_>, _available: Dimensioni) -> Dimensioni {
         Dimensioni::new(20, 20)
     }
 
@@ -338,11 +338,10 @@ fn retained_measurement_cache_survives_layout_passes_and_invalidates_ancestors()
 }
 
 #[test]
-fn child_topology_mutation_invalidates_its_container_without_a_container_update() {
+fn child_topology_mutation_invalidates_its_container_through_the_typed_update() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (first, first_counts) = Probe::new("first", log.clone());
     let (container, container_state) = TraversalContainer::new([Node::widget(first)], false, log.clone());
-    let children = container_state.try_read(|state| state.children.clone()).unwrap();
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -354,7 +353,10 @@ fn child_topology_mutation_invalidates_its_container_without_a_container_update(
     assert_eq!(first_counts.measures.get(), 1);
 
     let (second, second_counts) = Probe::new("second", log);
-    assert!(children.try_push(Node::widget(second)).is_ok());
+    assert_eq!(
+        container_state.try_update(|state| state.children.try_push(Node::widget(second)).is_ok()),
+        Some(true)
+    );
     layout_root(&mut runtime, &mut root, &style, atlas);
 
     assert_eq!(container_state.try_read(|state| state.measurements.get()), Some(2));

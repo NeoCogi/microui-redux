@@ -34,7 +34,14 @@ use super::*;
 
 impl UiRuntime {
     /// Updates one already-borrowed node and descendants.
-    pub(super) fn update_node_ref(&mut self, node: &mut Node, parent_transform: Transform, style: &Style, atlas: crate::AtlasHandle, input: InputSnapshot) {
+    pub(super) fn update_node_ref(
+        &mut self,
+        node: &mut Node,
+        parent_transform: Transform,
+        style: &Style,
+        atlas: crate::AtlasHandle,
+        input: InputSnapshot,
+    ) -> (bool, bool) {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.updates += 1);
         // Reconstruct exactly the frame/content coordinate spaces committed during layout. Widgets
@@ -84,11 +91,8 @@ impl UiRuntime {
             input.key_codes,
         );
         node.data.with_widget_mut(|widget| widget.update(&mut widget_ctx, event.as_ref()));
-        if widget_ctx.measurement_requested() {
-            node.state.invalidate_measurement();
-        } else if widget_ctx.layout_requested() {
-            node.state.invalidate_layout();
-        }
+        let mut measurement_dirty = widget_ctx.measurement_requested();
+        let mut layout_dirty = widget_ctx.layout_requested();
         let traverse_children = node.is_container();
         if traverse_children {
             node.with_children_mut(|children| {
@@ -100,10 +104,18 @@ impl UiRuntime {
                     // sees successful earlier changes, while an already-updated child is not rerun.
                     // The mandatory post-event layout observes the final state/topology. Rendering
                     // enters the tree later through the distinct paint traversal below.
-                    self.update_node_ref(child, child_transform, style, atlas.clone(), input);
+                    let (child_measurement_dirty, child_layout_dirty) = self.update_node_ref(child, child_transform, style, atlas.clone(), input);
+                    measurement_dirty |= child_measurement_dirty;
+                    layout_dirty |= child_layout_dirty;
                 }
             });
         }
+        if measurement_dirty {
+            node.state.invalidate_measurement();
+        } else if layout_dirty {
+            node.state.invalidate_layout();
+        }
+        (measurement_dirty, layout_dirty)
     }
 
     /// Computes interaction state from node geometry and shared input.

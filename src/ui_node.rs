@@ -42,8 +42,8 @@
 //! offset and clip. Recursive passes carry one stack-only [`Transform`]. Resolved outer rectangles
 //! and outer clips remain runtime stack locals; phase contexts expose node-local content geometry.
 //! Common phases dispatch through the concrete [`crate::Widget`] owned by each private `NodeKind`
-//! variant. A branch stores that object as `Rc<RefCell<dyn ContainerWidget>>` beside—not around—its
-//! child cell. Container update, layout, and paint borrow the concrete object only for the current
+//! variant. A branch stores that object in an erased widget cell beside—not around—its child cell.
+//! Container update, layout, and paint borrow the concrete object only for the current
 //! method and release it before recursive child traversal; each child borrow likewise remains
 //! scoped to one opaque visitor call.
 //!
@@ -67,6 +67,7 @@ mod widget_context;
 pub use widget::{
     FocusPolicy, LeafWidget, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
+pub(crate) use widget::WidgetStorage;
 pub mod widgets;
 
 mod children;
@@ -76,7 +77,7 @@ pub use node_layout::ChildParticipation;
 pub(crate) use node_layout::{NodeLayout, RuntimeNodeId, Transform};
 mod node;
 pub use node::Node;
-pub(crate) use node::{MeasurementState, NodeKind, NodeRuntime};
+pub(crate) use node::{NodeKind, NodeRuntime};
 mod runtime;
 pub(crate) use runtime::UiRuntime;
 #[cfg(test)]

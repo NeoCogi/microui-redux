@@ -137,8 +137,8 @@ impl Row {
 }
 
 impl ContainerWidget for Row {
-    fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
-        row_size(ctx, self, children, available)
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
+        row_size(ctx, self, available)
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
@@ -172,7 +172,7 @@ fn layout_row(ctx: &mut ContainerLayoutCtx<'_>, state: &mut Row, children: &mut 
     let available_width = rect.width.saturating_sub(spacing_total).max(1);
     // First resolve each width and measure content at that actual width. This is what keeps wrapped
     // child height consistent with the widths that layout will commit.
-    let mut axis = row_axis(state, children, available_width, |index| {
+    let mut axis = row_axis(state, count, available_width, |index| {
         ctx.measure_child(children, index, Dimensioni::default()).unwrap_or_default().width
     });
     let mut height = 0;
@@ -193,7 +193,7 @@ fn layout_row(ctx: &mut ContainerLayoutCtx<'_>, state: &mut Row, children: &mut 
 
     // Replay the allocation now that the single shared row height is known, placing each child as
     // soon as its width is resolved instead of collecting widths in a temporary Vec.
-    let mut axis = row_axis(state, children, available_width, |index| {
+    let mut axis = row_axis(state, count, available_width, |index| {
         ctx.measure_child(children, index, Dimensioni::default()).unwrap_or_default().width
     });
     let mut x = rect.x;
@@ -208,11 +208,11 @@ fn layout_row(ctx: &mut ContainerLayoutCtx<'_>, state: &mut Row, children: &mut 
 }
 
 /// Builds the scalar width cursor from child preferences and index-matched Row track policies.
-fn row_axis(state: &Row, children: &Children, available_width: i32, mut preferred_width: impl FnMut(usize) -> i32) -> Axis {
+fn row_axis(state: &Row, count: usize, available_width: i32, mut preferred_width: impl FnMut(usize) -> i32) -> Axis {
     // Axis stores scalar allocation totals only; individual widths are replayed when needed.
     Axis::new(
         available_width,
-        (0..children.len()).map(|index| {
+        (0..count).map(|index| {
             let preferred = preferred_width(index);
             (state.widths.get(index).copied().unwrap_or(SizePolicy::Auto), preferred)
         }),
@@ -223,9 +223,9 @@ fn row_axis(state: &Row, children: &Children, available_width: i32, mut preferre
 ///
 /// Children are remeasured at their resolved widths to obtain a correct shared height for wrapped
 /// content. Placement policy remains parent-owned and is not folded into child content measurement.
-fn row_size(ctx: &MeasureCtx<'_>, state: &Row, children: &Children, available: Dimensioni) -> Dimensioni {
+fn row_size(ctx: &mut MeasureCtx<'_>, state: &Row, available: Dimensioni) -> Dimensioni {
     // Mirror placement policy and return only aggregate preferred geometry.
-    let count = children.len();
+    let count = ctx.child_count();
     let spacing = ctx.style().spacing.max(0);
     // gap_count = child_count - 1; spacing_total = spacing * gap_count.
     let gap_count = count.saturating_sub(1) as i32;
@@ -237,19 +237,19 @@ fn row_size(ctx: &MeasureCtx<'_>, state: &Row, children: &Children, available: D
         0
     };
     // Resolve width tracks first; each resolved width then becomes the child's wrapping constraint.
-    let mut axis = row_axis(state, children, available_width, |index| {
-        ctx.measure_child(children, index, Dimensioni::default()).unwrap_or_default().width
+    let mut axis = row_axis(state, count, available_width, |index| {
+        ctx.measure_child(index, Dimensioni::default()).unwrap_or_default().width
     });
     let mut preferred_height = 0;
     for index in 0..count {
         let policy = state.widths.get(index).copied().unwrap_or(SizePolicy::Auto);
-        let preferred = ctx.measure_child(children, index, Dimensioni::default()).unwrap_or_default().width;
-        let width = children
+        let preferred = ctx.measure_child(index, Dimensioni::default()).unwrap_or_default().width;
+        let width = ctx
             .child_policy(index)
             .unwrap_or_else(crate::Policy::auto)
             .width
             .measurement_bound(axis.next(policy, preferred).advance);
-        preferred_height = preferred_height.max(ctx.measure_child(children, index, Dimensioni::new(width, 0)).unwrap_or_default().height);
+        preferred_height = preferred_height.max(ctx.measure_child(index, Dimensioni::new(width, 0)).unwrap_or_default().height);
     }
     // An empty or zero-height row retains the standard control-height fallback.
     preferred_height = preferred_height.max(super::default_cell_height(ctx.style(), ctx.atlas()));
@@ -293,21 +293,21 @@ mod tests {
     fn row_measurement_and_bounded_allocation_share_track_sizing() {
         let style = Style { spacing: 3, ..Style::default() };
         let atlas = test_atlas();
-        let ctx = MeasureCtx::new(&style, &atlas);
-        let children: Children = [
+        let mut children: Children = [
             Node::widget(Custom::create(CustomParameters::new("left"))),
             Node::widget(Custom::create(CustomParameters::new("right side"))),
         ]
         .into_iter()
         .collect();
+        let mut ctx = MeasureCtx::new(&style, &atlas, &mut children);
         let topology = Rc::new(RefCell::new(Children::new()));
         let state = Row {
             children: ChildrenHandle::new(&topology),
             widths: vec![SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)],
             item_height: SizePolicy::Auto,
         };
-        let measured = row_size(&ctx, &state, &children, Dimensioni::default());
-        let allocated = row_size(&ctx, &state, &children, measured);
+        let measured = row_size(&mut ctx, &state, Dimensioni::default());
+        let allocated = row_size(&mut ctx, &state, measured);
         assert_eq!(allocated.width, measured.width);
         assert_eq!(allocated.height, measured.height);
     }

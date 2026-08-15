@@ -112,9 +112,9 @@ impl Column {
 }
 
 impl ContainerWidget for Column {
-    fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
         // Column geometry depends only on the authoritative child sequence and shared Style.
-        measure_column(ctx, children, available)
+        measure_column(ctx, available)
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
@@ -184,11 +184,11 @@ pub(super) fn layout_column(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Chi
 ///
 /// Width is the widest policy-adjusted child. Height uses the same ordered axis allocation as
 /// layout, including spacing, but does not retain or mutate any sizing state.
-pub(super) fn measure_column(ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
+pub(super) fn measure_column(ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
     // Use the same spacing and track policy math as placement so preferred and committed geometry
     // cannot disagree when the parent supplies a finite height.
     let spacing = ctx.style().spacing.max(0);
-    let count = children.len();
+    let count = ctx.child_count();
     let mut width = 0;
     // A positive bound is divided among tracks after spacing; zero stays the intrinsic marker.
     // gap_count = child_count - 1; spacing_total = spacing * gap_count.
@@ -204,9 +204,9 @@ pub(super) fn measure_column(ctx: &MeasureCtx<'_>, children: &Children, availabl
     let mut axis = Axis::new(
         available_height,
         (0..count).map(|index| {
-            let policy = children.child_policy(index).unwrap_or_else(crate::Policy::auto);
+            let policy = ctx.child_policy(index).unwrap_or_else(crate::Policy::auto);
             let child_width = policy.width.measurement_bound(available.width);
-            let child = ctx.measure_child(children, index, Dimensioni::new(child_width, 0)).unwrap_or_default();
+            let child = ctx.measure_child(index, Dimensioni::new(child_width, 0)).unwrap_or_default();
             width = width.max(policy.width.preferred_extent(child.width, available.width));
             (policy.height, child.height)
         }),
@@ -219,9 +219,9 @@ pub(super) fn measure_column(ctx: &MeasureCtx<'_>, children: &Children, availabl
     // Bounded policies such as Remainder depend on sibling order and are replayed through the
     // scalar cursor. No child result escapes this query or becomes mutable widget state.
     for index in 0..count {
-        let policy = children.child_policy(index).unwrap_or_else(crate::Policy::auto);
+        let policy = ctx.child_policy(index).unwrap_or_else(crate::Policy::auto);
         let child_width = policy.width.measurement_bound(available.width);
-        let preferred = ctx.measure_child(children, index, Dimensioni::new(child_width, 0)).unwrap_or_default().height;
+        let preferred = ctx.measure_child(index, Dimensioni::new(child_width, 0)).unwrap_or_default().height;
         axis.next(policy.height, preferred);
     }
     Dimensioni::new(width, axis.extent(count, spacing))

@@ -271,8 +271,8 @@ struct ScrollSurface {
 }
 
 impl ContainerWidget for ScrollSurface {
-    fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
-        ctx.measure_child(children, 0, Dimensioni::new(available.width, 0)).unwrap_or_default()
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
+        ctx.measure_child(0, Dimensioni::new(available.width, 0)).unwrap_or_default()
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
@@ -332,7 +332,7 @@ impl ScrollArea {
 }
 
 impl ContainerWidget for ScrollArea {
-    fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
         // Measure application content through the scroll surface and add only panel padding.
         // Scrollbars are responsive affordances and do not inflate intrinsic composite size.
         let padding = ctx.style().padding.max(0);
@@ -344,9 +344,7 @@ impl ContainerWidget for ScrollArea {
         } else {
             0
         };
-        let content = ctx
-            .measure_child(children, Self::SURFACE, Dimensioni::new(content_width, 0))
-            .unwrap_or_default();
+        let content = ctx.measure_child(Self::SURFACE, Dimensioni::new(content_width, 0)).unwrap_or_default();
         // preferred_extent = content_extent + leading_padding + trailing_padding.
         Dimensioni::new(content.width.saturating_add(inset), content.height.saturating_add(inset))
     }

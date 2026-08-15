@@ -61,8 +61,33 @@ use rs_math3d::Dimensioni;
 
 use crate::atlas::AtlasHandle;
 use crate::theme::Style;
-use super::{MeasurementState, UiInputEvent};
+use super::UiInputEvent;
 pub use super::widget_context::{WidgetPaintCtx, WidgetUpdateCtx};
+
+/// Concrete widget state and the only mutation marker needed by context-free typed handles.
+///
+/// The marker is written while the handle already owns this cell's exclusive borrow. Tree
+/// traversal later consumes it and invalidates node-local caches on the recursive call stack.
+pub(crate) struct WidgetStorage<W: ?Sized> {
+    measurement_dirty: bool,
+    pub(crate) widget: W,
+}
+
+impl<W> WidgetStorage<W> {
+    pub(crate) fn new(widget: W) -> Self {
+        Self { measurement_dirty: false, widget }
+    }
+}
+
+impl<W: ?Sized> WidgetStorage<W> {
+    pub(crate) fn is_measurement_dirty(&self) -> bool {
+        self.measurement_dirty
+    }
+
+    pub(crate) fn take_measurement_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.measurement_dirty)
+    }
+}
 
 bitflags! {
     #[derive(Copy, Clone)]
@@ -140,26 +165,19 @@ pub trait WidgetParameters: 'static {}
 /// application code and coordinating widgets may keep this typed weak view. Removing the node
 /// therefore makes every typed handle expire instead of keeping an invisible widget alive.
 pub struct TypedWidgetHandle<W: Widget + 'static> {
-    widget: Weak<RefCell<W>>,
-    measurement: Weak<RefCell<MeasurementState>>,
+    widget: Weak<RefCell<WidgetStorage<W>>>,
 }
 
 impl<W: Widget + 'static> Clone for TypedWidgetHandle<W> {
     fn clone(&self) -> Self {
-        Self {
-            widget: self.widget.clone(),
-            measurement: self.measurement.clone(),
-        }
+        Self { widget: self.widget.clone() }
     }
 }
 
 impl<W: Widget + 'static> TypedWidgetHandle<W> {
     /// Creates a weak typed view of the allocation that will be erased into a retained node.
-    pub(crate) fn new(widget: &Rc<RefCell<W>>, measurement: &Rc<RefCell<MeasurementState>>) -> Self {
-        Self {
-            widget: Rc::downgrade(widget),
-            measurement: Rc::downgrade(measurement),
-        }
+    pub(crate) fn new(widget: &Rc<RefCell<WidgetStorage<W>>>) -> Self {
+        Self { widget: Rc::downgrade(widget) }
     }
 
     /// Reports whether the retained tree still owns this widget.
@@ -174,16 +192,15 @@ impl<W: Widget + 'static> TypedWidgetHandle<W> {
     pub fn try_read<R>(&self, f: impl FnOnce(&W) -> R) -> Option<R> {
         let widget = self.widget.upgrade()?;
         let widget = widget.try_borrow().ok()?;
-        Some(f(&widget))
+        Some(f(&widget.widget))
     }
 
     /// Runs a widget-specific mutation when the widget is alive and not otherwise borrowed.
     pub fn try_update<R>(&self, f: impl FnOnce(&mut W) -> R) -> Option<R> {
         let widget = self.widget.upgrade()?;
         let mut widget = widget.try_borrow_mut().ok()?;
-        let result = f(&mut widget);
-        drop(widget);
-        self.invalidate_measurement();
+        let result = f(&mut widget.widget);
+        widget.measurement_dirty = true;
         Some(result)
     }
 
@@ -197,9 +214,8 @@ impl<W: Widget + 'static> TypedWidgetHandle<W> {
             Ok(widget) => widget,
             Err(_) => return Err(input),
         };
-        let result = f(&mut widget, input);
-        drop(widget);
-        self.invalidate_measurement();
+        let result = f(&mut widget.widget, input);
+        widget.measurement_dirty = true;
         Ok(result)
     }
 
@@ -207,13 +223,7 @@ impl<W: Widget + 'static> TypedWidgetHandle<W> {
     pub(crate) fn try_update_without_measurement<R>(&self, f: impl FnOnce(&mut W) -> R) -> Option<R> {
         let widget = self.widget.upgrade()?;
         let mut widget = widget.try_borrow_mut().ok()?;
-        Some(f(&mut widget))
-    }
-
-    fn invalidate_measurement(&self) {
-        if let Some(measurement) = self.measurement.upgrade() {
-            measurement.borrow_mut().invalidate();
-        }
+        Some(f(&mut widget.widget))
     }
 }
 

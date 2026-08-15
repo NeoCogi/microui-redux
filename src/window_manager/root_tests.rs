@@ -35,7 +35,7 @@ use crate::{
     color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Column, ColumnParameters, Custom, CustomParameters,
     Context, Dimensioni, Disclosure, DisclosureParameters, Grid, GridParameters, KeyMode, MouseButton, Node, Policy, Row, RowParameters, ScrollArea,
     ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, SizePolicy, Stack, StackDirection, StackParameters, Style, Textbox, TextboxChanged,
-    TextboxParameters, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
+    TextBlock, TextBlockParameters, TextboxParameters, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
 };
 use crate::render::{FrameInfo, RenderError};
 use std::{
@@ -1589,6 +1589,31 @@ fn auto_width_preserves_programmed_height() {
     let outer = root.widget().try_read(RootChrome::rect).unwrap();
     assert!(outer.width > programmed.width, "AUTO_WIDTH must derive width from content");
     assert_eq!(outer.height, programmed.height, "AUTO_WIDTH must retain the programmed height");
+}
+
+#[test]
+fn auto_width_consumes_typed_measurement_invalidation_before_intrinsic_measurement() {
+    let (text, content) = TextBlock::create(TextBlockParameters::new("x"));
+    let mut ctx = context();
+    let root = ctx.create_popup("dynamic width", content);
+    let programmed = rect(20, 30, 1, 80);
+    ctx.set_root_options(
+        root.id(),
+        WindowOption::FRAME | WindowOption::AUTO_WIDTH | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
+    )
+    .unwrap();
+    ctx.set_root_visible(root.id(), true).unwrap();
+    ctx.set_root_rect(root.id(), programmed).unwrap();
+
+    ctx.update_ui(Dimensioni::new(320, 240));
+    let before = root.widget().try_read(RootChrome::rect).unwrap();
+
+    text.set_text("a substantially wider retained text block").unwrap();
+    ctx.update_ui(Dimensioni::new(320, 240));
+    let after = root.widget().try_read(RootChrome::rect).unwrap();
+
+    assert!(after.width > before.width, "auto-width measurement must observe the typed mutation");
+    assert_eq!(after.height, programmed.height);
 }
 
 #[test]

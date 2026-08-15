@@ -161,8 +161,8 @@ impl Stack {
 }
 
 impl ContainerWidget for Stack {
-    fn measure(&self, ctx: &MeasureCtx<'_>, children: &Children, available: Dimensioni) -> Dimensioni {
-        stack_size(ctx, self, children, available)
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
+        stack_size(ctx, self, available)
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
@@ -234,16 +234,16 @@ fn layout_stack(ctx: &mut ContainerLayoutCtx<'_>, state: &mut Stack, children: &
 ///
 /// The child's own width policy determines the content-measurement bound but is applied to final
 /// geometry later by the generic node layout path.
-fn layout_stack_child_height(ctx: &ContainerLayoutCtx<'_>, children: &Children, index: usize, width: i32) -> i32 {
+fn layout_stack_child_height(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, index: usize, width: i32) -> i32 {
     // Measure with the resolved shared width so wrapping contributes the height placement will use.
     let child_width = children.child_policy(index).unwrap_or_else(crate::Policy::auto).width.measurement_bound(width);
     ctx.measure_child(children, index, Dimensioni::new(child_width, 0)).unwrap_or_default().height
 }
 
-/// Measures one Stack child height from the immutable measurement phase.
-fn measure_stack_child_height(ctx: &MeasureCtx<'_>, children: &Children, index: usize, width: i32) -> i32 {
-    let child_width = children.child_policy(index).unwrap_or_else(crate::Policy::auto).width.measurement_bound(width);
-    ctx.measure_child(children, index, Dimensioni::new(child_width, 0)).unwrap_or_default().height
+/// Measures one Stack child height during the preferred-size phase.
+fn measure_stack_child_height(ctx: &mut MeasureCtx<'_>, index: usize, width: i32) -> i32 {
+    let child_width = ctx.child_policy(index).unwrap_or_else(crate::Policy::auto).width.measurement_bound(width);
+    ctx.measure_child(index, Dimensioni::new(child_width, 0)).unwrap_or_default().height
 }
 
 /// Builds the scalar vertical cursor for all Stack children at one resolved item width.
@@ -253,16 +253,16 @@ fn stack_axis(state: &Stack, count: usize, available_height: i32, mut preferred_
 }
 
 /// Measures the preferred Stack extent without mutating or retaining sizing results.
-fn stack_size(ctx: &MeasureCtx<'_>, state: &Stack, children: &Children, available: Dimensioni) -> Dimensioni {
+fn stack_size(ctx: &mut MeasureCtx<'_>, state: &Stack, available: Dimensioni) -> Dimensioni {
     // Aggregate the same shared policies used by placement without retaining per-child geometry.
-    let count = children.len();
+    let count = ctx.child_count();
     if count == 0 {
         return Dimensioni::default();
     }
     let spacing = ctx.style().spacing.max(0);
     // Width must be resolved before height because child text may wrap at the shared width.
     let preferred_width = (0..count)
-        .map(|index| ctx.measure_child(children, index, Dimensioni::default()).unwrap_or_default().width)
+        .map(|index| ctx.measure_child(index, Dimensioni::default()).unwrap_or_default().width)
         .max()
         .unwrap_or_default();
     let width = state.item_width.preferred_extent(preferred_width, available.width);
@@ -275,14 +275,14 @@ fn stack_size(ctx: &MeasureCtx<'_>, state: &Stack, children: &Children, availabl
     } else {
         0
     };
-    let mut axis = stack_axis(state, count, available_height, |index| measure_stack_child_height(ctx, children, index, width));
+    let mut axis = stack_axis(state, count, available_height, |index| measure_stack_child_height(ctx, index, width));
     if available_height == 0 {
         // The construction pass already contains every intrinsic child height.
         return Dimensioni::new(width, axis.intrinsic_extent(count, spacing));
     }
     // Bounded policies require ordered replay so Remainder observes earlier siblings.
     for index in 0..count {
-        axis.next(state.item_height, measure_stack_child_height(ctx, children, index, width));
+        axis.next(state.item_height, measure_stack_child_height(ctx, index, width));
     }
     Dimensioni::new(width, axis.extent(count, spacing))
 }

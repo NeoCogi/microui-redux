@@ -73,8 +73,8 @@
 //! `microui-redux` provides a GUI toolkit inspired by [rxi/microui](https://github.com/rxi/microui).
 //! The crate uses unique owning [`Node`] values as its public UI authoring input. Each
 //! [`Context`] root consumes one persistent node and remains its sole owner until explicit
-//! destruction. Leaf nodes retain erased `Rc<RefCell<dyn LeafWidget>>` owners; containers separately
-//! retain an erased concrete [`ContainerWidget`] and their authoritative child collection.
+//! destruction. Leaf nodes retain erased widget cells; containers separately retain an erased
+//! concrete [`ContainerWidget`] and their authoritative child collection.
 //! Applications and coordinating composites may keep typed weak [`TypedWidgetHandle`] views of
 //! either concrete allocation. A handle never keeps a removed widget alive.
 //!
