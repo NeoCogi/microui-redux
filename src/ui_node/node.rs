@@ -384,6 +384,11 @@ impl Node {
         measurement_dirty
     }
 
+    /// Marks this node as the local source of a preferred-size invalidation.
+    pub(crate) fn mark_measurement_dirty(&mut self) {
+        self.data.mark_measurement_dirty();
+    }
+
     /// Writes layout as the source of truth.
     pub(crate) fn set_layout(&mut self, layout: NodeLayout) {
         self.state.set_layout(layout);
@@ -509,6 +514,17 @@ impl NodeKind {
                 .unwrap_or_else(|_| widget_borrow_conflict())
                 .take_measurement_dirty(),
             Self::Container(container) => container.take_measurement_dirty(),
+        }
+    }
+
+    fn mark_measurement_dirty(&mut self) {
+        match self {
+            Self::Widget(node) => node
+                .widget
+                .try_borrow_mut()
+                .unwrap_or_else(|_| widget_borrow_conflict())
+                .mark_measurement_dirty(),
+            Self::Container(container) => container.mark_measurement_dirty(),
         }
     }
 }

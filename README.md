@@ -392,7 +392,7 @@ the inherited viewport, regardless of which container owns them.
 
 ### Preferred sizing and retained layout
 - Every built-in leaf reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout), while every container measures against its authoritative child collection.
-- Widgets that change intrinsic geometry from `Widget::update` call `WidgetUpdateCtx::request_measurement`; placement-only changes call `WidgetUpdateCtx::request_layout`. Interaction and paint-only state leave both retained caches intact.
+- A consumed or captured event conservatively dirties its recipient's retained measurement; the runtime propagates that invalidation through dependent ancestors at the next layout boundary. Typed-handle mutations use the same propagation path, so widget implementations do not manage layout caches.
 - `LeafWidget::measure` and `ContainerWidget::measure` report preferred content, not an allocation. A positive input axis may be used for wrapping; a non-positive axis requests the unconstrained preferred size. `Node` placement policy is applied later by its parent layout.
 - Auto-sized roots measure both axes intrinsically. Flexible `Fraction`, `Weight`, and `Remainder` tracks contribute content minima until a bounded allocation exists; `Fixed` tracks remain exact and may expose child overflow.
 - `Context::update_ui` first synchronizes layout, then drains input in API-call order. Every event runs one complete eligible-tree `Widget::update` traversal and one follow-up layout, so geometry changed by one event is authoritative for routing the next.

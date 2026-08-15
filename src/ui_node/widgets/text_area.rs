@@ -333,9 +333,6 @@ impl TextArea {
             self.reset_preferred_x = false;
         }
         let outcome = textarea_update(ctx, input, self, font);
-        if self.buf != old_buf {
-            ctx.request_measurement();
-        }
         let changed_event = outcome.changed.then(|| TextAreaChanged {
             text: self.buf.clone(),
             cursor: self.cursor,

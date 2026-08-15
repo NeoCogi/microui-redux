@@ -157,10 +157,11 @@ impl Widget for CommitProbe {
         &self.opt
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, event: Option<&UiInputEvent>) {
-        if let Some(grow_to) = self.grow_to.take() {
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, event: Option<&UiInputEvent>) {
+        if event.is_some()
+            && let Some(grow_to) = self.grow_to.take()
+        {
             self.intrinsic_height = grow_to;
-            ctx.request_measurement();
         }
         if matches!(event, Some(UiInputEvent::MouseDown { .. })) {
             self.presses += 1;

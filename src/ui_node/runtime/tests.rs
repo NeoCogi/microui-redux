@@ -123,19 +123,17 @@ struct TraversalContainer {
     children: ChildrenHandle,
     measurements: Cell<usize>,
     visible: bool,
-    hide_during_update: bool,
     log: Rc<RefCell<Vec<String>>>,
     opt: WidgetOption,
 }
 
 impl TraversalContainer {
-    fn new(children: impl IntoIterator<Item = Node>, hide_during_update: bool, log: Rc<RefCell<Vec<String>>>) -> (Container, TypedWidgetHandle<Self>) {
+    fn new(children: impl IntoIterator<Item = Node>, log: Rc<RefCell<Vec<String>>>) -> (Container, TypedWidgetHandle<Self>) {
         let children = Rc::new(RefCell::new(children.into_iter().collect()));
         let widget = TraversalContainer {
             children: ChildrenHandle::new(&children),
             measurements: Cell::new(0),
             visible: true,
-            hide_during_update,
             log,
             opt: WidgetOption::NONE,
         };
@@ -171,12 +169,8 @@ impl Widget for TraversalContainer {
         &self.opt
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
         self.log.borrow_mut().push("container:update".to_owned());
-        if self.hide_during_update && self.visible {
-            self.visible = false;
-            ctx.request_layout();
-        }
     }
 
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {
@@ -302,7 +296,7 @@ fn leaf_layout_reuses_one_authoritative_widget_measurement() {
 fn subtree_measurement_is_reused_within_one_layout_pass() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (probe, counts) = Probe::new("leaf", log.clone());
-    let (container, _) = TraversalContainer::new([Node::widget(probe)], false, log);
+    let (container, _) = TraversalContainer::new([Node::widget(probe)], log);
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
 
@@ -316,7 +310,7 @@ fn retained_measurement_cache_survives_layout_passes_and_invalidates_ancestors()
     let log = Rc::new(RefCell::new(Vec::new()));
     let (probe, counts) = Probe::new("leaf", log.clone());
     let (probe, probe_node) = Node::typed_widget(probe);
-    let (container, container_state) = TraversalContainer::new([probe_node], false, log);
+    let (container, container_state) = TraversalContainer::new([probe_node], log);
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -341,7 +335,7 @@ fn retained_measurement_cache_survives_layout_passes_and_invalidates_ancestors()
 fn child_topology_mutation_invalidates_its_container_through_the_typed_update() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (first, first_counts) = Probe::new("first", log.clone());
-    let (container, container_state) = TraversalContainer::new([Node::widget(first)], false, log.clone());
+    let (container, container_state) = TraversalContainer::new([Node::widget(first)], log.clone());
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -385,7 +379,7 @@ fn common_phases_are_parent_first_and_siblings_are_forward() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (first, first_counts) = Probe::new("first", log.clone());
     let (second, second_counts) = Probe::new("second", log.clone());
-    let (container, _) = TraversalContainer::new([Node::widget(first), Node::widget(second)], false, log.clone());
+    let (container, _) = TraversalContainer::new([Node::widget(first), Node::widget(second)], log.clone());
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -412,10 +406,10 @@ fn common_phases_are_parent_first_and_siblings_are_forward() {
 }
 
 #[test]
-fn routed_event_without_geometry_change_preserves_all_measurements() {
+fn consumed_event_conservatively_invalidates_recipient_and_ancestors() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (probe, counts) = Probe::new("leaf", log.clone());
-    let (container, container_state) = TraversalContainer::new([Node::widget(probe)], false, log);
+    let (container, container_state) = TraversalContainer::new([Node::widget(probe)], log);
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -439,15 +433,15 @@ fn routed_event_without_geometry_change_preserves_all_measurements() {
     runtime.update_tree_root(&mut root, &style, atlas.clone(), empty_input());
     layout_root(&mut runtime, &mut root, &style, atlas);
 
-    assert_eq!(counts.measures.get(), leaf_measurements);
-    assert_eq!(container_state.try_read(|state| state.measurements.get()), Some(container_measurements));
+    assert_eq!(counts.measures.get(), leaf_measurements + 1);
+    assert_eq!(container_state.try_read(|state| state.measurements.get()), Some(container_measurements + 1));
 }
 
 #[test]
 fn layout_participation_filters_descendants_after_state_changes() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (child, child_counts) = Probe::new("child", log.clone());
-    let (container, _) = TraversalContainer::new([Node::widget(child)], true, log.clone());
+    let (container, container_state) = TraversalContainer::new([Node::widget(child)], log.clone());
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -457,6 +451,7 @@ fn layout_participation_filters_descendants_after_state_changes() {
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
     log.borrow_mut().clear();
     runtime.update_tree_root(&mut root, &style, atlas.clone(), empty_input());
+    container_state.try_update(|state| state.visible = false).unwrap();
     // Visibility is a layout result, so commit the state change before paint consumes the flag.
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
     runtime.paint_tree_root(&mut root, &mut DisplayList::default(), &style, atlas);
@@ -471,7 +466,7 @@ fn overlapping_pointer_routing_visits_siblings_in_reverse_z_order() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (first, first_counts) = Probe::new("first", log.clone());
     let (second, second_counts) = Probe::new("second", log.clone());
-    let (container, _) = TraversalContainer::new([Node::widget(first), Node::widget(second)], false, log);
+    let (container, _) = TraversalContainer::new([Node::widget(first), Node::widget(second)], log);
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -503,7 +498,7 @@ fn pointer_target_selection_uses_reverse_sibling_paint_order() {
     let first_id_value = first_id.id();
     let second_id = Node::widget(second);
     let second_id_value = second_id.id();
-    let (container, _) = TraversalContainer::new([first_id, second_id], false, log);
+    let (container, _) = TraversalContainer::new([first_id, second_id], log);
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -531,7 +526,7 @@ fn no_interact_node_is_transparent_to_pointer_target_selection() {
     second.opt = WidgetOption::NO_INTERACT;
     let first = Node::widget(first);
     let first_id = first.id();
-    let (container, _) = TraversalContainer::new([first, Node::widget(second)], false, log);
+    let (container, _) = TraversalContainer::new([first, Node::widget(second)], log);
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -561,7 +556,7 @@ fn composite_header_is_targeted_as_a_real_child_surface() {
     let (_, disclosure) = crate::Disclosure::create(crate::DisclosureParameters::header("Header", true, std::iter::empty()));
     let disclosure = disclosure.with_policy(Policy::fill());
     let disclosure_id = disclosure.id();
-    let (container, _) = TraversalContainer::new([lower, disclosure], false, log);
+    let (container, _) = TraversalContainer::new([lower, disclosure], log);
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -593,7 +588,7 @@ fn ignored_topmost_pointer_target_never_exposes_a_covered_sibling() {
     let (mut lower, lower_counts) = Probe::new("lower", log.clone());
     lower.opt = WidgetOption::GRAB_SCROLL;
     let (upper, upper_counts) = Probe::new("upper", log.clone());
-    let (container, _) = TraversalContainer::new([Node::widget(lower), Node::widget(upper)], false, log);
+    let (container, container_state) = TraversalContainer::new([Node::widget(lower), Node::widget(upper)], log);
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -601,6 +596,9 @@ fn ignored_topmost_pointer_target_never_exposes_a_covered_sibling() {
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
+    let lower_measurements = lower_counts.measures.get();
+    let upper_measurements = upper_counts.measures.get();
+    let container_measurements = container_state.try_read(|state| state.measurements.get()).unwrap();
     let event = UiInputEvent::Scroll {
         pos: Vec2i::new(20, 30),
         delta: Vec2i::new(0, 1),
@@ -608,7 +606,8 @@ fn ignored_topmost_pointer_target_never_exposes_a_covered_sibling() {
     runtime.begin_input_event(true, &event);
     let routed = runtime.route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &event);
     assert_eq!(routed.map(|(_, result)| result), Some(DispatchResult::Ignored));
-    runtime.update_tree_root(&mut root, &style, atlas, empty_input());
+    runtime.update_tree_root(&mut root, &style, atlas.clone(), empty_input());
+    layout_root(&mut runtime, &mut root, &style, atlas);
 
     assert_eq!(upper_counts.routed_events.get(), 0, "unsupported events are not delivered to the target update");
     assert_eq!(
@@ -618,6 +617,9 @@ fn ignored_topmost_pointer_target_never_exposes_a_covered_sibling() {
     );
     assert!(upper_counts.hovered.get(), "the geometric target remains hovered when its event bubbles");
     assert!(!lower_counts.hovered.get());
+    assert_eq!(lower_counts.measures.get(), lower_measurements);
+    assert_eq!(upper_counts.measures.get(), upper_measurements);
+    assert_eq!(container_state.try_read(|state| state.measurements.get()), Some(container_measurements));
 }
 
 #[test]
@@ -781,7 +783,7 @@ fn ancestor_gate_clears_targets_and_next_active_update_reconciles_local_mode() {
     capture_state.try_update(|state| state.active = true).unwrap();
     let captured = Node::container(captured);
     let captured_id = captured.id();
-    let (gate, gate_state) = TraversalContainer::new([captured], false, log);
+    let (gate, gate_state) = TraversalContainer::new([captured], log);
     let mut root = Node::container(gate);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -830,7 +832,7 @@ fn removed_target_does_not_notify_or_transfer_state_to_same_index_replacement() 
     let (replacement, replacement_state) = CaptureContainer::new();
     let replacement = Node::container(replacement);
     let replacement_id = replacement.id();
-    let (parent, parent_state) = TraversalContainer::new([removed], false, log);
+    let (parent, parent_state) = TraversalContainer::new([removed], log);
     let mut root = Node::container(parent);
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -893,13 +895,13 @@ fn cross_subtree_removal_during_update_sanitizes_before_later_delivery() {
     captured_state.try_update(|state| state.active = true).unwrap();
     let captured = Node::container(captured);
     let captured_id = captured.id();
-    let (target_parent, target_state) = TraversalContainer::new([captured], false, log.clone());
+    let (target_parent, target_state) = TraversalContainer::new([captured], log.clone());
     let remover = CrossSubtreeRemover {
         target: target_state,
         removed: false,
         opt: WidgetOption::NONE,
     };
-    let (root_container, _) = TraversalContainer::new([Node::widget(remover), Node::container(target_parent)], false, log);
+    let (root_container, _) = TraversalContainer::new([Node::widget(remover), Node::container(target_parent)], log);
     let mut root = Node::container(root_container);
     let mut runtime = UiRuntime::new();
     let style = Style::default();

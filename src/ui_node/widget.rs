@@ -80,6 +80,10 @@ impl<W> WidgetStorage<W> {
 }
 
 impl<W: ?Sized> WidgetStorage<W> {
+    pub(crate) fn mark_measurement_dirty(&mut self) {
+        self.measurement_dirty = true;
+    }
+
     pub(crate) fn is_measurement_dirty(&self) -> bool {
         self.measurement_dirty
     }
@@ -200,7 +204,7 @@ impl<W: Widget + 'static> TypedWidgetHandle<W> {
         let widget = self.widget.upgrade()?;
         let mut widget = widget.try_borrow_mut().ok()?;
         let result = f(&mut widget.widget);
-        widget.measurement_dirty = true;
+        widget.mark_measurement_dirty();
         Some(result)
     }
 
@@ -215,7 +219,7 @@ impl<W: Widget + 'static> TypedWidgetHandle<W> {
             Err(_) => return Err(input),
         };
         let result = f(&mut widget.widget, input);
-        widget.measurement_dirty = true;
+        widget.mark_measurement_dirty();
         Ok(result)
     }
 
@@ -261,10 +265,9 @@ pub trait Widget {
     /// eligible widget receives `None`. Held state is available from [`WidgetUpdateCtx`]. The
     /// update context intentionally cannot record drawing commands. Implementations that retain a
     /// local drag mode must reconcile it from [`WidgetUpdateCtx::active`] on every call; pointer
-    /// capture is runtime-owned and has no separate widget lifecycle callback. An implementation
-    /// that changes intrinsic geometry during this phase must call
-    /// [`WidgetUpdateCtx::request_measurement`]; a placement-only change calls
-    /// [`WidgetUpdateCtx::request_layout`].
+    /// capture is runtime-owned and has no separate widget lifecycle callback. Delivery of a
+    /// consumed or captured event conservatively invalidates this node's retained measurement and
+    /// its dependent ancestors; widgets do not report cache effects themselves.
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>);
     /// Records paint commands through paint-only capabilities.
     ///

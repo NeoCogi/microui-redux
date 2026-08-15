@@ -162,10 +162,6 @@ pub struct WidgetUpdateCtx<'a> {
     key_modes: KeyMode,
     /// Navigation keys held after applying the current raw input event.
     key_codes: KeyCode,
-    /// Whether this update changed the widget's preferred size.
-    measurement_requested: bool,
-    /// Whether this update changed placement without changing preferred size.
-    layout_requested: bool,
 }
 
 impl<'a> WidgetUpdateCtx<'a> {
@@ -224,30 +220,7 @@ impl<'a> WidgetUpdateCtx<'a> {
             mouse_buttons,
             key_modes,
             key_codes,
-            measurement_requested: false,
-            layout_requested: false,
         }
-    }
-
-    /// Invalidates this node's preferred size and all dependent ancestor measurements.
-    ///
-    /// Call this only when an update changes intrinsic geometry. Interaction and paint-only state
-    /// such as hover, focus, selection, cursor position, or scroll offset does not require it.
-    pub fn request_measurement(&mut self) {
-        self.measurement_requested = true;
-    }
-
-    /// Invalidates retained placement while preserving preferred measurements.
-    pub fn request_layout(&mut self) {
-        self.layout_requested = true;
-    }
-
-    pub(crate) fn measurement_requested(&self) -> bool {
-        self.measurement_requested
-    }
-
-    pub(crate) fn layout_requested(&self) -> bool {
-        self.layout_requested
     }
 
     /// Returns the derived content rectangle in widget-local coordinates.

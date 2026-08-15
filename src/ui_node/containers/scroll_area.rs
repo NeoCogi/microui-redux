@@ -234,12 +234,10 @@ impl Widget for ScrollArea {
         }
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         // Routing guarantees that only an accepted wheel event reaches this surface.
         let Some(UiInputEvent::Scroll { delta, .. }) = input else { return };
-        if self.scroll_by(*delta) {
-            ctx.request_layout();
-        }
+        self.scroll_by(*delta);
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {

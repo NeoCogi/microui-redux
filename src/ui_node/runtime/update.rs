@@ -34,14 +34,7 @@ use super::*;
 
 impl UiRuntime {
     /// Updates one already-borrowed node and descendants.
-    pub(super) fn update_node_ref(
-        &mut self,
-        node: &mut Node,
-        parent_transform: Transform,
-        style: &Style,
-        atlas: crate::AtlasHandle,
-        input: InputSnapshot,
-    ) -> (bool, bool) {
+    pub(super) fn update_node_ref(&mut self, node: &mut Node, parent_transform: Transform, style: &Style, atlas: crate::AtlasHandle, input: InputSnapshot) {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.updates += 1);
         // Reconstruct exactly the frame/content coordinate spaces committed during layout. Widgets
@@ -62,6 +55,7 @@ impl UiRuntime {
         // Snapshot interaction before invoking user code so all reads during this update are stable.
         let (opt, focus_policy) = node_interaction_config(node);
         let id = node.id();
+        let was_focused = node.state.focused;
         let (hovered, focused, clicked, active) = self.commit_interaction_snapshot(id, node.state.hovered, input, opt, focus_policy);
         node.state.hovered = hovered;
         node.state.focused = focused;
@@ -91,8 +85,14 @@ impl UiRuntime {
             input.key_codes,
         );
         node.data.with_widget_mut(|widget| widget.update(&mut widget_ctx, event.as_ref()));
-        let mut measurement_dirty = widget_ctx.measurement_requested();
-        let mut layout_dirty = widget_ctx.layout_requested();
+        if event.is_some() || was_focused != node.state.focused {
+            // A routed event is precisely a consumed/captured delivery. A focus transition is the
+            // other generic update trigger: the old focus owner may commit intrinsic state while
+            // receiving `None` (for example an inline numeric editor committing on blur). Both
+            // write the same node-local marker as typed handles; layout performs the sole upward
+            // propagation after the update traversal completes.
+            node.mark_measurement_dirty();
+        }
         let traverse_children = node.is_container();
         if traverse_children {
             node.with_children_mut(|children| {
@@ -104,18 +104,10 @@ impl UiRuntime {
                     // sees successful earlier changes, while an already-updated child is not rerun.
                     // The mandatory post-event layout observes the final state/topology. Rendering
                     // enters the tree later through the distinct paint traversal below.
-                    let (child_measurement_dirty, child_layout_dirty) = self.update_node_ref(child, child_transform, style, atlas.clone(), input);
-                    measurement_dirty |= child_measurement_dirty;
-                    layout_dirty |= child_layout_dirty;
+                    self.update_node_ref(child, child_transform, style, atlas.clone(), input);
                 }
             });
         }
-        if measurement_dirty {
-            node.state.invalidate_measurement();
-        } else if layout_dirty {
-            node.state.invalidate_layout();
-        }
-        (measurement_dirty, layout_dirty)
     }
 
     /// Computes interaction state from node geometry and shared input.

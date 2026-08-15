@@ -329,7 +329,6 @@ impl Widget for RetainedScrollbar {
         // Resolve one geometry snapshot for the complete event so hit testing and delta mapping use
         // identical track/thumb/range values.
         let Some(geometry) = self.geometry() else { return };
-        let previous = self.offset;
         match input {
             Some(UiInputEvent::MouseDown { pos, button }) if button.intersects(MouseButton::LEFT) && geometry.track().contains(pos) => {
                 // Clicking outside the thumb recenters it. Runtime capture established for this
@@ -345,9 +344,6 @@ impl Widget for RetainedScrollbar {
                 self.offset = self.offset.saturating_add(geometry.drag_delta(*delta)).clamp(0, self.max_offset());
             }
             _ => {}
-        }
-        if self.offset != previous {
-            ctx.request_layout();
         }
     }
 

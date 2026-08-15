@@ -162,9 +162,6 @@ impl Number {
         } else {
             self.set_value(self.value);
         }
-        if self.value != last {
-            ctx.request_measurement();
-        }
         let changed = (self.value != last).then_some(NumberChanged { value: self.value });
         if let Some(event) = changed {
             self.changed_event.borrow_mut().emit(event);

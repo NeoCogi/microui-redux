@@ -240,6 +240,13 @@ impl Container {
             .unwrap_or_else(|_| typed_container_borrow_conflict())
             .take_measurement_dirty()
     }
+
+    pub(crate) fn mark_measurement_dirty(&mut self) {
+        self.widget
+            .try_borrow_mut()
+            .unwrap_or_else(|_| typed_container_borrow_conflict())
+            .mark_measurement_dirty();
+    }
 }
 
 /// Reports application access that overlaps a typed container runtime phase.

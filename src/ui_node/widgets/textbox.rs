@@ -256,9 +256,6 @@ impl Textbox {
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         let font = ctx.style().resolve_font_choice(self.font);
         let outcome = textbox_update(ctx, input, &mut self.buf, &mut self.cursor, self.opt, font);
-        if outcome.changed {
-            ctx.request_measurement();
-        }
         let changed = outcome.changed.then(|| TextboxChanged {
             text: self.buf.clone(),
             cursor: self.cursor,
