@@ -287,7 +287,6 @@ let (name, name_node) = Textbox::create(TextboxParameters::new(""));
 let name_submitted = name.submitted();
 let (_, label_node) = TextBlock::create(TextBlockParameters::new("Name"));
 let (_, tree) = Row::create(RowParameters::new(
-    TrackSize::Content,
     [
         LinearItem::fixed(label_node, 120),
         LinearItem::flex(name_node, 1.0),
@@ -406,6 +405,7 @@ inherited viewport, regardless of which container owns them.
 - A public widget's Painter geometry and routed pointer positions share the derived content-local origin.
 - Built-in leaf and container constructors return a weak `TypedWidgetHandle<W>` plus one completed owning `Node`. Concrete container constructors consume child nodes, and `Node::custom_render` plus `Node::typed_custom_render` cover backend-typed custom-render leaves.
 - Row and Column share one linear implementation, Grid uses the same track resolver, and all three apply identical content/fixed/flex, spacing, rounding, and overflow rules.
+- `RowHeight` expresses the separate shared line-height choices directly: content height, an exact fixed height, or filling a bounded parent height.
 - Negative desired extents are normalized to zero at the node boundary. A desired zero remains zero; generic containers do not substitute Style-owned fallback cells.
 
 Built-in leaves and containers are mutated through their typed widget handles between commits. After programmatic state/topology changes, call `update_ui` even when no input is pending so layout is synchronized before paint. Feed raw input through methods such as `mousemove`, `mousedown`, `scroll`, `keydown_code`, and `text`; calls are queued without coalescing. A widget receives the current event as `Option<&UiInputEvent>`, while `WidgetUpdateCtx::{mouse_buttons,key_modes,key_codes}` exposes held state after that event was applied.

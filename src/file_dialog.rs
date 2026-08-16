@@ -45,8 +45,8 @@ use std::{
 
 use crate::{
     Button, ButtonParameters, ButtonSubmitted, Column, ColumnParameters, IconId, LinearItem, ListItem, ListItemParameters, ListItemSubmitted, Node, Recti,
-    RootHandle, RootSubmitted, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Textbox, TextboxParameters, TextboxSubmitted, ThemeIcons, TrackSize,
-    TypedWidgetHandle, WidgetEventHandle, WidgetOption, WindowOption,
+    RootHandle, RootSubmitted, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Textbox, TextboxParameters, TextboxSubmitted, ThemeIcons, TypedWidgetHandle,
+    WidgetEventHandle, WidgetOption, WindowOption,
 };
 use crate::event::{WidgetEventListener, WidgetEventPort};
 use crate::ui_node::RuntimeNodeId;
@@ -264,31 +264,23 @@ impl FileDialogController {
         let ok_button = ok_handle.submitted().listen().unwrap();
         let ok_button_id = ok_node.id();
 
-        let (_, toolbar) = crate::Row::create(crate::RowParameters::new(
-            TrackSize::Content,
-            [
-                LinearItem::fixed(up_node, 56),
-                LinearItem::fixed(home_node, 56),
-                LinearItem::flex(path_node, 1.0),
-                LinearItem::fixed(go_node, 56),
-            ],
-        ));
-        let (_, browser) = crate::Row::create(crate::RowParameters::new(
-            TrackSize::Flex(1.0),
-            [LinearItem::flex(folder_scroll_node, 1.0), LinearItem::flex(file_scroll_node, 2.0)],
-        ));
-        let (_, filename) = crate::Row::create(crate::RowParameters::new(
-            TrackSize::Content,
-            [LinearItem::fixed(Self::static_item("File name:"), 86), LinearItem::flex(file_name_node, 1.0)],
-        ));
-        let (_, actions) = crate::Row::create(crate::RowParameters::new(
-            TrackSize::Content,
-            [
-                LinearItem::flex(Self::static_item(""), 1.0),
-                LinearItem::fixed(cancel_node, 96),
-                LinearItem::fixed(ok_node, 96),
-            ],
-        ));
+        let (_, toolbar) = crate::Row::create(crate::RowParameters::new([
+            LinearItem::fixed(up_node, 56),
+            LinearItem::fixed(home_node, 56),
+            LinearItem::flex(path_node, 1.0),
+            LinearItem::fixed(go_node, 56),
+        ]));
+        let (_, browser) =
+            crate::Row::create(crate::RowParameters::new([LinearItem::flex(folder_scroll_node, 1.0), LinearItem::flex(file_scroll_node, 2.0)]).fill_height());
+        let (_, filename) = crate::Row::create(crate::RowParameters::new([
+            LinearItem::fixed(Self::static_item("File name:"), 86),
+            LinearItem::flex(file_name_node, 1.0),
+        ]));
+        let (_, actions) = crate::Row::create(crate::RowParameters::new([
+            LinearItem::flex(Self::static_item(""), 1.0),
+            LinearItem::fixed(cancel_node, 96),
+            LinearItem::fixed(ok_node, 96),
+        ]));
         let (_, shell) = Column::create(ColumnParameters::new([
             LinearItem::content(toolbar),
             LinearItem::flex(browser, 1.0),

@@ -306,10 +306,11 @@ fn demo_flex_row_geometry_is_preserved_as_an_explicit_baseline() {
     let (label_id, label) = layout_button("label");
     let (middle_id, middle) = layout_button("middle");
     let (last_id, last) = layout_button("last");
-    let (_, mut root) = crate::Row::create(crate::RowParameters::new(
-        TrackSize::Content,
-        [LinearItem::fixed(label, 86), LinearItem::flex(middle, 1.0), LinearItem::fixed(last, 109)],
-    ));
+    let (_, mut root) = crate::Row::create(crate::RowParameters::new([
+        LinearItem::fixed(label, 86),
+        LinearItem::flex(middle, 1.0),
+        LinearItem::fixed(last, 109),
+    ]));
     let style = Style { spacing: 4, ..Style::default() };
     let mut runtime = UiRuntime::new();
     runtime.begin_update();
@@ -343,24 +344,26 @@ fn demo_weight_grid_fills_remaining_height_and_preserves_one_to_two_heights() {
     // flexible item, so it receives the resolved remaining height directly. A content-sized
     // container inserted between those nodes would create a different edge and correctly shrink
     // the Grid back to its intrinsic height.
-    fn row(node: Node, height: TrackSize) -> Node {
-        crate::Row::create(crate::RowParameters::new(height, [LinearItem::flex(node, 1.0)])).1
+    fn row(node: Node, height: crate::RowHeight) -> Node {
+        crate::Row::create(crate::RowParameters::new([LinearItem::flex(node, 1.0)]).with_height(height)).1
     }
 
     let (_, row_label) = crate::ListItem::create(crate::ListItemParameters::with_opt("Row weights 1 : 2 : 3", WidgetOption::NO_INTERACT));
-    let row_label = row(row_label, TrackSize::Content);
+    let row_label = row(row_label, crate::RowHeight::Content);
 
     let row_buttons = [layout_button("w1").1, layout_button("w2").1, layout_button("w3").1];
-    let (_, row_buttons) = crate::Row::create(crate::RowParameters::new(
-        TrackSize::Fixed(28),
-        row_buttons
-            .into_iter()
-            .zip([TrackSize::Flex(1.0), TrackSize::Flex(2.0), TrackSize::Flex(3.0)])
-            .map(|(button, width)| LinearItem::new(button, width)),
-    ));
+    let (_, row_buttons) = crate::Row::create(
+        crate::RowParameters::new(
+            row_buttons
+                .into_iter()
+                .zip([TrackSize::Flex(1.0), TrackSize::Flex(2.0), TrackSize::Flex(3.0)])
+                .map(|(button, width)| LinearItem::new(button, width)),
+        )
+        .fixed_height(28),
+    );
 
     let (_, grid_label) = crate::ListItem::create(crate::ListItemParameters::with_opt("Grid weights rows 1 : 2", WidgetOption::NO_INTERACT));
-    let grid_label = row(grid_label, TrackSize::Content);
+    let grid_label = row(grid_label, crate::RowHeight::Content);
 
     let (g1_id, g1) = layout_button("g1");
     let (g2_id, g2) = layout_button("g2");

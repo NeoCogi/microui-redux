@@ -12,37 +12,76 @@ use crate::{
 
 use super::linear::{LinearItem, LinearState, Orientation, layout_linear, measure_linear};
 
+/// Shared cross-axis sizing for one horizontal [`Row`].
+///
+/// A Row has exactly one line, so weighted distribution has no meaningful sibling context on its
+/// height axis. This type exposes only the three behaviors the container can actually perform.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub enum RowHeight {
+    /// Uses the tallest child's desired height, including the standard non-empty control minimum.
+    #[default]
+    Content,
+    /// Uses an exact non-negative line height and allows taller child content to overflow.
+    Fixed(i32),
+    /// Fills a bounded height supplied by the Row's parent and uses content when unbounded.
+    Fill,
+}
+
+impl RowHeight {
+    /// Creates an exact line height, normalizing a negative public extent to zero.
+    pub const fn fixed(extent: i32) -> Self {
+        // Normalize at this named constructor so ordinary callers establish the documented
+        // non-negative invariant before the value reaches measurement or placement.
+        Self::Fixed(if extent < 0 { 0 } else { extent })
+    }
+}
+
 /// One-shot construction input for a horizontal [`Row`].
 ///
-/// Each item owns its width track. `height` resolves the single shared line height: `Content` uses
-/// the tallest child, `Fixed` uses an exact height, and `Flex` fills a finite height supplied by the
-/// Row's parent while falling back to content during unbounded measurement.
+/// Each item owns its width track. The row uses content height by default; named configuration can
+/// select an exact height or fill a finite height supplied by the Row's parent.
 pub struct RowParameters {
     items: Vec<LinearItem>,
-    height: TrackSize,
+    height: RowHeight,
 }
 
 impl WidgetParameters for RowParameters {}
 
 impl RowParameters {
-    /// Creates a row from one shared height rule and ordered child items.
+    /// Creates a content-height row from ordered child items.
     ///
     /// Plain [`Node`] values convert to content-width items. Use [`LinearItem`] only for a fixed or
     /// flexible width, or for an explicit fixed child height.
-    pub fn new<T>(height: TrackSize, items: impl IntoIterator<Item = T>) -> Self
+    pub fn new<T>(items: impl IntoIterator<Item = T>) -> Self
     where
         T: Into<LinearItem>,
     {
         Self {
             items: items.into_iter().map(Into::into).collect(),
-            height,
+            height: RowHeight::Content,
         }
+    }
+
+    /// Replaces the shared line-height behavior.
+    pub const fn with_height(mut self, height: RowHeight) -> Self {
+        self.height = height;
+        self
+    }
+
+    /// Uses an exact non-negative shared line height.
+    pub const fn fixed_height(self, extent: i32) -> Self {
+        self.with_height(RowHeight::fixed(extent))
+    }
+
+    /// Stretches the shared line across a bounded parent height.
+    pub const fn fill_height(self) -> Self {
+        self.with_height(RowHeight::Fill)
     }
 }
 
 impl Default for RowParameters {
     fn default() -> Self {
-        Self::new(TrackSize::Content, std::iter::empty::<LinearItem>())
+        Self::new(std::iter::empty::<LinearItem>())
     }
 }
 
@@ -53,7 +92,7 @@ impl Default for RowParameters {
 /// child ownership synchronized with its edge metadata.
 pub struct Row {
     linear: LinearState,
-    height: TrackSize,
+    height: RowHeight,
 }
 
 impl Row {
@@ -109,12 +148,12 @@ impl Row {
     }
 
     /// Returns the shared line-height rule.
-    pub const fn height(&self) -> TrackSize {
+    pub const fn height(&self) -> RowHeight {
         self.height
     }
 
     /// Replaces the shared line-height rule.
-    pub fn set_height(&mut self, height: TrackSize) {
+    pub fn set_height(&mut self, height: RowHeight) {
         self.height = height;
     }
 
@@ -162,7 +201,7 @@ mod tests {
     fn measure_content_row(width: AvailableSpace) -> Dimensioni {
         let child = Node::widget(Custom::create(CustomParameters::new("content")));
         let (children, linear) = LinearState::mount([child]);
-        let row = Row { linear, height: TrackSize::Content };
+        let row = Row { linear, height: RowHeight::Content };
         let style = Style::default();
         let atlas = test_atlas();
         let mut children = children.borrow_mut();
@@ -176,7 +215,7 @@ mod tests {
     fn row_mutations_keep_nodes_and_tracks_synchronized() {
         let first = Custom::create(CustomParameters::new("first"));
         let (first_state, first) = Node::typed_widget(first);
-        let (row, node) = Row::create(RowParameters::new(TrackSize::Content, [LinearItem::fixed(first, 20)]));
+        let (row, node) = Row::create(RowParameters::new([LinearItem::fixed(first, 20)]));
 
         row.try_update(|state| {
             assert!(
@@ -185,12 +224,12 @@ mod tests {
                     .is_ok()
             );
             assert!(state.set_track(0, TrackSize::Flex(1.0)));
-            state.set_height(TrackSize::Fixed(24));
+            state.set_height(RowHeight::fixed(24));
         })
         .unwrap();
 
         assert_eq!(row.try_read(|state| state.track(0)), Some(Some(TrackSize::Flex(1.0))));
-        assert_eq!(row.try_read(Row::height), Some(TrackSize::Fixed(24)));
+        assert_eq!(row.try_read(Row::height), Some(RowHeight::Fixed(24)));
         assert_eq!(row.try_read(Row::len), Some(Some(2)));
         assert_eq!(row.try_update(|state| state.remove_drop(0)), Some(Some(true)));
         assert!(!first_state.is_alive());

@@ -48,5 +48,5 @@ pub use column::{Column, ColumnParameters};
 pub use disclosure::{Disclosure, DisclosureParameters};
 pub use grid::{Grid, GridItem, GridParameters, GridSpan};
 pub use linear::LinearItem;
-pub use row::{Row, RowParameters};
+pub use row::{Row, RowHeight, RowParameters};
 pub use scroll_area::{ScrollArea, ScrollAreaOption, ScrollAreaParameters};

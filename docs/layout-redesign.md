@@ -52,6 +52,12 @@ enum TrackSize {
     Fixed(i32),
     Flex(f32),
 }
+
+enum RowHeight {
+    Content,
+    Fixed(i32),
+    Fill,
+}
 ```
 
 `TrackSize` belongs to a parent-child relationship. It is not stored on `Node`, and it is not
@@ -76,7 +82,8 @@ does not manufacture space from a remembered rectangle or an arbitrary probe.
 
 Row and Column are orientation-specific constructors over one linear implementation. Each child has
 one main-axis `TrackSize`; children fill the cross axis unless an explicit fixed cross extent is
-needed by an existing interface. Reverse direction affects origins only, never sizing.
+needed by an existing interface. Row's single shared line uses `RowHeight`, because a weighted flex
+value has no sibling meaning on that axis. Reverse direction affects origins only, never sizing.
 
 The former vertical `Stack` duplicated Column. Its uses moved to Column; the name was not retained
 for a non-overlapping layout.
@@ -85,7 +92,6 @@ The public linear syntax attaches sizing to the parent-child edge where it is in
 
 ```rust
 RowParameters::new(
-    TrackSize::Content,
     [
         LinearItem::fixed(label, 86),
         LinearItem::flex(body, 1.0),

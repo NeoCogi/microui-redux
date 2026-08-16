@@ -784,10 +784,10 @@ mod tests {
         ));
         let text_id = text.id();
         let (_, text_column) = Column::create(ColumnParameters::new([text]));
-        let (_, row) = Row::create(RowParameters::new(
-            crate::TrackSize::Content,
-            [crate::LinearItem::fixed(label, 40), crate::LinearItem::flex(text_column, 1.0)],
-        ));
+        let (_, row) = Row::create(RowParameters::new([
+            crate::LinearItem::fixed(label, 40),
+            crate::LinearItem::flex(text_column, 1.0),
+        ]));
         let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, row));
         let style = Style {
             padding: 0,

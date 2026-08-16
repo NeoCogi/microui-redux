@@ -12,6 +12,7 @@ use std::{cell::RefCell, rc::Rc};
 use crate::ui_node::children::ChildrenHandle;
 use crate::{AvailableSpace, Children, Constraints, ContainerLayoutCtx, Dimensioni, MeasureCtx, Node, Recti, TrackSize};
 
+use super::row::RowHeight;
 use super::tracks::TrackResolver;
 
 /// An unmounted node paired with its main-axis relationship to a Row or Column.
@@ -375,13 +376,13 @@ impl Orientation {
 
 /// Measures one orientation without retaining per-pass geometry.
 ///
-/// `line_track` is Row's shared height rule. Column passes `None`: its desired width is content,
+/// `row_height` is Row's shared height rule. Column passes `None`: its desired width is content,
 /// while placement stretches children to the exact width assigned by Column's parent.
 pub(super) fn measure_linear(
     ctx: &mut MeasureCtx<'_>,
     state: &LinearState,
     orientation: Orientation,
-    line_track: Option<TrackSize>,
+    row_height: Option<RowHeight>,
     minimum_cross: i32,
     constraints: Constraints,
 ) -> Dimensioni {
@@ -402,7 +403,10 @@ pub(super) fn measure_linear(
         let child = measure_child(ctx, orientation, index, AvailableSpace::Bounded(main), cross_space, placement);
         cross_content = cross_content.max(placement.fixed_cross.unwrap_or_else(|| orientation.cross(child)).max(0));
     }
-    let cross = resolve_line_cross(line_track, cross_space, cross_content.max(minimum_cross.max(0)));
+    let cross_content = cross_content.max(minimum_cross.max(0));
+    let cross = row_height
+        .map(|height| resolve_row_height(height, cross_space, cross_content))
+        .unwrap_or(cross_content);
     orientation.size(resolver.extent(), cross)
 }
 
@@ -444,7 +448,7 @@ pub(super) fn layout_linear(
     children: &mut Children,
     state: &mut LinearState,
     orientation: Orientation,
-    line_track: Option<TrackSize>,
+    row_height: Option<RowHeight>,
     minimum_cross: i32,
     rect: Recti,
 ) {
@@ -497,8 +501,8 @@ pub(super) fn layout_linear(
         cross_content = cross_content.max(layout.fixed_cross.unwrap_or_else(|| orientation.cross(child)).max(0));
     }
     let cross_content = cross_content.max(minimum_cross.max(0));
-    let line_cross = line_track
-        .map(|track| resolve_line_cross(Some(track), cross_space, cross_content))
+    let line_cross = row_height
+        .map(|height| resolve_row_height(height, cross_space, cross_content))
         .unwrap_or_else(|| orientation.cross_extent(rect).max(0));
 
     let reversed = state.reversed;
@@ -536,10 +540,30 @@ fn measure_layout_child(
     ctx.measure_child(children, index, orientation.constraints(main, cross)).unwrap_or_default()
 }
 
-fn resolve_line_cross(track: Option<TrackSize>, available: AvailableSpace, content: i32) -> i32 {
-    let Some(track) = track else {
-        return content.max(0);
-    };
-    let mut resolver = TrackResolver::new(available, 0, 1, [(track, content)]);
-    resolver.next(track, content)
+/// Resolves the one shared Row line without routing it through weighted sibling allocation.
+fn resolve_row_height(height: RowHeight, available: AvailableSpace, content: i32) -> i32 {
+    let content = content.max(0);
+    match height {
+        RowHeight::Content => content,
+        RowHeight::Fixed(extent) => extent.max(0),
+        // Fill requires a finite parent extent. During intrinsic measurement there is nothing to
+        // fill, so the row contributes the same desired height as a content-height row.
+        RowHeight::Fill => available.bound().unwrap_or(content).max(0),
+    }
+}
+
+#[cfg(test)]
+mod row_height_tests {
+    use super::*;
+
+    #[test]
+    fn row_height_exposes_only_content_fixed_and_fill_behavior() {
+        // Content remains desired size under either constraint, while Fixed is exact and Fill uses
+        // a finite parent extent without manufacturing height for an intrinsic query.
+        assert_eq!(resolve_row_height(RowHeight::Content, AvailableSpace::bounded(80), 20), 20);
+        assert_eq!(resolve_row_height(RowHeight::Fixed(12), AvailableSpace::bounded(80), 20), 12);
+        assert_eq!(resolve_row_height(RowHeight::Fill, AvailableSpace::bounded(80), 20), 80);
+        assert_eq!(resolve_row_height(RowHeight::Fill, AvailableSpace::Unbounded, 20), 20);
+        assert_eq!(RowHeight::fixed(-7), RowHeight::Fixed(0));
+    }
 }

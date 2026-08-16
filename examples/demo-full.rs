@@ -922,13 +922,20 @@ impl DemoNodes {
         state
     }
 
-    fn row(&mut self, widths: &[TrackSize], height: TrackSize, f: impl FnOnce(&mut Self)) {
+    fn row(&mut self, widths: &[TrackSize], height: RowHeight, f: impl FnOnce(&mut Self)) {
         let items = Self::children(f)
             .into_iter()
             .enumerate()
             .map(|(index, node)| LinearItem::new(node, widths.get(index).copied().unwrap_or(TrackSize::Content)));
-        let (_, node) = Row::create(RowParameters::new(height, items));
-        self.push_item(LinearItem::new(node, height));
+        let (_, node) = Row::create(RowParameters::new(items).with_height(height));
+        // The surrounding demo Column owns the Row's vertical slot. Translate the Row-specific
+        // line behavior back to that parent-child track without leaking weighted height into Row.
+        let parent_track = match height {
+            RowHeight::Content => TrackSize::Content,
+            RowHeight::Fixed(extent) => TrackSize::Fixed(extent),
+            RowHeight::Fill => TrackSize::Flex(1.0),
+        };
+        self.push_item(LinearItem::new(node, parent_track));
     }
 
     /// Adds a Grid with an explicit height relationship to this surrounding demo Column.
@@ -1802,7 +1809,7 @@ impl State {
                                     ]
                                 }))
                         {
-                            tree.row(&color_row, TrackSize::Content, |tree| {
+                            tree.row(&color_row, RowHeight::Content, |tree| {
                                 tree.widget(label);
                                 tree.widget(red);
                                 tree.widget(green);
@@ -1813,7 +1820,7 @@ impl State {
                         }
 
                         for (label, slider) in style_metric_labels.into_iter().zip(style_value_sliders) {
-                            tree.row(&metrics_row, TrackSize::Content, |tree| {
+                            tree.row(&metrics_row, RowHeight::Content, |tree| {
                                 tree.widget(label);
                                 tree.widget(slider);
                             });
@@ -1831,7 +1838,7 @@ impl State {
                     .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
                         tree.widget(log_text);
                     });
-                tree.row(&submit_row, TrackSize::Content, |tree| {
+                tree.row(&submit_row, RowHeight::Content, |tree| {
                     tree.widget(submit_buf);
                     tree.widget(submit_button);
                 });
@@ -1890,11 +1897,11 @@ impl State {
                 let columns = [TrackSize::Flex(1.0), TrackSize::Flex(1.0)];
                 let [label_top, label_bottom] = stack_direction_labels;
                 let [button_top_0, button_top_1, button_top_2, button_bottom_0, button_bottom_1, button_bottom_2] = stack_direction_buttons;
-                tree.row(&columns, TrackSize::Content, |tree| {
+                tree.row(&columns, RowHeight::Content, |tree| {
                     tree.widget(label_top);
                     tree.widget(label_bottom);
                 });
-                tree.row(&columns, TrackSize::Fixed(120), |tree| {
+                tree.row(&columns, RowHeight::fixed(120), |tree| {
                     tree.column(|tree| {
                         tree.fixed_column(28, false, |tree| {
                             tree.widget(button_top_0);
@@ -1936,15 +1943,15 @@ impl State {
                 let row = [TrackSize::Flex(1.0), TrackSize::Flex(2.0), TrackSize::Flex(3.0)];
                 let cols = [TrackSize::Flex(1.0), TrackSize::Flex(1.0), TrackSize::Flex(1.0)];
                 let rows = [TrackSize::Flex(1.0), TrackSize::Flex(2.0)];
-                tree.row(&[TrackSize::Flex(1.0)], TrackSize::Content, |tree| {
+                tree.row(&[TrackSize::Flex(1.0)], RowHeight::Content, |tree| {
                     tree.widget(row_weight_label);
                 });
-                tree.row(&row, TrackSize::Fixed(28), |tree| {
+                tree.row(&row, RowHeight::fixed(28), |tree| {
                     tree.widget(button_row_0);
                     tree.widget(button_row_1);
                     tree.widget(button_row_2);
                 });
-                tree.row(&[TrackSize::Flex(1.0)], TrackSize::Content, |tree| {
+                tree.row(&[TrackSize::Flex(1.0)], RowHeight::Content, |tree| {
                     tree.widget(grid_weight_label);
                 });
                 // Grid owns the remaining vertical slot directly. A one-item Row or Column would
@@ -2004,32 +2011,32 @@ impl State {
                 tree.with_track(TrackSize::Flex(1.0))
                 .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
                 Self::section(tree, "Window Info", false, |tree| {
-                    tree.row(&window_info_row, TrackSize::Content, |tree| {
+                    tree.row(&window_info_row, RowHeight::Content, |tree| {
                         tree.widget(label_pos);
                         tree.widget(value_pos);
                     });
-                    tree.row(&window_info_row, TrackSize::Content, |tree| {
+                    tree.row(&window_info_row, RowHeight::Content, |tree| {
                         tree.widget(label_size);
                         tree.widget(value_size);
                     });
-                    tree.row(&window_info_row, TrackSize::Content, |tree| {
+                    tree.row(&window_info_row, RowHeight::Content, |tree| {
                         tree.widget(label_fps);
                         tree.widget(value_fps);
                     });
                 });
 
                 Self::section(tree, "Test Buttons", true, |tree| {
-                    tree.row(&button_widths, TrackSize::Content, |tree| {
+                    tree.row(&button_widths, RowHeight::Content, |tree| {
                         tree.widget(test_label0);
                         tree.widget(button0);
                         tree.widget(button1);
                     });
-                    tree.row(&button_widths, TrackSize::Content, |tree| {
+                    tree.row(&button_widths, RowHeight::Content, |tree| {
                         tree.widget(test_label1);
                         tree.widget(button2);
                         tree.widget(button3);
                     });
-                    tree.row(&button_widths, TrackSize::Content, |tree| {
+                    tree.row(&button_widths, RowHeight::Content, |tree| {
                         tree.widget(test_label2);
                         tree.widget(button4);
                         tree.widget(dialog_button);
@@ -2041,7 +2048,7 @@ impl State {
                 });
 
                 Self::section(tree, "Tree and Text", true, |tree| {
-                    tree.row(&tree_widths, TrackSize::Content, |tree| {
+                    tree.row(&tree_widths, RowHeight::Content, |tree| {
                         tree.column(|tree| {
                             let _ = tree.tree_node("Test 1", false, |tree| {
                                 let _ = tree.tree_node("Test 1a", false, |tree| {
@@ -2054,11 +2061,11 @@ impl State {
                                 });
                             });
                             let _ = tree.tree_node("Test 2", false, |tree| {
-                                tree.row(&tree_button_widths, TrackSize::Content, |tree| {
+                                tree.row(&tree_button_widths, RowHeight::Content, |tree| {
                                     tree.widget(tree_button2);
                                     tree.widget(tree_button3);
                                 });
-                                tree.row(&tree_button_widths, TrackSize::Content, |tree| {
+                                tree.row(&tree_button_widths, RowHeight::Content, |tree| {
                                     tree.widget(tree_button4);
                                     tree.widget(tree_button5);
                                 });
@@ -2086,17 +2093,17 @@ impl State {
                     // Let the row derive its height from the three slider rows. A fixed pixel
                     // estimate becomes stale when font metrics, control padding, or spacing
                     // changes and can place the Blue control underneath the next disclosure.
-                    tree.row(&background_widths, TrackSize::Content, |tree| {
+                    tree.row(&background_widths, RowHeight::Content, |tree| {
                         tree.column(|tree| {
-                            tree.row(&slider_row, TrackSize::Content, |tree| {
+                            tree.row(&slider_row, RowHeight::Content, |tree| {
                                 tree.widget(label_red);
                                 tree.widget(slider_red);
                             });
-                            tree.row(&slider_row, TrackSize::Content, |tree| {
+                            tree.row(&slider_row, RowHeight::Content, |tree| {
                                 tree.widget(label_green);
                                 tree.widget(slider_green);
                             });
-                            tree.row(&slider_row, TrackSize::Content, |tree| {
+                            tree.row(&slider_row, RowHeight::Content, |tree| {
                                 tree.widget(label_blue);
                                 tree.widget(slider_blue);
                             });

@@ -348,7 +348,7 @@ fn main() {
             CalcButton::new(".", Action::Dot),
             CalcButton::new("=", Action::Equals),
         ];
-        let (_, display_row) = Row::create(RowParameters::new(TrackSize::Flex(1.0), [LinearItem::flex(display_runtime, 1.0)]));
+        let (_, display_row) = Row::create(RowParameters::new([LinearItem::flex(display_runtime, 1.0)]).fill_height());
         let columns = [TrackSize::Flex(1.0); 4];
         let rows = [TrackSize::Flex(KEYPAD_ROW_HEIGHT_WEIGHT); 5];
         let button_nodes = buttons
@@ -357,7 +357,7 @@ fn main() {
             .collect::<Vec<_>>();
         let (_, grid) = Grid::create(GridParameters::new(columns, rows, button_nodes));
         let (_, keypad_column) = Column::create(ColumnParameters::new([grid]));
-        let (_, keypad_row) = Row::create(RowParameters::new(TrackSize::Flex(1.0), [LinearItem::flex(keypad_column, 1.0)]));
+        let (_, keypad_row) = Row::create(RowParameters::new([LinearItem::flex(keypad_column, 1.0)]).fill_height());
         let display_weight = DISPLAY_HEIGHT_FRACTION;
         let (_, tree) = Column::create(ColumnParameters::new([
             LinearItem::flex(display_row, display_weight),

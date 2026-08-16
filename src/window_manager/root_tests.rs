@@ -782,10 +782,7 @@ fn widget_handle_events_invoke_state_methods_without_polling() {
     let (second_widget, second) = Button::create(ButtonParameters::new("second"));
     let second_submitted = second_widget.submitted();
     let second_id = second.id();
-    let (_, content) = Row::create(RowParameters::new(
-        TrackSize::Content,
-        [LinearItem::fixed(first, 60), LinearItem::fixed(second, 60)],
-    ));
+    let (_, content) = Row::create(RowParameters::new([LinearItem::fixed(first, 60), LinearItem::fixed(second, 60)]));
     let mut ctx: Context<NoopRenderer, Model> = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, Dimensioni::new(320, 240));
     let root = ctx.create_window("signal", rect(0, 0, 140, 100), content);
     ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
@@ -1071,7 +1068,7 @@ fn layout_only_update_and_paint_have_separate_phase_counts() {
 #[test]
 fn warmed_container_measurement_and_layout_allocate_nothing() {
     let child = |name| Node::widget(Custom::create(CustomParameters::new(name)));
-    let (_, row) = Row::create(RowParameters::new(TrackSize::Content, [LinearItem::flex(child("row"), 1.0)]));
+    let (_, row) = Row::create(RowParameters::new([LinearItem::flex(child("row"), 1.0)]));
     let (_, grid) = Grid::create(GridParameters::new([TrackSize::Flex(1.0)], [TrackSize::Content], [child("grid")]));
     let (_, fixed_column) = Column::create(ColumnParameters::new([LinearItem::fixed(child("column"), 20)]));
     let (_, disclosure) = Disclosure::create(DisclosureParameters::header("expanded", true, [child("disclosure")]));
@@ -1641,15 +1638,15 @@ fn auto_size_ignores_the_previous_rect_for_flexible_linear_and_grid_tracks() {
     let row_children = (0..5)
         .map(|index| Node::widget(Custom::create(CustomParameters::new(format!("row {index}")))))
         .collect::<Vec<_>>();
-    let (_, row) = Row::create(RowParameters::new(
-        TrackSize::Flex(1.0),
-        row_children.into_iter().enumerate().map(|(index, child)| match index {
+    let (_, row) = Row::create(
+        RowParameters::new(row_children.into_iter().enumerate().map(|(index, child)| match index {
             0 => LinearItem::fixed(child, 18),
             1 => LinearItem::content(child),
             2 | 3 => LinearItem::flex(child, 1.0),
             _ => LinearItem::fixed(child, 4),
-        }),
-    ));
+        }))
+        .fill_height(),
+    );
     let grid_items = (0..5)
         .map(|index| Node::widget(Custom::create(CustomParameters::new(format!("grid {index}")))))
         .collect::<Vec<_>>();
