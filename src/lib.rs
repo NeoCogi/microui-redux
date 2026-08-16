@@ -194,6 +194,7 @@ pub mod render;
 mod test_support;
 pub mod theme;
 mod ui_node;
+pub use ui_node::layout;
 pub use ui_node::widgets;
 mod window_manager;
 

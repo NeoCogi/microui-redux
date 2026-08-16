@@ -59,7 +59,7 @@
 pub(crate) mod frame;
 mod input;
 pub use input::UiInputEvent;
-mod layout;
+pub mod layout;
 mod scrollbar;
 pub use layout::{AvailableSpace, Constraints, LinearItem, RowHeight, TrackSize};
 pub(crate) mod text_layout;
