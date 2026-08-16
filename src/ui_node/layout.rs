@@ -54,6 +54,86 @@
 //! not to [`Node`](crate::Node). The same node may be content-sized in one parent and flexible in
 //! another without carrying global layout policy or requiring container-specific runtime dispatch.
 //!
+//! # Object ownership
+//!
+//! The layout-relevant retained objects form the following ownership graph. The diagram uses only
+//! stored relationships: tree branches are by-value ownership, `==>` is a persistent strong
+//! [`Rc`](std::rc::Rc) edge to an independently allocated cell, `-.->` is a non-owning
+//! [`Weak`](std::rc::Weak) edge, and `---->` associates parallel data by index without pointing to
+//! or owning the object on the right.
+//!
+//! ```text
+//! Context
+//! `-- WindowManager
+//!     `-- roots: Vec<WindowEntry>
+//!         `-- WindowEntry
+//!             +-- root_widget: TypedWidgetHandle<RootChrome>
+//!             |   `-.-> RootChrome WidgetStorage allocation inside root
+//!             `-- tree: WidgetTree
+//!                 +-- runtime: UiRuntime
+//!                 |   `-- traversal state only; it does not own Node objects
+//!                 `-- root: Node
+//!                     +-- state: NodeRuntime
+//!                     |   +-- layout: NodeLayout
+//!                     |   `-- measurement: MeasurementCache
+//!                     `-- data: NodeKind (exactly one of the following)
+//!                         +-- WidgetNode
+//!                         |   `==> Rc<RefCell<WidgetStorage<dyn LeafWidget>>>
+//!                         |
+//!                         `-- Container
+//!                             +==> Rc<RefCell<Children>>
+//!                             |        +-- nodes[0]: Node
+//!                             |        +-- nodes[1]: Node
+//!                             |        `-- ... recursively repeats the Node subtree
+//!                             |
+//!                             `==> Rc<RefCell<WidgetStorage<dyn ContainerWidget>>>
+//!                                          `-- concrete container widget W
+//!                                               +-- Row / Column / Grid only
+//!                                               |   +-- children: ChildrenHandle
+//!                                               |   |   `-.-> same Children cell
+//!                                               |   +-- parent-child relationship metadata
+//!                                               |   `-- reusable derived layout scratch
+//!                                               `-- other containers: widget-specific state
+//!
+//! Application state (leaf or container):
+//! `-- TypedWidgetHandle<W>
+//!     `-.-> same WidgetStorage<W> allocation shown above
+//!
+//! For Row or Column:
+//!     LinearState.specs[i] ------------------------> Children.nodes[i]
+//!     LinearState.resolved_main[i] -- derived ----> Children.nodes[i]
+//!
+//! For Grid:
+//!     GridItems.spans[i] --------------------------> Children.nodes[i]
+//!     GridItems.placements[i] ------- derived ----> Children.nodes[i]
+//!     GridLayout.columns / rows = track scratch, not child ownership
+//! ```
+//!
+//! A root `Node` is therefore owned by its `WidgetTree`; every descendant `Node` is owned by
+//! exactly one parent [`Children`](crate::Children) collection. [`Node`](crate::Node) is not
+//! cloneable, has no parent pointer, and cannot participate in an ownership cycle. Moving an
+//! unmounted node into a root or child collection transfers its one owner.
+//!
+//! A leaf or container `Node` is also the sole persistent strong owner of its widget allocation.
+//! The allocation remains concrete as `WidgetStorage<W>` while the node views the same allocation
+//! through an erased widget trait object. [`TypedWidgetHandle`](crate::TypedWidgetHandle) stores
+//! only `Weak`, so application state can inspect or mutate a live widget but cannot keep a removed
+//! widget, its container, or its descendants alive.
+//!
+//! Containers deliberately separate topology from parent-child relationship metadata. The
+//! [`Container`](crate::Container) strongly owns `Children`, while Row, Column, and Grid retain a
+//! weak `ChildrenHandle` beside index-matched tracks, spans, placements, and reusable scratch.
+//! Topology mutations update the child collection and the parallel metadata in one checked
+//! operation. The weak backlink lets typed widget methods perform that operation without forming
+//! `Container -> widget -> Children -> Node -> Container` strong cycles.
+//!
+//! `UiRuntime`, [`MeasureCtx`](crate::MeasureCtx), and
+//! [`ContainerLayoutCtx`](crate::ContainerLayoutCtx) only borrow nodes, widget state, and children
+//! for the duration of a traversal operation. They never retain those borrows or acquire ownership.
+//! `NodeLayout`, the bounded measurement cache, linear resolved extents, Grid placements, and Grid
+//! track vectors are derived state owned next to the semantic object that reuses them; none is an
+//! alternative tree or a second owner of a child.
+//!
 //! # Public layout values
 //!
 //! ## Available space
