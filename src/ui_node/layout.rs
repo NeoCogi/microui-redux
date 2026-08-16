@@ -88,7 +88,7 @@
 //!                             |
 //!                             `==> Rc<RefCell<WidgetStorage<dyn ContainerWidget>>>
 //!                                          `-- concrete container widget W
-//!                                               +-- Row / Column / Grid only
+//!                                               +-- Linear / Grid only
 //!                                               |   +-- children: ChildrenHandle
 //!                                               |   |   `-.-> same Children cell
 //!                                               |   +-- parent-child relationship metadata
@@ -99,9 +99,9 @@
 //! `-- TypedWidgetHandle<W>
 //!     `-.-> same WidgetStorage<W> allocation shown above
 //!
-//! For Row or Column:
-//!     LinearState.specs[i] ------------------------> Children.nodes[i]
-//!     LinearState.resolved_main[i] -- derived ----> Children.nodes[i]
+//! For Linear:
+//!     Linear.specs[i] -----------------------------> Children.nodes[i]
+//!     Linear.resolved_main[i] ------- derived ----> Children.nodes[i]
 //!
 //! For Grid:
 //!     GridItems.spans[i] --------------------------> Children.nodes[i]
@@ -121,7 +121,7 @@
 //! widget, its container, or its descendants alive.
 //!
 //! Containers deliberately separate topology from parent-child relationship metadata. The
-//! [`Container`](crate::Container) strongly owns `Children`, while Row, Column, and Grid retain a
+//! [`Container`](crate::Container) strongly owns `Children`, while Linear and Grid retain a
 //! weak `ChildrenHandle` beside index-matched tracks, spans, placements, and reusable scratch.
 //! Topology mutations update the child collection and the parallel metadata in one checked
 //! operation. The weak backlink lets typed widget methods perform that operation without forming
@@ -162,7 +162,7 @@
 //!
 //! ## Parent-owned tracks
 //!
-//! [`TrackSize`] describes one Row, Column, or Grid relationship:
+//! [`TrackSize`] describes one Linear or Grid relationship:
 //!
 //! - [`TrackSize::Content`] reserves the measured non-negative content extent.
 //! - [`TrackSize::Fixed`] reserves an exact non-negative extent. Content may overflow it but cannot
@@ -177,11 +177,11 @@
 //! The default [`TrackSize`] is Content.
 //!
 //! [`LinearItem`] is the construction and mutation value that pairs an unmounted node with its
-//! parent-owned main-axis track and optional exact cross-axis extent. The concrete Row or Column
-//! consumes it, becomes the sole owner of the node, and stores only the relationship metadata.
-//! [`RowHeight`] separately describes the one shared Row line: content height, fixed height, or
-//! filling a bounded parent height. It intentionally has no weight because one line has no sibling
-//! line with which to share space. Its default is content height.
+//! parent-owned main-axis track and optional exact cross-axis extent. The concrete [`Linear`]
+//! consumes it, while its generic [`Container`](crate::Container) becomes the sole strong owner of
+//! the node and Linear stores only relationship metadata. [`LinearCrossSize`] describes the shared
+//! line as content-sized, stretched across exact allocation, or fixed. [`LinearDirection`] combines
+//! axis and leading edge so reversal needs no separate orientation-specific flag.
 //!
 //! # Track-resolution algorithm
 //!
@@ -251,25 +251,26 @@
 //!
 //! `TrackResolver::extent` is known after the summary pass, but replay is still required when a
 //! caller needs each individual track extent. Callers must replay the same order summarized during
-//! construction. The private API keeps that invariant close to Row, Column, and Grid.
+//! construction. The private API keeps that invariant close to Linear and Grid.
 //!
 //! `resolve_tracks_in_place` is the slice adapter used by Grid. It normalizes a retained content
 //! vector, summarizes it, and overwrites each entry with its resolved extent. Missing explicit
 //! track metadata defaults to Content, which is also how implicit Grid tracks behave.
 //!
-//! # Shared linear layout
+//! # Linear layout
 //!
-//! The private `linear` module implements the common algorithm behind [`Row`](crate::Row) and
-//! [`Column`](crate::Column). There is intentionally no `Linear` widget. Row and Column are the
-//! concrete containers; the module owns their common retained data and axis-independent geometry.
+//! [`Linear`] is the one concrete widget for every one-dimensional layout. Its public parameters
+//! use `horizontal` and `vertical` as constructor vocabulary, while retained direction selects both
+//! the coordinate axis and leading edge. Consequently every linear tree exposes the same
+//! `TypedWidgetHandle<Linear>` topology and configuration API.
 //!
 //! ## Retained data
 //!
-//! Internally, `LinearState` contains:
+//! Internally, `Linear` contains:
 //!
 //! - a weak `ChildrenHandle` used by typed mutation methods;
 //! - one `LinearItemSpec` per child, containing its main-axis track and optional fixed cross extent;
-//! - a reverse-placement flag used by Column;
+//! - one [`LinearDirection`] and one [`LinearCrossSize`] as semantic layout state;
 //! - `resolved_main`, a reusable vector of exact main-axis extents.
 //!
 //! The concrete [`Container`](crate::Container) remains the only strong owner of the authoritative
@@ -279,10 +280,9 @@
 //! ownership is never lost. Debug assertions check synchronization at mutation and traversal
 //! boundaries.
 //!
-//! `LinearAxis` maps width/height and x/y into main/cross operations. The algorithm is therefore
-//! written once: Horizontal produces Row geometry and Vertical produces Column geometry. Reverse
-//! mode changes only cursor origins and advances; it does not reverse ownership, measurement,
-//! traversal, or track resolution.
+//! `LinearAxis` privately maps width/height and x/y into main/cross operations after the retained
+//! direction selects an axis. A trailing-edge direction changes only cursor origins and advances;
+//! it does not reverse ownership, measurement, traversal, or track resolution.
 //!
 //! ## Immutable measurement
 //!
@@ -294,8 +294,8 @@
 //! 3. Replays each track to obtain its resolved main extent.
 //! 4. Measures the child at that exact bounded main extent so responsive content, especially text,
 //!    can report the correct cross extent.
-//! 5. Takes the maximum cross requirement, applies Row's non-empty control minimum when relevant,
-//!    and resolves [`RowHeight`] or Column's content width.
+//! 5. Takes the maximum cross requirement, applies the horizontal non-empty control-line minimum
+//!    when relevant, and resolves [`LinearCrossSize`] as desired content or an exact fixed extent.
 //! 6. Returns the track-sequence extent and resolved cross extent as desired size.
 //!
 //! Empty linear containers return zero desired size. Repeated intrinsic queries during scalar
@@ -312,9 +312,9 @@
 //! 3. Construct one `TrackResolver` and overwrite the scratch entries with exact resolved extents.
 //! 4. Measure every child once at its exact main extent to determine responsive cross content. If
 //!    the offered cross constraint also becomes the child's allocated cross extent—as it does for
-//!    Column stretch, Row Fill, and fixed-cross items—the query warms the exact cache entry used
-//!    when runtime commits the child rectangle.
-//! 5. Resolve the Row line height or use Column's assigned cross extent.
+//!    stretched lines and fixed-cross items—the query warms the exact cache entry used when runtime
+//!    commits the child rectangle.
+//! 5. Resolve the shared line from content, the assigned cross extent, or a fixed extent.
 //! 6. Walk the resolved vector once, construct exact child rectangles, and call
 //!    [`ContainerLayoutCtx::layout_child`](crate::ContainerLayoutCtx::layout_child).
 //! 7. Publish logical content size from the resolved main span and any cross-axis overflow.
@@ -375,7 +375,7 @@
 //!
 //! - `TrackResolver` uses constant auxiliary space. It stores six scalar accumulators rather than
 //!   copying track metadata or resolved extents.
-//! - Immutable Row, Column, and Grid measurement uses scalar replay and performs no scratch-vector
+//! - Immutable Linear and Grid measurement uses scalar replay and performs no scratch-vector
 //!   allocation.
 //! - Linear placement reuses `resolved_main`; Grid placement reuses its column and row vectors;
 //!   Grid placement rebuilding reuses its occupancy bitmap. Clearing retains capacity.
@@ -400,7 +400,8 @@
 //! - Public constructors and internal use sites normalize desired sizes, tracks, gaps, and
 //!   allocations to non-negative extents at their ownership boundaries.
 //! - Geometry accumulation uses saturating arithmetic.
-//! - A bounded axis fills only through a valid Flex track or an explicit Row Fill rule.
+//! - A bounded main axis fills only through a valid Flex track; cross-axis Stretch consumes only an
+//!   exact placement allocation and does not manufacture desired size during measurement.
 //! - Content and Fixed overflow remain visible; Flex collapses to zero when no remainder exists.
 //! - Track gaps are counted once and only between tracks.
 //! - Parent containers are the sole authority for child rectangles.
@@ -412,7 +413,7 @@
 use crate::Dimensioni;
 
 pub(in crate::ui_node) mod linear;
-pub use linear::{Linear, LinearCrossSize, LinearDirection, LinearItem, LinearParameters, RowHeight};
+pub use linear::{Linear, LinearCrossSize, LinearDirection, LinearItem, LinearParameters};
 
 /// Available space on one measurement axis.
 ///

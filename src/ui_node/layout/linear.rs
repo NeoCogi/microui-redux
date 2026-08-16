@@ -17,31 +17,6 @@ use crate::{
 
 use super::TrackResolver;
 
-/// Shared cross-axis sizing for one horizontal [`crate::Row`].
-///
-/// A Row has exactly one line, so weighted distribution has no meaningful sibling context on its
-/// height axis. The shared linear algorithm owns these three behaviors; Row exposes them as its
-/// public configuration vocabulary.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-pub enum RowHeight {
-    /// Uses the tallest child's desired height, including the standard non-empty control minimum.
-    #[default]
-    Content,
-    /// Uses an exact non-negative line height and allows taller child content to overflow.
-    Fixed(i32),
-    /// Fills a bounded height supplied by the Row's parent and uses content when unbounded.
-    Fill,
-}
-
-impl RowHeight {
-    /// Creates an exact line height, normalizing a negative public extent to zero.
-    pub const fn fixed(extent: i32) -> Self {
-        // Normalize at this named constructor so ordinary callers establish the documented
-        // non-negative invariant before the value reaches measurement or placement.
-        Self::Fixed(if extent < 0 { 0 } else { extent })
-    }
-}
-
 /// Leading-edge direction of a one-dimensional retained layout.
 ///
 /// Direction deliberately combines axis and reversal. This prevents the old design from storing a
@@ -151,7 +126,7 @@ impl LinearParameters {
     where
         T: Into<LinearItem>,
     {
-        // Vertical defaults encode the former Column behavior using the same cross-size vocabulary
+        // Vertical defaults stretch across the assigned width using the same cross-size vocabulary
         // available to every direction.
         Self {
             items: items.into_iter().map(Into::into).collect(),
@@ -194,11 +169,12 @@ impl LinearParameters {
     }
 }
 
-/// An unmounted node paired with its main-axis relationship to a Row or Column.
+/// An unmounted node paired with its main-axis relationship to a [`Linear`] container.
 ///
-/// The item is construction and mutation input, not another runtime node. Row interprets `main` as
-/// width; Column interprets it as height. The optional fixed cross extent is likewise interpreted by
-/// the owning container, so no container-specific policy is stored on [`Node`].
+/// The item is construction and mutation input, not another runtime node. Horizontal directions
+/// interpret `main` as width; vertical directions interpret it as height. The optional fixed cross
+/// extent is likewise interpreted by the owning container, so no direction-specific policy is
+/// stored on [`Node`].
 pub struct LinearItem {
     node: Node,
     main: TrackSize,
@@ -273,7 +249,7 @@ struct LinearItemSpec {
 /// Collects construction or replacement input into the runtime's split ownership representation.
 ///
 /// The concrete container remains the sole strong owner of `Children`; linear state retains only
-/// the index-matched relationship metadata that Row or Column interprets. Building both outputs in
+/// the index-matched relationship metadata that Linear interprets. Building both outputs in
 /// one function keeps their order and length identical before either becomes observable.
 fn collect_items<T>(items: impl IntoIterator<Item = T>) -> (Children, Vec<LinearItemSpec>)
 where
@@ -597,7 +573,7 @@ impl LinearAxis {
 /// Measures the retained direction and cross policy without mutating per-pass geometry.
 pub(in crate::ui_node) fn measure(ctx: &mut MeasureCtx<'_>, state: &Linear, constraints: Constraints) -> Dimensioni {
     // Direction is retained semantic state, so private callers cannot accidentally pair horizontal
-    // geometry with a vertical widget or pass a Row-only optional policy.
+    // geometry with a vertical widget or pass an orientation-specific optional policy.
     let orientation = state.direction.axis();
     let count = ctx.child_count();
     if count == 0 {
@@ -699,7 +675,7 @@ pub(in crate::ui_node) fn place(ctx: &mut ContainerLayoutCtx<'_>, children: &mut
     let extent = resolver.extent();
 
     // Responsive children are measured once at their exact main-axis extent. This pass determines
-    // the shared Row height or Column overflow width and also warms the exact measurement consumed
+    // the shared cross extent or overflow and also warms the exact measurement consumed
     // by the runtime when each child rectangle is committed below.
     let mut cross_content = 0;
     for (index, (spec, main)) in specs.iter().copied().zip(resolved_main.iter().copied()).enumerate() {
@@ -823,5 +799,64 @@ mod cross_size_tests {
         assert_eq!(resolve_measured_cross(LinearCrossSize::Fixed(12), 20), 12);
         assert_eq!(resolve_placed_cross(LinearCrossSize::Fixed(12), 80, 20), 12);
         assert_eq!(LinearCrossSize::fixed(-7), LinearCrossSize::Fixed(0));
+    }
+}
+
+#[cfg(test)]
+mod linear_widget_tests {
+    use super::*;
+    use crate::test_support::test_atlas;
+    use crate::{Custom, CustomParameters};
+
+    /// Measures one ordinary content-track widget through its public container contract.
+    fn measure_content_linear(width: AvailableSpace) -> Dimensioni {
+        let child = Node::widget(Custom::create(CustomParameters::new("content")));
+        let (children, linear) = Linear::mount(LinearParameters::horizontal([child]));
+        let style = Style::default();
+        let atlas = test_atlas();
+        let mut children = children.borrow_mut();
+        let mut ctx = MeasureCtx::new(&style, &atlas, &mut children);
+
+        // Height remains unbounded so this probe isolates the main-axis bounded measurement rule.
+        linear.measure(&mut ctx, Constraints::new(width, AvailableSpace::Unbounded))
+    }
+
+    #[test]
+    fn topology_mutations_keep_nodes_and_tracks_synchronized() {
+        let first = Custom::create(CustomParameters::new("first"));
+        let (first_state, first) = Node::typed_widget(first);
+        let (linear, node) = Linear::create(LinearParameters::horizontal([LinearItem::fixed(first, 20)]));
+
+        linear
+            .try_update(|state| {
+                // Exercise topology, edge metadata, and cross policy through the one concrete typed
+                // handle so synchronization no longer depends on an orientation-specific façade.
+                assert!(
+                    state
+                        .push(LinearItem::flex(Node::widget(Custom::create(CustomParameters::new("second"))), 2.0))
+                        .is_ok()
+                );
+                assert!(state.set_track(0, TrackSize::Flex(1.0)));
+                state.set_cross_size(LinearCrossSize::fixed(24));
+            })
+            .unwrap();
+
+        assert_eq!(linear.try_read(|state| state.track(0)), Some(Some(TrackSize::Flex(1.0))));
+        assert_eq!(linear.try_read(Linear::cross_size), Some(LinearCrossSize::Fixed(24)));
+        assert_eq!(linear.try_read(Linear::len), Some(Some(2)));
+        assert_eq!(linear.try_update(|state| state.remove_drop(0)), Some(Some(true)));
+        assert!(!first_state.is_alive());
+        drop(node);
+        assert!(!linear.is_alive());
+    }
+
+    #[test]
+    fn bounded_content_linear_reports_only_its_desired_width() {
+        let desired = measure_content_linear(AvailableSpace::Unbounded);
+        let bounded = measure_content_linear(AvailableSpace::bounded(desired.width.saturating_add(100)));
+
+        // An offered main-axis bound is measurement information, not an allocation to claim.
+        assert_eq!(bounded.width, desired.width);
+        assert_eq!(bounded.height, desired.height);
     }
 }
