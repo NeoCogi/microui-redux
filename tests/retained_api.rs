@@ -34,8 +34,8 @@ use microui_redux::render::{FrameError, FrameInfo, RendererBackend, RendererFram
 use microui_redux::retained::*;
 use microui_redux::prelude::{Dimensioni, FileDialogRequest, FileDialogStatus, Recti};
 use microui_redux::{
-    color, rect, AtlasHandle, AtlasSource, Column, ColumnParameters, Constraints, Context, Disclosure, DisclosureParameters, FontEntry, Grid, GridParameters,
-    RootMutationError, Row, RowParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SourceFormat, Style, TextureId,
+    color, rect, AtlasHandle, AtlasSource, Constraints, Context, Disclosure, DisclosureParameters, FontEntry, Grid, GridParameters, Linear, LinearParameters,
+    RootMutationError, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SourceFormat, Style, TextureId,
 };
 
 struct TestBackend {
@@ -104,11 +104,11 @@ fn downstream_file_dialog_session_is_polled_and_cancelled_without_widget_access(
 
 #[test]
 fn every_builtin_container_returns_a_typed_handle_and_completed_node() {
-    let (row, row_node) = Row::create(RowParameters::default());
+    let (row, row_node) = Linear::create(LinearParameters::horizontal(std::iter::empty::<Node>()));
     let (grid, grid_node) = Grid::create(GridParameters::new([], [], std::iter::empty::<Node>()));
-    let (_, scroll_content) = Column::create(ColumnParameters::default());
+    let (_, scroll_content) = Linear::create(LinearParameters::vertical(std::iter::empty::<Node>()));
     let (scroll, scroll_node) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, scroll_content));
-    let (column, column_node) = Column::create(ColumnParameters::new([row_node, grid_node, scroll_node]));
+    let (column, column_node) = Linear::create(LinearParameters::vertical([row_node, grid_node, scroll_node]));
     let (disclosure, root_node) = Disclosure::create(DisclosureParameters::header("group", true, [column_node]));
 
     assert_eq!(row.try_read(|state| state.len()), Some(Some(0)));
@@ -217,7 +217,7 @@ fn downstream_custom_container_measures_and_lays_out_through_public_scoped_apis(
 #[test]
 fn root_creation_and_lifecycle_need_no_projection_or_generated_node_identity() {
     let mut ctx = context();
-    let content = Column::create(ColumnParameters::default()).1;
+    let content = Linear::create(LinearParameters::vertical(std::iter::empty::<Node>())).1;
     let root = ctx.create_window("root", rect(10, 20, 100, 80), content);
     let id = root.id();
 

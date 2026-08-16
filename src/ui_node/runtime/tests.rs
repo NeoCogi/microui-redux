@@ -306,7 +306,7 @@ fn demo_flex_row_geometry_is_preserved_as_an_explicit_baseline() {
     let (label_id, label) = layout_button("label");
     let (middle_id, middle) = layout_button("middle");
     let (last_id, last) = layout_button("last");
-    let (_, mut root) = crate::Row::create(crate::RowParameters::new([
+    let (_, mut root) = crate::Linear::create(crate::LinearParameters::horizontal([
         LinearItem::fixed(label, 86),
         LinearItem::flex(middle, 1.0),
         LinearItem::fixed(last, 109),
@@ -328,7 +328,10 @@ fn calculator_flex_geometry_is_preserved_as_an_explicit_baseline() {
     // retired policy names that happened to produce it.
     let (display_id, display) = layout_probe("display");
     let (keypad_id, keypad) = layout_probe("keypad");
-    let (_, mut root) = crate::Column::create(crate::ColumnParameters::new([LinearItem::flex(display, 1.0), LinearItem::flex(keypad, 3.0)]));
+    let (_, mut root) = crate::Linear::create(crate::LinearParameters::vertical([
+        LinearItem::flex(display, 1.0),
+        LinearItem::flex(keypad, 3.0),
+    ]));
     let style = Style { spacing: 4, ..Style::default() };
     let mut runtime = UiRuntime::new();
     runtime.begin_update();
@@ -340,30 +343,30 @@ fn calculator_flex_geometry_is_preserved_as_an_explicit_baseline() {
 
 #[test]
 fn demo_weight_grid_fills_remaining_height_and_preserves_one_to_two_heights() {
-    // This is the layout structure used by demo-full's Weight Demo. The Grid is the outer Column's
+    // This is the layout structure used by demo-full's Weight Demo. The Grid is the outer vertical Linear's
     // flexible item, so it receives the resolved remaining height directly. A content-sized
     // container inserted between those nodes would create a different edge and correctly shrink
     // the Grid back to its intrinsic height.
-    fn row(node: Node, height: crate::RowHeight) -> Node {
-        crate::Row::create(crate::RowParameters::new([LinearItem::flex(node, 1.0)]).with_height(height)).1
+    fn row(node: Node, cross_size: crate::LinearCrossSize) -> Node {
+        crate::Linear::create(crate::LinearParameters::horizontal([LinearItem::flex(node, 1.0)]).with_cross_size(cross_size)).1
     }
 
     let (_, row_label) = crate::ListItem::create(crate::ListItemParameters::with_opt("Row weights 1 : 2 : 3", WidgetOption::NO_INTERACT));
-    let row_label = row(row_label, crate::RowHeight::Content);
+    let row_label = row(row_label, crate::LinearCrossSize::Content);
 
     let row_buttons = [layout_button("w1").1, layout_button("w2").1, layout_button("w3").1];
-    let (_, row_buttons) = crate::Row::create(
-        crate::RowParameters::new(
+    let (_, row_buttons) = crate::Linear::create(
+        crate::LinearParameters::horizontal(
             row_buttons
                 .into_iter()
                 .zip([TrackSize::Flex(1.0), TrackSize::Flex(2.0), TrackSize::Flex(3.0)])
                 .map(|(button, width)| LinearItem::new(button, width)),
         )
-        .fixed_height(28),
+        .fixed_cross(28),
     );
 
     let (_, grid_label) = crate::ListItem::create(crate::ListItemParameters::with_opt("Grid weights rows 1 : 2", WidgetOption::NO_INTERACT));
-    let grid_label = row(grid_label, crate::RowHeight::Content);
+    let grid_label = row(grid_label, crate::LinearCrossSize::Content);
 
     let (g1_id, g1) = layout_button("g1");
     let (g2_id, g2) = layout_button("g2");
@@ -376,7 +379,7 @@ fn demo_weight_grid_fills_remaining_height_and_preserves_one_to_two_heights() {
         [TrackSize::Flex(1.0), TrackSize::Flex(2.0)],
         [g1, g2, g3, g4, g5, g6],
     ));
-    let (_, mut root) = crate::Column::create(crate::ColumnParameters::new([
+    let (_, mut root) = crate::Linear::create(crate::LinearParameters::vertical([
         LinearItem::content(row_label),
         LinearItem::fixed(row_buttons, 28),
         LinearItem::content(grid_label),
@@ -400,11 +403,14 @@ fn demo_weight_grid_fills_remaining_height_and_preserves_one_to_two_heights() {
 
 #[test]
 fn demo_column_bottom_margin_geometry_is_preserved_as_an_explicit_baseline() {
-    // The log panel uses one flexible Column item followed by an explicit 24-pixel spacer below
+    // The log panel uses one flexible vertical Linear item followed by an explicit 24-pixel spacer below
     // its scrolling child for the submission row that follows it.
     let (content_id, content) = layout_probe("content");
     let spacer = Node::widget(WidgetOption::NONE);
-    let (_, mut root) = crate::Column::create(crate::ColumnParameters::new([LinearItem::flex(content, 1.0), LinearItem::fixed(spacer, 24)]));
+    let (_, mut root) = crate::Linear::create(crate::LinearParameters::vertical([
+        LinearItem::flex(content, 1.0),
+        LinearItem::fixed(spacer, 24),
+    ]));
     let mut runtime = UiRuntime::new();
     runtime.begin_update();
     runtime.layout_tree_root(
@@ -503,7 +509,7 @@ fn child_topology_mutation_invalidates_its_container_through_the_typed_update() 
 fn measurement_cache_keeps_constraints_distinct_within_one_pass() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (probe, counts) = Probe::new("leaf", log);
-    let (_, mut root) = crate::Column::create(crate::ColumnParameters::new([Node::widget(probe)]));
+    let (_, mut root) = crate::Linear::create(crate::LinearParameters::vertical([Node::widget(probe)]));
     let mut runtime = UiRuntime::new();
 
     layout_root(&mut runtime, &mut root, &Style::default(), test_atlas());

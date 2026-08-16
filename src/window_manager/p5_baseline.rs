@@ -34,7 +34,7 @@ use crate::render::FrameInfo;
 use crate::test_support::{AllocationCount, AllocationMeasurement, NoopRenderer, test_atlas};
 use crate::ui_node::RuntimeMetrics;
 use crate::{
-    Column, ColumnParameters, Context, Dimensioni, KeyMode, Node, ScrollArea, ScrollAreaOption, ScrollAreaParameters, TextBlock, TextBlockParameters, color,
+    Context, Dimensioni, KeyMode, Linear, LinearParameters, Node, ScrollArea, ScrollAreaOption, ScrollAreaParameters, TextBlock, TextBlockParameters, color,
     rect,
 };
 use std::hint::black_box;
@@ -170,11 +170,11 @@ fn ui_node_p5_baseline_runtime() {
     let one = measure_scenario("one widget", 1, || TextBlock::create(TextBlockParameters::new("one")).1);
     let hundred = measure_scenario("100-node tree", 100, || {
         let children = (0..99).map(|index| TextBlock::create(TextBlockParameters::new(format!("node-{index}"))).1);
-        Column::create(ColumnParameters::new(children)).1
+        Linear::create(LinearParameters::vertical(children)).1
     });
     let scroll = measure_scenario("scroll area with 20 content widgets", 22, || {
         let children = (0..20).map(|index| TextBlock::create(TextBlockParameters::new(format!("row-{index}"))).1);
-        let content = Column::create(ColumnParameters::new(children)).1;
+        let content = Linear::create(LinearParameters::vertical(children)).1;
         ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, content)).1
     });
 
@@ -196,7 +196,7 @@ fn ui_node_p5_baseline_runtime() {
     // Repeat the ordered transaction boundary in the same release-mode evidence run. The root
     // chrome and its one application node both receive one update for each of three events.
     let mut ctx = context();
-    let content = Column::create(ColumnParameters::default()).1;
+    let content = Linear::create(LinearParameters::vertical(std::iter::empty::<Node>())).1;
     let root = ctx.create_window("phase split", rect(0, 0, 120, 90), content);
     ctx.mousemove(20, 20);
     ctx.keydown(KeyMode::SHIFT);

@@ -32,10 +32,10 @@ use super::*;
 
 use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, test_atlas};
 use crate::{
-    color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Column, ColumnParameters, Custom, CustomParameters,
-    Constraints, Context, Dimensioni, Disclosure, DisclosureParameters, Grid, GridParameters, KeyMode, LinearItem, MouseButton, Node, Row, RowParameters,
-    ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Style, Textbox, TextboxChanged, TextBlock, TextBlockParameters,
-    TextboxParameters, TrackSize, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
+    color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Custom, CustomParameters, Constraints, Context,
+    Dimensioni, Disclosure, DisclosureParameters, Grid, GridParameters, KeyMode, Linear, LinearItem, LinearParameters, MouseButton, Node, ScrollArea,
+    ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Style, Textbox, TextboxChanged, TextBlock, TextBlockParameters, TextboxParameters,
+    TrackSize, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
 };
 use crate::render::{FrameInfo, RenderError};
 use std::{
@@ -48,7 +48,7 @@ fn context() -> Context<NoopRenderer> {
 }
 
 fn empty_content() -> Node {
-    Column::create(ColumnParameters::default()).1
+    Linear::create(LinearParameters::vertical(std::iter::empty::<Node>())).1
 }
 
 fn frame_info(dimensions: Dimensioni) -> FrameInfo {
@@ -277,8 +277,8 @@ impl crate::LeafWidget for CountedProbe {
 struct TopologyMutator {
     same_container_blocked: bool,
     other_container_changed: bool,
-    same_container: Rc<RefCell<Option<TypedWidgetHandle<Column>>>>,
-    other_container: TypedWidgetHandle<Column>,
+    same_container: Rc<RefCell<Option<TypedWidgetHandle<Linear>>>>,
+    other_container: TypedWidgetHandle<Linear>,
     candidate: Option<Node>,
     opt: WidgetOption,
 }
@@ -549,7 +549,7 @@ fn nested_scroll_bubbles_at_the_inner_boundary_and_moves_only_the_outer_area() {
     let (inner, inner_node) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, inner_content));
     let inner_id = inner_node.id();
     let outer_tail = Node::widget(Custom::create(CustomParameters::new("outer tail")));
-    let (_, outer_content) = Column::create(ColumnParameters::new([
+    let (_, outer_content) = Linear::create(LinearParameters::vertical([
         LinearItem::fixed(inner_node, 60).with_fixed_cross(60),
         LinearItem::fixed(outer_tail, 120).with_fixed_cross(60),
     ]));
@@ -585,7 +585,7 @@ fn intrinsic_mutation_is_laid_out_before_the_next_event_and_painted_from_that_co
     let growing_id = growing.id();
     let (target_state, target, _) = CommitProbe::new(10, None);
     let target_id = target.id();
-    let (_, content) = Column::create(ColumnParameters::new([growing, target]));
+    let (_, content) = Linear::create(LinearParameters::vertical([growing, target]));
     let mut ctx = context();
     let root = ctx.create_window("window", rect(0, 0, 140, 100), content);
     ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
@@ -622,7 +622,7 @@ fn sibling_mutation_observes_parent_first_forward_traversal_without_reruns() {
     let (earlier_state, earlier) = SiblingMutationProbe::new(0, Some((later_state.clone(), 11)));
     let (already_updated_state, already_updated) = SiblingMutationProbe::new(0, None);
     let (_late_mutator_state, late_mutator) = SiblingMutationProbe::new(0, Some((already_updated_state.clone(), 22)));
-    let (_, content) = Column::create(ColumnParameters::new([earlier, later, already_updated, late_mutator]));
+    let (_, content) = Linear::create(LinearParameters::vertical([earlier, later, already_updated, late_mutator]));
     let mut ctx = context();
     let root = ctx.create_window("window", rect(0, 0, 140, 100), content);
     ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
@@ -645,7 +645,7 @@ fn sibling_mutation_observes_parent_first_forward_traversal_without_reruns() {
 fn topology_mutation_is_blocked_for_the_active_container_and_visible_in_a_later_subtree() {
     let inserted_updates = Rc::new(Cell::new(0));
     let candidate = Node::widget(CountedProbe::new(inserted_updates.clone()));
-    let (other_container, other_node) = Column::create(ColumnParameters::default());
+    let (other_container, other_node) = Linear::create(LinearParameters::vertical(std::iter::empty::<Node>()));
     let same_container = Rc::new(RefCell::new(None));
     let mutator = TopologyMutator {
         same_container_blocked: false,
@@ -656,7 +656,7 @@ fn topology_mutation_is_blocked_for_the_active_container_and_visible_in_a_later_
         opt: WidgetOption::NONE,
     };
     let (mutator_state, mutator) = Node::typed_widget(mutator);
-    let (outer_container, content) = Column::create(ColumnParameters::new([mutator, other_node]));
+    let (outer_container, content) = Linear::create(LinearParameters::vertical([mutator, other_node]));
     *same_container.borrow_mut() = Some(outer_container.clone());
     let mut ctx = context();
     let root = ctx.create_window("window", rect(0, 0, 140, 100), content);
@@ -670,15 +670,15 @@ fn topology_mutation_is_blocked_for_the_active_container_and_visible_in_a_later_
         mutator_state.try_read(|state| (state.same_container_blocked, state.other_container_changed)),
         Some((true, true))
     );
-    assert_eq!(outer_container.try_read(Column::len), Some(Some(2)));
-    assert_eq!(other_container.try_read(Column::len), Some(Some(1)));
+    assert_eq!(outer_container.try_read(Linear::len), Some(Some(2)));
+    assert_eq!(other_container.try_read(Linear::len), Some(Some(1)));
     assert_eq!(inserted_updates.get(), 1, "the newly inserted later descendant participates in the same update");
 }
 
 #[test]
 fn programmatic_topology_mutation_needs_only_an_empty_queue_layout_commit() {
     let (_, first, _) = CommitProbe::new(10, None);
-    let (column, content) = Column::create(ColumnParameters::new([first]));
+    let (column, content) = Linear::create(LinearParameters::vertical([first]));
     let mut ctx = context();
     let root = ctx.create_window("window", rect(0, 0, 140, 100), content);
     ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
@@ -782,7 +782,7 @@ fn widget_handle_events_invoke_state_methods_without_polling() {
     let (second_widget, second) = Button::create(ButtonParameters::new("second"));
     let second_submitted = second_widget.submitted();
     let second_id = second.id();
-    let (_, content) = Row::create(RowParameters::new([LinearItem::fixed(first, 60), LinearItem::fixed(second, 60)]));
+    let (_, content) = Linear::create(LinearParameters::horizontal([LinearItem::fixed(first, 60), LinearItem::fixed(second, 60)]));
     let mut ctx: Context<NoopRenderer, Model> = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, Dimensioni::new(320, 240));
     let root = ctx.create_window("signal", rect(0, 0, 140, 100), content);
     ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
@@ -863,7 +863,7 @@ fn every_root_kind_adds_exactly_one_private_chrome_node() {
     let dialog = ctx.create_dialog("dialog", rect(10, 10, 100, 80), empty_content());
     let popup = ctx.create_popup("popup", empty_content());
 
-    // Each application tree contains one empty Column node. The second retained node is the one
+    // Each application tree contains one empty vertical Linear node. The second retained node is the one
     // private root Container; title, close, and resize regions are geometry, not child nodes.
     assert_eq!(ctx.debug_root_node_count(window.id()), Some(2));
     assert_eq!(ctx.debug_root_node_count(dialog.id()), Some(2));
@@ -967,7 +967,7 @@ fn popup_switch_is_atomic_when_the_visible_popup_state_is_borrowed() {
 #[test]
 fn dynamic_container_root_changes_descendants_without_replacing_the_root() {
     let mut ctx = context();
-    let (column, content) = Column::create(ColumnParameters::default());
+    let (column, content) = Linear::create(LinearParameters::vertical(std::iter::empty::<Node>()));
     let root = ctx.create_window("dynamic", rect(0, 0, 140, 100), content);
     let root_id = root.id();
     let (button, widget) = Button::create(ButtonParameters::new("new child"));
@@ -979,7 +979,7 @@ fn dynamic_container_root_changes_descendants_without_replacing_the_root() {
     assert!(button.is_alive());
     assert_eq!(ctx.debug_root_node_count(root_id), Some(3));
 
-    assert_eq!(column.try_update(|column: &mut Column| column.remove_drop(0)), Some(Some(true)));
+    assert_eq!(column.try_update(|linear: &mut Linear| linear.remove_drop(0)), Some(Some(true)));
     assert!(!button.is_alive());
     assert!(root.widget().is_alive());
 }
@@ -1068,12 +1068,12 @@ fn layout_only_update_and_paint_have_separate_phase_counts() {
 #[test]
 fn warmed_container_measurement_and_layout_allocate_nothing() {
     let child = |name| Node::widget(Custom::create(CustomParameters::new(name)));
-    let (_, row) = Row::create(RowParameters::new([LinearItem::flex(child("row"), 1.0)]));
+    let (_, row) = Linear::create(LinearParameters::horizontal([LinearItem::flex(child("row"), 1.0)]));
     let (_, grid) = Grid::create(GridParameters::new([TrackSize::Flex(1.0)], [TrackSize::Content], [child("grid")]));
-    let (_, fixed_column) = Column::create(ColumnParameters::new([LinearItem::fixed(child("column"), 20)]));
+    let (_, fixed_column) = Linear::create(LinearParameters::vertical([LinearItem::fixed(child("column"), 20)]));
     let (_, disclosure) = Disclosure::create(DisclosureParameters::header("expanded", true, [child("disclosure")]));
     let (_, scroll) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child("scroll")));
-    let (_, content) = Column::create(ColumnParameters::new([row, grid, fixed_column, disclosure, scroll]));
+    let (_, content) = Linear::create(LinearParameters::vertical([row, grid, fixed_column, disclosure, scroll]));
     let mut ctx = context();
     ctx.create_window("allocation probe", rect(10, 10, 300, 220), content);
     let dimensions = Dimensioni::new(640, 480);
@@ -1561,7 +1561,7 @@ fn auto_height_preserves_popup_width_and_stretches_column_items() {
             node
         })
         .collect::<Vec<_>>();
-    let (_, content) = Column::create(ColumnParameters::new(items));
+    let (_, content) = Linear::create(LinearParameters::vertical(items));
     let mut ctx = context();
     let root = ctx.create_popup("combo", content);
     let anchor = rect(20, 30, 180, 1);
@@ -1638,14 +1638,14 @@ fn auto_size_ignores_the_previous_rect_for_flexible_linear_and_grid_tracks() {
     let row_children = (0..5)
         .map(|index| Node::widget(Custom::create(CustomParameters::new(format!("row {index}")))))
         .collect::<Vec<_>>();
-    let (_, row) = Row::create(
-        RowParameters::new(row_children.into_iter().enumerate().map(|(index, child)| match index {
+    let (_, row) = Linear::create(
+        LinearParameters::horizontal(row_children.into_iter().enumerate().map(|(index, child)| match index {
             0 => LinearItem::fixed(child, 18),
             1 => LinearItem::content(child),
             2 | 3 => LinearItem::flex(child, 1.0),
             _ => LinearItem::fixed(child, 4),
         }))
-        .fill_height(),
+        .stretch_cross(),
     );
     let grid_items = (0..5)
         .map(|index| Node::widget(Custom::create(CustomParameters::new(format!("grid {index}")))))
@@ -1661,11 +1661,11 @@ fn auto_size_ignores_the_previous_rect_for_flexible_linear_and_grid_tracks() {
         [TrackSize::Flex(1.0)],
         grid_items,
     ));
-    let (_, flexible_column) = Column::create(ColumnParameters::new([
+    let (_, flexible_column) = Linear::create(LinearParameters::vertical([
         LinearItem::flex(Node::widget(Custom::create(CustomParameters::new("column first"))), 1.0),
         LinearItem::flex(Node::widget(Custom::create(CustomParameters::new("column second"))), 1.0),
     ]));
-    let (_, content) = Column::create(ColumnParameters::new([row, grid, flexible_column]));
+    let (_, content) = Linear::create(LinearParameters::vertical([row, grid, flexible_column]));
     let mut ctx = context();
     let root = ctx.create_popup("intrinsic", content);
     ctx.set_root_visible(root.id(), true).unwrap();

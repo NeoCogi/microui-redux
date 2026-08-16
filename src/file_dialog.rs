@@ -44,7 +44,7 @@ use std::{
 };
 
 use crate::{
-    Button, ButtonParameters, ButtonSubmitted, Column, ColumnParameters, IconId, LinearItem, ListItem, ListItemParameters, ListItemSubmitted, Node, Recti,
+    Button, ButtonParameters, ButtonSubmitted, IconId, Linear, LinearItem, LinearParameters, ListItem, ListItemParameters, ListItemSubmitted, Node, Recti,
     RootHandle, RootSubmitted, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Textbox, TextboxParameters, TextboxSubmitted, ThemeIcons, TypedWidgetHandle,
     WidgetEventHandle, WidgetOption, WindowOption,
 };
@@ -180,8 +180,8 @@ pub(crate) struct FileDialogController {
     folders: Vec<String>,
     files: Vec<String>,
     icons: ThemeIcons,
-    folder_column: TypedWidgetHandle<Column>,
-    file_column: TypedWidgetHandle<Column>,
+    folder_column: TypedWidgetHandle<Linear>,
+    file_column: TypedWidgetHandle<Linear>,
     #[cfg_attr(not(test), allow(dead_code))]
     folder_scroll: TypedWidgetHandle<ScrollArea>,
     #[cfg_attr(not(test), allow(dead_code))]
@@ -245,8 +245,10 @@ impl FileDialogController {
 
         let folder_item_ids = folder_rows.ids;
         let file_item_ids = file_rows.ids;
-        let (folder_column, folder_content) = Column::create(ColumnParameters::new(std::iter::once(Self::static_item("Folders")).chain(folder_rows.nodes)));
-        let (file_column, file_content) = Column::create(ColumnParameters::new(std::iter::once(Self::static_item("Files")).chain(file_rows.nodes)));
+        let (folder_column, folder_content) = Linear::create(LinearParameters::vertical(
+            std::iter::once(Self::static_item("Folders")).chain(folder_rows.nodes),
+        ));
+        let (file_column, file_content) = Linear::create(LinearParameters::vertical(std::iter::once(Self::static_item("Files")).chain(file_rows.nodes)));
         let (folder_scroll, folder_scroll_node) = ScrollArea::create(ScrollAreaParameters::new(
             ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL,
             folder_content,
@@ -264,24 +266,24 @@ impl FileDialogController {
         let ok_button = ok_handle.submitted().listen().unwrap();
         let ok_button_id = ok_node.id();
 
-        let (_, toolbar) = crate::Row::create(crate::RowParameters::new([
+        let (_, toolbar) = Linear::create(LinearParameters::horizontal([
             LinearItem::fixed(up_node, 56),
             LinearItem::fixed(home_node, 56),
             LinearItem::flex(path_node, 1.0),
             LinearItem::fixed(go_node, 56),
         ]));
         let (_, browser) =
-            crate::Row::create(crate::RowParameters::new([LinearItem::flex(folder_scroll_node, 1.0), LinearItem::flex(file_scroll_node, 2.0)]).fill_height());
-        let (_, filename) = crate::Row::create(crate::RowParameters::new([
+            Linear::create(LinearParameters::horizontal([LinearItem::flex(folder_scroll_node, 1.0), LinearItem::flex(file_scroll_node, 2.0)]).stretch_cross());
+        let (_, filename) = Linear::create(LinearParameters::horizontal([
             LinearItem::fixed(Self::static_item("File name:"), 86),
             LinearItem::flex(file_name_node, 1.0),
         ]));
-        let (_, actions) = crate::Row::create(crate::RowParameters::new([
+        let (_, actions) = Linear::create(LinearParameters::horizontal([
             LinearItem::flex(Self::static_item(""), 1.0),
             LinearItem::fixed(cancel_node, 96),
             LinearItem::fixed(ok_node, 96),
         ]));
-        let (_, shell) = Column::create(ColumnParameters::new([
+        let (_, shell) = Linear::create(LinearParameters::vertical([
             LinearItem::content(toolbar),
             LinearItem::flex(browser, 1.0),
             LinearItem::content(filename),
@@ -611,7 +613,7 @@ impl FileDialogController {
 }
 
 #[allow(clippy::result_large_err)]
-fn replace_column_rows(handle: &TypedWidgetHandle<Column>, nodes: Vec<Node>) -> Result<(), Vec<Node>> {
+fn replace_column_rows(handle: &TypedWidgetHandle<Linear>, nodes: Vec<Node>) -> Result<(), Vec<Node>> {
     handle.try_update_with(nodes, |state, nodes| state.replace(nodes))?
 }
 
@@ -967,7 +969,7 @@ mod tests {
 
     #[test]
     fn unavailable_column_replacement_returns_every_node() {
-        let (column, owner) = Column::create(ColumnParameters::default());
+        let (column, owner) = Linear::create(LinearParameters::vertical(std::iter::empty::<Node>()));
         let rejected = column
             .try_read(|_| {
                 let replacements = vec![FileDialogController::static_item("one"), FileDialogController::static_item("two")];

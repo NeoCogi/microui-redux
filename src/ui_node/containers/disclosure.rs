@@ -35,7 +35,8 @@ use crate::{
     UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
-use super::{Children, Column, ColumnParameters, ContainerLayoutCtx, LinearItem, Node};
+use super::{Children, ContainerLayoutCtx, LinearItem, Node};
+use crate::{Linear, LinearParameters};
 
 #[derive(Copy, Clone)]
 enum DisclosureVariant {
@@ -61,7 +62,7 @@ impl DisclosureParameters {
     /// Creates the framed header presentation and its top-to-bottom body items.
     ///
     /// Plain [`Node`] values use content height. Pass [`LinearItem`] when an item has an explicit
-    /// fixed or flexible relationship to the private body Column.
+    /// fixed or flexible relationship to the private vertical Linear.
     pub fn header<T>(label: impl Into<String>, expanded: bool, children: impl IntoIterator<Item = T>) -> Self
     where
         T: Into<LinearItem>,
@@ -101,8 +102,8 @@ impl DisclosureParameters {
 /// Expansion gates descendant traversal while retaining every owned runtime and its state. It does
 /// not expose or mutate generic node visibility.
 pub struct Disclosure {
-    /// Weak access to content topology strongly owned by the body Column child.
-    content: TypedWidgetHandle<Column>,
+    /// Weak access to content topology strongly owned by the vertical Linear body child.
+    content: TypedWidgetHandle<Linear>,
     expanded: bool,
     variant: DisclosureVariant,
 }
@@ -135,18 +136,18 @@ impl Disclosure {
 
     /// Returns the number of owned child nodes.
     pub fn len(&self) -> Option<usize> {
-        self.content.try_read(Column::len).flatten()
+        self.content.try_read(Linear::len).flatten()
     }
 
     /// Returns whether the disclosure owns no children.
     pub fn is_empty(&self) -> Option<bool> {
-        self.content.try_read(Column::is_empty).flatten()
+        self.content.try_read(Linear::is_empty).flatten()
     }
 
-    /// Appends one still-unmounted body item and its Column-owned height track.
+    /// Appends one still-unmounted body item and its vertical Linear-owned height track.
     #[allow(clippy::result_large_err)] // Failure returns the exact unique node and its edge metadata.
     pub fn push(&mut self, item: impl Into<LinearItem>) -> Result<(), LinearItem> {
-        self.content.try_update_with(item.into(), Column::push)?
+        self.content.try_update_with(item.into(), Linear::push)?
     }
 
     /// Inserts an item, returning it unchanged when `index > len`.
@@ -162,7 +163,7 @@ impl Disclosure {
 
     /// Drops every child owner.
     pub fn clear(&mut self) -> Option<()> {
-        self.content.try_update(Column::clear).flatten()
+        self.content.try_update(Linear::clear).flatten()
     }
 
     /// Replaces all body items in iterator order.
@@ -171,7 +172,7 @@ impl Disclosure {
         T: Into<LinearItem>,
         I: IntoIterator<Item = T>,
     {
-        self.content.try_update_with(items, Column::replace)?
+        self.content.try_update_with(items, Linear::replace)?
     }
 
     const BODY: usize = 0;
@@ -358,7 +359,7 @@ impl Widget for Disclosure {
 
 /// Builds the fixed body/header structure before wrapping it in the public owning node.
 fn create_container(parameters: DisclosureParameters) -> (TypedWidgetHandle<Disclosure>, Container) {
-    let (content, body) = Column::create(ColumnParameters::new(parameters.children));
+    let (content, body) = Linear::create(LinearParameters::vertical(parameters.children));
     let widget = Rc::new(RefCell::new(crate::ui_node::WidgetStorage::new(Disclosure {
         content,
         expanded: parameters.expanded,

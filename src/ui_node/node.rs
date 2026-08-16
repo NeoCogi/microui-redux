@@ -602,7 +602,7 @@ mod tests {
 
     #[test]
     fn ownership_moving_widget_access_returns_the_same_unmounted_node_on_failure() {
-        let (column_state, column_node) = crate::Column::create(crate::ColumnParameters::default());
+        let (column_state, column_node) = crate::Linear::create(crate::LinearParameters::vertical(std::iter::empty::<Node>()));
         let (_, candidate) = text_node("candidate");
         let candidate_id = candidate.state.id.0.get();
 

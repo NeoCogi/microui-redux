@@ -553,10 +553,7 @@ mod tests {
     use crate::input::Input;
     use crate::test_support::{AllocationMeasurement, test_atlas};
     use crate::ui_node::UiRuntime;
-    use crate::{
-        Column, ColumnParameters, Custom, CustomParameters, LinearItem, MouseButton, Row, RowParameters, Style, TextBlock, TextBlockParameters, TextWrap,
-        UNCLIPPED_RECT,
-    };
+    use crate::{Custom, CustomParameters, Linear, LinearItem, LinearParameters, MouseButton, Style, TextBlock, TextBlockParameters, TextWrap, UNCLIPPED_RECT};
 
     /// Test leaf whose desired size is content behavior rather than a generic node policy.
     struct FixedContent(Dimensioni);
@@ -649,7 +646,7 @@ mod tests {
             first_id.get_or_insert(node.id());
             LinearItem::fixed(node, 20)
         });
-        let (_, content) = Column::create(ColumnParameters::new(rows));
+        let (_, content) = Linear::create(LinearParameters::vertical(rows));
         let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, content));
         assert_eq!(root.debug_node_count(), 1_005, "all retained row nodes remain owned by their column");
 
@@ -783,8 +780,8 @@ mod tests {
             TextWrap::Word,
         ));
         let text_id = text.id();
-        let (_, text_column) = Column::create(ColumnParameters::new([text]));
-        let (_, row) = Row::create(RowParameters::new([
+        let (_, text_column) = Linear::create(LinearParameters::vertical([text]));
+        let (_, row) = Linear::create(LinearParameters::horizontal([
             crate::LinearItem::fixed(label, 40),
             crate::LinearItem::flex(text_column, 1.0),
         ]));
