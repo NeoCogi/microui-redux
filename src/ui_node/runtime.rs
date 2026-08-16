@@ -33,7 +33,7 @@
 use super::*;
 
 mod input_dispatcher;
-mod layout;
+mod layout_traversal;
 mod paint;
 mod update;
 

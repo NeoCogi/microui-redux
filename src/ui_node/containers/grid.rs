@@ -36,7 +36,7 @@ use crate::{
     WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
-use super::tracks::TrackResolver;
+use crate::ui_node::layout::{TrackResolver, resolve_tracks_in_place};
 use super::{Children, ContainerLayoutCtx, Node};
 
 /// Validated placement extent for one child owned by a [`Grid`].
@@ -708,7 +708,7 @@ fn resolve_columns_into(ctx: &mut impl GridMeasureCtx, state: &Grid, available_w
     let spacing = ctx.spacing();
     columns.clear();
     columns.extend((0..count).map(|index| preferred_column(ctx, state, index, spacing)));
-    super::tracks::resolve_tracks(available_width, spacing, &state.column_tracks, columns);
+    resolve_tracks_in_place(available_width, spacing, &state.column_tracks, columns);
 }
 
 /// Fills the layout-phase row buffer using already resolved column widths.
@@ -721,7 +721,7 @@ fn resolve_rows_into(ctx: &mut impl GridMeasureCtx, state: &Grid, available_heig
             track_span(columns, placement.column, placement.column_span, spacing)
         })
     }));
-    super::tracks::resolve_tracks(available_height, spacing, &state.row_tracks, rows);
+    resolve_tracks_in_place(available_height, spacing, &state.row_tracks, rows);
 }
 
 /// Measures one complete track axis through the allocation rules shared with layout.

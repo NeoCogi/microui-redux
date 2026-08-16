@@ -28,7 +28,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-//! Retained measurement, allocation, and child-content bounds.
+//! Retained-tree measurement, allocation traversal, and child-content bounds.
 
 use super::*;
 use crate::math::RectExt;

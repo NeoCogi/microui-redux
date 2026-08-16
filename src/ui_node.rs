@@ -51,15 +51,17 @@
 //!
 //! Singular modules such as `widget` and `container` own extension contracts; plural modules such
 //! as `widgets` and `containers` are built-in catalogs. Named module files are used at every depth,
-//! each public built-in component family has one correspondingly named file, and shared helpers are
-//! named for their behavior. Tests follow their owning subject without forcing production code into
-//! a `mod.rs` layout.
+//! and each public built-in component family has one correspondingly named file. The `layout`
+//! module owns reusable constraints and algorithms rather than pretending those helpers are
+//! concrete containers; runtime recursion is named `layout_traversal` at its narrower ownership
+//! boundary. Tests follow their owning subject without forcing production code into a `mod.rs`
+//! layout.
 pub(crate) mod frame;
 mod input;
 pub use input::UiInputEvent;
+mod layout;
 mod scrollbar;
-mod sizing;
-pub use sizing::{AvailableSpace, Constraints, TrackSize};
+pub use layout::{AvailableSpace, Constraints, LinearItem, RowHeight, TrackSize};
 pub(crate) mod text_layout;
 pub use text_layout::TextWrap;
 mod widget;
@@ -86,7 +88,6 @@ mod container;
 pub use container::{Container, ContainerLayoutCtx, ContainerWidget, MeasureCtx};
 mod containers;
 pub use containers::{
-    Column, ColumnParameters, Disclosure, DisclosureParameters, Grid, GridItem, GridParameters, GridSpan, LinearItem, Row, RowHeight, RowParameters,
-    ScrollArea, ScrollAreaParameters,
+    Column, ColumnParameters, Disclosure, DisclosureParameters, Grid, GridItem, GridParameters, GridSpan, Row, RowParameters, ScrollArea, ScrollAreaParameters,
 };
 pub use containers::ScrollAreaOption;

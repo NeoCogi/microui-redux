@@ -10,7 +10,7 @@ use crate::{
     Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
-use super::linear::{LinearItem, LinearState, Orientation, layout_linear, measure_linear};
+use crate::ui_node::layout::linear::{self as linear_layout, LinearAxis, LinearItem, LinearState};
 
 /// One-shot construction input for a vertical [`Column`].
 pub struct ColumnParameters {
@@ -128,11 +128,11 @@ impl ContainerWidget for Column {
     fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: Constraints) -> Dimensioni {
         // A Column reports its widest desired child but stretches children across its exact width
         // during placement. Main-axis sizing is otherwise identical to Row.
-        measure_linear(ctx, &self.linear, Orientation::Vertical, None, 0, constraints)
+        linear_layout::measure(ctx, &self.linear, LinearAxis::Vertical, None, 0, constraints)
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
-        layout_linear(ctx, children, &mut self.linear, Orientation::Vertical, None, 0, rect);
+        linear_layout::place(ctx, children, &mut self.linear, LinearAxis::Vertical, None, 0, rect);
     }
 }
 

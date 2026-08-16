@@ -10,7 +10,8 @@ use crate::{
     TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
-use super::linear::{LinearItem, LinearState, Orientation, layout_linear, measure_linear};
+use crate::ui_node::layout::RowHeight;
+use crate::ui_node::layout::linear::{self as linear_layout, LinearAxis, LinearItem, LinearState};
 
 /// Returns the style-derived minimum height for a non-empty content-height Row.
 ///
@@ -21,30 +22,6 @@ fn minimum_content_height(style: &Style, atlas: &AtlasHandle) -> i32 {
     // A standard control line contains the selected font plus equal top and bottom padding. Use
     // saturating arithmetic so hostile public style values cannot overflow retained measurement.
     (atlas.get_font_height(style.font) as i32).saturating_add(padding * 2).max(padding * 2)
-}
-
-/// Shared cross-axis sizing for one horizontal [`Row`].
-///
-/// A Row has exactly one line, so weighted distribution has no meaningful sibling context on its
-/// height axis. This type exposes only the three behaviors the container can actually perform.
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-pub enum RowHeight {
-    /// Uses the tallest child's desired height, including the standard non-empty control minimum.
-    #[default]
-    Content,
-    /// Uses an exact non-negative line height and allows taller child content to overflow.
-    Fixed(i32),
-    /// Fills a bounded height supplied by the Row's parent and uses content when unbounded.
-    Fill,
-}
-
-impl RowHeight {
-    /// Creates an exact line height, normalizing a negative public extent to zero.
-    pub const fn fixed(extent: i32) -> Self {
-        // Normalize at this named constructor so ordinary callers establish the documented
-        // non-negative invariant before the value reaches measurement or placement.
-        Self::Fixed(if extent < 0 { 0 } else { extent })
-    }
 }
 
 /// One-shot construction input for a horizontal [`Row`].
@@ -180,12 +157,12 @@ impl Row {
 impl ContainerWidget for Row {
     fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: Constraints) -> Dimensioni {
         let minimum = minimum_content_height(ctx.style(), ctx.atlas());
-        measure_linear(ctx, &self.linear, Orientation::Horizontal, Some(self.height), minimum, constraints)
+        linear_layout::measure(ctx, &self.linear, LinearAxis::Horizontal, Some(self.height), minimum, constraints)
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
         let minimum = minimum_content_height(ctx.style(), ctx.atlas());
-        layout_linear(ctx, children, &mut self.linear, Orientation::Horizontal, Some(self.height), minimum, rect);
+        linear_layout::place(ctx, children, &mut self.linear, LinearAxis::Horizontal, Some(self.height), minimum, rect);
     }
 }
 
