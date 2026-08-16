@@ -5,19 +5,113 @@ decisions that keep measurement, parent-owned sizing, and exact allocation separ
 
 ## Goals
 
-- A constraint has an explicit bounded or unbounded state; zero is an ordinary bound.
-- Measurement reports content requirements. Allocation assigns an exact rectangle.
-- The parent is the only owner of a child's slot size.
-- Allocation never reapplies a sizing rule already resolved by the parent.
-- Row and Column use one linear algorithm with no container-specific branches in the runtime.
-- Grid uses the same track solver as linear layout.
-- Scrollbars are selected from child measurements and content is allocated once.
-- Empty Row, Column, and Grid containers have zero intrinsic size unless they contain explicit
-  fixed tracks.
-- Linear and Grid overflow is explicit and never changes sibling placement.
-- Representative `demo-full` geometry is preserved through exact automated assertions. Final
-  appearance comparison remains a manual release check.
-- Warm retained layout remains allocation-free.
+- [ ] **Represent finite and intrinsic measurement requests without sentinels.** A constraint must
+  say explicitly whether each axis is bounded or unbounded, and a bounded value of zero must remain
+  a real zero-pixel offer. Every measurement path, including composite widgets and scroll probes,
+  must preserve that distinction instead of repairing zero into one or interpreting a remembered
+  rectangle as an intrinsic request.
+
+- [ ] **Keep desired measurement separate from exact allocation.** Measurement reports the content
+  extent a widget would like under the supplied information; it does not silently accept all
+  available space unless an explicit policy says that occupying the bound is the desired behavior.
+  Placement is the later operation that receives an exact rectangle and commits descendant
+  geometry. Tests must exercise both phases so a correct measurement cannot hide an incorrect
+  allocation, or vice versa.
+
+- [ ] **Make the parent the sole owner of each child slot.** Main-axis tracks, grid spans, fixed
+  cross extents, and spacing are parent-child relationship data and must stay beside the container
+  that interprets them. `Node` must not acquire a fallback size policy, and the runtime must not
+  inspect concrete layout widget types to decide how much space a child receives.
+
+- [ ] **Resolve every sizing rule exactly once.** A container first resolves content, fixed, and
+  flexible relationships into exact extents and then passes rectangles containing those extents to
+  the runtime. Descendant allocation must not reapply the track rule, redistribute remainder, or
+  infer a second answer from the child's desired size. Overflow therefore remains attributable to
+  one parent decision.
+
+- [ ] **Use one concrete retained widget for all one-dimensional layout.** Horizontal and vertical
+  sequences must be configurations of a public `Linear` widget rather than separate `Row` and
+  `Column` widget types forwarding to private `LinearState`. The concrete object must directly own
+  its weak topology capability, index-matched item specifications, direction, cross-axis behavior,
+  and reusable placement scratch. Horizontal and vertical names may remain constructor vocabulary,
+  but they must not create different runtime state types or typed-handle APIs.
+
+- [ ] **Express direction and cross-axis behavior without orientation-specific special cases.** A
+  linear direction must identify both its axis and its leading edge, so left-to-right,
+  right-to-left, top-to-bottom, and bottom-to-top placement use one model. Cross sizing must use a
+  shared vocabulary for content sizing, stretching to the assigned allocation, and an exact fixed
+  extent. The old Row-only height type and Column-only reverse flag must disappear rather than be
+  carried as optional arguments through the shared solver.
+
+- [ ] **Use the same deterministic track solver for Linear and Grid.** Both containers must reserve
+  content, fixed extents, and non-negative gaps before dividing bounded remainder among valid flex
+  tracks. Invalid flex weights receive no share, rounding gives indivisible pixels to earlier
+  tracks, and unbounded flex behaves as content. The common arithmetic must remain independently
+  testable instead of being duplicated inside either container.
+
+- [ ] **Select scrollbars from measurements and allocate content once.** `ScrollArea` may evaluate
+  the finite set of candidate viewport states, but candidate evaluation must remain measurement
+  only. Once scrollbar visibility converges, the surface, bars, and application content receive one
+  committed set of rectangles. Linear unification must not introduce a special runtime hook for
+  scrolling or cause speculative child placement.
+
+- [ ] **Give empty generic containers zero intrinsic size.** An empty `Linear` or `Grid` contributes
+  no content merely because style contains padding, a font height, or a historical default cell
+  size. Explicit fixed tracks may still contribute their stated extents when the container model can
+  represent a track without a child; otherwise size must arise from actual retained content.
+
+- [ ] **Expose overflow without perturbing sibling placement.** Content and fixed tracks retain
+  their resolved size when they exceed a bound, while flexible tracks collapse to the remaining
+  non-negative space. A child's overflow may enlarge reported content bounds, but it must never
+  move a later sibling backward, cause implicit overlap, or rewrite the exact slot already assigned
+  by the parent.
+
+- [ ] **Preserve representative committed geometry during the type unification.** Exact regressions
+  must continue to cover the `demo-full` button row, calculator display/keypad split, log region,
+  and weighted Grid example. The API migration is allowed to break source compatibility, but a new
+  type name is not permission to change visibly correct placement. Final visual comparison remains
+  a manual release check because raster output is outside the retained layout contract.
+
+- [ ] **Keep warm retained layout allocation-free.** Mutable placement may retain vectors used for
+  resolved track extents and Grid occupancy, and repeated layout must reuse their capacity.
+  Immutable measurement must continue using scalar replay because `ContainerWidget::measure`
+  receives `&self`. The final validation must run the allocation regression after all call sites use
+  `Linear`, proving that removing the forwarding widgets did not trade type simplicity for per-frame
+  heap work.
+
+### Linear unification execution checklist
+
+- [ ] **Define the public model before migrating consumers.** Add `LinearDirection`,
+  `LinearCrossSize`, and one construction parameter type with documented defaults for horizontal
+  and vertical sequences. Direction owns reversal for both axes. Cross sizing owns whether the
+  shared line uses desired content, the exact assigned cross extent, or a fixed value. This step is
+  complete only when each public constructor and mutator explains normalization, ownership, and
+  measurement invalidation in both API documentation and implementation comments.
+
+- [ ] **Promote retained state into the concrete widget.** Rename and expand `LinearState` into the
+  `Linear` object stored behind `ContainerWidget`. Move creation, topology mutation, measurement,
+  placement, and the inert `Widget` surface onto that object. Remove orientation and Row-height
+  parameters from private layout calls; those decisions must be read from the concrete object so
+  invalid combinations cannot be assembled by an internal caller.
+
+- [ ] **Migrate every typed handle and construction site.** Built-ins, examples, window-manager
+  fixtures, integration tests, and public exports must use `TypedWidgetHandle<Linear>` and the new
+  parameter vocabulary. Disclosure's private body and FileDialog's mutable lists are important
+  acceptance cases because they exercise topology mutation through a retained typed handle, not
+  merely one-shot construction. Migration is incomplete while any production or test source names
+  the removed Row/Column types.
+
+- [ ] **Delete the obsolete façade surface.** Remove the Row and Column modules, their parameter
+  types, `RowHeight`, old exports, and documentation that describes two concrete linear widgets.
+  Search the complete repository, excluding build artifacts, for obsolete identifiers and repair
+  conceptual prose as well as code. No compatibility aliases are retained: a successful build must
+  prove that all consumers genuinely use the new model.
+
+- [ ] **Validate behavior, documentation, and warm-state properties.** Run formatting, all-target
+  checking, API documentation, all-target tests, feature-gated example checks, and the repository's
+  allocation regression. Record exact results in this document only after they have run. Any
+  geometry expectation changed solely to make a test pass must be explained against the desired
+  contract; otherwise the old committed rectangles remain the acceptance baseline.
 
 ## Non-goals
 
