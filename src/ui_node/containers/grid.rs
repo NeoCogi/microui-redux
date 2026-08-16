@@ -31,13 +31,13 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::ui_node::children::ChildrenHandle;
-use crate::ui_node::sizing::SizePolicy;
 use crate::{
-    AtlasHandle, Container, ContainerWidget, Dimensioni, MeasureCtx, Recti, Style, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx,
-    WidgetParameters, WidgetUpdateCtx,
+    AvailableSpace, Container, ContainerWidget, Dimensioni, MeasureCtx, Recti, TrackSize, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption,
+    WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
-use super::{Axis, Children, ContainerLayoutCtx, Node};
+use super::tracks::TrackResolver;
+use super::{Children, ContainerLayoutCtx, Node};
 
 /// Validated placement extent for one child owned by a [`Grid`].
 ///
@@ -291,8 +291,8 @@ impl GridItems {
 pub struct GridParameters {
     children: Children,
     items: GridItems,
-    column_tracks: Vec<SizePolicy>,
-    row_tracks: Vec<SizePolicy>,
+    column_tracks: Vec<TrackSize>,
+    row_tracks: Vec<TrackSize>,
 }
 
 impl WidgetParameters for GridParameters {}
@@ -303,8 +303,8 @@ impl GridParameters {
     /// Plain [`Node`] values convert to one-cell items through [`From<Node>`]; callers only need
     /// [`GridItem`] where a non-default span is meaningful.
     pub fn new<T>(
-        column_tracks: impl IntoIterator<Item = SizePolicy>,
-        row_tracks: impl IntoIterator<Item = SizePolicy>,
+        column_tracks: impl IntoIterator<Item = TrackSize>,
+        row_tracks: impl IntoIterator<Item = TrackSize>,
         items: impl IntoIterator<Item = T>,
     ) -> Self
     where
@@ -331,8 +331,8 @@ pub struct Grid {
     /// Weak topology access coordinated with Grid-owned edge metadata below.
     children: ChildrenHandle,
     items: GridItems,
-    column_tracks: Vec<SizePolicy>,
-    row_tracks: Vec<SizePolicy>,
+    column_tracks: Vec<TrackSize>,
+    row_tracks: Vec<TrackSize>,
     /// Bound-dependent track extents reused only by the mutable layout phase.
     layout: GridLayout,
 }
@@ -396,23 +396,23 @@ impl Grid {
     }
 
     /// Returns the column track policies.
-    pub fn column_tracks(&self) -> &[SizePolicy] {
+    pub fn column_tracks(&self) -> &[TrackSize] {
         &self.column_tracks
     }
 
     /// Replaces the column track policies without changing child ownership.
-    pub fn set_column_tracks(&mut self, tracks: impl IntoIterator<Item = SizePolicy>) {
+    pub fn set_column_tracks(&mut self, tracks: impl IntoIterator<Item = TrackSize>) {
         self.column_tracks = tracks.into_iter().collect();
         self.items.set_columns(self.column_tracks.len());
     }
 
     /// Returns the row track policies.
-    pub fn row_tracks(&self) -> &[SizePolicy] {
+    pub fn row_tracks(&self) -> &[TrackSize] {
         &self.row_tracks
     }
 
     /// Replaces the row track policies without changing child ownership.
-    pub fn set_row_tracks(&mut self, tracks: impl IntoIterator<Item = SizePolicy>) {
+    pub fn set_row_tracks(&mut self, tracks: impl IntoIterator<Item = TrackSize>) {
         self.row_tracks = tracks.into_iter().collect();
     }
 
@@ -447,23 +447,13 @@ struct GridLayout {
 
 /// Shared child-measurement surface used by Grid's immutable and placement-time solvers.
 trait GridMeasureCtx {
-    fn style(&self) -> &Style;
-    fn atlas(&self) -> &AtlasHandle;
-    fn child_policy(&self, index: usize) -> Option<crate::Policy>;
+    fn spacing(&self) -> i32;
     fn measure_child(&mut self, index: usize, constraints: crate::Constraints) -> Option<Dimensioni>;
 }
 
 impl GridMeasureCtx for MeasureCtx<'_> {
-    fn style(&self) -> &Style {
-        MeasureCtx::style(self)
-    }
-
-    fn atlas(&self) -> &AtlasHandle {
-        MeasureCtx::atlas(self)
-    }
-
-    fn child_policy(&self, index: usize) -> Option<crate::Policy> {
-        MeasureCtx::child_policy(self, index)
+    fn spacing(&self) -> i32 {
+        self.style().spacing.max(0)
     }
 
     fn measure_child(&mut self, index: usize, constraints: crate::Constraints) -> Option<Dimensioni> {
@@ -477,16 +467,8 @@ struct GridLayoutMeasureCtx<'a, 'runtime> {
 }
 
 impl GridMeasureCtx for GridLayoutMeasureCtx<'_, '_> {
-    fn style(&self) -> &Style {
-        self.ctx.style()
-    }
-
-    fn atlas(&self) -> &AtlasHandle {
-        self.ctx.atlas()
-    }
-
-    fn child_policy(&self, index: usize) -> Option<crate::Policy> {
-        self.ctx.child_policy(self.children, index)
+    fn spacing(&self) -> i32 {
+        self.ctx.style().spacing.max(0)
     }
 
     fn measure_child(&mut self, index: usize, constraints: crate::Constraints) -> Option<Dimensioni> {
@@ -496,7 +478,7 @@ impl GridMeasureCtx for GridLayoutMeasureCtx<'_, '_> {
 
 impl ContainerWidget for Grid {
     fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: crate::Constraints) -> Dimensioni {
-        grid_size(ctx, self, constraints.legacy_size())
+        grid_size(ctx, self, constraints)
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
@@ -524,11 +506,9 @@ impl Widget for Grid {
 /// bound and therefore affects the preferred height contributed to row tracks.
 fn layout_grid(state: &Grid, children: &mut Children, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti, layout: &mut GridLayout) {
     let spacing = ctx.style().spacing.max(0);
-    let (columns, rows) = grid_dimensions(state);
-
     // Resolve and retain each column width once for both row measurement and final placement.
-    let available_width = available_tracks(rect.width, columns, spacing);
-    let available_height = available_tracks(rect.height, rows, spacing);
+    let available_width = AvailableSpace::bounded(rect.width);
+    let available_height = AvailableSpace::bounded(rect.height);
     {
         let mut measure = GridLayoutMeasureCtx { ctx, children };
         resolve_columns_into(&mut measure, state, available_width, &mut layout.columns);
@@ -544,7 +524,7 @@ fn layout_grid(state: &Grid, children: &mut Children, ctx: &mut ContainerLayoutC
         let y = rect.y.saturating_add(track_offset(&layout.rows, placement.row, spacing));
         let width = track_span(&layout.columns, placement.column, placement.column_span, spacing);
         let height = track_span(&layout.rows, placement.row, placement.row_span, spacing);
-        let _ = ctx.layout_child(children, placement.child_index, Recti::new(x, y, width, height));
+        let _ = ctx.layout_child_allocated(children, placement.child_index, Recti::new(x, y, width, height));
     }
 }
 
@@ -552,19 +532,17 @@ fn layout_grid(state: &Grid, children: &mut Children, ctx: &mut ContainerLayoutC
 ///
 /// The pure measurement path resolves scalar column spans on demand when measuring row content.
 /// This costs recomputation but preserves `Widget::measure(&self)` and performs no allocation.
-fn grid_size(ctx: &mut MeasureCtx<'_>, state: &Grid, available: Dimensioni) -> Dimensioni {
+fn grid_size(ctx: &mut MeasureCtx<'_>, state: &Grid, constraints: crate::Constraints) -> Dimensioni {
     let spacing = ctx.style().spacing.max(0);
     let (columns, rows) = grid_dimensions(state);
-    let available_width = available_tracks(available.width, columns, spacing);
     // Column preferences depend only on intrinsic child widths and Grid column spans.
-    let width = measured_tracks(&state.column_tracks, columns, available_width, spacing, |index| {
+    let width = measured_tracks(&state.column_tracks, columns, constraints.width, spacing, |index| {
         preferred_column(ctx, state, index, spacing)
     });
-    let available_height = available_tracks(available.height, rows, spacing);
     // Row preferences additionally depend on each child's resolved column-span width.
-    let height = measured_tracks(&state.row_tracks, rows, available_height, spacing, |index| {
+    let height = measured_tracks(&state.row_tracks, rows, constraints.height, spacing, |index| {
         preferred_row(ctx, state, index, spacing, |ctx, placement| {
-            resolved_column_span(ctx, state, spacing, available_width, placement)
+            resolved_column_span(ctx, state, spacing, constraints.width, placement)
         })
     });
     Dimensioni::new(width, height)
@@ -588,25 +566,9 @@ fn grid_dimensions(state: &Grid) -> (usize, usize) {
     (columns, rows)
 }
 
-/// Removes inter-track spacing from a positive axis bound.
-///
-/// Zero remains the unbounded-measurement marker; a positive bound remains positive after inset.
-fn available_tracks(available: i32, count: usize, spacing: i32) -> i32 {
-    if available > 0 {
-        // gap_count = track_count - 1; spacing_total = spacing * gap_count.
-        let gap_count = count.saturating_sub(1) as i32;
-        let spacing_total = spacing.max(0).saturating_mul(gap_count);
-        // track_extent = max(available_extent - spacing_total, 1).
-        available.saturating_sub(spacing_total).max(1)
-    } else {
-        0
-    }
-}
-
-/// Computes one column's intrinsic minimum from its fallback and spanning children.
+/// Computes one column's intrinsic minimum from its explicit track and spanning children.
 fn preferred_column(ctx: &mut impl GridMeasureCtx, state: &Grid, index: usize, spacing: i32) -> i32 {
-    let fallback = super::default_cell_width(ctx.style());
-    let mut preferred = track_policy(&state.column_tracks, index).intrinsic_extent(fallback);
+    let mut preferred = fixed_track_extent(track(&state.column_tracks, index));
 
     // Only children whose spans cover this column can increase its minimum.
     for placement in state.items.placements.iter().copied() {
@@ -624,7 +586,6 @@ fn preferred_column(ctx: &mut impl GridMeasureCtx, state: &Grid, index: usize, s
             index,
             placement.column,
             placement.column_span,
-            fallback,
             spacing,
             minimum,
         ));
@@ -638,8 +599,7 @@ fn preferred_column(ctx: &mut impl GridMeasureCtx, state: &Grid, index: usize, s
 /// scalar resolver. Keeping that choice at the call site prevents this helper from knowing about
 /// caches, phases, or mutable container state.
 fn preferred_row<C: GridMeasureCtx>(ctx: &mut C, state: &Grid, index: usize, spacing: i32, mut child_width: impl FnMut(&mut C, GridPlacement) -> i32) -> i32 {
-    let fallback = super::default_cell_height(ctx.style(), ctx.atlas());
-    let mut preferred = track_policy(&state.row_tracks, index).intrinsic_extent(fallback);
+    let mut preferred = fixed_track_extent(track(&state.row_tracks, index));
     // Measure only children crossing this row, at the width of their complete column span.
     for placement in state.items.placements.iter().copied() {
         // row_end = first_row + row_span.
@@ -648,13 +608,11 @@ fn preferred_row<C: GridMeasureCtx>(ctx: &mut C, state: &Grid, index: usize, spa
             continue;
         }
         let width = child_width(ctx, placement);
-        let width = ctx
-            .child_policy(placement.child_index)
-            .unwrap_or_else(crate::Policy::auto)
-            .width
-            .measurement_bound(width);
         let minimum = ctx
-            .measure_child(placement.child_index, crate::Constraints::from_legacy_size(Dimensioni::new(width.max(1), 0)))
+            .measure_child(
+                placement.child_index,
+                crate::Constraints::new(AvailableSpace::bounded(width), AvailableSpace::Unbounded),
+            )
             .unwrap_or_default()
             .height;
         preferred = preferred.max(contribution_for_track(
@@ -662,7 +620,6 @@ fn preferred_row<C: GridMeasureCtx>(ctx: &mut C, state: &Grid, index: usize, spa
             index,
             placement.row,
             placement.row_span,
-            fallback,
             spacing,
             minimum,
         ));
@@ -676,10 +633,10 @@ fn preferred_row<C: GridMeasureCtx>(ctx: &mut C, state: &Grid, index: usize, spa
 /// non-fixed tracks; fixed tracks never grow to hide overflow. Integer remainders are assigned from
 /// left to right so the result is deterministic and, when a flexible track exists, the complete
 /// span covers the child minimum.
-fn contribution_for_track(policies: &[SizePolicy], index: usize, start: usize, span: usize, fallback: i32, spacing: i32, minimum: i32) -> i32 {
-    let policy = track_policy(policies, index);
-    let base = policy.intrinsic_extent(fallback);
-    if matches!(policy, SizePolicy::Fixed(_)) {
+fn contribution_for_track(tracks: &[TrackSize], index: usize, start: usize, span: usize, spacing: i32, minimum: i32) -> i32 {
+    let current_track = track(tracks, index);
+    let base = fixed_track_extent(current_track);
+    if matches!(current_track, TrackSize::Fixed(_)) {
         // Fixed is an explicit overflow boundary, not a minimum that content may enlarge.
         return base;
     }
@@ -692,12 +649,12 @@ fn contribution_for_track(policies: &[SizePolicy], index: usize, start: usize, s
     let mut initial = spacing.max(0).saturating_mul(span.saturating_sub(1) as i32);
     let mut flexible = 0_i32;
     let mut rank = 0_i32;
-    for track in start..end {
-        let track_policy = track_policy(policies, track);
+    for track_index in start..end {
+        let track_policy = track(tracks, track_index);
         // initial_coverage = previous_coverage + track_intrinsic_extent.
-        initial = initial.saturating_add(track_policy.intrinsic_extent(fallback));
-        if !matches!(track_policy, SizePolicy::Fixed(_)) {
-            if track < index {
+        initial = initial.saturating_add(fixed_track_extent(track_policy));
+        if !matches!(track_policy, TrackSize::Fixed(_)) {
+            if track_index < index {
                 rank += 1;
             }
             flexible += 1;
@@ -719,20 +676,19 @@ fn contribution_for_track(policies: &[SizePolicy], index: usize, start: usize, s
 ///
 /// No resolved-width vector is available in `measure(&self)`, so this function replays the scalar
 /// column allocator and accumulates only the requested span.
-fn resolved_column_span(ctx: &mut impl GridMeasureCtx, state: &Grid, spacing: i32, available_width: i32, placement: GridPlacement) -> i32 {
+fn resolved_column_span(ctx: &mut impl GridMeasureCtx, state: &Grid, spacing: i32, available_width: AvailableSpace, placement: GridPlacement) -> i32 {
     let columns = state.column_tracks.len().max(1);
-    let mut axis = Axis::new(
+    let mut resolver = TrackResolver::new(
         available_width,
-        (0..columns).map(|index| (track_policy(&state.column_tracks, index), preferred_column(ctx, state, index, spacing))),
+        spacing,
+        columns,
+        (0..columns).map(|index| (track(&state.column_tracks, index), preferred_column(ctx, state, index, spacing))),
     );
     let mut width = 0_i32;
-    // All preceding columns must be replayed because Remainder depends on ordered consumption.
     // placement_end = first_column + column_span.
     let placement_end = placement.column.saturating_add(placement.column_span);
     for index in 0..columns {
-        let size = axis
-            .next(track_policy(&state.column_tracks, index), preferred_column(ctx, state, index, spacing))
-            .advance;
+        let size = resolver.next(track(&state.column_tracks, index), preferred_column(ctx, state, index, spacing));
         if index >= placement.column && index < placement_end {
             // span_width = previous_span_width + resolved_track_width.
             width = width.saturating_add(size);
@@ -746,61 +702,49 @@ fn resolved_column_span(ctx: &mut impl GridMeasureCtx, state: &Grid, spacing: i3
 }
 
 /// Fills the layout-phase column buffer with resolved widths.
-fn resolve_columns_into(ctx: &mut impl GridMeasureCtx, state: &Grid, available_width: i32, columns: &mut Vec<i32>) {
+fn resolve_columns_into(ctx: &mut impl GridMeasureCtx, state: &Grid, available_width: AvailableSpace, columns: &mut Vec<i32>) {
     let count = state.column_tracks.len().max(1);
-    let spacing = ctx.style().spacing.max(0);
+    let spacing = ctx.spacing();
     columns.clear();
     columns.extend((0..count).map(|index| preferred_column(ctx, state, index, spacing)));
-    resolve_tracks(&state.column_tracks, available_width, columns);
+    super::tracks::resolve_tracks(available_width, spacing, &state.column_tracks, columns);
 }
 
 /// Fills the layout-phase row buffer using already resolved column widths.
-fn resolve_rows_into(ctx: &mut impl GridMeasureCtx, state: &Grid, available_height: i32, columns: &[i32], rows: &mut Vec<i32>) {
+fn resolve_rows_into(ctx: &mut impl GridMeasureCtx, state: &Grid, available_height: AvailableSpace, columns: &[i32], rows: &mut Vec<i32>) {
     let (_, count) = grid_dimensions(state);
-    let spacing = ctx.style().spacing.max(0);
+    let spacing = ctx.spacing();
     rows.clear();
     rows.extend((0..count).map(|index| {
         preferred_row(ctx, state, index, spacing, |_ctx, placement| {
             track_span(columns, placement.column, placement.column_span, spacing)
         })
     }));
-    resolve_tracks(&state.row_tracks, available_height, rows);
+    super::tracks::resolve_tracks(available_height, spacing, &state.row_tracks, rows);
 }
 
 /// Measures one complete track axis through the allocation rules shared with layout.
 ///
 /// Unbounded axes can return the intrinsic summary directly. Bounded axes replay preferences in
 /// order because `Remainder` depends on the pixels consumed by earlier tracks.
-fn measured_tracks(policies: &[SizePolicy], count: usize, available: i32, spacing: i32, mut preferred: impl FnMut(usize) -> i32) -> i32 {
-    let mut axis = Axis::new(available, (0..count).map(|index| (track_policy(policies, index), preferred(index))));
-    if available == 0 {
-        return axis.intrinsic_extent(count, spacing);
-    }
+fn measured_tracks(tracks: &[TrackSize], count: usize, available: AvailableSpace, spacing: i32, mut preferred: impl FnMut(usize) -> i32) -> i32 {
+    let mut resolver = TrackResolver::new(available, spacing, count, (0..count).map(|index| (track(tracks, index), preferred(index))));
     for index in 0..count {
-        axis.next(track_policy(policies, index), preferred(index));
+        resolver.next(track(tracks, index), preferred(index));
     }
-    axis.extent(count, spacing)
+    resolver.extent()
 }
 
-/// Replaces preferred extents in a layout buffer with their resolved track extents.
-fn resolve_tracks(policies: &[SizePolicy], available: i32, sizes: &mut [i32]) {
-    // Axis construction reads the complete immutable preference slice before in-place replacement.
-    let mut axis = Axis::new(
-        available,
-        sizes
-            .iter()
-            .copied()
-            .enumerate()
-            .map(|(index, preferred)| (track_policy(policies, index), preferred)),
-    );
-    for (index, size) in sizes.iter_mut().enumerate() {
-        *size = axis.next(track_policy(policies, index), *size).advance;
-    }
+/// Returns an explicit track or `Content` for an implicit track.
+fn track(tracks: &[TrackSize], index: usize) -> TrackSize {
+    tracks.get(index).copied().unwrap_or(TrackSize::Content)
 }
 
-/// Returns an explicit track policy or `Auto` for an implicit track.
-fn track_policy(policies: &[SizePolicy], index: usize) -> SizePolicy {
-    policies.get(index).copied().unwrap_or(SizePolicy::Auto)
+fn fixed_track_extent(track: TrackSize) -> i32 {
+    match track {
+        TrackSize::Fixed(extent) => extent.max(0),
+        TrackSize::Content | TrackSize::Flex(_) => 0,
+    }
 }
 
 /// Sums a resolved track span including only the gaps internal to that span.
@@ -917,7 +861,7 @@ fn mark_grid_occupied(occupied: &mut Vec<bool>, columns: usize, row: usize, colu
 mod tests {
     use super::*;
     use crate::test_support::test_atlas;
-    use crate::TypedWidgetHandle;
+    use crate::{Style, TypedWidgetHandle};
 
     fn text_node(label: &str) -> (TypedWidgetHandle<crate::TextBlock>, Node) {
         crate::TextBlock::create(crate::TextBlockParameters::new(label))
@@ -978,14 +922,14 @@ mod tests {
     #[test]
     fn grid_widget_mutates_placement_and_tracks_without_replacing_children() {
         let (child_state, child) = text_node("stable");
-        let (grid_state, grid_node) = Grid::create(GridParameters::new([SizePolicy::Fixed(20)], [SizePolicy::Fixed(10)], [child]));
+        let (grid_state, grid_node) = Grid::create(GridParameters::new([TrackSize::Fixed(20)], [TrackSize::Fixed(10)], [child]));
 
         grid_state
             .try_update(|state| {
                 assert!(state.set_span(0, GridSpan::new(2, 3)));
                 assert!(!state.set_span(1, GridSpan::ONE));
-                state.set_column_tracks([SizePolicy::Fixed(20), SizePolicy::Remainder(0)]);
-                state.set_row_tracks([SizePolicy::Fixed(10), SizePolicy::Fixed(15)]);
+                state.set_column_tracks([TrackSize::Fixed(20), TrackSize::Flex(1.0)]);
+                state.set_row_tracks([TrackSize::Fixed(10), TrackSize::Fixed(15)]);
             })
             .expect("Grid state must be available before runtime traversal");
 
@@ -993,8 +937,8 @@ mod tests {
             .try_read(|state| (state.span(0), state.column_tracks().to_vec(), state.row_tracks().to_vec()))
             .expect("Grid state must remain owned by its runtime");
         assert_eq!(span, Some(GridSpan::new(2, 3)));
-        assert_eq!(columns, [SizePolicy::Fixed(20), SizePolicy::Remainder(0)]);
-        assert_eq!(rows, [SizePolicy::Fixed(10), SizePolicy::Fixed(15)]);
+        assert_eq!(columns, [TrackSize::Fixed(20), TrackSize::Flex(1.0)]);
+        assert_eq!(rows, [TrackSize::Fixed(10), TrackSize::Fixed(15)]);
         assert!(child_state.is_alive());
 
         drop(grid_node);
@@ -1072,34 +1016,34 @@ mod tests {
             default_cell_width: 0,
             ..Style::default()
         };
-        let columns = [SizePolicy::Fixed(10), SizePolicy::Auto, SizePolicy::Weight(1.0)];
-        assert_eq!(contribution_for_track(&columns, 0, 0, 3, 0, style.spacing, 70), 10);
-        assert_eq!(contribution_for_track(&columns, 1, 0, 3, 0, style.spacing, 70), 28);
-        assert_eq!(contribution_for_track(&columns, 2, 0, 3, 0, style.spacing, 70), 28);
-        let rows = [SizePolicy::Fixed(8), SizePolicy::Auto];
-        assert_eq!(contribution_for_track(&rows, 0, 0, 2, 0, style.spacing, 40), 8);
-        assert_eq!(contribution_for_track(&rows, 1, 0, 2, 0, style.spacing, 40), 30);
+        let columns = [TrackSize::Fixed(10), TrackSize::Content, TrackSize::Flex(1.0)];
+        assert_eq!(contribution_for_track(&columns, 0, 0, 3, style.spacing, 70), 10);
+        assert_eq!(contribution_for_track(&columns, 1, 0, 3, style.spacing, 70), 28);
+        assert_eq!(contribution_for_track(&columns, 2, 0, 3, style.spacing, 70), 28);
+        let rows = [TrackSize::Fixed(8), TrackSize::Content];
+        assert_eq!(contribution_for_track(&rows, 0, 0, 2, style.spacing, 40), 8);
+        assert_eq!(contribution_for_track(&rows, 1, 0, 2, style.spacing, 40), 30);
 
         let mut children = Children::new();
         let topology = Rc::new(RefCell::new(Children::new()));
         let empty = Grid {
             children: ChildrenHandle::new(&topology),
             items: GridItems::default(),
-            column_tracks: vec![SizePolicy::Fixed(10), SizePolicy::Auto],
-            row_tracks: vec![SizePolicy::Fixed(8), SizePolicy::Auto],
+            column_tracks: vec![TrackSize::Fixed(10), TrackSize::Content],
+            row_tracks: vec![TrackSize::Fixed(8), TrackSize::Content],
             layout: GridLayout::default(),
         };
         let atlas = test_atlas();
         let mut ctx = MeasureCtx::new(&style, &atlas, &mut children);
-        let measured = grid_size(&mut ctx, &empty, Dimensioni::default());
+        let measured = grid_size(&mut ctx, &empty, crate::Constraints::unbounded());
         assert_eq!(measured.width, 12);
-        assert_eq!(measured.height, 20);
+        assert_eq!(measured.height, 10);
     }
 
     #[test]
     fn grid_fixed_span_tracks_do_not_grow_to_hide_child_overflow() {
-        let tracks = [SizePolicy::Fixed(10), SizePolicy::Fixed(12)];
-        assert_eq!(contribution_for_track(&tracks, 0, 0, 2, 0, 2, 50), 10);
-        assert_eq!(contribution_for_track(&tracks, 1, 0, 2, 0, 2, 50), 12);
+        let tracks = [TrackSize::Fixed(10), TrackSize::Fixed(12)];
+        assert_eq!(contribution_for_track(&tracks, 0, 0, 2, 2, 50), 10);
+        assert_eq!(contribution_for_track(&tracks, 1, 0, 2, 2, 50), 12);
     }
 }

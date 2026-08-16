@@ -33,22 +33,20 @@
 use super::container::ContainerLayoutCtx;
 use super::{Children, Node};
 
-mod axis;
 mod column;
 mod disclosure;
 mod grid;
+mod linear;
 mod row;
 mod scroll_area;
-mod stack;
 mod track_metrics;
 mod tracks;
 
-use axis::Axis;
-use track_metrics::{default_cell_height, default_cell_width};
+use track_metrics::default_cell_height;
 
 pub use column::{Column, ColumnParameters};
 pub use disclosure::{Disclosure, DisclosureParameters};
 pub use grid::{Grid, GridItem, GridParameters, GridSpan};
+pub use linear::LinearItem;
 pub use row::{Row, RowParameters};
 pub use scroll_area::{ScrollArea, ScrollAreaOption, ScrollAreaParameters};
-pub use stack::{Stack, StackDirection, StackParameters};

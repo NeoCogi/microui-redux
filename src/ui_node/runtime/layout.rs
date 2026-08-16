@@ -66,7 +66,7 @@ impl UiRuntime {
     }
 
     /// Lays out a node whose parent/root flow has already resolved its size policy.
-    pub(super) fn layout_allocated_node_ref(&mut self, node: &mut Node, style: &Style, atlas: &crate::AtlasHandle, rect: Recti) -> Dimensioni {
+    pub(in crate::ui_node) fn layout_allocated_node_ref(&mut self, node: &mut Node, style: &Style, atlas: &crate::AtlasHandle, rect: Recti) -> Dimensioni {
         let framed = node_is_framed(node);
         // Preserve the established measure/layout phase contract while keeping the resolved root
         // allocation authoritative.

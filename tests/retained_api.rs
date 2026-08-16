@@ -35,8 +35,7 @@ use microui_redux::retained::*;
 use microui_redux::prelude::{Dimensioni, FileDialogRequest, FileDialogStatus, Recti};
 use microui_redux::{
     color, rect, AtlasHandle, AtlasSource, Column, ColumnParameters, Constraints, Context, Disclosure, DisclosureParameters, FontEntry, Grid, GridParameters,
-    Policy, RootMutationError, Row, RowParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SizePolicy, SourceFormat, Stack, StackDirection,
-    StackParameters, Style, TextureId,
+    Policy, RootMutationError, Row, RowParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SourceFormat, Style, TextureId,
 };
 
 struct TestBackend {
@@ -105,19 +104,17 @@ fn downstream_file_dialog_session_is_polled_and_cancelled_without_widget_access(
 
 #[test]
 fn every_builtin_container_returns_a_typed_handle_and_completed_node() {
-    let (row, row_node) = Row::create(RowParameters::new([], SizePolicy::Auto, []));
+    let (row, row_node) = Row::create(RowParameters::default());
     let (grid, grid_node) = Grid::create(GridParameters::new([], [], std::iter::empty::<Node>()));
-    let (stack, stack_node) = Stack::create(StackParameters::new(SizePolicy::Auto, SizePolicy::Auto, StackDirection::TopToBottom, []));
-    let (_, scroll_content) = Column::create(ColumnParameters::new([]));
+    let (_, scroll_content) = Column::create(ColumnParameters::default());
     let (scroll, scroll_node) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, scroll_content));
-    let (column, column_node) = Column::create(ColumnParameters::new([row_node, grid_node, stack_node, scroll_node]));
+    let (column, column_node) = Column::create(ColumnParameters::new([row_node, grid_node, scroll_node]));
     let (disclosure, root_node) = Disclosure::create(DisclosureParameters::header("group", true, [column_node]));
 
     assert_eq!(row.try_read(|state| state.len()), Some(Some(0)));
     assert_eq!(grid.try_read(|state| state.len()), Some(Some(0)));
-    assert_eq!(stack.try_read(|state| state.len()), Some(Some(0)));
     assert!(scroll.is_alive());
-    assert_eq!(column.try_read(|state| state.len()), Some(Some(4)));
+    assert_eq!(column.try_read(|state| state.len()), Some(Some(3)));
     assert_eq!(disclosure.try_read(|state| state.len()), Some(Some(1)));
     drop(root_node);
     assert!(!row.is_alive());

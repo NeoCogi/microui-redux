@@ -163,7 +163,7 @@ impl Default for ChildLayout {
     }
 }
 
-/// Stack-only transform derived while walking the node tree.
+/// Composed translation and clip derived while walking the node tree.
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct Transform {
     /// Translation from the current content coordinate space to screen coordinates.

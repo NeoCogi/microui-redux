@@ -64,8 +64,9 @@ impl ChildrenHandle {
 
     /// Runs a crate-internal atomic metadata/topology update while preserving `input` on failure.
     pub(crate) fn try_update_with<I, R>(&self, input: I, f: impl FnOnce(&mut Children, I) -> R) -> Result<R, I> {
-        // Grid uses this scoped operation to update child ownership and its index-matched spans
-        // under one state closure. The collection borrow never escapes into public application code.
+        // Built-in containers use this scoped operation to update child ownership and their
+        // index-matched edge metadata under one state closure. The collection borrow never escapes
+        // into public application code.
         let Some(owner) = self.cell.upgrade() else {
             return Err(input);
         };
@@ -91,6 +92,7 @@ impl ChildrenHandle {
     }
 
     /// Appends an unmounted node or returns it unchanged when mutation is unavailable.
+    #[cfg(test)]
     pub(crate) fn try_push(&self, node: Node) -> Result<(), Node> {
         // Upgrade and borrow before consuming the node so failure preserves its unique ownership.
         let Some(owner) = self.cell.upgrade() else {
@@ -103,29 +105,8 @@ impl ChildrenHandle {
         Ok(())
     }
 
-    /// Inserts an unmounted node or returns it unchanged on conflict, expiry, or invalid index.
-    pub(crate) fn try_insert(&self, index: usize, node: Node) -> Result<(), Node> {
-        // Both capability failure and an out-of-range index have the same lossless recovery value,
-        // allowing callers to retry without manufacturing another node.
-        let Some(owner) = self.cell.upgrade() else {
-            return Err(node);
-        };
-        let Ok(mut children) = owner.try_borrow_mut() else {
-            return Err(node);
-        };
-        children.insert(index, node)
-    }
-
-    /// Drops one indexed owner, returning `None` when mutation is unavailable.
-    pub(crate) fn try_remove_drop(&self, index: usize) -> Option<bool> {
-        // The boolean distinguishes a missing index from capability failure represented by `None`.
-        let owner = self.cell.upgrade()?;
-        let mut children = owner.try_borrow_mut().ok()?;
-        // Removal is deliberately destructive: attached nodes are never returned for reparenting.
-        Some(children.remove_drop(index))
-    }
-
     /// Drops every child, returning `None` when mutation is unavailable.
+    #[cfg(test)]
     pub(crate) fn try_clear(&self) -> Option<()> {
         // Clearing keeps the collection allocation and weak-handle identity stable.
         let owner = self.cell.upgrade()?;
@@ -135,6 +116,7 @@ impl ChildrenHandle {
     }
 
     /// Replaces every child or returns the unconsumed iterator when mutation is unavailable.
+    #[cfg(test)]
     pub(crate) fn try_replace<I>(&self, nodes: I) -> Result<(), I>
     where
         I: IntoIterator<Item = Node>,
@@ -211,6 +193,7 @@ impl Children {
     }
 
     /// Replaces all children in iterator order, dropping the previous owners.
+    #[cfg(test)]
     pub(crate) fn replace(&mut self, nodes: impl IntoIterator<Item = Node>) {
         // Collect the replacement sequence once, then drop the previous vector and its subtrees.
         let nodes: Vec<_> = nodes.into_iter().collect();

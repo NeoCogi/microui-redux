@@ -33,9 +33,9 @@ use super::*;
 use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, test_atlas};
 use crate::{
     color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Column, ColumnParameters, Custom, CustomParameters,
-    Constraints, Context, Dimensioni, Disclosure, DisclosureParameters, Grid, GridParameters, KeyMode, MouseButton, Node, Policy, Row, RowParameters,
-    ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, SizePolicy, Stack, StackDirection, StackParameters, Style, Textbox,
-    TextboxChanged, TextBlock, TextBlockParameters, TextboxParameters, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
+    Constraints, Context, Dimensioni, Disclosure, DisclosureParameters, Grid, GridParameters, KeyMode, LinearItem, MouseButton, Node, Policy, Row,
+    RowParameters, ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Style, Textbox, TextboxChanged, TextBlock,
+    TextBlockParameters, TextboxParameters, TrackSize, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
 };
 use crate::render::{FrameInfo, RenderError};
 use std::{
@@ -274,7 +274,10 @@ impl Widget for TopologyMutator {
             .expect("outer container handle must be installed before traversal")
             .clone();
         let same_container_blocked = same_container.try_update(|state| state.remove_drop(usize::MAX)).flatten().is_none();
-        let other_container_changed = match self.other_container.try_update_with(candidate, |state, node| state.push(node)) {
+        let other_container_changed = match self
+            .other_container
+            .try_update_with(candidate, |state, node| state.push(node).map_err(crate::LinearItem::into_node))
+        {
             Ok(Ok(())) => true,
             Ok(Err(candidate)) | Err(candidate) => {
                 self.candidate = Some(candidate);
@@ -519,10 +522,12 @@ fn collapsed_disclosure_skips_descendant_phases_and_drops_targets_only_on_remova
 fn nested_scroll_bubbles_at_the_inner_boundary_and_moves_only_the_outer_area() {
     let inner_content = Node::widget(Custom::create(CustomParameters::new("inner content"))).with_policy(Policy::fixed(50, 180));
     let (inner, inner_node) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, inner_content));
-    let inner_node = inner_node.with_policy(Policy::fixed(60, 60));
     let inner_id = inner_node.id();
-    let outer_tail = Node::widget(Custom::create(CustomParameters::new("outer tail"))).with_policy(Policy::fixed(60, 120));
-    let (_, outer_content) = Column::create(ColumnParameters::new([inner_node, outer_tail]));
+    let outer_tail = Node::widget(Custom::create(CustomParameters::new("outer tail")));
+    let (_, outer_content) = Column::create(ColumnParameters::new([
+        LinearItem::fixed(inner_node, 60).with_fixed_cross(60),
+        LinearItem::fixed(outer_tail, 120).with_fixed_cross(60),
+    ]));
     let (outer, content) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, outer_content));
 
     let mut ctx = context();
@@ -753,9 +758,8 @@ fn widget_handle_events_invoke_state_methods_without_polling() {
     let second_submitted = second_widget.submitted();
     let second_id = second.id();
     let (_, content) = Row::create(RowParameters::new(
-        [SizePolicy::Fixed(60), SizePolicy::Fixed(60)],
-        SizePolicy::Auto,
-        [first, second],
+        TrackSize::Content,
+        [LinearItem::fixed(first, 60), LinearItem::fixed(second, 60)],
     ));
     let mut ctx: Context<NoopRenderer, Model> = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, Dimensioni::new(320, 240));
     let root = ctx.create_window("signal", rect(0, 0, 140, 100), content);
@@ -1042,14 +1046,9 @@ fn layout_only_update_and_paint_have_separate_phase_counts() {
 #[test]
 fn warmed_container_measurement_and_layout_allocate_nothing() {
     let child = |name| Node::widget(Custom::create(CustomParameters::new(name)));
-    let (_, row) = Row::create(RowParameters::new([SizePolicy::Weight(1.0)], SizePolicy::Auto, [child("row")]));
-    let (_, grid) = Grid::create(GridParameters::new([SizePolicy::Weight(1.0)], [SizePolicy::Auto], [child("grid")]));
-    let (_, stack) = Stack::create(StackParameters::new(
-        SizePolicy::Remainder(0),
-        SizePolicy::Fixed(20),
-        StackDirection::TopToBottom,
-        [child("stack")],
-    ));
+    let (_, row) = Row::create(RowParameters::new(TrackSize::Content, [LinearItem::flex(child("row"), 1.0)]));
+    let (_, grid) = Grid::create(GridParameters::new([TrackSize::Flex(1.0)], [TrackSize::Content], [child("grid")]));
+    let (_, stack) = Column::create(ColumnParameters::new([LinearItem::fixed(child("stack"), 20)]));
     let (_, disclosure) = Disclosure::create(DisclosureParameters::header("expanded", true, [child("disclosure")]));
     let (_, scroll) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child("scroll")));
     let (_, content) = Column::create(ColumnParameters::new([row, grid, stack, disclosure, scroll]));
@@ -1530,7 +1529,7 @@ fn chrome_geometry_exposes_one_body_and_auto_size_tracks_content() {
 }
 
 #[test]
-fn auto_height_preserves_popup_width_and_stretches_stack_items() {
+fn auto_height_preserves_popup_width_and_stretches_column_items() {
     let mut item_ids = Vec::new();
     let items = ["Apple", "Banana", "Cherry", "Date"]
         .into_iter()
@@ -1540,12 +1539,7 @@ fn auto_height_preserves_popup_width_and_stretches_stack_items() {
             node
         })
         .collect::<Vec<_>>();
-    let (_, content) = Stack::create(StackParameters::new(
-        SizePolicy::Remainder(0),
-        SizePolicy::Auto,
-        StackDirection::TopToBottom,
-        items,
-    ));
+    let (_, content) = Column::create(ColumnParameters::new(items));
     let mut ctx = context();
     let root = ctx.create_popup("combo", content);
     let anchor = rect(20, 30, 180, 1);
@@ -1623,39 +1617,32 @@ fn auto_size_ignores_the_previous_rect_for_flexible_row_grid_and_stack_tracks() 
         .map(|index| Node::widget(Custom::create(CustomParameters::new(format!("row {index}")))))
         .collect::<Vec<_>>();
     let (_, row) = Row::create(RowParameters::new(
-        [
-            SizePolicy::Fixed(18),
-            SizePolicy::Auto,
-            SizePolicy::Fraction(0.5),
-            SizePolicy::Weight(1.0),
-            SizePolicy::Remainder(4),
-        ],
-        SizePolicy::Weight(1.0),
-        row_children,
+        TrackSize::Flex(1.0),
+        row_children.into_iter().enumerate().map(|(index, child)| match index {
+            0 => LinearItem::fixed(child, 18),
+            1 => LinearItem::content(child),
+            2 | 3 => LinearItem::flex(child, 1.0),
+            _ => LinearItem::fixed(child, 4),
+        }),
     ));
     let grid_items = (0..5)
         .map(|index| Node::widget(Custom::create(CustomParameters::new(format!("grid {index}")))))
         .collect::<Vec<_>>();
     let (_, grid) = Grid::create(GridParameters::new(
         [
-            SizePolicy::Fixed(18),
-            SizePolicy::Auto,
-            SizePolicy::Fraction(0.5),
-            SizePolicy::Weight(1.0),
-            SizePolicy::Remainder(4),
+            TrackSize::Fixed(18),
+            TrackSize::Content,
+            TrackSize::Flex(1.0),
+            TrackSize::Flex(1.0),
+            TrackSize::Fixed(4),
         ],
-        [SizePolicy::Weight(1.0)],
+        [TrackSize::Flex(1.0)],
         grid_items,
     ));
-    let (_, stack) = Stack::create(StackParameters::new(
-        SizePolicy::Fraction(0.5),
-        SizePolicy::Weight(1.0),
-        StackDirection::TopToBottom,
-        [
-            Node::widget(Custom::create(CustomParameters::new("stack first"))),
-            Node::widget(Custom::create(CustomParameters::new("stack second"))),
-        ],
-    ));
+    let (_, stack) = Column::create(ColumnParameters::new([
+        LinearItem::flex(Node::widget(Custom::create(CustomParameters::new("stack first"))), 1.0),
+        LinearItem::flex(Node::widget(Custom::create(CustomParameters::new("stack second"))), 1.0),
+    ]));
     let (_, content) = Column::create(ColumnParameters::new([row, grid, stack]));
     let mut ctx = context();
     let root = ctx.create_popup("intrinsic", content);

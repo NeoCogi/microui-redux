@@ -86,7 +86,7 @@ mod container;
 pub use container::{Container, ContainerLayoutCtx, ContainerWidget, MeasureCtx};
 mod containers;
 pub use containers::{
-    Column, ColumnParameters, Disclosure, DisclosureParameters, Grid, GridItem, GridParameters, GridSpan, Row, RowParameters, ScrollArea, ScrollAreaParameters,
-    Stack, StackDirection, StackParameters,
+    Column, ColumnParameters, Disclosure, DisclosureParameters, Grid, GridItem, GridParameters, GridSpan, LinearItem, Row, RowParameters, ScrollArea,
+    ScrollAreaParameters,
 };
 pub use containers::ScrollAreaOption;

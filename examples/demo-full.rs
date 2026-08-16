@@ -863,26 +863,42 @@ impl IntoDemoNode for SuzanneWidget {
 /// state-owned containers. It carries no identity or reconciliation metadata.
 #[derive(Default)]
 struct DemoNodes {
-    nodes: Vec<Node>,
+    items: Vec<LinearItem>,
 }
 
 impl DemoNodes {
-    fn build(f: impl FnOnce(&mut Self)) -> Vec<Node> {
+    fn build(f: impl FnOnce(&mut Self)) -> Vec<LinearItem> {
         let mut nodes = Self::default();
         f(&mut nodes);
-        nodes.nodes
+        nodes.items
     }
 
     fn children(f: impl FnOnce(&mut Self)) -> Vec<Node> {
+        Self::build(f).into_iter().map(LinearItem::into_node).collect()
+    }
+
+    fn items(f: impl FnOnce(&mut Self)) -> Vec<LinearItem> {
         Self::build(f)
     }
 
     fn push(&mut self, node: Node) {
-        self.nodes.push(node);
+        self.items.push(LinearItem::content(node));
     }
 
-    fn with_policy(&mut self, policy: Policy) -> DemoNode<'_> {
-        DemoNode { nodes: self, policy }
+    fn push_item(&mut self, item: LinearItem) {
+        self.items.push(item);
+    }
+
+    fn with_track(&mut self, track: TrackSize) -> DemoNode<'_> {
+        DemoNode { nodes: self, track, fixed_cross: None }
+    }
+
+    fn with_fixed_cross(&mut self, extent: i32) -> DemoNode<'_> {
+        DemoNode {
+            nodes: self,
+            track: TrackSize::Content,
+            fixed_cross: Some(extent),
+        }
     }
 
     fn widget<W: IntoDemoNode>(&mut self, widget: W) {
@@ -891,20 +907,6 @@ impl DemoNodes {
 
     fn text_with_wrap(&mut self, text: impl Into<String>, wrap: TextWrap) {
         let (_, node) = TextBlock::create(TextBlockParameters::with_wrap(text, wrap));
-        self.push(node);
-    }
-
-    fn custom_render<B, W>(&mut self, widget: W, renderer: CustomRenderHandle<B>)
-    where
-        B: RendererBackend,
-        W: LeafWidget + 'static,
-    {
-        self.push(Node::custom_render(widget, renderer));
-    }
-
-    fn scroll_area(&mut self, opt: ScrollAreaOption, f: impl FnOnce(&mut Self)) {
-        let (_, content) = Column::create(ColumnParameters::new(Self::children(f)));
-        let (_, node) = ScrollArea::create(ScrollAreaParameters::new(opt, content));
         self.push(node);
     }
 
@@ -920,24 +922,34 @@ impl DemoNodes {
         state
     }
 
-    fn row(&mut self, widths: &[SizePolicy], height: SizePolicy, f: impl FnOnce(&mut Self)) {
-        let (_, node) = Row::create(RowParameters::new(widths.iter().copied(), height, Self::children(f)));
-        self.push(node.with_policy(Policy::new(SizePolicy::Auto, height)));
+    fn row(&mut self, widths: &[TrackSize], height: TrackSize, f: impl FnOnce(&mut Self)) {
+        let items = Self::children(f)
+            .into_iter()
+            .enumerate()
+            .map(|(index, node)| LinearItem::new(node, widths.get(index).copied().unwrap_or(TrackSize::Content)));
+        let (_, node) = Row::create(RowParameters::new(height, items));
+        self.push_item(LinearItem::new(node, height));
     }
 
-    fn grid(&mut self, widths: &[SizePolicy], heights: &[SizePolicy], f: impl FnOnce(&mut Self)) {
+    fn grid(&mut self, widths: &[TrackSize], heights: &[TrackSize], f: impl FnOnce(&mut Self)) {
         let items = Self::children(f).into_iter().map(GridItem::new);
         let (_, node) = Grid::create(GridParameters::new(widths.iter().copied(), heights.iter().copied(), items));
         self.push(node);
     }
 
     fn column(&mut self, f: impl FnOnce(&mut Self)) {
-        let (_, node) = Column::create(ColumnParameters::new(Self::children(f)));
+        let (_, node) = Column::create(ColumnParameters::new(Self::items(f)));
         self.push(node);
     }
 
-    fn stack(&mut self, width: SizePolicy, height: SizePolicy, direction: StackDirection, f: impl FnOnce(&mut Self)) -> TypedWidgetHandle<Stack> {
-        let (state, node) = Stack::create(StackParameters::new(width, height, direction, Self::children(f)));
+    fn fixed_column(&mut self, height: i32, reversed: bool, f: impl FnOnce(&mut Self)) -> TypedWidgetHandle<Column> {
+        let items = Self::children(f).into_iter().map(|node| LinearItem::fixed(node, height));
+        let parameters = if reversed {
+            ColumnParameters::new(items).reversed()
+        } else {
+            ColumnParameters::new(items)
+        };
+        let (state, node) = Column::create(parameters);
         self.push(node);
         state
     }
@@ -945,18 +957,39 @@ impl DemoNodes {
 
 struct DemoNode<'a> {
     nodes: &'a mut DemoNodes,
-    policy: Policy,
+    track: TrackSize,
+    fixed_cross: Option<i32>,
 }
 
 impl DemoNode<'_> {
     fn widget<W: IntoDemoNode>(self, widget: W) {
-        self.nodes.push(widget.into_demo_node().with_policy(self.policy));
+        let mut item = LinearItem::new(widget.into_demo_node(), self.track);
+        if let Some(extent) = self.fixed_cross {
+            item = item.with_fixed_cross(extent);
+        }
+        self.nodes.push_item(item);
     }
 
     fn scroll_area(self, opt: ScrollAreaOption, f: impl FnOnce(&mut DemoNodes)) {
-        let (_, content) = Column::create(ColumnParameters::new(DemoNodes::children(f)));
+        let (_, content) = Column::create(ColumnParameters::new(DemoNodes::items(f)));
         let (_, node) = ScrollArea::create(ScrollAreaParameters::new(opt, content));
-        self.nodes.push(node.with_policy(self.policy));
+        let mut item = LinearItem::new(node, self.track);
+        if let Some(extent) = self.fixed_cross {
+            item = item.with_fixed_cross(extent);
+        }
+        self.nodes.push_item(item);
+    }
+
+    fn custom_render<B, W>(self, widget: W, renderer: CustomRenderHandle<B>)
+    where
+        B: RendererBackend,
+        W: LeafWidget + 'static,
+    {
+        let mut item = LinearItem::new(Node::custom_render(widget, renderer), self.track);
+        if let Some(extent) = self.fixed_cross {
+            item = item.with_fixed_cross(extent);
+        }
+        self.nodes.push_item(item);
     }
 }
 
@@ -979,8 +1012,8 @@ fn root_content() -> (TypedWidgetHandle<Column>, Node) {
     Column::create(ColumnParameters::default())
 }
 
-fn replace_root_content(root: &TypedWidgetHandle<Column>, nodes: Vec<Node>, name: &str) {
-    if !matches!(root.try_update_with(nodes, Column::replace), Ok(Ok(()))) {
+fn replace_root_content(root: &TypedWidgetHandle<Column>, items: Vec<LinearItem>, name: &str) {
+    if !matches!(root.try_update_with(items, Column::replace), Ok(Ok(()))) {
         panic!("{name} root content state unavailable");
     }
 }
@@ -1743,16 +1776,16 @@ impl State {
             &roots.style,
             DemoNodes::build(move |tree| {
                 let color_row = [
-                    SizePolicy::Fixed(80),
-                    SizePolicy::Weight(1.0),
-                    SizePolicy::Weight(1.0),
-                    SizePolicy::Weight(1.0),
-                    SizePolicy::Weight(1.0),
-                    SizePolicy::Weight(1.0),
+                    TrackSize::Fixed(80),
+                    TrackSize::Flex(1.0),
+                    TrackSize::Flex(1.0),
+                    TrackSize::Flex(1.0),
+                    TrackSize::Flex(1.0),
+                    TrackSize::Flex(1.0),
                 ];
-                let metrics_row = [SizePolicy::Fixed(80), SizePolicy::Remainder(0)];
+                let metrics_row = [TrackSize::Fixed(80), TrackSize::Flex(1.0)];
 
-                tree.with_policy(Policy::fill())
+                tree.with_track(TrackSize::Flex(1.0))
                     .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
                         let mut sliders = style_color_sliders.into_iter();
                         for ((label, swatch), [red, green, blue, alpha]) in
@@ -1768,7 +1801,7 @@ impl State {
                                     ]
                                 }))
                         {
-                            tree.row(&color_row, SizePolicy::Auto, |tree| {
+                            tree.row(&color_row, TrackSize::Content, |tree| {
                                 tree.widget(label);
                                 tree.widget(red);
                                 tree.widget(green);
@@ -1779,7 +1812,7 @@ impl State {
                         }
 
                         for (label, slider) in style_metric_labels.into_iter().zip(style_value_sliders) {
-                            tree.row(&metrics_row, SizePolicy::Auto, |tree| {
+                            tree.row(&metrics_row, TrackSize::Content, |tree| {
                                 tree.widget(label);
                                 tree.widget(slider);
                             });
@@ -1792,13 +1825,12 @@ impl State {
         replace_root_content(
             &roots.log,
             DemoNodes::build(|tree| {
-                let submit_row = [SizePolicy::Remainder(69), SizePolicy::Remainder(0)];
-                tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(24), StackDirection::TopToBottom, |tree| {
-                    tree.scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
+                let submit_row = [TrackSize::Flex(1.0), TrackSize::Fixed(69)];
+                tree.with_track(TrackSize::Flex(1.0))
+                    .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
                         tree.widget(log_text);
                     });
-                });
-                tree.row(&submit_row, SizePolicy::Auto, |tree| {
+                tree.row(&submit_row, TrackSize::Content, |tree| {
                     tree.widget(submit_buf);
                     tree.widget(submit_button);
                 });
@@ -1809,7 +1841,7 @@ impl State {
         replace_root_content(
             &roots.typography,
             DemoNodes::build(move |tree| {
-                tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
+                tree.column(|tree| {
                     tree.widget(typography_heading);
                     tree.widget(typography_body);
                     tree.widget(typography_button);
@@ -1821,9 +1853,7 @@ impl State {
         replace_root_content(
             &roots.triangle,
             DemoNodes::build(move |tree| {
-                tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
-                    tree.custom_render(triangle_widget, triangle_renderer);
-                });
+                tree.with_track(TrackSize::Flex(1.0)).custom_render(triangle_widget, triangle_renderer);
             }),
             "triangle",
         );
@@ -1831,9 +1861,7 @@ impl State {
         replace_root_content(
             &roots.suzanne,
             DemoNodes::build(move |tree| {
-                tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
-                    tree.custom_render(suzanne_widget, suzanne_renderer);
-                });
+                tree.with_track(TrackSize::Flex(1.0)).custom_render(suzanne_widget, suzanne_renderer);
             }),
             "Suzanne",
         );
@@ -1841,9 +1869,7 @@ impl State {
         replace_root_content(
             &roots.painter,
             DemoNodes::build(move |tree| {
-                tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
-                    tree.widget(painter_widget);
-                });
+                tree.with_track(TrackSize::Flex(1.0)).widget(painter_widget);
             }),
             "painter",
         );
@@ -1851,9 +1877,7 @@ impl State {
         replace_root_content(
             &roots.falloff,
             DemoNodes::build(move |tree| {
-                tree.stack(SizePolicy::Remainder(0), SizePolicy::Remainder(0), StackDirection::TopToBottom, |tree| {
-                    tree.widget(falloff_widget);
-                });
+                tree.with_track(TrackSize::Flex(1.0)).widget(falloff_widget);
             }),
             "falloff",
         );
@@ -1862,29 +1886,27 @@ impl State {
         replace_root_content(
             &roots.stack_direction,
             DemoNodes::build(|tree| {
-                let columns = [SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)];
+                let columns = [TrackSize::Flex(1.0), TrackSize::Flex(1.0)];
                 let [label_top, label_bottom] = stack_direction_labels;
                 let [button_top_0, button_top_1, button_top_2, button_bottom_0, button_bottom_1, button_bottom_2] = stack_direction_buttons;
-                tree.row(&columns, SizePolicy::Auto, |tree| {
+                tree.row(&columns, TrackSize::Content, |tree| {
                     tree.widget(label_top);
                     tree.widget(label_bottom);
                 });
-                tree.row(&columns, SizePolicy::Fixed(120), |tree| {
+                tree.row(&columns, TrackSize::Fixed(120), |tree| {
                     tree.column(|tree| {
-                        tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::TopToBottom, |tree| {
+                        tree.fixed_column(28, false, |tree| {
                             tree.widget(button_top_0);
                             tree.widget(button_top_1);
                             tree.widget(button_top_2);
                         });
                     });
                     tree.column(|tree| {
-                        bottom_stack = Some(
-                            tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(28), StackDirection::TopToBottom, |tree| {
-                                tree.widget(button_bottom_0);
-                                tree.widget(button_bottom_1);
-                                tree.widget(button_bottom_2);
-                            }),
-                        );
+                        bottom_stack = Some(tree.fixed_column(28, false, |tree| {
+                            tree.widget(button_bottom_0);
+                            tree.widget(button_bottom_1);
+                            tree.widget(button_bottom_2);
+                        }));
                     });
                 });
             }),
@@ -1892,7 +1914,7 @@ impl State {
         );
         bottom_stack
             .expect("bottom stack must be constructed")
-            .try_update(|stack| stack.set_direction(StackDirection::BottomToTop))
+            .try_update(|column| column.set_reversed(true))
             .expect("bottom stack state unavailable");
 
         replace_root_content(
@@ -1910,21 +1932,21 @@ impl State {
                     button_grid_4,
                     button_grid_5,
                 ] = weight_buttons;
-                let row = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0), SizePolicy::Weight(3.0)];
-                let cols = [SizePolicy::Weight(1.0), SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)];
-                let rows = [SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)];
-                tree.row(&[SizePolicy::Remainder(0)], SizePolicy::Auto, |tree| {
+                let row = [TrackSize::Flex(1.0), TrackSize::Flex(2.0), TrackSize::Flex(3.0)];
+                let cols = [TrackSize::Flex(1.0), TrackSize::Flex(1.0), TrackSize::Flex(1.0)];
+                let rows = [TrackSize::Flex(1.0), TrackSize::Flex(2.0)];
+                tree.row(&[TrackSize::Flex(1.0)], TrackSize::Content, |tree| {
                     tree.widget(row_weight_label);
                 });
-                tree.row(&row, SizePolicy::Fixed(28), |tree| {
+                tree.row(&row, TrackSize::Fixed(28), |tree| {
                     tree.widget(button_row_0);
                     tree.widget(button_row_1);
                     tree.widget(button_row_2);
                 });
-                tree.row(&[SizePolicy::Weight(1.0)], SizePolicy::Auto, |tree| {
+                tree.row(&[TrackSize::Flex(1.0)], TrackSize::Content, |tree| {
                     tree.widget(grid_weight_label);
                 });
-                tree.row(&[SizePolicy::Weight(1.0)], SizePolicy::Remainder(0), |tree| {
+                tree.row(&[TrackSize::Flex(1.0)], TrackSize::Flex(1.0), |tree| {
                     tree.column(|tree| {
                         tree.grid(&cols, &rows, |tree| {
                             tree.widget(button_grid_0);
@@ -1943,11 +1965,9 @@ impl State {
         replace_root_content(
             &roots.combo,
             DemoNodes::build(|tree| {
-                tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                    for item in combo_items {
-                        tree.widget(item);
-                    }
-                });
+                for item in combo_items {
+                    tree.widget(item);
+                }
             }),
             "combo popup",
         );
@@ -1955,11 +1975,9 @@ impl State {
         replace_root_content(
             &roots.popup,
             DemoNodes::build(|tree| {
-                tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                    for button in popup_buttons {
-                        tree.widget(button);
-                    }
-                });
+                for button in popup_buttons {
+                    tree.widget(button);
+                }
             }),
             "test popup",
         );
@@ -1967,12 +1985,12 @@ impl State {
         replace_root_content(
             &roots.demo,
             DemoNodes::build(|tree| {
-                let window_info_row = [SizePolicy::Fixed(54), SizePolicy::Remainder(0)];
-                let button_widths = [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)];
-                let tree_widths = [SizePolicy::Fixed(140), SizePolicy::Remainder(0)];
-                let tree_button_widths = [SizePolicy::Fixed(54), SizePolicy::Fixed(54)];
-                let background_widths = [SizePolicy::Remainder(77), SizePolicy::Remainder(0)];
-                let slider_row = [SizePolicy::Fixed(46), SizePolicy::Remainder(0)];
+                let window_info_row = [TrackSize::Fixed(54), TrackSize::Flex(1.0)];
+                let button_widths = [TrackSize::Fixed(86), TrackSize::Flex(1.0), TrackSize::Fixed(109)];
+                let tree_widths = [TrackSize::Fixed(140), TrackSize::Flex(1.0)];
+                let tree_button_widths = [TrackSize::Fixed(54), TrackSize::Fixed(54)];
+                let background_widths = [TrackSize::Flex(1.0), TrackSize::Fixed(77)];
+                let slider_row = [TrackSize::Fixed(46), TrackSize::Flex(1.0)];
                 let [label_pos, label_size, label_fps] = window_info_labels;
                 let [value_pos, value_size, value_fps] = window_info_values;
                 let [button0, button1, button2, button3, button4, dialog_button] = test_buttons;
@@ -1984,35 +2002,35 @@ impl State {
                 let [label_red, label_green, label_blue] = background_labels;
                 let [texture0, texture1, texture2, texture3] = texture_buttons;
 
-                tree.with_policy(Policy::fill())
+                tree.with_track(TrackSize::Flex(1.0))
                 .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
                 Self::section(tree, "Window Info", false, |tree| {
-                    tree.row(&window_info_row, SizePolicy::Auto, |tree| {
+                    tree.row(&window_info_row, TrackSize::Content, |tree| {
                         tree.widget(label_pos);
                         tree.widget(value_pos);
                     });
-                    tree.row(&window_info_row, SizePolicy::Auto, |tree| {
+                    tree.row(&window_info_row, TrackSize::Content, |tree| {
                         tree.widget(label_size);
                         tree.widget(value_size);
                     });
-                    tree.row(&window_info_row, SizePolicy::Auto, |tree| {
+                    tree.row(&window_info_row, TrackSize::Content, |tree| {
                         tree.widget(label_fps);
                         tree.widget(value_fps);
                     });
                 });
 
                 Self::section(tree, "Test Buttons", true, |tree| {
-                    tree.row(&button_widths, SizePolicy::Auto, |tree| {
+                    tree.row(&button_widths, TrackSize::Content, |tree| {
                         tree.widget(test_label0);
                         tree.widget(button0);
                         tree.widget(button1);
                     });
-                    tree.row(&button_widths, SizePolicy::Auto, |tree| {
+                    tree.row(&button_widths, TrackSize::Content, |tree| {
                         tree.widget(test_label1);
                         tree.widget(button2);
                         tree.widget(button3);
                     });
-                    tree.row(&button_widths, SizePolicy::Auto, |tree| {
+                    tree.row(&button_widths, TrackSize::Content, |tree| {
                         tree.widget(test_label2);
                         tree.widget(button4);
                         tree.widget(dialog_button);
@@ -2020,13 +2038,11 @@ impl State {
                 });
 
                 Self::section(tree, "Combo Box", true, |tree| {
-                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                        tree.widget(combo);
-                    });
+                    tree.widget(combo);
                 });
 
                 Self::section(tree, "Tree and Text", true, |tree| {
-                    tree.row(&tree_widths, SizePolicy::Auto, |tree| {
+                    tree.row(&tree_widths, TrackSize::Content, |tree| {
                         tree.column(|tree| {
                             let _ = tree.tree_node("Test 1", false, |tree| {
                                 let _ = tree.tree_node("Test 1a", false, |tree| {
@@ -2039,11 +2055,11 @@ impl State {
                                 });
                             });
                             let _ = tree.tree_node("Test 2", false, |tree| {
-                                tree.row(&tree_button_widths, SizePolicy::Auto, |tree| {
+                                tree.row(&tree_button_widths, TrackSize::Content, |tree| {
                                     tree.widget(tree_button2);
                                     tree.widget(tree_button3);
                                 });
-                                tree.row(&tree_button_widths, SizePolicy::Auto, |tree| {
+                                tree.row(&tree_button_widths, TrackSize::Content, |tree| {
                                     tree.widget(tree_button4);
                                     tree.widget(tree_button5);
                                 });
@@ -2055,37 +2071,33 @@ impl State {
                             });
                         });
                         tree.column(|tree| {
-                            tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                                tree.text_with_wrap(
-                                    "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum, eu varius magna felis a nulla.",
-                                    TextWrap::Word,
-                                );
-                            });
+                            tree.text_with_wrap(
+                                "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Maecenas lacinia, sem eu lacinia molestie, mi risus faucibus ipsum, eu varius magna felis a nulla.",
+                                TextWrap::Word,
+                            );
                         });
                     });
                 });
 
                 Self::section(tree, "TextArea", true, |tree| {
-                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Fixed(120), StackDirection::TopToBottom, |tree| {
-                        tree.widget(text_area);
-                    });
+                    tree.with_track(TrackSize::Fixed(120)).widget(text_area);
                 });
 
                 Self::section(tree, "Background Color", true, |tree| {
                     // Let the row derive its height from the three slider rows. A fixed pixel
                     // estimate becomes stale when font metrics, control padding, or spacing
                     // changes and can place the Blue control underneath the next disclosure.
-                    tree.row(&background_widths, SizePolicy::Auto, |tree| {
+                    tree.row(&background_widths, TrackSize::Content, |tree| {
                         tree.column(|tree| {
-                            tree.row(&slider_row, SizePolicy::Auto, |tree| {
+                            tree.row(&slider_row, TrackSize::Content, |tree| {
                                 tree.widget(label_red);
                                 tree.widget(slider_red);
                             });
-                            tree.row(&slider_row, SizePolicy::Auto, |tree| {
+                            tree.row(&slider_row, TrackSize::Content, |tree| {
                                 tree.widget(label_green);
                                 tree.widget(slider_green);
                             });
-                            tree.row(&slider_row, SizePolicy::Auto, |tree| {
+                            tree.row(&slider_row, TrackSize::Content, |tree| {
                                 tree.widget(label_blue);
                                 tree.widget(slider_blue);
                             });
@@ -2095,17 +2107,13 @@ impl State {
                 });
 
                 Self::section(tree, "Textures", true, |tree| {
-                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                        tree.widget(texture0);
-                        tree.widget(texture1);
-                        tree.widget(texture2);
-                        if let Some(button) = external_image_button {
-                            tree.with_policy(Policy::fixed_width(256)).widget(button);
-                        }
-                    });
-                    tree.stack(SizePolicy::Remainder(0), SizePolicy::Auto, StackDirection::TopToBottom, |tree| {
-                        tree.widget(texture3);
-                    });
+                    tree.widget(texture0);
+                    tree.widget(texture1);
+                    tree.widget(texture2);
+                    if let Some(button) = external_image_button {
+                        tree.with_fixed_cross(256).widget(button);
+                    }
+                    tree.widget(texture3);
                 });
                 });
             }),

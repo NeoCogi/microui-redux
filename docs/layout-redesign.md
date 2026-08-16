@@ -6,14 +6,16 @@ retained layout contract. It is updated in the same commits as the implementatio
 ## Goals
 
 - [x] A constraint has an explicit bounded or unbounded state; zero is an ordinary bound.
-- [ ] Measurement reports content requirements. Allocation assigns an exact rectangle.
-- [ ] The parent is the only owner of a child's slot size.
-- [ ] Allocation never reapplies a policy already resolved by the parent.
-- [ ] Row and Column use one linear algorithm with no container-specific branches in the runtime.
-- [ ] Grid uses the same track solver as linear layout.
+- [x] Measurement reports content requirements. Allocation assigns an exact rectangle for migrated
+      containers; the remaining composite adapters are tracked below.
+- [x] The parent is the only owner of a child's slot size in Row, Column, and Grid.
+- [x] Allocation never reapplies a policy already resolved by Row, Column, or Grid.
+- [x] Row and Column use one linear algorithm with no container-specific branches in the runtime.
+- [x] Grid uses the same track solver as linear layout.
 - [ ] Scrollbars are selected from measurement and content is allocated once.
-- [ ] Empty containers have zero intrinsic size unless they contain explicit fixed tracks.
-- [ ] Overflow is explicit and never changes sibling placement.
+- [x] Empty Row, Column, and Grid containers have zero intrinsic size unless they contain explicit
+      fixed tracks.
+- [x] Linear and Grid overflow is explicit and never changes sibling placement.
 - [ ] The existing `demo-full` geometry and appearance are preserved intentionally.
 - [ ] Warm retained layout remains allocation-free after correctness and clarity are established.
 
@@ -79,6 +81,22 @@ needed by an existing interface. Reverse direction affects origins only, never s
 The current vertical `Stack` duplicates Column. Its uses will move to Column; the name will not be
 retained for a non-overlapping layout.
 
+The public linear syntax attaches sizing to the parent-child edge where it is interpreted:
+
+```rust
+RowParameters::new(
+    TrackSize::Content,
+    [
+        LinearItem::fixed(label, 86),
+        LinearItem::flex(body, 1.0),
+        LinearItem::fixed(action, 109),
+    ],
+)
+```
+
+Plain `Node` values still mean `LinearItem::content(node)`. There is no node-global fallback and no
+runtime dispatch on the Row or Column type.
+
 ### Legacy policy migration
 
 ```text
@@ -116,17 +134,23 @@ call site must state that relationship directly.
 
 ### Phase 3: containers
 
-- [ ] Move Row and Column to the shared linear implementation.
-- [ ] Migrate and remove the current vertical Stack.
-- [ ] Move Grid to the common track solver.
-- [ ] Make empty-container sizing consistent.
+- [x] Moved Row and Column to one orientation-parameterized implementation. Their public APIs now
+      accept `LinearItem`, and retained mutations keep nodes and their edge tracks synchronized.
+- [x] Migrated all vertical Stack uses to Column and removed Stack instead of maintaining two names
+      for the same non-overlapping behavior. Reverse placement is a Column property.
+- [x] Moved Grid to the same `TrackResolver` used by linear layout and replaced both Grid track
+      vectors and mutation APIs with `TrackSize`.
+- [x] Made empty Row, Column, and Grid sizing zero. Row retains the font-derived standard control
+      height only when it actually contains children.
 
 ### Phase 4: composites and validation
 
 - [ ] Make ScrollArea choose bars during measurement and allocate content once.
 - [ ] Keep root chrome as an ordinary exact-allocation container.
-- [ ] Migrate every example, test, and file-dialog caller.
-- [ ] Compare `demo-full` geometry/appearance with the baseline.
+- [x] Migrated Row, Column, Grid, and former Stack call sites in every example, test, and the file
+      dialog. Composite-specific policy call sites remain until their phases below.
+- [x] Re-ran the frozen `demo-full` rectangles after the linear/Grid migration: the 86/flex/109
+      button row, calculator 104/312 split, and 276-pixel log region remain exact.
 - [ ] Run formatting, all-target tests, and relevant feature builds.
 
 ## Decisions and observations
@@ -144,3 +168,13 @@ call site must state that relationship directly.
       earlier sibling.
 - [x] Responsive leaf measurement receives constraints as information, not as an allocation. A
       leaf still reports desired content; only its parent may assign its final rectangle.
+- [x] A linear item stores only relationship metadata (`TrackSize` and an optional fixed cross
+      extent). It is consumed at insertion and never becomes a second node or runtime abstraction.
+- [x] Track resolution is replayable: construction summarizes reservations and weights, and a
+      caller replays the same track/content pairs to obtain exact extents. This keeps immutable
+      measurement free of scratch allocation while sharing the identical arithmetic with Grid.
+- [x] Column reverse direction changes only the placement origin. Sizing, item order, mutation, and
+      traversal remain the same as an ordinary Column.
+- [x] `cargo test --all-targets` passes after this phase (230 library tests and four downstream API
+      tests, with the three pre-existing manual baselines ignored). The `example-wgpu` demo build
+      also succeeds.

@@ -1,148 +1,140 @@
 //
 // Copyright 2023-Present (c) Raja Lehtihet & Wael El Oraiby
 //
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are met:
-//
-// 1. Redistributions of source code must retain the above copyright notice,
-// this list of conditions and the following disclaimer.
-//
-// 2. Redistributions in binary form must reproduce the above copyright notice,
-// this list of conditions and the following disclaimer in the documentation
-// and/or other materials provided with the distribution.
-//
-// 3. Neither the name of the copyright holder nor the names of its contributors
-// may be used to endorse or promote products derived from this software without
-// specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-// POSSIBILITY OF SUCH DAMAGE.
+// Redistribution and use in source and binary forms, with or without modification, are permitted
+// provided that the conditions in the project LICENSE are met.
 //
 
-use std::{cell::RefCell, rc::Rc};
-
-use crate::ui_node::sizing::SizePolicy;
-use crate::ui_node::children::ChildrenHandle;
 use crate::{
-    Container, ContainerWidget, Dimensioni, MeasureCtx, Recti, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters,
-    WidgetUpdateCtx,
+    Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, Dimensioni, MeasureCtx, Node, Recti, TrackSize, TypedWidgetHandle, UiInputEvent,
+    Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
-use super::{Axis, Children, ContainerLayoutCtx, Node};
+use super::linear::{LinearItem, LinearState, Orientation, layout_linear, measure_linear};
 
-/// One-shot construction input for a horizontal row.
+/// One-shot construction input for a horizontal [`Row`].
 ///
-/// The initial children, index-matched width tracks, and shared item height are copied into
-/// [`Row`] and remain mutable there after mounting.
+/// Each item owns its width track. `height` resolves the single shared line height: `Content` uses
+/// the tallest child, `Fixed` uses an exact height, and `Flex` fills a finite height supplied by the
+/// Row's parent while falling back to content during unbounded measurement.
 pub struct RowParameters {
-    children: Children,
-    widths: Vec<SizePolicy>,
-    item_height: SizePolicy,
+    items: Vec<LinearItem>,
+    height: TrackSize,
 }
 
 impl WidgetParameters for RowParameters {}
 
 impl RowParameters {
-    /// Creates a row with index-matched width policies and one shared item height policy.
-    pub fn new(widths: impl IntoIterator<Item = SizePolicy>, item_height: SizePolicy, children: impl IntoIterator<Item = Node>) -> Self {
+    /// Creates a row from one shared height rule and ordered child items.
+    ///
+    /// Plain [`Node`] values convert to content-width items. Use [`LinearItem`] only for a fixed or
+    /// flexible width, or for an explicit fixed child height.
+    pub fn new<T>(height: TrackSize, items: impl IntoIterator<Item = T>) -> Self
+    where
+        T: Into<LinearItem>,
+    {
         Self {
-            children: children.into_iter().collect(),
-            widths: widths.into_iter().collect(),
-            item_height,
+            items: items.into_iter().map(Into::into).collect(),
+            height,
         }
     }
 }
 
-/// Application-facing state for a horizontal row.
+impl Default for RowParameters {
+    fn default() -> Self {
+        Self::new(TrackSize::Content, std::iter::empty::<LinearItem>())
+    }
+}
+
+/// A horizontal sequence whose child widths are parent-owned [`LinearItem`] tracks.
 ///
-/// This is the sole mounted authority for ordered membership, index-matched width tracks, and the
-/// shared item-height policy. Missing width entries use [`SizePolicy::Auto`].
+/// Row and [`crate::Column`] use the same private measurement and allocation implementation. This
+/// type owns only the horizontal name, the shared line-height rule, and mutation methods that keep
+/// child ownership synchronized with its edge metadata.
 pub struct Row {
-    /// Weak topology access kept separate from index-matched row configuration.
-    children: ChildrenHandle,
-    widths: Vec<SizePolicy>,
-    item_height: SizePolicy,
+    linear: LinearState,
+    height: TrackSize,
 }
 
 impl Row {
-    /// Returns the number of owned children.
+    /// Returns the number of owned children, or `None` while topology is unavailable.
     pub fn len(&self) -> Option<usize> {
-        self.children.len()
-    }
-    /// Returns whether the row owns no children.
-    pub fn is_empty(&self) -> Option<bool> {
-        self.children.is_empty()
-    }
-    /// Appends one unmounted child.
-    pub fn push(&mut self, node: Node) -> Result<(), Node> {
-        self.children.try_push(node)
-    }
-    /// Inserts a child or returns it unchanged when `index > len`.
-    #[allow(clippy::result_large_err)]
-    pub fn insert(&mut self, index: usize, node: Node) -> Result<(), Node> {
-        self.children.try_insert(index, node)
-    }
-    /// Drops one indexed child and reports whether it existed.
-    pub fn remove_drop(&mut self, index: usize) -> Option<bool> {
-        self.children.try_remove_drop(index)
-    }
-    /// Drops all children.
-    pub fn clear(&mut self) -> Option<()> {
-        self.children.try_clear()
-    }
-    /// Replaces all children in iterator order.
-    pub fn replace<I>(&mut self, nodes: I) -> Result<(), I>
-    where
-        I: IntoIterator<Item = Node>,
-    {
-        self.children.try_replace(nodes)
+        self.linear.len()
     }
 
-    /// Returns the index-matched row track policies.
-    pub fn widths(&self) -> &[SizePolicy] {
-        &self.widths
+    /// Returns whether the row is empty, or `None` while topology is unavailable.
+    pub fn is_empty(&self) -> Option<bool> {
+        self.linear.is_empty()
     }
-    /// Replaces the row track policies.
-    pub fn set_widths(&mut self, widths: impl IntoIterator<Item = SizePolicy>) {
-        self.widths = widths.into_iter().collect();
+
+    /// Appends one unmounted item, preserving it on failure.
+    pub fn push(&mut self, item: impl Into<LinearItem>) -> Result<(), LinearItem> {
+        self.linear.push(item)
     }
-    /// Returns the shared item-height policy.
-    pub fn item_height(&self) -> SizePolicy {
-        self.item_height
+
+    /// Inserts one item, preserving it when the index or topology is unavailable.
+    #[allow(clippy::result_large_err)]
+    pub fn insert(&mut self, index: usize, item: LinearItem) -> Result<(), LinearItem> {
+        self.linear.insert(index, item)
     }
-    /// Replaces the shared item-height policy.
-    pub fn set_item_height(&mut self, height: SizePolicy) {
-        self.item_height = height;
+
+    /// Drops one child and its width metadata, reporting whether the index existed.
+    pub fn remove_drop(&mut self, index: usize) -> Option<bool> {
+        self.linear.remove_drop(index)
     }
-    /// Creates a child-owning row and its weak typed widget handle.
+
+    /// Drops all children and width metadata.
+    pub fn clear(&mut self) -> Option<()> {
+        self.linear.clear()
+    }
+
+    /// Replaces the complete ordered item sequence.
+    pub fn replace<T, I>(&mut self, items: I) -> Result<(), I>
+    where
+        T: Into<LinearItem>,
+        I: IntoIterator<Item = T>,
+    {
+        self.linear.replace(items)
+    }
+
+    /// Returns one child's width track.
+    pub fn track(&self, index: usize) -> Option<TrackSize> {
+        self.linear.main(index)
+    }
+
+    /// Replaces one existing child's width track without replacing the child.
+    pub fn set_track(&mut self, index: usize, track: TrackSize) -> bool {
+        self.linear.set_main(index, track)
+    }
+
+    /// Returns the shared line-height rule.
+    pub const fn height(&self) -> TrackSize {
+        self.height
+    }
+
+    /// Replaces the shared line-height rule.
+    pub fn set_height(&mut self, height: TrackSize) {
+        self.height = height;
+    }
+
+    /// Creates a child-owning row and a weak typed handle to its mounted state.
     pub fn create(parameters: RowParameters) -> (TypedWidgetHandle<Self>, Node) {
-        let children = Rc::new(RefCell::new(parameters.children));
-        let widget = Self {
-            children: ChildrenHandle::new(&children),
-            widths: parameters.widths,
-            item_height: parameters.item_height,
-        };
+        let (children, linear) = LinearState::mount(parameters.items);
+        let widget = Self { linear, height: parameters.height };
         let (handle, container) = Container::from_shared(children, widget);
         (handle, Node::container(container))
     }
 }
 
 impl ContainerWidget for Row {
-    fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: crate::Constraints) -> Dimensioni {
-        row_size(ctx, self, constraints.legacy_size())
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: Constraints) -> Dimensioni {
+        let minimum = super::default_cell_height(ctx.style(), ctx.atlas());
+        measure_linear(ctx, &self.linear, Orientation::Horizontal, Some(self.height), minimum, constraints)
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
-        layout_row(ctx, self, children, rect);
+        let minimum = super::default_cell_height(ctx.style(), ctx.atlas());
+        layout_linear(ctx, children, &self.linear, Orientation::Horizontal, Some(self.height), minimum, rect);
     }
 }
 
@@ -156,163 +148,34 @@ impl Widget for Row {
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
 
-/// Resolves shared row height and commits children from left to right.
-///
-/// Width tracks are replayed because the shared height must be known before any child is placed;
-/// replaying them avoids allocating a temporary width collection on every layout frame.
-fn layout_row(ctx: &mut ContainerLayoutCtx<'_>, state: &mut Row, children: &mut Children, rect: Recti) {
-    // Resolve horizontal slots and vertical preference from one state snapshot. No child borrow or
-    // parallel geometry collection survives this call.
-    let count = children.len();
-    let spacing = ctx.style().spacing.max(0);
-    // gap_count = child_count - 1; spacing_total = spacing * gap_count.
-    let gap_count = count.saturating_sub(1) as i32;
-    let spacing_total = spacing.saturating_mul(gap_count);
-    // track_width = max(container_width - spacing_total, 1).
-    let available_width = rect.width.saturating_sub(spacing_total).max(1);
-    // First resolve each width and measure content at that actual width. This is what keeps wrapped
-    // child height consistent with the widths that layout will commit.
-    let mut axis = row_axis(state, count, available_width, |index| {
-        ctx.measure_child(children, index, crate::Constraints::unbounded()).unwrap_or_default().width
-    });
-    let mut height = 0;
-    for index in 0..count {
-        let policy = state.widths.get(index).copied().unwrap_or(SizePolicy::Auto);
-        let preferred = ctx.measure_child(children, index, crate::Constraints::unbounded()).unwrap_or_default().width;
-        let width = axis.next(policy, preferred).advance;
-        let measured_width = children.child_policy(index).unwrap_or_else(crate::Policy::auto).width.measurement_bound(width);
-        height = height.max(
-            ctx.measure_child(children, index, crate::Constraints::from_legacy_size(Dimensioni::new(measured_width, 0)))
-                .unwrap_or_default()
-                .height,
-        );
-    }
-    height = state
-        .item_height
-        .preferred_extent(height.max(super::default_cell_height(ctx.style(), ctx.atlas())), rect.height);
-
-    // Replay the allocation now that the single shared row height is known, placing each child as
-    // soon as its width is resolved instead of collecting widths in a temporary Vec.
-    let mut axis = row_axis(state, count, available_width, |index| {
-        ctx.measure_child(children, index, crate::Constraints::unbounded()).unwrap_or_default().width
-    });
-    let mut x = rect.x;
-    for index in 0..count {
-        let policy = state.widths.get(index).copied().unwrap_or(SizePolicy::Auto);
-        let preferred = ctx.measure_child(children, index, crate::Constraints::unbounded()).unwrap_or_default().width;
-        let width = axis.next(policy, preferred).advance;
-        let _ = ctx.layout_child(children, index, Recti::new(x, rect.y, width, height));
-        // next_x = current_x + child_width + spacing.
-        x = x.saturating_add(width).saturating_add(spacing);
-    }
-}
-
-/// Builds the scalar width cursor from child preferences and index-matched Row track policies.
-fn row_axis(state: &Row, count: usize, available_width: i32, mut preferred_width: impl FnMut(usize) -> i32) -> Axis {
-    // Axis stores scalar allocation totals only; individual widths are replayed when needed.
-    Axis::new(
-        available_width,
-        (0..count).map(|index| {
-            let preferred = preferred_width(index);
-            (state.widths.get(index).copied().unwrap_or(SizePolicy::Auto), preferred)
-        }),
-    )
-}
-
-/// Measures a Row using the same width-track resolution used during layout.
-///
-/// Children are remeasured at their resolved widths to obtain a correct shared height for wrapped
-/// content. Placement policy remains parent-owned and is not folded into child content measurement.
-fn row_size(ctx: &mut MeasureCtx<'_>, state: &Row, available: Dimensioni) -> Dimensioni {
-    // Mirror placement policy and return only aggregate preferred geometry.
-    let count = ctx.child_count();
-    let spacing = ctx.style().spacing.max(0);
-    // gap_count = child_count - 1; spacing_total = spacing * gap_count.
-    let gap_count = count.saturating_sub(1) as i32;
-    let spacing_total = spacing.saturating_mul(gap_count);
-    let available_width = if available.width > 0 {
-        // track_width = max(available_width - spacing_total, 1).
-        available.width.saturating_sub(spacing_total).max(1)
-    } else {
-        0
-    };
-    // Resolve width tracks first; each resolved width then becomes the child's wrapping constraint.
-    let mut axis = row_axis(state, count, available_width, |index| {
-        ctx.measure_child(index, crate::Constraints::unbounded()).unwrap_or_default().width
-    });
-    let mut preferred_height = 0;
-    for index in 0..count {
-        let policy = state.widths.get(index).copied().unwrap_or(SizePolicy::Auto);
-        let preferred = ctx.measure_child(index, crate::Constraints::unbounded()).unwrap_or_default().width;
-        let width = ctx
-            .child_policy(index)
-            .unwrap_or_else(crate::Policy::auto)
-            .width
-            .measurement_bound(axis.next(policy, preferred).advance);
-        preferred_height = preferred_height.max(
-            ctx.measure_child(index, crate::Constraints::from_legacy_size(Dimensioni::new(width, 0)))
-                .unwrap_or_default()
-                .height,
-        );
-    }
-    // An empty or zero-height row retains the standard control-height fallback.
-    preferred_height = preferred_height.max(super::default_cell_height(ctx.style(), ctx.atlas()));
-    let height = state.item_height.preferred_extent(preferred_height, available.height);
-    Dimensioni::new(axis.extent(count, spacing), height)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::test_atlas;
-    use crate::{Custom, CustomParameters, Style};
+    use crate::{Custom, CustomParameters};
 
     #[test]
-    fn row_widget_exposes_topology_and_mutable_track_configuration() {
+    fn row_mutations_keep_nodes_and_tracks_synchronized() {
         let first = Custom::create(CustomParameters::new("first"));
         let (first_state, first) = Node::typed_widget(first);
-        let (row, node) = Row::create(RowParameters::new([SizePolicy::Auto], SizePolicy::Auto, [first]));
-        assert_eq!(row.try_read(Row::len), Some(Some(1)));
+        let (row, node) = Row::create(RowParameters::new(TrackSize::Content, [LinearItem::fixed(first, 20)]));
 
         row.try_update(|state| {
-            state.set_widths([SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)]);
-            state.set_item_height(SizePolicy::Fixed(24));
-            assert!(state.push(Node::widget(Custom::create(CustomParameters::new("second")))).is_ok());
+            assert!(
+                state
+                    .push(LinearItem::flex(Node::widget(Custom::create(CustomParameters::new("second"))), 2.0))
+                    .is_ok()
+            );
+            assert!(state.set_track(0, TrackSize::Flex(1.0)));
+            state.set_height(TrackSize::Fixed(24));
         })
         .unwrap();
-        assert_eq!(
-            row.try_read(|state| state.widths().to_vec()),
-            Some(vec![SizePolicy::Weight(1.0), SizePolicy::Weight(2.0)])
-        );
-        assert_eq!(row.try_read(Row::item_height), Some(SizePolicy::Fixed(24)));
-        assert_eq!(row.try_read(Row::len), Some(Some(2)));
 
+        assert_eq!(row.try_read(|state| state.track(0)), Some(Some(TrackSize::Flex(1.0))));
+        assert_eq!(row.try_read(Row::height), Some(TrackSize::Fixed(24)));
+        assert_eq!(row.try_read(Row::len), Some(Some(2)));
         assert_eq!(row.try_update(|state| state.remove_drop(0)), Some(Some(true)));
         assert!(!first_state.is_alive());
         drop(node);
         assert!(!row.is_alive());
-    }
-
-    #[test]
-    fn row_measurement_and_bounded_allocation_share_track_sizing() {
-        let style = Style { spacing: 3, ..Style::default() };
-        let atlas = test_atlas();
-        let mut children: Children = [
-            Node::widget(Custom::create(CustomParameters::new("left"))),
-            Node::widget(Custom::create(CustomParameters::new("right side"))),
-        ]
-        .into_iter()
-        .collect();
-        let mut ctx = MeasureCtx::new(&style, &atlas, &mut children);
-        let topology = Rc::new(RefCell::new(Children::new()));
-        let state = Row {
-            children: ChildrenHandle::new(&topology),
-            widths: vec![SizePolicy::Weight(1.0), SizePolicy::Weight(1.0)],
-            item_height: SizePolicy::Auto,
-        };
-        let measured = row_size(&mut ctx, &state, Dimensioni::default());
-        let allocated = row_size(&mut ctx, &state, measured);
-        assert_eq!(allocated.width, measured.width);
-        assert_eq!(allocated.height, measured.height);
     }
 }

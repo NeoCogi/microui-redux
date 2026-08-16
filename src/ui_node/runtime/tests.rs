@@ -275,6 +275,11 @@ fn layout_probe(name: &'static str) -> (RuntimeNodeId, Node) {
     (node.id(), node)
 }
 
+fn layout_button(label: &'static str) -> (RuntimeNodeId, Node) {
+    let (_, node) = crate::Button::create(crate::ButtonParameters::new(label));
+    (node.id(), node)
+}
+
 fn committed_rect(runtime: &UiRuntime, root: &Node, id: RuntimeNodeId) -> Recti {
     runtime
         .debug_node_rect(std::slice::from_ref(root), id)
@@ -298,13 +303,12 @@ fn next_input(input: &mut Input) -> (UiInputEvent, InputSnapshot) {
 fn demo_remainder_row_geometry_is_preserved_as_an_explicit_baseline() {
     // `demo-full` uses this sequence for its three-button rows. The first remainder leaves 109
     // pixels for the final remainder track; spacing is outside all three tracks.
-    let (label_id, label) = layout_probe("label");
-    let (middle_id, middle) = layout_probe("middle");
-    let (last_id, last) = layout_probe("last");
+    let (label_id, label) = layout_button("label");
+    let (middle_id, middle) = layout_button("middle");
+    let (last_id, last) = layout_button("last");
     let (_, mut root) = crate::Row::create(crate::RowParameters::new(
-        [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)],
-        SizePolicy::Auto,
-        [label, middle, last],
+        TrackSize::Content,
+        [LinearItem::fixed(label, 86), LinearItem::flex(middle, 1.0), LinearItem::fixed(last, 109)],
     ));
     let style = Style { spacing: 4, ..Style::default() };
     let mut runtime = UiRuntime::new();
@@ -322,10 +326,8 @@ fn calculator_fraction_and_remainder_geometry_is_preserved_as_an_explicit_baseli
     // exact remainder to the keypad. This records the visible result rather than the legacy enum
     // implementation that happened to produce it.
     let (display_id, display) = layout_probe("display");
-    let display = display.with_policy(Policy::new(SizePolicy::Auto, SizePolicy::Fraction(0.25)));
     let (keypad_id, keypad) = layout_probe("keypad");
-    let keypad = keypad.with_policy(Policy::new(SizePolicy::Auto, SizePolicy::Remainder(0)));
-    let (_, mut root) = crate::Column::create(crate::ColumnParameters::new([display, keypad]));
+    let (_, mut root) = crate::Column::create(crate::ColumnParameters::new([LinearItem::flex(display, 1.0), LinearItem::flex(keypad, 3.0)]));
     let style = Style { spacing: 4, ..Style::default() };
     let mut runtime = UiRuntime::new();
     runtime.begin_update();
@@ -340,17 +342,13 @@ fn demo_stack_remainder_margin_geometry_is_preserved_as_an_explicit_baseline() {
     // The log panel uses one stack item with `Remainder(24)`, intentionally leaving a 24-pixel
     // strip below its scrolling child for the submission row that follows it.
     let (content_id, content) = layout_probe("content");
-    let (_, mut root) = crate::Stack::create(crate::StackParameters::new(
-        SizePolicy::Remainder(0),
-        SizePolicy::Remainder(24),
-        crate::StackDirection::TopToBottom,
-        [content],
-    ));
+    let spacer = Node::widget(WidgetOption::NONE);
+    let (_, mut root) = crate::Column::create(crate::ColumnParameters::new([LinearItem::flex(content, 1.0), LinearItem::fixed(spacer, 24)]));
     let mut runtime = UiRuntime::new();
     runtime.begin_update();
     runtime.layout_tree_root(
         &mut root,
-        &Style::default(),
+        &Style { spacing: 0, ..Style::default() },
         test_atlas(),
         Recti::new(0, 0, 400, 300),
         Recti::new(0, 0, 400, 300),
@@ -451,8 +449,8 @@ fn measurement_cache_keeps_constraints_distinct_within_one_pass() {
 
     assert_eq!(
         counts.measures.get(),
-        3,
-        "the intrinsic, allocated-track, and final-slot constraints must not share one result"
+        2,
+        "the intrinsic main-axis query and exact final slot must remain distinct cache keys"
     );
 }
 

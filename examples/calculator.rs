@@ -348,19 +348,21 @@ fn main() {
             CalcButton::new(".", Action::Dot),
             CalcButton::new("=", Action::Equals),
         ];
-        let (_, display_row) = Row::create(RowParameters::new([SizePolicy::Remainder(0)], SizePolicy::Remainder(0), [display_runtime]));
-        let display_row = display_row.with_policy(Policy::new(SizePolicy::Auto, SizePolicy::Fraction(DISPLAY_HEIGHT_FRACTION)));
-        let columns = [SizePolicy::Weight(1.0); 4];
-        let rows = [SizePolicy::Weight(KEYPAD_ROW_HEIGHT_WEIGHT); 5];
+        let (_, display_row) = Row::create(RowParameters::new(TrackSize::Flex(1.0), [LinearItem::flex(display_runtime, 1.0)]));
+        let columns = [TrackSize::Flex(1.0); 4];
+        let rows = [TrackSize::Flex(KEYPAD_ROW_HEIGHT_WEIGHT); 5];
         let button_nodes = buttons
             .iter_mut()
             .map(|button| button.widget.take().expect("calculator tree is built once"))
             .collect::<Vec<_>>();
         let (_, grid) = Grid::create(GridParameters::new(columns, rows, button_nodes));
         let (_, keypad_column) = Column::create(ColumnParameters::new([grid]));
-        let (_, keypad_row) = Row::create(RowParameters::new([SizePolicy::Remainder(0)], SizePolicy::Remainder(0), [keypad_column]));
-        let keypad_row = keypad_row.with_policy(Policy::new(SizePolicy::Auto, SizePolicy::Remainder(0)));
-        let (_, tree) = Column::create(ColumnParameters::new([display_row, keypad_row]));
+        let (_, keypad_row) = Row::create(RowParameters::new(TrackSize::Flex(1.0), [LinearItem::flex(keypad_column, 1.0)]));
+        let display_weight = DISPLAY_HEIGHT_FRACTION;
+        let (_, tree) = Column::create(ColumnParameters::new([
+            LinearItem::flex(display_row, display_weight),
+            LinearItem::flex(keypad_row, 1.0 - display_weight),
+        ]));
         let root = ctx.create_window("Calculator", rect(0, 0, 320, 420), tree);
         ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_RESIZE | WindowOption::NO_TITLE)
             .expect("calculator root should remain registered");

@@ -313,6 +313,16 @@ impl ContainerLayoutCtx<'_> {
         Some(self.runtime.layout_node_ref(node, self.style, self.atlas, rect))
     }
 
+    /// Assigns an exact child rectangle after a built-in parent has resolved all track sizing.
+    ///
+    /// This remains crate-private while legacy containers still rely on node policy. Once every
+    /// parent owns its relationships, the public `layout_child` operation becomes exact and this
+    /// migration-only distinction disappears.
+    pub(crate) fn layout_child_allocated(&mut self, children: &mut Children, index: usize, rect: Recti) -> Option<Dimensioni> {
+        let node = children.get_mut(index)?;
+        Some(self.runtime.layout_allocated_node_ref(node, self.style, self.atlas, rect))
+    }
+
     /// Reads one child's content extent from its most recent placement in this pass.
     pub fn child_content_size(&self, children: &Children, index: usize) -> Option<Dimensioni> {
         // Content size is a copy of committed layout output, never a borrow of child runtime state.

@@ -136,13 +136,15 @@ impl Disclosure {
 
     /// Appends one still-unmounted child.
     pub fn push(&mut self, node: Node) -> Result<(), Node> {
-        self.content.try_update_with(node, |content, node| content.push(node))?
+        self.content
+            .try_update_with(node, |content, node| content.push(node).map_err(super::LinearItem::into_node))?
     }
 
     /// Inserts a node, returning it unchanged when `index > len`.
     #[allow(clippy::result_large_err)] // The exact unboxed owner is the failure value by contract.
     pub fn insert(&mut self, index: usize, node: Node) -> Result<(), Node> {
-        self.content.try_update_with(node, |content, node| content.insert(index, node))?
+        self.content
+            .try_update_with(node, |content, node| content.insert(index, node.into()).map_err(super::LinearItem::into_node))?
     }
 
     /// Drops one indexed child owner and reports whether it existed.

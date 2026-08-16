@@ -536,8 +536,8 @@ mod tests {
     use crate::test_support::{AllocationMeasurement, test_atlas};
     use crate::ui_node::UiRuntime;
     use crate::{
-        Column, ColumnParameters, Custom, CustomParameters, MouseButton, Policy, Row, RowParameters, SizePolicy, Stack, StackDirection, StackParameters, Style,
-        TextBlock, TextBlockParameters, TextWrap, UNCLIPPED_RECT,
+        Column, ColumnParameters, Custom, CustomParameters, MouseButton, Policy, Row, RowParameters, SizePolicy, Style, TextBlock, TextBlockParameters,
+        TextWrap, UNCLIPPED_RECT,
     };
 
     /// Lays out one fixed content node and returns the parent layout's committed summary.
@@ -692,17 +692,10 @@ mod tests {
             TextWrap::Word,
         ));
         let text_id = text.id();
-        let (_, text_stack) = Stack::create(StackParameters::new(
-            SizePolicy::Remainder(0),
-            SizePolicy::Auto,
-            StackDirection::TopToBottom,
-            [text],
-        ));
-        let (_, text_column) = Column::create(ColumnParameters::new([text_stack]));
+        let (_, text_column) = Column::create(ColumnParameters::new([text]));
         let (_, row) = Row::create(RowParameters::new(
-            [SizePolicy::Fixed(40), SizePolicy::Remainder(0)],
-            SizePolicy::Auto,
-            [label, text_column],
+            crate::TrackSize::Content,
+            [crate::LinearItem::fixed(label, 40), crate::LinearItem::flex(text_column, 1.0)],
         ));
         let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, row));
         let style = Style {
