@@ -176,12 +176,14 @@
 //! measured content are normalized at use sites, so negative geometry cannot enter placement.
 //! The default [`TrackSize`] is Content.
 //!
-//! [`LinearItem`] is the construction and mutation value that pairs an unmounted node with its
-//! parent-owned main-axis track and optional exact cross-axis extent. The concrete [`Linear`]
+//! [`LinearItem`](crate::LinearItem) is the construction and mutation value that pairs an unmounted node with its
+//! parent-owned main-axis track and optional exact cross-axis extent. The concrete
+//! [`Linear`](crate::Linear)
 //! consumes it, while its generic [`Container`](crate::Container) becomes the sole strong owner of
-//! the node and Linear stores only relationship metadata. [`LinearCrossSize`] describes the shared
-//! line as content-sized, stretched across exact allocation, or fixed. [`LinearDirection`] combines
-//! axis and leading edge so reversal needs no separate orientation-specific flag.
+//! the node and Linear stores only relationship metadata. [`LinearCrossSize`](crate::LinearCrossSize)
+//! describes the shared line as content-sized, stretched across exact allocation, or fixed.
+//! [`LinearDirection`](crate::LinearDirection) combines axis and leading edge so reversal needs no
+//! separate orientation-specific flag.
 //!
 //! # Track-resolution algorithm
 //!
@@ -259,10 +261,10 @@
 //!
 //! # Linear layout
 //!
-//! [`Linear`] is the one concrete widget for every one-dimensional layout. Its public parameters
-//! use `horizontal` and `vertical` as constructor vocabulary, while retained direction selects both
-//! the coordinate axis and leading edge. Consequently every linear tree exposes the same
-//! `TypedWidgetHandle<Linear>` topology and configuration API.
+//! [`Linear`](crate::Linear) is the one concrete widget for every one-dimensional layout. Its public
+//! parameters use `horizontal` and `vertical` as constructor vocabulary, while retained direction
+//! selects both the coordinate axis and leading edge. Consequently every linear tree exposes the
+//! same `TypedWidgetHandle<Linear>` topology and configuration API.
 //!
 //! ## Retained data
 //!
@@ -270,15 +272,16 @@
 //!
 //! - a weak `ChildrenHandle` used by typed mutation methods;
 //! - one `LinearItemSpec` per child, containing its main-axis track and optional fixed cross extent;
-//! - one [`LinearDirection`] and one [`LinearCrossSize`] as semantic layout state;
+//! - one [`LinearDirection`](crate::LinearDirection) and one
+//!   [`LinearCrossSize`](crate::LinearCrossSize) as semantic layout state;
 //! - `resolved_main`, a reusable vector of exact main-axis extents.
 //!
 //! The concrete [`Container`](crate::Container) remains the only strong owner of the authoritative
 //! [`Children`](crate::Children) collection. Child nodes and specifications are parallel by index.
 //! Push, insert, removal, replacement, and clear operations update both collections inside one
-//! checked topology closure. Failed insertion reconstructs the exact [`LinearItem`] so unique node
-//! ownership is never lost. Debug assertions check synchronization at mutation and traversal
-//! boundaries.
+//! checked topology closure. Failed insertion reconstructs the exact
+//! [`LinearItem`](crate::LinearItem) so unique node ownership is never lost. Debug assertions check
+//! synchronization at mutation and traversal boundaries.
 //!
 //! `LinearAxis` privately maps width/height and x/y into main/cross operations after the retained
 //! direction selects an axis. A trailing-edge direction changes only cursor origins and advances;
@@ -295,7 +298,8 @@
 //! 4. Measures the child at that exact bounded main extent so responsive content, especially text,
 //!    can report the correct cross extent.
 //! 5. Takes the maximum cross requirement, applies the horizontal non-empty control-line minimum
-//!    when relevant, and resolves [`LinearCrossSize`] as desired content or an exact fixed extent.
+//!    when relevant, and resolves [`LinearCrossSize`](crate::LinearCrossSize) as desired content or
+//!    an exact fixed extent.
 //! 6. Returns the track-sequence extent and resolved cross extent as desired size.
 //!
 //! Empty linear containers return zero desired size. Repeated intrinsic queries during scalar
@@ -411,9 +415,6 @@
 //!   capacity and never becomes semantic state.
 
 use crate::Dimensioni;
-
-pub(in crate::ui_node) mod linear;
-pub use linear::{Linear, LinearCrossSize, LinearDirection, LinearItem, LinearParameters};
 
 /// Available space on one measurement axis.
 ///

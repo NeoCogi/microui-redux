@@ -61,7 +61,7 @@ mod input;
 pub use input::UiInputEvent;
 pub mod layout;
 mod scrollbar;
-pub use layout::{AvailableSpace, Constraints, Linear, LinearCrossSize, LinearDirection, LinearItem, LinearParameters, TrackSize};
+pub use layout::{AvailableSpace, Constraints, TrackSize};
 pub(crate) mod text_layout;
 pub use text_layout::TextWrap;
 mod widget;
@@ -87,5 +87,8 @@ pub(crate) use runtime::RuntimeMetrics;
 mod container;
 pub use container::{Container, ContainerLayoutCtx, ContainerWidget, MeasureCtx};
 mod containers;
-pub use containers::{Disclosure, DisclosureParameters, Grid, GridItem, GridParameters, GridSpan, ScrollArea, ScrollAreaParameters};
+pub use containers::{
+    Disclosure, DisclosureParameters, Grid, GridItem, GridParameters, GridSpan, Linear, LinearCrossSize, LinearDirection, LinearItem, LinearParameters,
+    ScrollArea, ScrollAreaParameters,
+};
 pub use containers::ScrollAreaOption;

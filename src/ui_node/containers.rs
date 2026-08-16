@@ -35,9 +35,10 @@ use super::{Children, Node};
 
 mod disclosure;
 mod grid;
+mod linear;
 mod scroll_area;
 
-pub use super::layout::LinearItem;
 pub use disclosure::{Disclosure, DisclosureParameters};
 pub use grid::{Grid, GridItem, GridParameters, GridSpan};
+pub use linear::{Linear, LinearCrossSize, LinearDirection, LinearItem, LinearParameters};
 pub use scroll_area::{ScrollArea, ScrollAreaOption, ScrollAreaParameters};
