@@ -63,8 +63,8 @@ pub enum ButtonContent {
 }
 
 impl crate::LeafWidget for Button {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.preferred_size_widget(style, atlas, avail)
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, constraints)
     }
 }
 
@@ -173,7 +173,7 @@ impl Button {
     }
 
     /// Measures the label and optional visual content.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         match &self.content {
             ButtonContent::Text { label, icon } => {
                 let visual = icon.map(|icon| atlas.get_icon_size(icon));
@@ -185,8 +185,8 @@ impl Button {
             }
             ButtonContent::ScaledImage { label, image } => {
                 let visual = image.map(TextureId::size);
-                if visual.is_some() && _avail.width > 0 {
-                    scaled_visual_content_size(_avail, visual)
+                if visual.is_some() && constraints.width.bound().is_some() {
+                    scaled_visual_content_size(constraints, visual)
                 } else {
                     inline_content_size(style, atlas, self.font, label, visual)
                 }

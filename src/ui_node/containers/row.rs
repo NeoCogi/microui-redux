@@ -137,8 +137,8 @@ impl Row {
 }
 
 impl ContainerWidget for Row {
-    fn measure(&self, ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
-        row_size(ctx, self, available)
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: crate::Constraints) -> Dimensioni {
+        row_size(ctx, self, constraints.legacy_size())
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
@@ -173,16 +173,16 @@ fn layout_row(ctx: &mut ContainerLayoutCtx<'_>, state: &mut Row, children: &mut 
     // First resolve each width and measure content at that actual width. This is what keeps wrapped
     // child height consistent with the widths that layout will commit.
     let mut axis = row_axis(state, count, available_width, |index| {
-        ctx.measure_child(children, index, Dimensioni::default()).unwrap_or_default().width
+        ctx.measure_child(children, index, crate::Constraints::unbounded()).unwrap_or_default().width
     });
     let mut height = 0;
     for index in 0..count {
         let policy = state.widths.get(index).copied().unwrap_or(SizePolicy::Auto);
-        let preferred = ctx.measure_child(children, index, Dimensioni::default()).unwrap_or_default().width;
+        let preferred = ctx.measure_child(children, index, crate::Constraints::unbounded()).unwrap_or_default().width;
         let width = axis.next(policy, preferred).advance;
         let measured_width = children.child_policy(index).unwrap_or_else(crate::Policy::auto).width.measurement_bound(width);
         height = height.max(
-            ctx.measure_child(children, index, Dimensioni::new(measured_width, 0))
+            ctx.measure_child(children, index, crate::Constraints::from_legacy_size(Dimensioni::new(measured_width, 0)))
                 .unwrap_or_default()
                 .height,
         );
@@ -194,12 +194,12 @@ fn layout_row(ctx: &mut ContainerLayoutCtx<'_>, state: &mut Row, children: &mut 
     // Replay the allocation now that the single shared row height is known, placing each child as
     // soon as its width is resolved instead of collecting widths in a temporary Vec.
     let mut axis = row_axis(state, count, available_width, |index| {
-        ctx.measure_child(children, index, Dimensioni::default()).unwrap_or_default().width
+        ctx.measure_child(children, index, crate::Constraints::unbounded()).unwrap_or_default().width
     });
     let mut x = rect.x;
     for index in 0..count {
         let policy = state.widths.get(index).copied().unwrap_or(SizePolicy::Auto);
-        let preferred = ctx.measure_child(children, index, Dimensioni::default()).unwrap_or_default().width;
+        let preferred = ctx.measure_child(children, index, crate::Constraints::unbounded()).unwrap_or_default().width;
         let width = axis.next(policy, preferred).advance;
         let _ = ctx.layout_child(children, index, Recti::new(x, rect.y, width, height));
         // next_x = current_x + child_width + spacing.
@@ -238,18 +238,22 @@ fn row_size(ctx: &mut MeasureCtx<'_>, state: &Row, available: Dimensioni) -> Dim
     };
     // Resolve width tracks first; each resolved width then becomes the child's wrapping constraint.
     let mut axis = row_axis(state, count, available_width, |index| {
-        ctx.measure_child(index, Dimensioni::default()).unwrap_or_default().width
+        ctx.measure_child(index, crate::Constraints::unbounded()).unwrap_or_default().width
     });
     let mut preferred_height = 0;
     for index in 0..count {
         let policy = state.widths.get(index).copied().unwrap_or(SizePolicy::Auto);
-        let preferred = ctx.measure_child(index, Dimensioni::default()).unwrap_or_default().width;
+        let preferred = ctx.measure_child(index, crate::Constraints::unbounded()).unwrap_or_default().width;
         let width = ctx
             .child_policy(index)
             .unwrap_or_else(crate::Policy::auto)
             .width
             .measurement_bound(axis.next(policy, preferred).advance);
-        preferred_height = preferred_height.max(ctx.measure_child(index, Dimensioni::new(width, 0)).unwrap_or_default().height);
+        preferred_height = preferred_height.max(
+            ctx.measure_child(index, crate::Constraints::from_legacy_size(Dimensioni::new(width, 0)))
+                .unwrap_or_default()
+                .height,
+        );
     }
     // An empty or zero-height row retains the standard control-height fallback.
     preferred_height = preferred_height.max(super::default_cell_height(ctx.style(), ctx.atlas()));

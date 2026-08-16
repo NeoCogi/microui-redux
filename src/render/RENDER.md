@@ -161,7 +161,7 @@ impl LeafWidget for PaintedSwatch {
         &self,
         _style: &Style,
         _atlas: &AtlasHandle,
-        _available: Dimensioni,
+        _constraints: Constraints,
     ) -> Dimensioni {
         Dimensioni::new(96, 48)
     }

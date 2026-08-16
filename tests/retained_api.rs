@@ -34,8 +34,8 @@ use microui_redux::render::{FrameError, FrameInfo, RendererBackend, RendererFram
 use microui_redux::retained::*;
 use microui_redux::prelude::{Dimensioni, FileDialogRequest, FileDialogStatus, Recti};
 use microui_redux::{
-    color, rect, AtlasHandle, AtlasSource, Column, ColumnParameters, Context, Disclosure, DisclosureParameters, FontEntry, Grid, GridParameters, Policy,
-    RootMutationError, Row, RowParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SizePolicy, SourceFormat, Stack, StackDirection,
+    color, rect, AtlasHandle, AtlasSource, Column, ColumnParameters, Constraints, Context, Disclosure, DisclosureParameters, FontEntry, Grid, GridParameters,
+    Policy, RootMutationError, Row, RowParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SizePolicy, SourceFormat, Stack, StackDirection,
     StackParameters, Style, TextureId,
 };
 
@@ -132,10 +132,10 @@ struct ExternalContainer {
 }
 
 impl ContainerWidget for ExternalContainer {
-    fn measure(&self, ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: Constraints) -> Dimensioni {
         self.measure_calls.set(self.measure_calls.get() + 1);
         self.observed_policy.set(ctx.child_policy(0));
-        ctx.measure_child(0, available).unwrap_or_else(|| Dimensioni::new(20, 20))
+        ctx.measure_child(0, constraints).unwrap_or_else(|| Dimensioni::new(20, 20))
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
@@ -191,7 +191,7 @@ impl Widget for ExternalLeaf {
 }
 
 impl LeafWidget for ExternalLeaf {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(12, 9)
     }
 }

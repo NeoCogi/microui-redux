@@ -71,8 +71,8 @@ pub struct TextboxParameters {
 }
 
 impl crate::LeafWidget for Textbox {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.preferred_size_widget(style, atlas, avail)
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, constraints)
     }
 }
 
@@ -234,7 +234,7 @@ impl Textbox {
     }
 
     /// Measures a single-line editor, bounded by available width when supplied.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         let padding = style.padding.max(0);
         let vertical_pad = (padding / 2).max(1);
         let font = style.resolve_font_choice(self.font);
@@ -245,8 +245,8 @@ impl Textbox {
             atlas.get_text_size(font, self.buf.as_str()).width
         };
         let mut width = (text_w + padding * 2 + 1).max(0);
-        if avail.width > 0 {
-            width = width.min(avail.width.max(0));
+        if let Some(max_width) = constraints.width.bound() {
+            width = width.min(max_width);
         }
         let height = (font_height + vertical_pad * 2).max(0);
         Dimensioni::new(width, height)

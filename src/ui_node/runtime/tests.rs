@@ -89,7 +89,7 @@ impl Widget for Probe {
 }
 
 impl crate::LeafWidget for Probe {
-    fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
+    fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _constraints: Constraints) -> Dimensioni {
         self.counts.measures.set(self.counts.measures.get() + 1);
         Dimensioni::new(17, 13)
     }
@@ -114,7 +114,7 @@ impl Widget for HoldFocusProbe {
 }
 
 impl crate::LeafWidget for HoldFocusProbe {
-    fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
+    fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(20, 20)
     }
 }
@@ -143,10 +143,10 @@ impl TraversalContainer {
 }
 
 impl ContainerWidget for TraversalContainer {
-    fn measure(&self, ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: Constraints) -> Dimensioni {
         self.measurements.set(self.measurements.get() + 1);
         (0..ctx.child_count())
-            .filter_map(|index| ctx.measure_child(index, available))
+            .filter_map(|index| ctx.measure_child(index, constraints))
             .fold(Dimensioni::default(), |size, child| {
                 Dimensioni::new(size.width.max(child.width), size.height.max(child.height))
             })
@@ -199,7 +199,7 @@ impl CaptureContainer {
 }
 
 impl ContainerWidget for CaptureContainer {
-    fn measure(&self, _ctx: &mut MeasureCtx<'_>, _available: Dimensioni) -> Dimensioni {
+    fn measure(&self, _ctx: &mut MeasureCtx<'_>, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(20, 20)
     }
 
@@ -259,7 +259,7 @@ impl Widget for CrossSubtreeRemover {
 }
 
 impl crate::LeafWidget for CrossSubtreeRemover {
-    fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
+    fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(10, 10)
     }
 }

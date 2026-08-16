@@ -50,8 +50,8 @@ pub struct NumberParameters {
 }
 
 impl crate::LeafWidget for Number {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.preferred_size_widget(style, atlas, avail)
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, constraints)
     }
 }
 
@@ -142,7 +142,7 @@ impl Number {
     }
 
     /// Measures the formatted number label.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         number_preferred_size(style, atlas, self.font, self.value, self.precision, 0, 0)
     }
 

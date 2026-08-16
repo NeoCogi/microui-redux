@@ -46,8 +46,8 @@ pub struct ListBoxParameters {
 }
 
 impl crate::LeafWidget for ListBox {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.preferred_size_widget(style, atlas, avail)
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, constraints)
     }
 }
 
@@ -114,7 +114,7 @@ impl ListBox {
     }
 
     /// Measures list-box inline label and optional image.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         let visual = self.image.map(TextureId::size);
         inline_content_size(style, atlas, self.font, &self.label, visual)
     }

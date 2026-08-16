@@ -361,7 +361,7 @@ impl Widget for RetainedScrollbar {
 }
 
 impl crate::LeafWidget for RetainedScrollbar {
-    fn measure(&self, style: &crate::Style, _atlas: &crate::AtlasHandle, _available: Dimensioni) -> Dimensioni {
+    fn measure(&self, style: &crate::Style, _atlas: &crate::AtlasHandle, _constraints: crate::Constraints) -> Dimensioni {
         let thickness = style.scrollbar_size.max(0);
         match self.axis {
             ScrollAxis::Horizontal => Dimensioni::new(0, thickness),

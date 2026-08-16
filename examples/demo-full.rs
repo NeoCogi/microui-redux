@@ -241,7 +241,7 @@ impl Widget for PainterDemo {
 }
 
 impl LeafWidget for PainterDemo {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(240, 200)
     }
 }
@@ -702,7 +702,7 @@ impl Widget for FalloffEditor {
 }
 
 impl LeafWidget for FalloffEditor {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(300, 220)
     }
 }
@@ -816,7 +816,7 @@ impl Widget for SuzanneWidget {
 }
 
 impl LeafWidget for SuzanneWidget {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(80, 24)
     }
 }

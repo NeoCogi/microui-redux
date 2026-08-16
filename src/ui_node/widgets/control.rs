@@ -93,13 +93,13 @@ pub(super) fn inline_content_size(style: &Style, atlas: &AtlasHandle, font: Font
 }
 
 /// Computes preferred size for an image-like button that scales its visual to the available width.
-pub(super) fn scaled_visual_content_size(available: Dimensioni, visual_size: Option<Dimensioni>) -> Dimensioni {
+pub(super) fn scaled_visual_content_size(constraints: Constraints, visual_size: Option<Dimensioni>) -> Dimensioni {
     let visual_size = visual_size.unwrap_or_default();
     if visual_size.width <= 0 || visual_size.height <= 0 {
         return Dimensioni::default();
     }
 
-    let width = if available.width > 0 { available.width } else { visual_size.width };
+    let width = constraints.width.bound().unwrap_or(visual_size.width);
     let height = ((width.max(0) as i64 * visual_size.height as i64) / visual_size.width as i64) as i32;
     Dimensioni::new(width.max(0), height.max(0))
 }

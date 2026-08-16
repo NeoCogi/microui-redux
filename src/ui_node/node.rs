@@ -33,7 +33,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::math::RectExt;
-use crate::{AtlasHandle, Dimensioni, FontId, IconId, LeafWidget, Recti, Style, TypedWidgetHandle, Widget};
+use crate::{AtlasHandle, Constraints, Dimensioni, FontId, IconId, LeafWidget, Recti, Style, TypedWidgetHandle, Widget};
 
 use super::{ChildParticipation, Children, Container, NodeLayout, RuntimeNodeId, WidgetStorage};
 
@@ -81,7 +81,7 @@ impl MeasurementStyleKey {
 }
 
 struct MeasurementEntry {
-    available: Dimensioni,
+    constraints: Constraints,
     style: MeasurementStyleKey,
     atlas: AtlasHandle,
     preferred: Dimensioni,
@@ -118,12 +118,10 @@ impl MeasurementCache {
         self.layout_dirty = false;
     }
 
-    fn lookup(&self, available: Dimensioni, style: MeasurementStyleKey, atlas: &AtlasHandle) -> Option<Dimensioni> {
+    fn lookup(&self, constraints: Constraints, style: MeasurementStyleKey, atlas: &AtlasHandle) -> Option<Dimensioni> {
         self.entries
             .iter()
-            .find(|cached| {
-                cached.available.width == available.width && cached.available.height == available.height && cached.style == style && cached.atlas.ptr_eq(atlas)
-            })
+            .find(|cached| cached.constraints == constraints && cached.style == style && cached.atlas.ptr_eq(atlas))
             .map(|cached| cached.preferred)
     }
 
@@ -329,14 +327,14 @@ impl Node {
     }
 
     /// Measures this node's preferred outer size. Placement policy is applied later by layout.
-    pub(crate) fn measure(&mut self, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> Dimensioni {
-        self.measure_with_cache_status(style, atlas, available).0
+    pub(crate) fn measure(&mut self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+        self.measure_with_cache_status(style, atlas, constraints).0
     }
 
     /// Measures and reports whether the retained result satisfied this exact query.
-    pub(crate) fn measure_with_cache_status(&mut self, style: &Style, atlas: &AtlasHandle, available: Dimensioni) -> (Dimensioni, bool) {
+    pub(crate) fn measure_with_cache_status(&mut self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> (Dimensioni, bool) {
         let style_key = MeasurementStyleKey::new(style);
-        if let Some(cached) = self.state.measurement.lookup(available, style_key, atlas) {
+        if let Some(cached) = self.state.measurement.lookup(constraints, style_key, atlas) {
             return (cached, true);
         }
 
@@ -352,17 +350,17 @@ impl Node {
                 let border_width = if framed { style.frame_border().width.max(0) } else { 0 };
                 let measured_content = widget
                     .widget
-                    .measure(style, atlas, crate::ui_node::frame::content_available(available, border_width));
+                    .measure(style, atlas, crate::ui_node::frame::content_constraints(constraints, border_width));
                 (border_width, measured_content)
             }
-            NodeKind::Container(container) => container.measure_content_with_frame(style, atlas, available),
+            NodeKind::Container(container) => container.measure_content_with_frame(style, atlas, constraints),
         };
         // Widgets cannot return negative geometry. Node placement policy is intentionally absent:
         // the parent applies it later when allocating this preferred outer size.
         let preferred_content = Dimensioni::new(measured_content.width.max(0), measured_content.height.max(0));
         let preferred = crate::ui_node::frame::outer_preferred(preferred_content, border_width);
         self.state.measurement.insert(MeasurementEntry {
-            available,
+            constraints,
             style: style_key,
             atlas: atlas.clone(),
             preferred,
@@ -582,8 +580,8 @@ mod tests {
         let style = crate::Style::default();
         let atlas = test_atlas();
 
-        let plain = plain.measure(&style, &atlas, Dimensioni::default());
-        let fixed_measurement = fixed.measure(&style, &atlas, Dimensioni::default());
+        let plain = plain.measure(&style, &atlas, Constraints::unbounded());
+        let fixed_measurement = fixed.measure(&style, &atlas, Constraints::unbounded());
         assert_eq!((plain.width, plain.height), (fixed_measurement.width, fixed_measurement.height));
         let children: Children = [fixed].into_iter().collect();
         assert_eq!(children.child_policy(0), Some(crate::Policy::fixed(300, 200)));

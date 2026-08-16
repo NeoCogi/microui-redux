@@ -31,7 +31,7 @@
 //!
 //! This standalone example validates that external texture drawing respects UI clipping.
 
-use microui_redux::{prelude::*, render::Vertex, AtlasSource};
+use microui_redux::{prelude::*, render::Vertex, AtlasSource, Constraints};
 use std::{cell::RefCell, rc::Rc};
 
 enum SmokeEvent {
@@ -196,7 +196,7 @@ impl Widget for TextureClippingProbe {
 }
 
 impl LeafWidget for TextureClippingProbe {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(64, 64)
     }
 }

@@ -43,7 +43,7 @@ pub(crate) use input_dispatcher::DispatchResult;
 use crate::input::InputSnapshot;
 use crate::math::RectExt;
 use crate::render::DisplayList;
-use crate::{Dimensioni, MouseButton, Recti, Style, UNCLIPPED_RECT, Vec2i};
+use crate::{Constraints, Dimensioni, MouseButton, Recti, Style, UNCLIPPED_RECT, Vec2i};
 #[cfg(test)]
 use std::cell::Cell;
 
@@ -157,12 +157,10 @@ impl UiRuntime {
 
     /// Measures one persistent root node for auto-size without introducing a parallel projection.
     ///
-    /// A zero component requests unconstrained preferred size; a positive component supplies the
-    /// programmed measurement bound. Root chrome owns the conversion from application content to
-    /// the final outer window extent.
-    pub(crate) fn measure_tree_root(&mut self, root: &mut Node, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
+    /// Root chrome owns the conversion from application constraints to the final outer extent.
+    pub(crate) fn measure_tree_root(&mut self, root: &mut Node, style: &Style, atlas: &crate::AtlasHandle, constraints: Constraints) -> Dimensioni {
         root.synchronize_measurement_invalidation();
-        self.measure_node(root, style, atlas, available)
+        self.measure_node(root, style, atlas, constraints)
     }
 
     /// Lays out one persistent root node at its authoritative screen-space rectangle.

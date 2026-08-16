@@ -35,18 +35,18 @@ use crate::math::RectExt;
 
 impl UiRuntime {
     /// Measures one already-borrowed node through the authoritative private node path.
-    pub(in crate::ui_node) fn measure_node(&self, node: &mut Node, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
+    pub(in crate::ui_node) fn measure_node(&self, node: &mut Node, style: &Style, atlas: &crate::AtlasHandle, constraints: Constraints) -> Dimensioni {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.measures += 1);
         // Node::measure is the only place that adds frame geometry; containers receive the same
         // content-only measurement contract whether reached here or through Children.
-        node.measure(style, atlas, available)
+        node.measure(style, atlas, constraints)
     }
 
-    fn measure_node_for_layout(&self, node: &mut Node, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> (Dimensioni, bool) {
+    fn measure_node_for_layout(&self, node: &mut Node, style: &Style, atlas: &crate::AtlasHandle, constraints: Constraints) -> (Dimensioni, bool) {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.measures += 1);
-        node.measure_with_cache_status(style, atlas, available)
+        node.measure_with_cache_status(style, atlas, constraints)
     }
 
     /// Lays out one already-borrowed node through direct widget/container dispatch.
@@ -54,7 +54,7 @@ impl UiRuntime {
         let framed = node_is_framed(node);
         // Query content preference at the offered slot before the parent-owned node policy chooses
         // the actual outer allocation.
-        let (preferred, measurement_cached) = self.measure_node_for_layout(node, style, atlas, Dimensioni::new(rect.width.max(1), rect.height.max(1)));
+        let (preferred, measurement_cached) = self.measure_node_for_layout(node, style, atlas, Constraints::bounded(Dimensioni::new(rect.width, rect.height)));
         let policy = node.state.policy;
         let outer = Recti::new(
             rect.x,
@@ -70,7 +70,7 @@ impl UiRuntime {
         let framed = node_is_framed(node);
         // Preserve the established measure/layout phase contract while keeping the resolved root
         // allocation authoritative.
-        let (preferred, measurement_cached) = self.measure_node_for_layout(node, style, atlas, Dimensioni::new(rect.width.max(1), rect.height.max(1)));
+        let (preferred, measurement_cached) = self.measure_node_for_layout(node, style, atlas, Constraints::bounded(Dimensioni::new(rect.width, rect.height)));
         let outer = Recti::new(rect.x, rect.y, rect.width.max(0), rect.height.max(0));
         self.layout_node_outer_ref(node, style, atlas, framed, outer, preferred, measurement_cached)
     }

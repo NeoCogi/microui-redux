@@ -34,8 +34,8 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::render::Painter;
 use crate::{
-    AtlasHandle, Children, Container, ContainerLayoutCtx, ContainerWidget, ControlColor, Dimensioni, FocusPolicy, MeasureCtx, MouseButton, Node, Recti, Style,
-    TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, WindowOption,
+    AtlasHandle, Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, ControlColor, Dimensioni, FocusPolicy, MeasureCtx, MouseButton, Node,
+    Recti, Style, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, WindowOption,
 };
 
 use super::RootId;
@@ -349,7 +349,8 @@ impl ContainerWidget for RootChrome {
         event_position(event).is_some_and(|position| self.geometry.hit_test(position).is_some()) && !matches!(event, UiInputEvent::Scroll { .. })
     }
 
-    fn measure(&self, ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: Constraints) -> Dimensioni {
+        let available = constraints.legacy_size();
         // Resolve chrome-only minimum/insets first, then measure the one application child inside
         // that body. Auto-size and placement therefore share root_chrome_geometry.
         let minimum = root_chrome_geometry(Recti::default(), Dimensioni::default(), &self.name, self.options, ctx.style(), ctx.atlas()).minimum_outer;
@@ -367,10 +368,10 @@ impl ContainerWidget for RootChrome {
         let child = ctx
             .measure_child(
                 0,
-                Dimensioni::new(
+                Constraints::from_legacy_size(Dimensioni::new(
                     policy.width.measurement_bound(child_available.width),
                     policy.height.measurement_bound(child_available.height),
-                ),
+                )),
             )
             .unwrap_or_default();
         let child = Dimensioni::new(
@@ -389,10 +390,10 @@ impl ContainerWidget for RootChrome {
             .measure_child(
                 children,
                 0,
-                Dimensioni::new(
+                Constraints::from_legacy_size(Dimensioni::new(
                     policy.width.measurement_bound(shell.body.width.max(1)),
                     policy.height.measurement_bound(shell.body.height.max(1)),
-                ),
+                )),
             )
             .unwrap_or_default();
         // Commit one snapshot used by layout, hit testing, surface paint, and overlay paint.

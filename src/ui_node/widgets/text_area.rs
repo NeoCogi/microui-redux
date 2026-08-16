@@ -79,8 +79,8 @@ pub struct TextAreaParameters {
 }
 
 impl crate::LeafWidget for TextArea {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.preferred_size_widget(style, atlas, avail)
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, constraints)
     }
 }
 
@@ -294,11 +294,15 @@ impl TextArea {
     }
 
     /// Measures the text area content, respecting wrapping and available constraints.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         let padding = style.padding.max(0);
         let font = style.resolve_font_choice(self.font);
-        let max_width = if self.wrap == TextWrap::Word && avail.width > 0 {
-            (avail.width - padding * 2).max(1)
+        let max_width = if self.wrap == TextWrap::Word {
+            constraints
+                .width
+                .bound()
+                .map(|width| width.saturating_sub(padding * 2).max(1))
+                .unwrap_or(i32::MAX / 4)
         } else {
             i32::MAX / 4
         };
@@ -310,11 +314,11 @@ impl TextArea {
         let mut width = text_w.saturating_add(padding * 2).max(0);
         // preferred_height = line_height * line_count + top_padding + bottom_padding.
         let mut height = line_height.saturating_mul(line_count).saturating_add(padding * 2).max(0);
-        if avail.width > 0 {
-            width = width.min(avail.width.max(0));
+        if let Some(max_width) = constraints.width.bound() {
+            width = width.min(max_width);
         }
-        if avail.height > 0 {
-            height = height.min(avail.height.max(0));
+        if let Some(max_height) = constraints.height.bound() {
+            height = height.min(max_height);
         }
         Dimensioni::new(width, height)
     }

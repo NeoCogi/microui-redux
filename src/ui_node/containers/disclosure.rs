@@ -276,17 +276,18 @@ impl Widget for DisclosureHeader {
 }
 
 impl crate::LeafWidget for DisclosureHeader {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, _constraints: crate::Constraints) -> Dimensioni {
         // Header content is intrinsically one line and does not stretch to the offered bound.
         self.preferred(style, atlas)
     }
 }
 
 impl ContainerWidget for Disclosure {
-    fn measure(&self, ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: crate::Constraints) -> Dimensioni {
+        let available = constraints.legacy_size();
         // The header always contributes. Body measurement is conditional so collapsed content does
         // not influence root auto-size while its state and nodes remain retained.
-        let header = ctx.measure_child(Self::HEADER, available).unwrap_or_default();
+        let header = ctx.measure_child(Self::HEADER, constraints).unwrap_or_default();
         if !self.expanded {
             return header;
         }
@@ -302,7 +303,9 @@ impl ContainerWidget for Disclosure {
         } else {
             0
         };
-        let body = ctx.measure_child(Self::BODY, Dimensioni::new(body_width, body_height)).unwrap_or_default();
+        let body = ctx
+            .measure_child(Self::BODY, crate::Constraints::from_legacy_size(Dimensioni::new(body_width, body_height)))
+            .unwrap_or_default();
         Dimensioni::new(
             header.width.max(body.width.saturating_add(indent)),
             header.height.saturating_add(spacing).saturating_add(body.height),
@@ -312,7 +315,7 @@ impl ContainerWidget for Disclosure {
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
         // Header is a fixed structural role and always occupies the first visible row.
         let preferred = ctx
-            .measure_child(children, Self::HEADER, Dimensioni::new(rect.width, rect.height))
+            .measure_child(children, Self::HEADER, crate::Constraints::bounded(Dimensioni::new(rect.width, rect.height)))
             .unwrap_or_default();
         let header_height = preferred.height.min(rect.height.max(0));
         let _ = ctx.set_child_participation(children, Self::HEADER, ChildParticipation::Active);

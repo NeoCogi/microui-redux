@@ -450,7 +450,7 @@ trait GridMeasureCtx {
     fn style(&self) -> &Style;
     fn atlas(&self) -> &AtlasHandle;
     fn child_policy(&self, index: usize) -> Option<crate::Policy>;
-    fn measure_child(&mut self, index: usize, available: Dimensioni) -> Option<Dimensioni>;
+    fn measure_child(&mut self, index: usize, constraints: crate::Constraints) -> Option<Dimensioni>;
 }
 
 impl GridMeasureCtx for MeasureCtx<'_> {
@@ -466,8 +466,8 @@ impl GridMeasureCtx for MeasureCtx<'_> {
         MeasureCtx::child_policy(self, index)
     }
 
-    fn measure_child(&mut self, index: usize, available: Dimensioni) -> Option<Dimensioni> {
-        MeasureCtx::measure_child(self, index, available)
+    fn measure_child(&mut self, index: usize, constraints: crate::Constraints) -> Option<Dimensioni> {
+        MeasureCtx::measure_child(self, index, constraints)
     }
 }
 
@@ -489,14 +489,14 @@ impl GridMeasureCtx for GridLayoutMeasureCtx<'_, '_> {
         self.ctx.child_policy(self.children, index)
     }
 
-    fn measure_child(&mut self, index: usize, available: Dimensioni) -> Option<Dimensioni> {
-        self.ctx.measure_child(self.children, index, available)
+    fn measure_child(&mut self, index: usize, constraints: crate::Constraints) -> Option<Dimensioni> {
+        self.ctx.measure_child(self.children, index, constraints)
     }
 }
 
 impl ContainerWidget for Grid {
-    fn measure(&self, ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
-        grid_size(ctx, self, available)
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: crate::Constraints) -> Dimensioni {
+        grid_size(ctx, self, constraints.legacy_size())
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
@@ -615,7 +615,10 @@ fn preferred_column(ctx: &mut impl GridMeasureCtx, state: &Grid, index: usize, s
         if index < placement.column || index >= column_end {
             continue;
         }
-        let minimum = ctx.measure_child(placement.child_index, Dimensioni::default()).unwrap_or_default().width;
+        let minimum = ctx
+            .measure_child(placement.child_index, crate::Constraints::unbounded())
+            .unwrap_or_default()
+            .width;
         preferred = preferred.max(contribution_for_track(
             &state.column_tracks,
             index,
@@ -651,7 +654,7 @@ fn preferred_row<C: GridMeasureCtx>(ctx: &mut C, state: &Grid, index: usize, spa
             .width
             .measurement_bound(width);
         let minimum = ctx
-            .measure_child(placement.child_index, Dimensioni::new(width.max(1), 0))
+            .measure_child(placement.child_index, crate::Constraints::from_legacy_size(Dimensioni::new(width.max(1), 0)))
             .unwrap_or_default()
             .height;
         preferred = preferred.max(contribution_for_track(

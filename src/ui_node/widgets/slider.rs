@@ -77,8 +77,8 @@ pub struct SliderParameters {
 }
 
 impl crate::LeafWidget for Slider {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.preferred_size_widget(style, atlas, avail)
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, constraints)
     }
 }
 
@@ -177,7 +177,7 @@ impl Slider {
     }
 
     /// Measures the slider track plus formatted value label.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         let thumb_size = style.thumb_size.max(0);
         number_preferred_size(style, atlas, self.font, self.value, self.precision, thumb_size, thumb_size)
     }

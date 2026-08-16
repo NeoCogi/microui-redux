@@ -48,8 +48,8 @@ pub struct ListItemParameters {
 }
 
 impl crate::LeafWidget for ListItem {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.preferred_size_widget(style, atlas, avail)
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, constraints)
     }
 }
 
@@ -164,7 +164,7 @@ impl ListItem {
     }
 
     /// Measures the row label and optional icon.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         let padding = style.padding.max(0);
         let mut width = padding * 2;
         let mut visual_h = 0;

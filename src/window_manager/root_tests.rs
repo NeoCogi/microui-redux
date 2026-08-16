@@ -33,9 +33,9 @@ use super::*;
 use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, test_atlas};
 use crate::{
     color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Column, ColumnParameters, Custom, CustomParameters,
-    Context, Dimensioni, Disclosure, DisclosureParameters, Grid, GridParameters, KeyMode, MouseButton, Node, Policy, Row, RowParameters, ScrollArea,
-    ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, SizePolicy, Stack, StackDirection, StackParameters, Style, Textbox, TextboxChanged,
-    TextBlock, TextBlockParameters, TextboxParameters, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
+    Constraints, Context, Dimensioni, Disclosure, DisclosureParameters, Grid, GridParameters, KeyMode, MouseButton, Node, Policy, Row, RowParameters,
+    ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, SizePolicy, Stack, StackDirection, StackParameters, Style, Textbox,
+    TextboxChanged, TextBlock, TextBlockParameters, TextboxParameters, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
 };
 use crate::render::{FrameInfo, RenderError};
 use std::{
@@ -123,7 +123,7 @@ impl Widget for OrderedProbe {
 }
 
 impl crate::LeafWidget for OrderedProbe {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         self.measures.set(self.measures.get() + 1);
         Dimensioni::new(80, 60)
     }
@@ -175,7 +175,7 @@ impl Widget for CommitProbe {
 }
 
 impl crate::LeafWidget for CommitProbe {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(40, self.intrinsic_height)
     }
 }
@@ -217,7 +217,7 @@ impl Widget for SiblingMutationProbe {
 }
 
 impl crate::LeafWidget for SiblingMutationProbe {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(20, 10)
     }
 }
@@ -246,7 +246,7 @@ impl Widget for CountedProbe {
 }
 
 impl crate::LeafWidget for CountedProbe {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(20, 10)
     }
 }
@@ -289,7 +289,7 @@ impl Widget for TopologyMutator {
 }
 
 impl crate::LeafWidget for TopologyMutator {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _available: Dimensioni) -> Dimensioni {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(20, 10)
     }
 }

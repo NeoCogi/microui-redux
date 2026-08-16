@@ -108,7 +108,7 @@ impl Widget for CubeWidget {
 }
 
 impl LeafWidget for CubeWidget {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(300, 300)
     }
 }

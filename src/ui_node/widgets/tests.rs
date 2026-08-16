@@ -62,13 +62,13 @@ fn image_widgets_measure_external_texture_dimensions() {
     let texture = TextureId::new(7, 13, 5);
 
     let button = ButtonBuilder::create_widget(ButtonParameters::with_image("aa", Some(texture), WidgetOption::FRAME, WidgetFillOption::ALL));
-    let button_size = button.measure(&style, &atlas, Dimensioni::default());
+    let button_size = button.measure(&style, &atlas, Constraints::unbounded());
 
     assert_eq!(button_size.width, style.padding * 2 + texture.width() + style.padding + 16);
     assert_eq!(button_size.height, 14);
 
     let list_box = ListBoxBuilder::create_widget(ListBoxParameters::new("a", Some(texture)));
-    let list_size = list_box.measure(&style, &atlas, Dimensioni::default());
+    let list_size = list_box.measure(&style, &atlas, Constraints::unbounded());
 
     assert_eq!(list_size.width, style.padding * 2 + texture.width() + style.padding + 8);
     assert_eq!(list_size.height, 14);

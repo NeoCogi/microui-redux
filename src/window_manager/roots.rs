@@ -63,8 +63,8 @@ impl WidgetTree {
         self.runtime.clear_transient_targets();
     }
 
-    fn measure(&mut self, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> Dimensioni {
-        self.runtime.measure_tree_root(&mut self.root, style, atlas, available)
+    fn measure(&mut self, style: &Style, atlas: &crate::AtlasHandle, constraints: crate::Constraints) -> Dimensioni {
+        self.runtime.measure_tree_root(&mut self.root, style, atlas, constraints)
     }
 
     fn layout(&mut self, style: &Style, atlas: crate::AtlasHandle, rect: Recti, viewport: Recti) {
@@ -486,12 +486,23 @@ impl WindowManager {
             let auto_width = options.intersects(WindowOption::AUTO_WIDTH);
             let auto_height = options.intersects(WindowOption::AUTO_HEIGHT);
             if visible && options.intersects(WindowOption::AUTO_SIZE) {
-                // Zero requests intrinsic size on an automatic axis. A retained axis supplies its
+                // An automatic root axis asks for intrinsic size. A retained axis supplies its
                 // programmed outer bound so root chrome can offer the exact remaining body extent
                 // without exposing frame or padding arithmetic to the application.
-                let available = Dimensioni::new(if auto_width { 0 } else { rect.width.max(1) }, if auto_height { 0 } else { rect.height.max(1) });
+                let constraints = crate::Constraints::new(
+                    if auto_width {
+                        crate::AvailableSpace::Unbounded
+                    } else {
+                        crate::AvailableSpace::bounded(rect.width)
+                    },
+                    if auto_height {
+                        crate::AvailableSpace::Unbounded
+                    } else {
+                        crate::AvailableSpace::bounded(rect.height)
+                    },
+                );
                 let tree = &mut self.roots[index].tree;
-                let size = tree.measure(&self.style, atlas, available);
+                let size = tree.measure(&self.style, atlas, constraints);
                 let size = Dimensioni::new(
                     if auto_width { size.width } else { rect.width },
                     if auto_height { size.height } else { rect.height },

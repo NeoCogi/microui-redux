@@ -30,7 +30,7 @@
 
 use crate::render::Painter;
 use crate::theme::FrameBorder;
-use crate::{Color, Dimensioni, Recti, Style};
+use crate::{AvailableSpace, Color, Constraints, Dimensioni, Recti, Style};
 
 /// Geometry derived from one authoritative outer allocation.
 #[derive(Copy, Clone, Debug)]
@@ -59,13 +59,13 @@ pub(crate) fn frame_geometry(outer: Recti, framed: bool, style: &Style) -> Frame
     FrameGeometry { outer, content }
 }
 
-/// Removes a frame from a positive measurement bound while preserving the intrinsic `0` marker.
-pub(crate) fn content_available(available: Dimensioni, border_width: i32) -> Dimensioni {
+/// Removes a frame from each finite measurement bound while preserving unbounded axes.
+pub(crate) fn content_constraints(constraints: Constraints, border_width: i32) -> Constraints {
     // border_extent = leading_border_width + trailing_border_width = border_width * 2.
     let border_extent = border_width.saturating_mul(2);
-    Dimensioni::new(
-        inset_available(available.width, border_extent),
-        inset_available(available.height, border_extent),
+    Constraints::new(
+        inset_available(constraints.width, border_extent),
+        inset_available(constraints.height, border_extent),
     )
 }
 
@@ -145,11 +145,12 @@ fn checked_inset(outer: Recti, width: i32) -> Option<Recti> {
     Some(Recti::new(x, y, content_width, content_height))
 }
 
-/// Removes a non-negative inset from a measurement axis without losing the `0 == unbounded` marker.
-fn inset_available(value: i32, inset: i32) -> i32 {
-    // Positive bounds stay positive because downstream measurement reserves zero for unbounded.
-    // content_bound = max(available_bound - non_negative_inset, 1).
-    if value > 0 { value.saturating_sub(inset.max(0)).max(1) } else { 0 }
+/// Removes a non-negative inset without conflating a bounded zero with unbounded space.
+fn inset_available(space: AvailableSpace, inset: i32) -> AvailableSpace {
+    match space {
+        AvailableSpace::Unbounded => AvailableSpace::Unbounded,
+        AvailableSpace::Bounded(value) => AvailableSpace::bounded(value.saturating_sub(inset.max(0))),
+    }
 }
 
 fn expand_positive_axis(value: i32, border_width: i32) -> i32 {
@@ -210,6 +211,15 @@ mod tests {
     fn preferred_measurement_preserves_non_positive_results() {
         let preferred = outer_preferred(Dimensioni::new(10, -1), 2);
         assert_eq!((preferred.width, preferred.height), (14, -1));
+    }
+
+    #[test]
+    fn frame_inset_preserves_zero_and_unbounded_as_distinct_constraints() {
+        let constraints = Constraints::new(AvailableSpace::Bounded(1), AvailableSpace::Unbounded);
+        assert_eq!(
+            content_constraints(constraints, 2),
+            Constraints::new(AvailableSpace::Bounded(0), AvailableSpace::Unbounded)
+        );
     }
 
     #[test]

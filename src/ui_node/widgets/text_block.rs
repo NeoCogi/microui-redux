@@ -72,8 +72,8 @@ pub struct TextBlockParameters {
 }
 
 impl crate::LeafWidget for TextBlock {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.preferred_size_widget(style, atlas, avail)
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, constraints)
     }
 }
 
@@ -137,15 +137,15 @@ impl TextBlock {
     }
 
     /// Measures wrapped display text using the available width when requested.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         if self.text.is_empty() {
             return Dimensioni::new(0, 0);
         }
 
         let font = style.resolve_font_choice(self.font);
         let line_height = atlas.get_font_height(font) as i32;
-        let max_width = if self.wrap == TextWrap::Word && avail.width > 0 {
-            avail.width.max(1)
+        let max_width = if self.wrap == TextWrap::Word {
+            constraints.width.bound().unwrap_or(i32::MAX / 4).max(1)
         } else {
             i32::MAX / 4
         };

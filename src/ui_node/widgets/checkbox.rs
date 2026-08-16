@@ -54,7 +54,7 @@ pub struct CheckboxParameters {
 }
 
 impl crate::LeafWidget for Checkbox {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         self.preferred_size(style, atlas)
     }
 }

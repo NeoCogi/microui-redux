@@ -112,9 +112,9 @@ impl Column {
 }
 
 impl ContainerWidget for Column {
-    fn measure(&self, ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: crate::Constraints) -> Dimensioni {
         // Column geometry depends only on the authoritative child sequence and shared Style.
-        measure_column(ctx, available)
+        measure_column(ctx, constraints.legacy_size())
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
@@ -155,7 +155,7 @@ pub(super) fn layout_column(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Chi
             let policy = children.child_policy(index).unwrap_or_else(crate::Policy::auto);
             let width = policy.width.measurement_bound(rect.width.max(1));
             let preferred = ctx
-                .measure_child(children, index, Dimensioni::new(width, available_height))
+                .measure_child(children, index, crate::Constraints::from_legacy_size(Dimensioni::new(width, available_height)))
                 .unwrap_or_default()
                 .height;
             (policy.height, preferred)
@@ -169,7 +169,7 @@ pub(super) fn layout_column(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Chi
         let policy = children.child_policy(index).unwrap_or_else(crate::Policy::auto);
         let width = policy.width.measurement_bound(rect.width.max(1));
         let preferred = ctx
-            .measure_child(children, index, Dimensioni::new(width, available_height))
+            .measure_child(children, index, crate::Constraints::from_legacy_size(Dimensioni::new(width, available_height)))
             .unwrap_or_default()
             .height;
         let slot = axis.next(policy.height, preferred);
@@ -206,7 +206,9 @@ pub(super) fn measure_column(ctx: &mut MeasureCtx<'_>, available: Dimensioni) ->
         (0..count).map(|index| {
             let policy = ctx.child_policy(index).unwrap_or_else(crate::Policy::auto);
             let child_width = policy.width.measurement_bound(available.width);
-            let child = ctx.measure_child(index, Dimensioni::new(child_width, 0)).unwrap_or_default();
+            let child = ctx
+                .measure_child(index, crate::Constraints::from_legacy_size(Dimensioni::new(child_width, 0)))
+                .unwrap_or_default();
             width = width.max(policy.width.preferred_extent(child.width, available.width));
             (policy.height, child.height)
         }),
@@ -221,7 +223,10 @@ pub(super) fn measure_column(ctx: &mut MeasureCtx<'_>, available: Dimensioni) ->
     for index in 0..count {
         let policy = ctx.child_policy(index).unwrap_or_else(crate::Policy::auto);
         let child_width = policy.width.measurement_bound(available.width);
-        let preferred = ctx.measure_child(index, Dimensioni::new(child_width, 0)).unwrap_or_default().height;
+        let preferred = ctx
+            .measure_child(index, crate::Constraints::from_legacy_size(Dimensioni::new(child_width, 0)))
+            .unwrap_or_default()
+            .height;
         axis.next(policy.height, preferred);
     }
     Dimensioni::new(width, axis.extent(count, spacing))

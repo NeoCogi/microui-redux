@@ -30,7 +30,7 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{Dimensioni, Recti, Style, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption};
+use crate::{Constraints, Dimensioni, Recti, Style, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption};
 
 use super::{ChildParticipation, Children, NodeLayout, NodeRuntime, UiRuntime, WidgetStorage};
 
@@ -72,10 +72,10 @@ impl<'a> MeasureCtx<'a> {
     }
 
     /// Measures one indexed child under `available` without applying placement policy.
-    pub fn measure_child(&mut self, index: usize, available: Dimensioni) -> Option<Dimensioni> {
+    pub fn measure_child(&mut self, index: usize, constraints: Constraints) -> Option<Dimensioni> {
         // Reborrow exactly one node for the recursive call; only copied geometry leaves this scope.
         let node = self.children.get_mut(index)?;
-        Some(node.measure(self.style, self.atlas, available))
+        Some(node.measure(self.style, self.atlas, constraints))
     }
 }
 
@@ -86,7 +86,7 @@ impl<'a> MeasureCtx<'a> {
 /// recursively visiting descendants.
 pub trait ContainerWidget: Widget {
     /// Measures preferred content from the authoritative child collection.
-    fn measure(&self, ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni;
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: Constraints) -> Dimensioni;
 
     /// Places retained children and commits descendant viewport/content geometry.
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti);
@@ -190,7 +190,7 @@ impl Container {
     }
 
     /// Resolves frame width and measures content under one typed-runtime borrow.
-    pub(crate) fn measure_content_with_frame(&mut self, style: &Style, atlas: &crate::AtlasHandle, available: Dimensioni) -> (i32, Dimensioni) {
+    pub(crate) fn measure_content_with_frame(&mut self, style: &Style, atlas: &crate::AtlasHandle, constraints: Constraints) -> (i32, Dimensioni) {
         let mut children = self
             .children
             .try_borrow_mut()
@@ -202,7 +202,7 @@ impl Container {
             0
         };
         let mut ctx = MeasureCtx::new(style, atlas, &mut children);
-        let measured = ContainerWidget::measure(&widget.widget, &mut ctx, super::frame::content_available(available, border_width));
+        let measured = ContainerWidget::measure(&widget.widget, &mut ctx, super::frame::content_constraints(constraints, border_width));
         (border_width, measured)
     }
 
@@ -299,11 +299,11 @@ impl ContainerLayoutCtx<'_> {
     }
 
     /// Measures one indexed child under `available` during placement.
-    pub fn measure_child(&mut self, children: &mut Children, index: usize, available: Dimensioni) -> Option<Dimensioni> {
+    pub fn measure_child(&mut self, children: &mut Children, index: usize, constraints: Constraints) -> Option<Dimensioni> {
         // Placement participates in the same runtime epoch as the measure phase immediately before
         // it, so identical child queries reuse the node-local preferred-size result.
         let node = children.get_mut(index)?;
-        Some(self.runtime.measure_node(node, self.style, self.atlas, available))
+        Some(self.runtime.measure_node(node, self.style, self.atlas, constraints))
     }
 
     /// Assigns one indexed child rectangle and returns its resulting allocated size.
@@ -374,7 +374,7 @@ mod tests {
     }
 
     impl ContainerWidget for GeometryOnly {
-        fn measure(&self, ctx: &mut MeasureCtx<'_>, _available: Dimensioni) -> Dimensioni {
+        fn measure(&self, ctx: &mut MeasureCtx<'_>, _constraints: Constraints) -> Dimensioni {
             Dimensioni::new(ctx.child_count() as i32, 1)
         }
 

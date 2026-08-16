@@ -83,6 +83,34 @@ impl Constraints {
     pub const fn bounded(size: Dimensioni) -> Self {
         Self::new(AvailableSpace::bounded(size.width), AvailableSpace::bounded(size.height))
     }
+
+    /// Adapts an old `0 == unbounded` size while legacy containers are migrated individually.
+    ///
+    /// This stays crate-private so the retired sentinel convention cannot enter the new public
+    /// measurement contract.
+    pub(crate) const fn from_legacy_size(size: Dimensioni) -> Self {
+        Self::new(legacy_axis(size.width), legacy_axis(size.height))
+    }
+
+    /// Exposes the old sentinel representation only to a container awaiting migration.
+    pub(crate) fn legacy_size(self) -> Dimensioni {
+        Dimensioni::new(legacy_extent(self.width), legacy_extent(self.height))
+    }
+}
+
+const fn legacy_axis(extent: i32) -> AvailableSpace {
+    if extent > 0 {
+        AvailableSpace::Bounded(extent)
+    } else {
+        AvailableSpace::Unbounded
+    }
+}
+
+const fn legacy_extent(space: AvailableSpace) -> i32 {
+    match space {
+        AvailableSpace::Unbounded => 0,
+        AvailableSpace::Bounded(extent) => extent,
+    }
 }
 
 impl Default for Constraints {
@@ -259,5 +287,23 @@ pub(crate) fn scaled(total: i32, ratio: f32) -> i32 {
         ((total.max(0) as f32) * ratio).floor() as i32
     } else {
         0
+    }
+}
+
+#[cfg(test)]
+mod explicit_constraint_tests {
+    use super::*;
+
+    #[test]
+    fn bounded_constructor_preserves_zero_and_normalizes_negative_extents() {
+        assert_eq!(AvailableSpace::bounded(0), AvailableSpace::Bounded(0));
+        assert_eq!(AvailableSpace::bounded(-7), AvailableSpace::Bounded(0));
+    }
+
+    #[test]
+    fn constraints_keep_axis_bounds_independent() {
+        let constraints = Constraints::new(AvailableSpace::Unbounded, AvailableSpace::Bounded(24));
+        assert_eq!(constraints.width.bound(), None);
+        assert_eq!(constraints.height.bound(), Some(24));
     }
 }

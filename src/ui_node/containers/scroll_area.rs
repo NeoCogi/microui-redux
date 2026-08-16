@@ -269,12 +269,19 @@ struct ScrollSurface {
 }
 
 impl ContainerWidget for ScrollSurface {
-    fn measure(&self, ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
-        ctx.measure_child(0, Dimensioni::new(available.width, 0)).unwrap_or_default()
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: crate::Constraints) -> Dimensioni {
+        ctx.measure_child(0, crate::Constraints::new(constraints.width, crate::AvailableSpace::Unbounded))
+            .unwrap_or_default()
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
-        let preferred = ctx.measure_child(children, 0, Dimensioni::new(rect.width.max(1), 0)).unwrap_or_default();
+        let preferred = ctx
+            .measure_child(
+                children,
+                0,
+                crate::Constraints::new(crate::AvailableSpace::bounded(rect.width), crate::AvailableSpace::Unbounded),
+            )
+            .unwrap_or_default();
         let policy = ctx.child_policy(children, 0).unwrap_or_else(crate::Policy::auto);
         let content_rect = Recti::new(
             0,
@@ -330,19 +337,19 @@ impl ScrollArea {
 }
 
 impl ContainerWidget for ScrollArea {
-    fn measure(&self, ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: crate::Constraints) -> Dimensioni {
         // Measure application content through the scroll surface and add only panel padding.
         // Scrollbars are responsive affordances and do not inflate intrinsic composite size.
         let padding = ctx.style().padding.max(0);
         // inset = leading_padding + trailing_padding = padding * 2.
         let inset = padding.saturating_mul(2);
-        let content_width = if available.width > 0 {
-            // content_width = max(available_width - inset, 1).
-            available.width.saturating_sub(inset).max(1)
-        } else {
-            0
+        let content_width = match constraints.width {
+            crate::AvailableSpace::Bounded(width) => crate::AvailableSpace::bounded(width.saturating_sub(inset)),
+            crate::AvailableSpace::Unbounded => crate::AvailableSpace::Unbounded,
         };
-        let content = ctx.measure_child(Self::SURFACE, Dimensioni::new(content_width, 0)).unwrap_or_default();
+        let content = ctx
+            .measure_child(Self::SURFACE, crate::Constraints::new(content_width, crate::AvailableSpace::Unbounded))
+            .unwrap_or_default();
         // preferred_extent = content_extent + leading_padding + trailing_padding.
         Dimensioni::new(content.width.saturating_add(inset), content.height.saturating_add(inset))
     }

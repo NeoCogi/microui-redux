@@ -87,7 +87,7 @@ use rs_math3d::{Recti, Vec2f, Vec2i, color4b};
 ///         &self,
 ///         _style: &Style,
 ///         _atlas: &AtlasHandle,
-///         _available: Dimensioni,
+///         _constraints: Constraints,
 ///     ) -> Dimensioni {
 ///         Dimensioni::new(48, 24)
 ///     }

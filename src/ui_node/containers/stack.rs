@@ -161,8 +161,8 @@ impl Stack {
 }
 
 impl ContainerWidget for Stack {
-    fn measure(&self, ctx: &mut MeasureCtx<'_>, available: Dimensioni) -> Dimensioni {
-        stack_size(ctx, self, available)
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: crate::Constraints) -> Dimensioni {
+        stack_size(ctx, self, constraints.legacy_size())
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
@@ -191,7 +191,7 @@ fn layout_stack(ctx: &mut ContainerLayoutCtx<'_>, state: &mut Stack, children: &
     let spacing = ctx.style().spacing.max(0);
     // Establish one item width from the widest intrinsic child before measuring wrapped heights.
     let preferred_width = (0..count)
-        .map(|index| ctx.measure_child(children, index, Dimensioni::default()).unwrap_or_default().width)
+        .map(|index| ctx.measure_child(children, index, crate::Constraints::unbounded()).unwrap_or_default().width)
         .max()
         .unwrap_or_default();
     let width = state.item_width.preferred_extent(preferred_width, rect.width);
@@ -237,13 +237,17 @@ fn layout_stack(ctx: &mut ContainerLayoutCtx<'_>, state: &mut Stack, children: &
 fn layout_stack_child_height(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, index: usize, width: i32) -> i32 {
     // Measure with the resolved shared width so wrapping contributes the height placement will use.
     let child_width = children.child_policy(index).unwrap_or_else(crate::Policy::auto).width.measurement_bound(width);
-    ctx.measure_child(children, index, Dimensioni::new(child_width, 0)).unwrap_or_default().height
+    ctx.measure_child(children, index, crate::Constraints::from_legacy_size(Dimensioni::new(child_width, 0)))
+        .unwrap_or_default()
+        .height
 }
 
 /// Measures one Stack child height during the preferred-size phase.
 fn measure_stack_child_height(ctx: &mut MeasureCtx<'_>, index: usize, width: i32) -> i32 {
     let child_width = ctx.child_policy(index).unwrap_or_else(crate::Policy::auto).width.measurement_bound(width);
-    ctx.measure_child(index, Dimensioni::new(child_width, 0)).unwrap_or_default().height
+    ctx.measure_child(index, crate::Constraints::from_legacy_size(Dimensioni::new(child_width, 0)))
+        .unwrap_or_default()
+        .height
 }
 
 /// Builds the scalar vertical cursor for all Stack children at one resolved item width.
@@ -262,7 +266,7 @@ fn stack_size(ctx: &mut MeasureCtx<'_>, state: &Stack, available: Dimensioni) ->
     let spacing = ctx.style().spacing.max(0);
     // Width must be resolved before height because child text may wrap at the shared width.
     let preferred_width = (0..count)
-        .map(|index| ctx.measure_child(index, Dimensioni::default()).unwrap_or_default().width)
+        .map(|index| ctx.measure_child(index, crate::Constraints::unbounded()).unwrap_or_default().width)
         .max()
         .unwrap_or_default();
     let width = state.item_width.preferred_extent(preferred_width, available.width);

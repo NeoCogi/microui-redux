@@ -45,8 +45,8 @@ pub struct ComboParameters {
 }
 
 impl crate::LeafWidget for Combo {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni {
-        self.preferred_size_widget(style, atlas, avail)
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+        self.preferred_size_widget(style, atlas, constraints)
     }
 }
 
@@ -291,7 +291,7 @@ impl Combo {
     }
 
     /// Measures the combo header label plus dropdown indicator.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         let padding = style.padding.max(0);
         let text_w = if self.label.is_empty() {
             0

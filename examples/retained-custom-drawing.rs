@@ -32,7 +32,7 @@
 //! This example demonstrates implementing a custom widget that records widget-local geometry
 //! through `WidgetPaintCtx::painter`.
 
-use microui_redux::{prelude::*, render::Vertex, AtlasSource};
+use microui_redux::{prelude::*, render::Vertex, AtlasSource, Constraints};
 const ICON_NAMES: [&str; 6] = ["white", "close", "expand", "collapse", "check", "expand_down"];
 
 struct NoopRenderer {
@@ -112,7 +112,7 @@ impl Widget for RetainedPaint {
 }
 
 impl LeafWidget for RetainedPaint {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(96, 48)
     }
 }

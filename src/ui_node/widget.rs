@@ -61,6 +61,7 @@ use rs_math3d::Dimensioni;
 
 use crate::atlas::AtlasHandle;
 use crate::theme::Style;
+use crate::Constraints;
 use super::UiInputEvent;
 pub use super::widget_context::{WidgetPaintCtx, WidgetUpdateCtx};
 
@@ -295,12 +296,11 @@ pub trait Widget {
 
 /// Intrinsic geometry contract for a retained leaf widget.
 ///
-/// A positive `avail` component is available for wrapping or other responsive content. A
-/// non-positive component requests the unconstrained preferred size on that axis. Returned
-/// components are clamped to zero before the node's frame and parent placement policy are applied.
+/// Each constraint axis explicitly distinguishes a finite maximum from an unbounded preferred-size
+/// query. Returned components are clamped to zero before the node's frame is applied.
 pub trait LeafWidget: Widget {
     /// Returns this leaf's preferred content size.
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, avail: Dimensioni) -> Dimensioni;
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni;
 }
 
 impl Widget for WidgetOption {
@@ -313,7 +313,7 @@ impl Widget for WidgetOption {
 }
 
 impl LeafWidget for WidgetOption {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         // Internal placeholder widgets reserve enough room for text or an expand icon.
         let padding = style.padding.max(0);
         let vertical_pad = max(1, padding / 2);
@@ -359,7 +359,7 @@ mod widget_ownership_tests {
     }
 
     impl LeafWidget for TestWidget {
-        fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _avail: Dimensioni) -> Dimensioni {
+        fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
             Dimensioni::new(1, 1)
         }
     }

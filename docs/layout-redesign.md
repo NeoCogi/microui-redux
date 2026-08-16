@@ -105,8 +105,12 @@ call site must state that relationship directly.
 ### Phase 2: core sizing
 
 - [x] Introduced `AvailableSpace`, `Constraints`, and `TrackSize` without changing existing callers.
+- [x] Changed the public leaf/container measurement APIs, runtime traversal, frame inset, and
+      measurement-cache keys to carry `Constraints` directly. A bounded zero now reaches a leaf as
+      `Bounded(0)` instead of being rewritten to an arbitrary positive pixel.
 - [x] Added the pure replacement track solver; existing containers still use the legacy cursor until
       their migration commits.
+- [ ] Remove the crate-private sentinel adapters after the last legacy container is migrated.
 - [ ] Remove generic `Policy` from `Node` and runtime allocation.
 
 ### Phase 3: containers
@@ -137,3 +141,5 @@ call site must state that relationship directly.
 - [x] The new bounded solver reserves content, fixed tracks, and gaps before distributing flex
       space. Content overflow remains visible and flex collapses to zero instead of overlapping an
       earlier sibling.
+- [x] Responsive leaf measurement receives constraints as information, not as an allocation. A
+      leaf still reports desired content; only its parent may assign its final rectangle.
