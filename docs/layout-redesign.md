@@ -5,7 +5,7 @@ retained layout contract. It is updated in the same commits as the implementatio
 
 ## Goals
 
-- [ ] A constraint has an explicit bounded or unbounded state; zero is an ordinary bound.
+- [x] A constraint has an explicit bounded or unbounded state; zero is an ordinary bound.
 - [ ] Measurement reports content requirements. Allocation assigns an exact rectangle.
 - [ ] The parent is the only owner of a child's slot size.
 - [ ] Allocation never reapplies a policy already resolved by the parent.
@@ -99,13 +99,14 @@ call site must state that relationship directly.
 
 - [x] Created branch `layout-model-cleanup` from `extract-window-manager`.
 - [x] Recorded the target contract and explicit non-goals.
-- [ ] Add direct tests for bounded, unbounded, overflowing, and rounded track allocation.
+- [x] Added direct tests for bounded, unbounded, overflowing, and rounded track allocation.
 - [ ] Record representative demo layout geometry before changing behavior.
 
 ### Phase 2: core sizing
 
-- [ ] Introduce `AvailableSpace`, `Constraints`, and `TrackSize`.
-- [ ] Replace the ordered `Remainder` cursor with one pure track solver.
+- [x] Introduced `AvailableSpace`, `Constraints`, and `TrackSize` without changing existing callers.
+- [x] Added the pure replacement track solver; existing containers still use the legacy cursor until
+      their migration commits.
 - [ ] Remove generic `Policy` from `Node` and runtime allocation.
 
 ### Phase 3: containers
@@ -133,4 +134,6 @@ call site must state that relationship directly.
       retained container capacity rather than replaced by repeated measurement.
 - [x] Geometry compatibility is checked at the committed rectangles. Keeping old enum names while
       changing their meaning would not count as compatibility.
-
+- [x] The new bounded solver reserves content, fixed tracks, and gaps before distributing flex
+      space. Content overflow remains visible and flex collapses to zero instead of overlapping an
+      earlier sibling.

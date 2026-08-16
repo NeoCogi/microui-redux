@@ -30,6 +30,85 @@
 
 //! Public retained node and container sizing policy types.
 
+use crate::Dimensioni;
+
+/// Available space on one measurement axis.
+///
+/// This is deliberately not encoded in a pixel count: a bounded zero-sized surface and an
+/// unbounded measurement request are different inputs.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum AvailableSpace {
+    /// The parent imposes no maximum on this axis.
+    Unbounded,
+    /// The parent supplies a non-negative maximum extent.
+    Bounded(i32),
+}
+
+impl AvailableSpace {
+    /// Creates a bounded axis, normalizing an invalid negative extent at the public boundary.
+    pub const fn bounded(extent: i32) -> Self {
+        Self::Bounded(if extent < 0 { 0 } else { extent })
+    }
+
+    /// Returns the finite extent when this axis is bounded.
+    pub const fn bound(self) -> Option<i32> {
+        match self {
+            Self::Unbounded => None,
+            Self::Bounded(extent) => Some(extent),
+        }
+    }
+}
+
+/// Independent width and height constraints supplied during measurement.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct Constraints {
+    /// Horizontal measurement space.
+    pub width: AvailableSpace,
+    /// Vertical measurement space.
+    pub height: AvailableSpace,
+}
+
+impl Constraints {
+    /// Creates explicit axis constraints.
+    pub const fn new(width: AvailableSpace, height: AvailableSpace) -> Self {
+        Self { width, height }
+    }
+
+    /// Creates an unconstrained preferred-size query.
+    pub const fn unbounded() -> Self {
+        Self::new(AvailableSpace::Unbounded, AvailableSpace::Unbounded)
+    }
+
+    /// Creates a measurement constrained to a non-negative maximum size.
+    pub const fn bounded(size: Dimensioni) -> Self {
+        Self::new(AvailableSpace::bounded(size.width), AvailableSpace::bounded(size.height))
+    }
+}
+
+impl Default for Constraints {
+    fn default() -> Self {
+        Self::unbounded()
+    }
+}
+
+/// Size of one parent-owned linear or grid track.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum TrackSize {
+    /// Uses the measured content extent.
+    Content,
+    /// Uses an exact non-negative pixel extent.
+    Fixed(i32),
+    /// Receives a weighted share of bounded space left after content, fixed tracks, and gaps.
+    /// Under an unbounded constraint it contributes its measured content extent.
+    Flex(f32),
+}
+
+impl Default for TrackSize {
+    fn default() -> Self {
+        Self::Content
+    }
+}
+
 /// Size policy used by retained nodes, row/grid tracks, and stack items when resolving cells.
 ///
 /// Cell sizing resolves in this order:

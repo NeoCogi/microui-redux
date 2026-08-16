@@ -59,7 +59,7 @@ mod input;
 pub use input::UiInputEvent;
 mod scrollbar;
 mod sizing;
-pub use sizing::{Policy, SizePolicy};
+pub use sizing::{AvailableSpace, Constraints, Policy, SizePolicy, TrackSize};
 pub(crate) mod text_layout;
 pub use text_layout::TextWrap;
 mod widget;

@@ -41,6 +41,7 @@ mod row;
 mod scroll_area;
 mod stack;
 mod track_metrics;
+mod tracks;
 
 use axis::Axis;
 use track_metrics::{default_cell_height, default_cell_width};
