@@ -6,11 +6,22 @@
 //
 
 use crate::{
-    Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, Dimensioni, MeasureCtx, Node, Recti, TrackSize, TypedWidgetHandle, UiInputEvent,
-    Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
+    AtlasHandle, Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, Dimensioni, MeasureCtx, Node, Recti, Style, TrackSize,
+    TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
 use super::linear::{LinearItem, LinearState, Orientation, layout_linear, measure_linear};
+
+/// Returns the style-derived minimum height for a non-empty content-height Row.
+///
+/// This is Row behavior rather than a general track metric: empty Rows remain zero-sized, explicit
+/// fixed heights stay exact, and Grid no longer asks generic tracks to manufacture fallback cells.
+fn minimum_content_height(style: &Style, atlas: &AtlasHandle) -> i32 {
+    let padding = style.padding.max(0);
+    // A standard control line contains the selected font plus equal top and bottom padding. Use
+    // saturating arithmetic so hostile public style values cannot overflow retained measurement.
+    (atlas.get_font_height(style.font) as i32).saturating_add(padding * 2).max(padding * 2)
+}
 
 /// Shared cross-axis sizing for one horizontal [`Row`].
 ///
@@ -168,12 +179,12 @@ impl Row {
 
 impl ContainerWidget for Row {
     fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: Constraints) -> Dimensioni {
-        let minimum = super::default_cell_height(ctx.style(), ctx.atlas());
+        let minimum = minimum_content_height(ctx.style(), ctx.atlas());
         measure_linear(ctx, &self.linear, Orientation::Horizontal, Some(self.height), minimum, constraints)
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
-        let minimum = super::default_cell_height(ctx.style(), ctx.atlas());
+        let minimum = minimum_content_height(ctx.style(), ctx.atlas());
         layout_linear(ctx, children, &mut self.linear, Orientation::Horizontal, Some(self.height), minimum, rect);
     }
 }

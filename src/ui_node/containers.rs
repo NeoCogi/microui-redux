@@ -39,10 +39,7 @@ mod grid;
 mod linear;
 mod row;
 mod scroll_area;
-mod track_metrics;
 mod tracks;
-
-use track_metrics::default_cell_height;
 
 pub use column::{Column, ColumnParameters};
 pub use disclosure::{Disclosure, DisclosureParameters};
