@@ -37,8 +37,8 @@ use super::{ChildParticipation, Children, NodeLayout, NodeRuntime, UiRuntime, Wi
 /// Scoped services for measuring one retained container's children.
 ///
 /// The context owns the mutable child access required by node-local measurement caches but exposes
-/// only copied policy and derived geometry. Neither a [`Node`](crate::Node) nor the child collection
-/// crosses the public container-widget boundary.
+/// only derived geometry. Neither a [`Node`](crate::Node) nor the child collection crosses the
+/// public container-widget boundary.
 pub struct MeasureCtx<'a> {
     style: &'a Style,
     atlas: &'a crate::AtlasHandle,
@@ -66,12 +66,7 @@ impl<'a> MeasureCtx<'a> {
         self.children.len()
     }
 
-    /// Returns one child's parent-owned placement policy.
-    pub fn child_policy(&self, index: usize) -> Option<crate::Policy> {
-        self.children.child_policy(index)
-    }
-
-    /// Measures one indexed child under `available` without applying placement policy.
+    /// Measures one indexed child's desired size under explicit constraints.
     pub fn measure_child(&mut self, index: usize, constraints: Constraints) -> Option<Dimensioni> {
         // Reborrow exactly one node for the recursive call; only copied geometry leaves this scope.
         let node = self.children.get_mut(index)?;
@@ -81,7 +76,7 @@ impl<'a> MeasureCtx<'a> {
 
 /// Complete behavior of one retained branch widget.
 ///
-/// The concrete widget owns semantic, interaction, and layout policy while [`Container`] owns the
+/// The concrete widget owns semantic, interaction, and layout behavior while [`Container`] owns the
 /// heterogeneous child collection separately. Runtime calls never retain the widget borrow while
 /// recursively visiting descendants.
 pub trait ContainerWidget: Widget {
@@ -173,7 +168,7 @@ impl Container {
         f(&mut children)
     }
 
-    /// Invokes the geometry policy for one placement pass.
+    /// Invokes the geometry implementation for one placement pass.
     pub(crate) fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti) {
         // The widget receives the authoritative collection only for this call. A typed mutation
         // attempted against the same container while this borrow is active is rejected cleanly by
@@ -292,12 +287,6 @@ impl ContainerLayoutCtx<'_> {
         self.atlas
     }
 
-    /// Returns one child's parent-owned placement policy.
-    pub fn child_policy(&self, children: &Children, index: usize) -> Option<crate::Policy> {
-        // Delegate through Children so no Node reference crosses the public layout boundary.
-        children.child_policy(index)
-    }
-
     /// Measures one indexed child under `available` during placement.
     pub fn measure_child(&mut self, children: &mut Children, index: usize, constraints: Constraints) -> Option<Dimensioni> {
         // Placement participates in the same runtime epoch as the measure phase immediately before
@@ -306,21 +295,14 @@ impl ContainerLayoutCtx<'_> {
         Some(self.runtime.measure_node(node, self.style, self.atlas, constraints))
     }
 
-    /// Assigns one indexed child rectangle and returns its resulting allocated size.
+    /// Assigns one exact indexed child rectangle and returns its allocated size.
+    ///
+    /// A container must resolve every content, fixed, or flexible relationship before this call.
+    /// Runtime does not reinterpret the rectangle or inspect the concrete parent type.
     pub fn layout_child(&mut self, children: &mut Children, index: usize, rect: Recti) -> Option<Dimensioni> {
-        // Resolve the child internally, recurse immediately, and return only derived geometry.
+        // Resolve the child internally, recurse immediately, and return only copied geometry.
         let node = children.get_mut(index)?;
         Some(self.runtime.layout_node_ref(node, self.style, self.atlas, rect))
-    }
-
-    /// Assigns an exact child rectangle after a built-in parent has resolved all track sizing.
-    ///
-    /// This remains crate-private while legacy containers still rely on node policy. Once every
-    /// parent owns its relationships, the public `layout_child` operation becomes exact and this
-    /// migration-only distinction disappears.
-    pub(crate) fn layout_child_allocated(&mut self, children: &mut Children, index: usize, rect: Recti) -> Option<Dimensioni> {
-        let node = children.get_mut(index)?;
-        Some(self.runtime.layout_allocated_node_ref(node, self.style, self.atlas, rect))
     }
 
     /// Reads one child's content extent from its most recent placement in this pass.
@@ -370,7 +352,7 @@ impl ContainerLayoutCtx<'_> {
 mod tests {
     use super::*;
 
-    /// Minimal policy proving that concrete ownership needs geometry only.
+    /// Minimal layout implementation proving that concrete ownership needs geometry only.
     struct GeometryOnly;
 
     impl Widget for GeometryOnly {

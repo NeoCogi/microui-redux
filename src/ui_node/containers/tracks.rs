@@ -14,7 +14,7 @@ use crate::{AvailableSpace, TrackSize};
 /// Construction summarizes reservations and flex weights without retaining the input sequence.
 /// Callers then replay the same `(track, content)` pairs through [`Self::next`]. This keeps
 /// immutable measurement allocation-free and gives layout exact per-child extents without a
-/// second policy application in the runtime.
+/// second sizing pass in the runtime.
 pub(super) struct TrackResolver {
     available: AvailableSpace,
     flexible_space: i32,

@@ -349,6 +349,7 @@ impl Grid {
     }
 
     /// Appends one still-unmounted node and its Grid placement.
+    #[allow(clippy::result_large_err)] // Failure returns the exact unique node and its edge metadata.
     pub fn push(&mut self, item: impl Into<GridItem>) -> Result<(), GridItem> {
         let children = &self.children;
         let items = &mut self.items;
@@ -524,7 +525,7 @@ fn layout_grid(state: &Grid, children: &mut Children, ctx: &mut ContainerLayoutC
         let y = rect.y.saturating_add(track_offset(&layout.rows, placement.row, spacing));
         let width = track_span(&layout.columns, placement.column, placement.column_span, spacing);
         let height = track_span(&layout.rows, placement.row, placement.row_span, spacing);
-        let _ = ctx.layout_child_allocated(children, placement.child_index, Recti::new(x, y, width, height));
+        let _ = ctx.layout_child(children, placement.child_index, Recti::new(x, y, width, height));
     }
 }
 
@@ -551,7 +552,7 @@ fn grid_size(ctx: &mut MeasureCtx<'_>, state: &Grid, constraints: crate::Constra
 /// Returns the effective column and row counts represented by Grid configuration and placement.
 fn grid_dimensions(state: &Grid) -> (usize, usize) {
     // A Grid always exposes at least one track on each axis, even when it has no children or
-    // explicit policies. Row spans may extend beyond the explicit row-policy list.
+    // explicit tracks. Row spans may extend beyond the explicit row-track list.
     let columns = state.column_tracks.len().max(1);
     let rows = state
         .items
@@ -629,7 +630,7 @@ fn preferred_row<C: GridMeasureCtx>(ctx: &mut C, state: &Grid, index: usize, spa
 
 /// Returns the minimum required from `index` for one spanning child contribution.
 ///
-/// The span begins at each track's policy-derived fallback. Any remaining deficit is divided among
+/// The span begins at each track's explicit fixed contribution. Any remaining deficit is divided among
 /// non-fixed tracks; fixed tracks never grow to hide overflow. Integer remainders are assigned from
 /// left to right so the result is deterministic and, when a flexible track exists, the complete
 /// span covers the child minimum.
@@ -650,10 +651,10 @@ fn contribution_for_track(tracks: &[TrackSize], index: usize, start: usize, span
     let mut flexible = 0_i32;
     let mut rank = 0_i32;
     for track_index in start..end {
-        let track_policy = track(tracks, track_index);
+        let track_size = track(tracks, track_index);
         // initial_coverage = previous_coverage + track_intrinsic_extent.
-        initial = initial.saturating_add(fixed_track_extent(track_policy));
-        if !matches!(track_policy, TrackSize::Fixed(_)) {
+        initial = initial.saturating_add(fixed_track_extent(track_size));
+        if !matches!(track_size, TrackSize::Fixed(_)) {
             if track_index < index {
                 rank += 1;
             }
@@ -668,7 +669,7 @@ fn contribution_for_track(tracks: &[TrackSize], index: usize, start: usize, span
     // deficit = max(child_minimum - initial_coverage, 0).
     let deficit = minimum.max(0).saturating_sub(initial);
     let increment = deficit / flexible + i32::from(rank < deficit % flexible);
-    // contributed_extent = policy_base_extent + allocated_deficit_increment.
+    // contributed_extent = fixed_base_extent + allocated_deficit_increment.
     base.saturating_add(increment)
 }
 

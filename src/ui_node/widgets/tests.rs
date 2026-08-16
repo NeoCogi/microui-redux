@@ -162,7 +162,7 @@ fn convenience_constructors_store_explicit_outer_frame_policy() {
     assert!(has_option(&slider, WidgetOption::FRAME));
     assert!(has_option(&number, WidgetOption::FRAME));
     assert!(has_option(&swatch, WidgetOption::FRAME));
-    let header = crate::Disclosure::create(crate::DisclosureParameters::header("header", false, std::iter::empty())).1;
+    let header = crate::Disclosure::create(crate::DisclosureParameters::header("header", false, std::iter::empty::<crate::LinearItem>())).1;
     assert!(!header.data.with_widget(|widget| widget.effective_widget_opt().intersects(WidgetOption::FRAME)));
 
     let (checkbox, _checkbox_node) = Checkbox::create(CheckboxParameters::new("checkbox", false));
@@ -174,7 +174,7 @@ fn convenience_constructors_store_explicit_outer_frame_policy() {
     assert!(!Custom::create(CustomParameters::new("custom")).widget_opt().intersects(WidgetOption::FRAME));
     let (text, _text_node) = crate::TextBlock::create(crate::TextBlockParameters::new("text"));
     assert!(!has_option(&text, WidgetOption::FRAME));
-    let tree = crate::Disclosure::create(crate::DisclosureParameters::tree("tree", false, std::iter::empty())).1;
+    let tree = crate::Disclosure::create(crate::DisclosureParameters::tree("tree", false, std::iter::empty::<crate::LinearItem>())).1;
     assert!(!tree.data.with_widget(|widget| widget.effective_widget_opt().intersects(WidgetOption::FRAME)));
 
     let (flat, _flat_node) = Button::create(ButtonParameters::with_opt("flat", WidgetOption::ALIGN_CENTER));

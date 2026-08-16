@@ -6,18 +6,18 @@ retained layout contract. It is updated in the same commits as the implementatio
 ## Goals
 
 - [x] A constraint has an explicit bounded or unbounded state; zero is an ordinary bound.
-- [x] Measurement reports content requirements. Allocation assigns an exact rectangle for migrated
-      containers; the remaining composite adapters are tracked below.
-- [x] The parent is the only owner of a child's slot size in Row, Column, and Grid.
-- [x] Allocation never reapplies a policy already resolved by Row, Column, or Grid.
+- [x] Measurement reports content requirements. Allocation assigns an exact rectangle.
+- [x] The parent is the only owner of a child's slot size.
+- [x] Allocation never reapplies a sizing rule already resolved by the parent.
 - [x] Row and Column use one linear algorithm with no container-specific branches in the runtime.
 - [x] Grid uses the same track solver as linear layout.
-- [ ] Scrollbars are selected from measurement and content is allocated once.
+- [x] Scrollbars are selected from child measurements and content is allocated once.
 - [x] Empty Row, Column, and Grid containers have zero intrinsic size unless they contain explicit
       fixed tracks.
 - [x] Linear and Grid overflow is explicit and never changes sibling placement.
-- [ ] The existing `demo-full` geometry and appearance are preserved intentionally.
-- [ ] Warm retained layout remains allocation-free after correctness and clarity are established.
+- [ ] The existing `demo-full` geometry and appearance are preserved intentionally. Representative
+      exact geometry is checked; final visual comparison remains.
+- [x] Warm retained layout remains allocation-free after correctness and clarity are established.
 
 ## Non-goals
 
@@ -78,8 +78,8 @@ Row and Column are orientation-specific constructors over one linear implementat
 one main-axis `TrackSize`; children fill the cross axis unless an explicit fixed cross extent is
 needed by an existing interface. Reverse direction affects origins only, never sizing.
 
-The current vertical `Stack` duplicates Column. Its uses will move to Column; the name will not be
-retained for a non-overlapping layout.
+The former vertical `Stack` duplicated Column. Its uses moved to Column; the name was not retained
+for a non-overlapping layout.
 
 The public linear syntax attaches sizing to the parent-child edge where it is interpreted:
 
@@ -111,6 +111,23 @@ Fraction(a) + fill   -> proportional Flex weights
 There is no general `Remainder(m)` replacement because it encodes the size of later siblings. Each
 call site must state that relationship directly.
 
+The migration table is historical only. `Policy` and `SizePolicy` no longer exist in the public API
+or on `Node`.
+
+### Composite rules
+
+Composites use the same contract without adding cases to `Node`, `ContainerWidget`, or the runtime:
+
+```text
+Disclosure: measure header + optional body -> assign two exact role rectangles
+RootChrome: subtract chrome from constraints -> measure body -> assign exact body rectangle
+ScrollArea: measure candidate viewports -> choose bars -> configure bars -> place surface once
+ScrollSurface: desired content -> max(view width, desired width) x desired height
+```
+
+Disclosure body inputs are `LinearItem` values because the private body is an ordinary Column. The
+relationship does not leak onto the disclosure node or require a disclosure-specific runtime hook.
+
 ## Work log
 
 ### Phase 1: characterize and specify
@@ -127,10 +144,12 @@ call site must state that relationship directly.
 - [x] Changed the public leaf/container measurement APIs, runtime traversal, frame inset, and
       measurement-cache keys to carry `Constraints` directly. A bounded zero now reaches a leaf as
       `Bounded(0)` instead of being rewritten to an arbitrary positive pixel.
-- [x] Added the pure replacement track solver; existing containers still use the legacy cursor until
-      their migration commits.
-- [ ] Remove the crate-private sentinel adapters after the last legacy container is migrated.
-- [ ] Remove generic `Policy` from `Node` and runtime allocation.
+- [x] Added the pure replacement track solver alongside the legacy cursor so container migration
+      could happen in independently testable commits.
+- [x] Removed the crate-private sentinel adapters after the last container migration.
+- [x] Removed generic `Policy` and `SizePolicy` from `Node`, runtime allocation, public exports, and
+      downstream container APIs. `ContainerLayoutCtx::layout_child` now always assigns an exact
+      parent-owned rectangle.
 
 ### Phase 3: containers
 
@@ -145,13 +164,24 @@ call site must state that relationship directly.
 
 ### Phase 4: composites and validation
 
-- [ ] Make ScrollArea choose bars during measurement and allocate content once.
-- [ ] Keep root chrome as an ordinary exact-allocation container.
-- [x] Migrated Row, Column, Grid, and former Stack call sites in every example, test, and the file
-      dialog. Composite-specific policy call sites remain until their phases below.
+- [x] Made ScrollArea converge its four possible bar states using measurement only, configure the
+      resulting bars, and then allocate the scrolling surface once. A placement-count regression
+      test rejects speculative content layout.
+- [x] Kept root chrome as an ordinary exact-allocation container. It shrinks bounded constraints by
+      its chrome occupancy and gives its one application child the committed body rectangle.
+- [x] Migrated every example, test, file-dialog caller, Disclosure body, ScrollArea test fixture, and
+      root call site away from node-global sizing.
 - [x] Re-ran the frozen `demo-full` rectangles after the linear/Grid migration: the 86/flex/109
       button row, calculator 104/312 split, and 276-pixel log region remain exact.
-- [ ] Run formatting, all-target tests, and relevant feature builds.
+- [x] Ran formatting, `cargo test --all-targets`, `cargo doc --no-deps`, and wgpu builds for
+      `demo-full`, `calculator`, and `simple` without warnings.
+- [x] Ran a strict whole-repository Clippy audit. `-D warnings` still stops on pre-existing
+      atlas/image/style diagnostics outside this redesign; the production layout diagnostics it
+      exposed were corrected or documented where returning the exact unique owner is intentional.
+- [x] Built and launched the current `demo-full` with the glow backend on the available Wayland
+      display. GNOME denied programmatic screenshot access from this session, so pixel comparison
+      remains the one manual validation item; exact geometry assertions are the automated
+      compatibility gate.
 
 ## Decisions and observations
 
@@ -175,6 +205,13 @@ call site must state that relationship directly.
       measurement free of scratch allocation while sharing the identical arithmetic with Grid.
 - [x] Column reverse direction changes only the placement origin. Sizing, item order, mutation, and
       traversal remain the same as an ordinary Column.
-- [x] `cargo test --all-targets` passes after this phase (230 library tests and four downstream API
+- [x] `AvailableSpace::shrink` is the only inset primitive composites need. It preserves `Unbounded`
+      and treats bounded zero as bounded zero, so none of the old `max(1)` sentinel repairs remain.
+- [x] Scroll content has one deliberately local rule: it fills at least the viewport width, retains
+      wider intrinsic overflow, and keeps its desired height. This behavior belongs to ScrollSurface
+      and is not a general trait specialization.
+- [x] Public custom containers now observe only desired child measurements and exact allocations;
+      child-policy inspection was removed with the policy itself.
+- [x] `cargo test --all-targets` passes after this phase (231 library tests and four downstream API
       tests, with the three pre-existing manual baselines ignored). The `example-wgpu` demo build
       also succeeds.

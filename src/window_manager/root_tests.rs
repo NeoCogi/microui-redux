@@ -33,9 +33,9 @@ use super::*;
 use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, test_atlas};
 use crate::{
     color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Column, ColumnParameters, Custom, CustomParameters,
-    Constraints, Context, Dimensioni, Disclosure, DisclosureParameters, Grid, GridParameters, KeyMode, LinearItem, MouseButton, Node, Policy, Row,
-    RowParameters, ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Style, Textbox, TextboxChanged, TextBlock,
-    TextBlockParameters, TextboxParameters, TrackSize, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
+    Constraints, Context, Dimensioni, Disclosure, DisclosureParameters, Grid, GridParameters, KeyMode, LinearItem, MouseButton, Node, Row, RowParameters,
+    ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Style, Textbox, TextboxChanged, TextBlock, TextBlockParameters,
+    TextboxParameters, TrackSize, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
 };
 use crate::render::{FrameInfo, RenderError};
 use std::{
@@ -53,6 +53,29 @@ fn empty_content() -> Node {
 
 fn frame_info(dimensions: Dimensioni) -> FrameInfo {
     FrameInfo::try_new(dimensions, color(0, 0, 0, 255)).unwrap()
+}
+
+/// Leaf used when a test needs content with an exact intrinsic size.
+struct DesiredSize(Dimensioni);
+
+impl Widget for DesiredSize {
+    fn widget_opt(&self) -> &WidgetOption {
+        &WidgetOption::NONE
+    }
+
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
+
+    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+}
+
+impl crate::LeafWidget for DesiredSize {
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+        self.0
+    }
+}
+
+fn desired_size_node(width: i32, height: i32) -> Node {
+    Node::widget(DesiredSize(Dimensioni::new(width, height)))
 }
 
 fn increment_event_counter<E>(count: &mut usize, _: &E) {
@@ -468,9 +491,11 @@ fn collapsed_disclosure_skips_descendant_phases_and_drops_targets_only_on_remova
         .unwrap();
     let custom_runtime = Custom::create(CustomParameters::new("custom"));
     let (custom_state, custom_node) = Node::typed_custom_render(custom_runtime, custom);
-    let custom_node = custom_node.with_policy(Policy::fixed(20, 10));
-
-    let (disclosure, content) = Disclosure::create(DisclosureParameters::header("section", true, [probe_node, custom_node]));
+    let (disclosure, content) = Disclosure::create(DisclosureParameters::header(
+        "section",
+        true,
+        [LinearItem::content(probe_node), LinearItem::fixed(custom_node, 10).with_fixed_cross(20)],
+    ));
     let root = ctx.create_window("window", rect(0, 0, 160, 140), content);
     ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
@@ -520,7 +545,7 @@ fn collapsed_disclosure_skips_descendant_phases_and_drops_targets_only_on_remova
 
 #[test]
 fn nested_scroll_bubbles_at_the_inner_boundary_and_moves_only_the_outer_area() {
-    let inner_content = Node::widget(Custom::create(CustomParameters::new("inner content"))).with_policy(Policy::fixed(50, 180));
+    let inner_content = desired_size_node(50, 180);
     let (inner, inner_node) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, inner_content));
     let inner_id = inner_node.id();
     let outer_tail = Node::widget(Custom::create(CustomParameters::new("outer tail")));
@@ -1048,10 +1073,10 @@ fn warmed_container_measurement_and_layout_allocate_nothing() {
     let child = |name| Node::widget(Custom::create(CustomParameters::new(name)));
     let (_, row) = Row::create(RowParameters::new(TrackSize::Content, [LinearItem::flex(child("row"), 1.0)]));
     let (_, grid) = Grid::create(GridParameters::new([TrackSize::Flex(1.0)], [TrackSize::Content], [child("grid")]));
-    let (_, stack) = Column::create(ColumnParameters::new([LinearItem::fixed(child("stack"), 20)]));
+    let (_, fixed_column) = Column::create(ColumnParameters::new([LinearItem::fixed(child("column"), 20)]));
     let (_, disclosure) = Disclosure::create(DisclosureParameters::header("expanded", true, [child("disclosure")]));
     let (_, scroll) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child("scroll")));
-    let (_, content) = Column::create(ColumnParameters::new([row, grid, stack, disclosure, scroll]));
+    let (_, content) = Column::create(ColumnParameters::new([row, grid, fixed_column, disclosure, scroll]));
     let mut ctx = context();
     ctx.create_window("allocation probe", rect(10, 10, 300, 220), content);
     let dimensions = Dimensioni::new(640, 480);
@@ -1082,7 +1107,7 @@ fn blank_root_press_confines_drag_to_the_pressed_root() {
     let (probe_state, probe) = OrderedProbe::create(WidgetOption::NONE);
     let mut ctx = context();
     let first = ctx.create_window("first", rect(0, 0, 100, 80), empty_content());
-    let second = ctx.create_window("second", rect(160, 120, 100, 80), probe.with_policy(Policy::fill()));
+    let second = ctx.create_window("second", rect(160, 120, 100, 80), probe);
     for root in [first.id(), second.id()] {
         ctx.set_root_options(root, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
             .unwrap();
@@ -1108,7 +1133,7 @@ fn active_root_confines_scroll_while_hover_and_press_remain_hit_routed() {
     let (probe_state, probe) = OrderedProbe::create(WidgetOption::GRAB_SCROLL);
     let mut ctx = context();
     let first = ctx.create_window("first", rect(0, 0, 100, 80), empty_content());
-    let second = ctx.create_window("second", rect(160, 120, 100, 80), probe.with_policy(Policy::fill()));
+    let second = ctx.create_window("second", rect(160, 120, 100, 80), probe);
     for root in [first.id(), second.id()] {
         ctx.set_root_options(root, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
             .unwrap();
@@ -1136,7 +1161,7 @@ fn active_root_confines_scroll_while_hover_and_press_remain_hit_routed() {
 fn pointer_captured_root_remains_the_keyboard_and_text_input_root() {
     let (probe_state, probe) = OrderedProbe::create(WidgetOption::NONE);
     let mut ctx = context();
-    let first = ctx.create_window("first", rect(0, 0, 100, 80), probe.with_policy(Policy::fill()));
+    let first = ctx.create_window("first", rect(0, 0, 100, 80), probe);
     let second = ctx.create_window("second", rect(160, 120, 100, 80), empty_content());
     ctx.update_and_render_ui();
 
@@ -1425,7 +1450,7 @@ fn title_drag_and_close_record_typed_root_events() {
 fn resize_overlay_preempts_content_where_the_grip_overlaps_the_root_body() {
     let (probe_state, probe) = OrderedProbe::create(WidgetOption::NONE);
     let mut ctx = context();
-    let root = ctx.create_window("window", rect(30, 30, 140, 100), probe.with_policy(Policy::fill()));
+    let root = ctx.create_window("window", rect(30, 30, 140, 100), probe);
     ctx.update_and_render_ui();
 
     let resize = ctx.debug_root_chrome(root.id()).unwrap().2.unwrap();
@@ -1463,7 +1488,7 @@ fn resize_overlay_preempts_content_where_the_grip_overlaps_the_root_body() {
 fn content_capture_remains_exclusive_while_dragging_across_root_chrome() {
     let (probe_state, probe) = OrderedProbe::create(WidgetOption::NONE);
     let mut ctx = context();
-    let root = ctx.create_window("window", rect(30, 30, 140, 100), probe.with_policy(Policy::fill()));
+    let root = ctx.create_window("window", rect(30, 30, 140, 100), probe);
     ctx.update_and_render_ui();
 
     let body = ctx.debug_root_body(root.id()).unwrap();
@@ -1612,7 +1637,7 @@ fn auto_width_consumes_typed_measurement_invalidation_before_intrinsic_measureme
 }
 
 #[test]
-fn auto_size_ignores_the_previous_rect_for_flexible_row_grid_and_stack_tracks() {
+fn auto_size_ignores_the_previous_rect_for_flexible_linear_and_grid_tracks() {
     let row_children = (0..5)
         .map(|index| Node::widget(Custom::create(CustomParameters::new(format!("row {index}")))))
         .collect::<Vec<_>>();
@@ -1639,11 +1664,11 @@ fn auto_size_ignores_the_previous_rect_for_flexible_row_grid_and_stack_tracks() 
         [TrackSize::Flex(1.0)],
         grid_items,
     ));
-    let (_, stack) = Column::create(ColumnParameters::new([
-        LinearItem::flex(Node::widget(Custom::create(CustomParameters::new("stack first"))), 1.0),
-        LinearItem::flex(Node::widget(Custom::create(CustomParameters::new("stack second"))), 1.0),
+    let (_, flexible_column) = Column::create(ColumnParameters::new([
+        LinearItem::flex(Node::widget(Custom::create(CustomParameters::new("column first"))), 1.0),
+        LinearItem::flex(Node::widget(Custom::create(CustomParameters::new("column second"))), 1.0),
     ]));
-    let (_, content) = Column::create(ColumnParameters::new([row, grid, stack]));
+    let (_, content) = Column::create(ColumnParameters::new([row, grid, flexible_column]));
     let mut ctx = context();
     let root = ctx.create_popup("intrinsic", content);
     ctx.set_root_visible(root.id(), true).unwrap();

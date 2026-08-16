@@ -300,9 +300,9 @@ fn next_input(input: &mut Input) -> (UiInputEvent, InputSnapshot) {
 }
 
 #[test]
-fn demo_remainder_row_geometry_is_preserved_as_an_explicit_baseline() {
-    // `demo-full` uses this sequence for its three-button rows. The first remainder leaves 109
-    // pixels for the final remainder track; spacing is outside all three tracks.
+fn demo_flex_row_geometry_is_preserved_as_an_explicit_baseline() {
+    // `demo-full` uses this sequence for its three-button rows. Explicit fixed edge tracks leave
+    // the center item the remaining space; spacing is outside all three tracks.
     let (label_id, label) = layout_button("label");
     let (middle_id, middle) = layout_button("middle");
     let (last_id, last) = layout_button("last");
@@ -321,10 +321,10 @@ fn demo_remainder_row_geometry_is_preserved_as_an_explicit_baseline() {
 }
 
 #[test]
-fn calculator_fraction_and_remainder_geometry_is_preserved_as_an_explicit_baseline() {
+fn calculator_flex_geometry_is_preserved_as_an_explicit_baseline() {
     // The calculator assigns one quarter of the gap-adjusted column to the display and gives the
-    // exact remainder to the keypad. This records the visible result rather than the legacy enum
-    // implementation that happened to produce it.
+    // exact remaining height to the keypad. This records the visible result independently of the
+    // retired policy names that happened to produce it.
     let (display_id, display) = layout_probe("display");
     let (keypad_id, keypad) = layout_probe("keypad");
     let (_, mut root) = crate::Column::create(crate::ColumnParameters::new([LinearItem::flex(display, 1.0), LinearItem::flex(keypad, 3.0)]));
@@ -338,9 +338,9 @@ fn calculator_fraction_and_remainder_geometry_is_preserved_as_an_explicit_baseli
 }
 
 #[test]
-fn demo_stack_remainder_margin_geometry_is_preserved_as_an_explicit_baseline() {
-    // The log panel uses one stack item with `Remainder(24)`, intentionally leaving a 24-pixel
-    // strip below its scrolling child for the submission row that follows it.
+fn demo_column_bottom_margin_geometry_is_preserved_as_an_explicit_baseline() {
+    // The log panel uses one flexible Column item followed by an explicit 24-pixel spacer below
+    // its scrolling child for the submission row that follows it.
     let (content_id, content) = layout_probe("content");
     let spacer = Node::widget(WidgetOption::NONE);
     let (_, mut root) = crate::Column::create(crate::ColumnParameters::new([LinearItem::flex(content, 1.0), LinearItem::fixed(spacer, 24)]));
@@ -631,10 +631,9 @@ fn no_interact_node_is_transparent_to_pointer_target_selection() {
 fn composite_header_is_targeted_as_a_real_child_surface() {
     let log = Rc::new(RefCell::new(Vec::new()));
     let (lower, lower_counts) = Probe::new("lower", log.clone());
-    let lower = Node::widget(lower).with_policy(Policy::fill());
+    let lower = Node::widget(lower);
     let lower_id = lower.id();
-    let (_, disclosure) = crate::Disclosure::create(crate::DisclosureParameters::header("Header", true, std::iter::empty()));
-    let disclosure = disclosure.with_policy(Policy::fill());
+    let (_, disclosure) = crate::Disclosure::create(crate::DisclosureParameters::header("Header", true, std::iter::empty::<crate::LinearItem>()));
     let disclosure_id = disclosure.id();
     let (container, _) = TraversalContainer::new([lower, disclosure], log);
     let mut root = Node::container(container);

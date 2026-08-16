@@ -68,6 +68,7 @@ impl Row {
     }
 
     /// Appends one unmounted item, preserving it on failure.
+    #[allow(clippy::result_large_err)] // Failure returns the exact unique node and its edge metadata.
     pub fn push(&mut self, item: impl Into<LinearItem>) -> Result<(), LinearItem> {
         self.linear.push(item)
     }

@@ -167,8 +167,6 @@ pub(crate) struct NodeRuntime {
     pub(crate) clicked: bool,
     /// Mouse is held down while this node owns focus.
     pub(crate) active: bool,
-    /// Placement policy used by runtime layout passes.
-    pub(crate) policy: crate::Policy,
     /// Parent-layout result consumed uniformly by traversal and dispatch.
     pub(crate) participation: ChildParticipation,
     /// Persistent preferred sizes owned directly by this retained node.
@@ -274,15 +272,6 @@ impl Node {
         Self::from_kind(NodeKind::Container(container))
     }
 
-    /// Replaces this still-unmounted node's generic parent placement policy.
-    ///
-    /// Grid spans are separate parent-owned metadata supplied by [`crate::GridItem`] and take
-    /// precedence for cell occupancy; this policy still controls sizing within the assigned area.
-    pub fn with_policy(mut self, policy: crate::Policy) -> Self {
-        self.state.policy = policy;
-        self
-    }
-
     fn from_kind(kind: NodeKind) -> Self {
         // Identity is allocated once at the final owning boundary and survives every subsequent move
         // of the non-Clone Node through unmounted construction and retained insertion.
@@ -294,7 +283,6 @@ impl Node {
                 focused: false,
                 clicked: false,
                 active: false,
-                policy: crate::Policy::auto(),
                 participation: ChildParticipation::Active,
                 measurement: MeasurementCache::new(),
                 placed: false,
@@ -326,7 +314,7 @@ impl Node {
         parent_transform.resolve(bounds).overlaps(parent_transform.clip)
     }
 
-    /// Measures this node's preferred outer size. Placement policy is applied later by layout.
+    /// Measures this node's desired outer size. Its parent assigns the later exact allocation.
     pub(crate) fn measure(&mut self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         self.measure_with_cache_status(style, atlas, constraints).0
     }
@@ -356,7 +344,7 @@ impl Node {
             NodeKind::Container(container) => container.measure_content_with_frame(style, atlas, constraints),
         };
         // Widgets cannot return negative geometry. Node placement policy is intentionally absent:
-        // the parent applies it later when allocating this preferred outer size.
+        // the parent consumes this desired size while resolving its own child relationship.
         let preferred_content = Dimensioni::new(measured_content.width.max(0), measured_content.height.max(0));
         let preferred = crate::ui_node::frame::outer_preferred(preferred_content, border_width);
         self.state.measurement.insert(MeasurementEntry {
@@ -470,7 +458,7 @@ impl WidgetNode {
 pub(crate) enum NodeKind {
     /// Direct erased leaf widget runtime.
     Widget(WidgetNode),
-    /// Direct concrete container owner with one erased geometry policy.
+    /// Direct concrete container owner with one erased geometry implementation.
     Container(Container),
 }
 
@@ -559,12 +547,8 @@ mod tests {
         let second_id = second.state.id.0.get();
         assert!(second_id > first_id, "the process-wide allocator must increase monotonically");
 
-        let configured = first.with_policy(crate::Policy::fixed(17, 23));
-        assert_eq!(configured.state.id.0.get(), first_id);
-        assert_eq!(configured.state.policy, crate::Policy::fixed(17, 23));
-
         let mut children = Children::new();
-        let rejected = children.insert(1, configured).expect_err("out-of-range insertion must reject the exact owner");
+        let rejected = children.insert(1, first).expect_err("out-of-range insertion must reject the exact owner");
         assert_eq!(rejected.state.id.0.get(), first_id);
         assert!(children.is_empty());
 
@@ -573,18 +557,20 @@ mod tests {
     }
 
     #[test]
-    fn measurement_reports_content_and_leaves_placement_policy_to_the_parent() {
-        let (_, mut plain) = text_node("same content");
-        let (_, fixed) = text_node("same content");
-        let mut fixed = fixed.with_policy(crate::Policy::fixed(300, 200));
+    fn measurement_reports_content_independently_of_exact_parent_allocation() {
+        let (_, mut node) = text_node("same content");
         let style = crate::Style::default();
         let atlas = test_atlas();
 
-        let plain = plain.measure(&style, &atlas, Constraints::unbounded());
-        let fixed_measurement = fixed.measure(&style, &atlas, Constraints::unbounded());
-        assert_eq!((plain.width, plain.height), (fixed_measurement.width, fixed_measurement.height));
-        let children: Children = [fixed].into_iter().collect();
-        assert_eq!(children.child_policy(0), Some(crate::Policy::fixed(300, 200)));
+        let preferred = node.measure(&style, &atlas, Constraints::unbounded());
+        let mut runtime = crate::ui_node::UiRuntime::new();
+        runtime.begin_update();
+        runtime.layout_tree_root(&mut node, &style, atlas.clone(), Recti::new(0, 0, 300, 200), crate::UNCLIPPED_RECT);
+        let measured_again = node.measure(&style, &atlas, Constraints::unbounded());
+
+        assert_eq!((measured_again.width, measured_again.height), (preferred.width, preferred.height));
+        let allocation = node.state.layout.allocation;
+        assert_eq!((allocation.x, allocation.y, allocation.width, allocation.height), (0, 0, 300, 200));
     }
 
     #[test]

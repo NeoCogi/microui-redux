@@ -208,7 +208,7 @@ fn main() {
             .expect("register cube renderer");
 
         let cube = CubeBuilder::create_widget(CubeParameters);
-        let tree = Node::custom_render(cube, cube_renderer).with_policy(Policy::fill());
+        let tree = Node::custom_render(cube, cube_renderer);
         ctx.create_window("Typed backend-frame cube", rect(40, 40, 360, 360), tree);
 
         State { angle }

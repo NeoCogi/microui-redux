@@ -151,12 +151,6 @@ impl Children {
         self.nodes.is_empty()
     }
 
-    /// Returns one child's placement policy without exposing the child itself.
-    pub fn child_policy(&self, index: usize) -> Option<crate::Policy> {
-        // Copy only the parent-owned policy; runtime identity and widget state remain opaque.
-        self.nodes.get(index).map(|node| node.state.policy)
-    }
-
     /// Appends one still-unmounted node and commits this collection as its owner.
     pub(crate) fn push(&mut self, node: Node) {
         // Moving the unique Node into the vector establishes this collection as its owner.

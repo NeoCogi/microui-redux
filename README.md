@@ -220,7 +220,7 @@ let cube_renderer = ctx.register_custom_renderer({
 })?;
 
 let cube = CubeBuilder::create_widget(CubeParameters);
-let tree = Node::custom_render(cube, cube_renderer).with_policy(Policy::fill());
+let tree = Node::custom_render(cube, cube_renderer);
 let _root = ctx.create_window("Cube", rect(40, 40, 360, 360), tree);
 ```
 
@@ -287,9 +287,11 @@ let (name, name_node) = Textbox::create(TextboxParameters::new(""));
 let name_submitted = name.submitted();
 let (_, label_node) = TextBlock::create(TextBlockParameters::new("Name"));
 let (_, tree) = Row::create(RowParameters::new(
-    [SizePolicy::Fixed(120), SizePolicy::Remainder(0)],
-    SizePolicy::Auto,
-    [label_node, name_node],
+    TrackSize::Content,
+    [
+        LinearItem::fixed(label_node, 120),
+        LinearItem::flex(name_node, 1.0),
+    ],
 ));
 
 let _root = ctx.create_window("main", rect(20, 20, 240, 120), tree);
@@ -375,8 +377,8 @@ subscription so one `Context<B, State>` can subscribe to heterogeneous native wi
 ### Retained node identity
 
 Each owning `Node` receives a private, process-unique runtime identity before mounting. Moving a
-node, applying consuming `with_policy`, wrapping it in an unmounted `GridItem`, and inserting it
-into `Children` or a `Grid` preserve that identity; applications cannot read or construct it.
+node, wrapping it in an unmounted `LinearItem` or `GridItem`, and inserting it into a container
+preserve that identity; applications cannot read or construct it.
 There is no public node ID or result lookup path. Weak typed widget handles expose event endpoints
 after node erasure, while root chrome exposes its rectangle, visibility, and active mode through
 `RootHandle::widget()` and its typed endpoints through `RootHandle::{changed, submitted}`.
@@ -384,26 +386,27 @@ after node erasure, while root chrome exposes its rectangle, visibility, and act
 Registered roots can be configured with `Context::set_root_options(...)` and `WindowOption` to
 control window chrome. Root overflow does not scroll implicitly; construct a `ScrollArea` with
 `ScrollAreaOption::ENABLE_SCROLL` around one content node and use its `TypedWidgetHandle<ScrollArea>`
-for offset changes. The content may be any leaf or container; its own layout policy remains outside
-ScrollArea. Every retained node caches preferred measurements and placement across layout passes. A
-geometry change clears that node and its weakly linked ancestor caches, while topology operations
-do this automatically. Ordinary traversal rejects nodes whose retained rectangles do not intersect
-the inherited viewport, regardless of which container owns them.
+for offset changes. The content may be any leaf or container. It fills at least the viewport width
+and keeps its desired height; explicit descendant relationships remain in the content container.
+Every retained node caches preferred measurements and placement across layout passes. A geometry
+change clears that node and its weakly linked ancestor caches, while topology operations do this
+automatically. Ordinary traversal rejects nodes whose retained rectangles do not intersect the
+inherited viewport, regardless of which container owns them.
 
 ### Preferred sizing and retained layout
 - Every built-in leaf reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout), while every container measures against its authoritative child collection.
 - A consumed or captured event conservatively dirties its recipient's retained measurement; the runtime propagates that invalidation through dependent ancestors at the next layout boundary. Typed-handle mutations use the same propagation path, so widget implementations do not manage layout caches.
-- `LeafWidget::measure` and `ContainerWidget::measure` report preferred content, not an allocation. A positive input axis may be used for wrapping; a non-positive axis requests the unconstrained preferred size. `Node` placement policy is applied later by its parent layout.
-- Auto-sized roots measure both axes intrinsically. Flexible `Fraction`, `Weight`, and `Remainder` tracks contribute content minima until a bounded allocation exists; `Fixed` tracks remain exact and may expose child overflow.
+- `LeafWidget::measure` and `ContainerWidget::measure` report desired content, not an allocation. `Constraints` represents each axis as `AvailableSpace::Bounded(i32)` or `AvailableSpace::Unbounded`; bounded zero is not an unconstrained request.
+- Auto-sized roots measure unbounded axes intrinsically. `TrackSize::Content` uses desired extent, `TrackSize::Fixed` stays exact, and `TrackSize::Flex` shares bounded space left after content, fixed tracks, and spacing while falling back to desired content when unbounded.
 - `Context::update_ui` first synchronizes layout, then drains input in API-call order. Every event runs one complete eligible-tree `Widget::update` traversal and one follow-up layout, so geometry changed by one event is authoritative for routing the next.
 - `ContextFrame::render_ui` performs no input, update, or layout work. It paints the committed tree with `Widget::paint` and submits one display list; missing, stale, pending-input, or dimension-mismatched commits return `RenderError::UiUpdateRequired` before backend acquisition.
 - Leaves and containers share the public `Widget` update/paint contract. `LeafWidget` adds intrinsic measurement; `ContainerWidget` adds child-aware measurement, placement, and optional surface event filtering.
-- Parent containers assign each node a retained parent-local allocation; child offsets and clips remain node-local and are resolved through a stack-only transform during traversal.
+- Parent containers assign each node one exact retained parent-local allocation. Sizing relationships belong to parent-child edges such as `LinearItem`; `Node` has no global placement policy. Child offsets and clips remain node-local and are resolved through a composed transform during traversal.
 - Resolved outer rectangles and clips remain runtime stack locals. Node behavior works against its local content surface, while outer frame painting, standard hit routing, and conversion from screen input remain runtime-owned.
 - A public widget's Painter geometry and routed pointer positions share the derived content-local origin.
 - Built-in leaf and container constructors return a weak `TypedWidgetHandle<W>` plus one completed owning `Node`. Concrete container constructors consume child nodes, and `Node::custom_render` plus `Node::typed_custom_render` cover backend-typed custom-render leaves.
-- `SizePolicy::Weight(value)` distributes available track space by sibling share ratio (spacing accounted for). Use `SizePolicy::Fraction(value)` for explicit `0.0..=1.0` proportional sizing in single-track flows.
-- Returning `<= 0` for either axis from a leaf or container measurement still means "use layout fallback/defaults" for that axis.
+- Row and Column share one linear implementation, Grid uses the same track resolver, and all three apply identical content/fixed/flex, spacing, rounding, and overflow rules.
+- Negative desired extents are normalized to zero at the node boundary. A desired zero remains zero; generic containers do not substitute Style-owned fallback cells.
 
 Built-in leaves and containers are mutated through their typed widget handles between commits. After programmatic state/topology changes, call `update_ui` even when no input is pending so layout is synchronized before paint. Feed raw input through methods such as `mousemove`, `mousedown`, `scroll`, `keydown_code`, and `text`; calls are queued without coalescing. A widget receives the current event as `Option<&UiInputEvent>`, while `WidgetUpdateCtx::{mouse_buttons,key_modes,key_codes}` exposes held state after that event was applied.
 

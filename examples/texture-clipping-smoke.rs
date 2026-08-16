@@ -211,7 +211,7 @@ fn main() -> Result<(), String> {
         texture,
         screen_content: screen_content.clone(),
     });
-    let tree = Node::widget(probe).with_policy(Policy::fixed(64, 64));
+    let tree = Node::widget(probe);
     let root = ctx.create_window("texture clipping smoke", rect(0, 0, 64, 64), tree);
     ctx.set_root_options(root.id(), WindowOption::NO_TITLE | WindowOption::NO_CLOSE | WindowOption::NO_RESIZE)
         .expect("root should remain registered");

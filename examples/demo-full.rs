@@ -911,13 +911,13 @@ impl DemoNodes {
     }
 
     fn header(&mut self, label: impl Into<String>, expanded: bool, f: impl FnOnce(&mut Self)) -> TypedWidgetHandle<Disclosure> {
-        let (state, node) = Disclosure::create(DisclosureParameters::header(label, expanded, Self::children(f)));
+        let (state, node) = Disclosure::create(DisclosureParameters::header(label, expanded, Self::items(f)));
         self.push(node);
         state
     }
 
     fn tree_node(&mut self, label: impl Into<String>, expanded: bool, f: impl FnOnce(&mut Self)) -> TypedWidgetHandle<Disclosure> {
-        let (state, node) = Disclosure::create(DisclosureParameters::tree(label, expanded, Self::children(f)));
+        let (state, node) = Disclosure::create(DisclosureParameters::tree(label, expanded, Self::items(f)));
         self.push(node);
         state
     }

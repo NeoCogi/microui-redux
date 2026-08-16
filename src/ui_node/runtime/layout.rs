@@ -49,27 +49,11 @@ impl UiRuntime {
         node.measure_with_cache_status(style, atlas, constraints)
     }
 
-    /// Lays out one already-borrowed node through direct widget/container dispatch.
+    /// Assigns one exact parent-owned rectangle through direct widget/container dispatch.
     pub(in crate::ui_node) fn layout_node_ref(&mut self, node: &mut Node, style: &Style, atlas: &crate::AtlasHandle, rect: Recti) -> Dimensioni {
         let framed = node_is_framed(node);
-        // Query content preference at the offered slot before the parent-owned node policy chooses
-        // the actual outer allocation.
-        let (preferred, measurement_cached) = self.measure_node_for_layout(node, style, atlas, Constraints::bounded(Dimensioni::new(rect.width, rect.height)));
-        let policy = node.state.policy;
-        let outer = Recti::new(
-            rect.x,
-            rect.y,
-            policy.width.allocated_extent(rect.width),
-            policy.height.allocated_extent(rect.height),
-        );
-        self.layout_node_outer_ref(node, style, atlas, framed, outer, preferred, measurement_cached)
-    }
-
-    /// Lays out a node whose parent/root flow has already resolved its size policy.
-    pub(in crate::ui_node) fn layout_allocated_node_ref(&mut self, node: &mut Node, style: &Style, atlas: &crate::AtlasHandle, rect: Recti) -> Dimensioni {
-        let framed = node_is_framed(node);
-        // Preserve the established measure/layout phase contract while keeping the resolved root
-        // allocation authoritative.
+        // Preserve the measure/layout phase contract while keeping the parent's rectangle
+        // authoritative. Sizing relationships live in the parent container, never on Node.
         let (preferred, measurement_cached) = self.measure_node_for_layout(node, style, atlas, Constraints::bounded(Dimensioni::new(rect.width, rect.height)));
         let outer = Recti::new(rect.x, rect.y, rect.width.max(0), rect.height.max(0));
         self.layout_node_outer_ref(node, style, atlas, framed, outer, preferred, measurement_cached)

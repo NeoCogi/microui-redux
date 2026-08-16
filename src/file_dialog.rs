@@ -44,8 +44,8 @@ use std::{
 };
 
 use crate::{
-    Button, ButtonParameters, ButtonSubmitted, Column, ColumnParameters, IconId, LinearItem, ListItem, ListItemParameters, ListItemSubmitted, Node, Policy,
-    Recti, RootHandle, RootSubmitted, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Textbox, TextboxParameters, TextboxSubmitted, ThemeIcons, TrackSize,
+    Button, ButtonParameters, ButtonSubmitted, Column, ColumnParameters, IconId, LinearItem, ListItem, ListItemParameters, ListItemSubmitted, Node, Recti,
+    RootHandle, RootSubmitted, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Textbox, TextboxParameters, TextboxSubmitted, ThemeIcons, TrackSize,
     TypedWidgetHandle, WidgetEventHandle, WidgetOption, WindowOption,
 };
 use crate::event::{WidgetEventListener, WidgetEventPort};
@@ -296,7 +296,7 @@ impl FileDialogController {
             LinearItem::content(actions),
         ]));
 
-        let root = ctx.create_dialog(&request.title, request.rect, shell.with_policy(Policy::fill()));
+        let root = ctx.create_dialog(&request.title, request.rect, shell);
         ctx.set_root_options(root.id(), WindowOption::FRAME)
             .expect("new file-dialog root must accept options");
         ctx.set_root_visible(root.id(), true).expect("new file-dialog root must become visible");

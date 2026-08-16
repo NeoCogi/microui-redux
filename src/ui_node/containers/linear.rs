@@ -215,6 +215,7 @@ impl LinearState {
         self.children.is_empty()
     }
 
+    #[allow(clippy::result_large_err)] // Failure preserves the unique node and its edge metadata.
     pub(super) fn push(&mut self, item: impl Into<LinearItem>) -> Result<(), LinearItem> {
         let items = &mut self.items;
         self.children.try_update_with(item.into(), |children, item| items.push(children, item))
@@ -463,7 +464,7 @@ pub(super) fn layout_linear(
         }
         let cross = placement.fixed_cross.unwrap_or(line_cross);
         let child_rect = orientation.rect(cursor, orientation.cross_origin(rect), main, cross);
-        let _ = ctx.layout_child_allocated(children, index, child_rect);
+        let _ = ctx.layout_child(children, index, child_rect);
         if state.reversed {
             cursor = cursor.saturating_sub(gap);
         } else {

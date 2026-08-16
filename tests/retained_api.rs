@@ -35,7 +35,7 @@ use microui_redux::retained::*;
 use microui_redux::prelude::{Dimensioni, FileDialogRequest, FileDialogStatus, Recti};
 use microui_redux::{
     color, rect, AtlasHandle, AtlasSource, Column, ColumnParameters, Constraints, Context, Disclosure, DisclosureParameters, FontEntry, Grid, GridParameters,
-    Policy, RootMutationError, Row, RowParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SourceFormat, Style, TextureId,
+    RootMutationError, Row, RowParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SourceFormat, Style, TextureId,
 };
 
 struct TestBackend {
@@ -124,24 +124,21 @@ fn every_builtin_container_returns_a_typed_handle_and_completed_node() {
 struct ExternalContainer {
     measure_calls: Cell<usize>,
     layout_calls: Cell<usize>,
-    observed_policy: Cell<Option<Policy>>,
+    allocated_child: Cell<Option<Dimensioni>>,
     options: WidgetOption,
 }
 
 impl ContainerWidget for ExternalContainer {
     fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: Constraints) -> Dimensioni {
         self.measure_calls.set(self.measure_calls.get() + 1);
-        self.observed_policy.set(ctx.child_policy(0));
         ctx.measure_child(0, constraints).unwrap_or_else(|| Dimensioni::new(20, 20))
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
         self.layout_calls.set(self.layout_calls.get() + 1);
-        assert!(ctx.child_policy(children, usize::MAX).is_none());
         assert!(ctx.layout_child(children, usize::MAX, rect).is_none());
-        self.observed_policy.set(ctx.child_policy(children, 0));
         if !children.is_empty() {
-            let _ = ctx.layout_child(children, 0, rect);
+            self.allocated_child.set(ctx.layout_child(children, 0, rect));
         }
     }
 }
@@ -161,7 +158,7 @@ fn external_container(children: impl IntoIterator<Item = Node>) -> (TypedWidgetH
         ExternalContainer {
             measure_calls: Cell::new(0),
             layout_calls: Cell::new(0),
-            observed_policy: Cell::new(None),
+            allocated_child: Cell::new(None),
             options: WidgetOption::NO_INTERACT,
         },
         children,
@@ -196,9 +193,7 @@ impl LeafWidget for ExternalLeaf {
 #[test]
 fn downstream_custom_container_measures_and_lays_out_through_public_scoped_apis() {
     let (child_state, child) = ExternalLeaf::create();
-    let policy = Policy::fixed(24, 18);
-    let children = [child.with_policy(policy)];
-    let (state, runtime) = external_container(children);
+    let (state, runtime) = external_container([child]);
     let node = Node::container(runtime);
     let mut ctx = context();
     let root = ctx.create_window("external", rect(10, 20, 100, 80), node);
@@ -211,7 +206,8 @@ fn downstream_custom_container_measures_and_lays_out_through_public_scoped_apis(
 
     assert!(state.try_read(|state| state.measure_calls.get()).unwrap() > 0);
     assert!(state.try_read(|state| state.layout_calls.get()).unwrap() > 0);
-    assert_eq!(state.try_read(|state| state.observed_policy.get()), Some(Some(policy)));
+    let allocated = state.try_read(|state| state.allocated_child.get()).flatten().unwrap();
+    assert!(allocated.width > 12 && allocated.height > 9, "the parent rectangle must be authoritative");
     assert!(child_state.is_alive());
     assert!(ctx.destroy_root(root.id()));
     assert!(!state.is_alive());

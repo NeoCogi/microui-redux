@@ -35,7 +35,7 @@ use crate::{
     UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
-use super::{Children, Column, ColumnParameters, ContainerLayoutCtx, Node};
+use super::{Children, Column, ColumnParameters, ContainerLayoutCtx, LinearItem, Node};
 
 #[derive(Copy, Clone)]
 enum DisclosureVariant {
@@ -50,7 +50,7 @@ enum DisclosureVariant {
 pub struct DisclosureParameters {
     label: String,
     expanded: bool,
-    children: Children,
+    children: Vec<LinearItem>,
     variant: DisclosureVariant,
     opt: WidgetOption,
 }
@@ -58,23 +58,32 @@ pub struct DisclosureParameters {
 impl WidgetParameters for DisclosureParameters {}
 
 impl DisclosureParameters {
-    /// Creates the framed header presentation.
-    pub fn header(label: impl Into<String>, expanded: bool, children: impl IntoIterator<Item = Node>) -> Self {
+    /// Creates the framed header presentation and its top-to-bottom body items.
+    ///
+    /// Plain [`Node`] values use content height. Pass [`LinearItem`] when an item has an explicit
+    /// fixed or flexible relationship to the private body Column.
+    pub fn header<T>(label: impl Into<String>, expanded: bool, children: impl IntoIterator<Item = T>) -> Self
+    where
+        T: Into<LinearItem>,
+    {
         Self {
             label: label.into(),
             expanded,
-            children: children.into_iter().collect(),
+            children: children.into_iter().map(Into::into).collect(),
             variant: DisclosureVariant::Header,
             opt: WidgetOption::FRAME,
         }
     }
 
-    /// Creates the unframed, indented tree presentation.
-    pub fn tree(label: impl Into<String>, expanded: bool, children: impl IntoIterator<Item = Node>) -> Self {
+    /// Creates the unframed, indented tree presentation and its body items.
+    pub fn tree<T>(label: impl Into<String>, expanded: bool, children: impl IntoIterator<Item = T>) -> Self
+    where
+        T: Into<LinearItem>,
+    {
         Self {
             label: label.into(),
             expanded,
-            children: children.into_iter().collect(),
+            children: children.into_iter().map(Into::into).collect(),
             variant: DisclosureVariant::Tree,
             opt: WidgetOption::NONE,
         }
@@ -134,17 +143,16 @@ impl Disclosure {
         self.content.try_read(Column::is_empty).flatten()
     }
 
-    /// Appends one still-unmounted child.
-    pub fn push(&mut self, node: Node) -> Result<(), Node> {
-        self.content
-            .try_update_with(node, |content, node| content.push(node).map_err(super::LinearItem::into_node))?
+    /// Appends one still-unmounted body item and its Column-owned height track.
+    #[allow(clippy::result_large_err)] // Failure returns the exact unique node and its edge metadata.
+    pub fn push(&mut self, item: impl Into<LinearItem>) -> Result<(), LinearItem> {
+        self.content.try_update_with(item.into(), Column::push)?
     }
 
-    /// Inserts a node, returning it unchanged when `index > len`.
+    /// Inserts an item, returning it unchanged when `index > len`.
     #[allow(clippy::result_large_err)] // The exact unboxed owner is the failure value by contract.
-    pub fn insert(&mut self, index: usize, node: Node) -> Result<(), Node> {
-        self.content
-            .try_update_with(node, |content, node| content.insert(index, node.into()).map_err(super::LinearItem::into_node))?
+    pub fn insert(&mut self, index: usize, item: LinearItem) -> Result<(), LinearItem> {
+        self.content.try_update_with(item, |content, item| content.insert(index, item))?
     }
 
     /// Drops one indexed child owner and reports whether it existed.
@@ -157,12 +165,13 @@ impl Disclosure {
         self.content.try_update(Column::clear).flatten()
     }
 
-    /// Replaces all descendants in iterator order.
-    pub fn replace<I>(&mut self, nodes: I) -> Result<(), I>
+    /// Replaces all body items in iterator order.
+    pub fn replace<T, I>(&mut self, items: I) -> Result<(), I>
     where
-        I: IntoIterator<Item = Node>,
+        T: Into<LinearItem>,
+        I: IntoIterator<Item = T>,
     {
-        self.content.try_update_with(nodes, |content, nodes| content.replace(nodes))?
+        self.content.try_update_with(items, Column::replace)?
     }
 
     const BODY: usize = 0;
@@ -286,7 +295,6 @@ impl crate::LeafWidget for DisclosureHeader {
 
 impl ContainerWidget for Disclosure {
     fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: crate::Constraints) -> Dimensioni {
-        let available = constraints.legacy_size();
         // The header always contributes. Body measurement is conditional so collapsed content does
         // not influence root auto-size while its state and nodes remain retained.
         let header = ctx.measure_child(Self::HEADER, constraints).unwrap_or_default();
@@ -295,19 +303,11 @@ impl ContainerWidget for Disclosure {
         }
         let indent = self.indent(ctx.style());
         let spacing = ctx.style().spacing.max(0);
-        let body_width = if available.width > 0 {
-            available.width.saturating_sub(indent).max(1)
-        } else {
-            0
-        };
-        let body_height = if available.height > 0 {
-            available.height.saturating_sub(header.height).saturating_sub(spacing).max(1)
-        } else {
-            0
-        };
-        let body = ctx
-            .measure_child(Self::BODY, crate::Constraints::from_legacy_size(Dimensioni::new(body_width, body_height)))
-            .unwrap_or_default();
+        let body_constraints = crate::Constraints::new(
+            constraints.width.shrink(indent),
+            constraints.height.shrink(header.height.saturating_add(spacing)),
+        );
+        let body = ctx.measure_child(Self::BODY, body_constraints).unwrap_or_default();
         Dimensioni::new(
             header.width.max(body.width.saturating_add(indent)),
             header.height.saturating_add(spacing).saturating_add(body.height),
@@ -358,7 +358,7 @@ impl Widget for Disclosure {
 
 /// Builds the fixed body/header structure before wrapping it in the public owning node.
 fn create_container(parameters: DisclosureParameters) -> (TypedWidgetHandle<Disclosure>, Container) {
-    let (content, body) = Column::create(ColumnParameters::new(parameters.children.nodes));
+    let (content, body) = Column::create(ColumnParameters::new(parameters.children));
     let widget = Rc::new(RefCell::new(crate::ui_node::WidgetStorage::new(Disclosure {
         content,
         expanded: parameters.expanded,
@@ -394,14 +394,14 @@ mod tests {
 
     #[test]
     fn header_and_tree_preserve_state_and_fixed_structural_children() {
-        let (header_state, header) = create_container(DisclosureParameters::header("Header", false, std::iter::empty()));
+        let (header_state, header) = create_container(DisclosureParameters::header("Header", false, std::iter::empty::<LinearItem>()));
         assert_eq!(header_state.try_read(Disclosure::is_collapsed), Some(true));
         header_state.try_update(Disclosure::toggle).unwrap();
         assert_eq!(header_state.try_read(Disclosure::is_expanded), Some(true));
         assert_eq!(Node::container(header).debug_node_count(), 3);
 
         let custom_opt = WidgetOption::ALIGN_RIGHT | WidgetOption::NO_INTERACT;
-        let (tree_state, tree) = create_container(DisclosureParameters::tree("Tree", true, std::iter::empty()).with_options(custom_opt));
+        let (tree_state, tree) = create_container(DisclosureParameters::tree("Tree", true, std::iter::empty::<LinearItem>()).with_options(custom_opt));
         assert_eq!(tree_state.try_read(Disclosure::is_expanded), Some(true));
         assert_eq!(Node::container(tree).debug_node_count(), 3);
     }

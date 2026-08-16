@@ -170,7 +170,7 @@ impl UiRuntime {
         root.synchronize_measurement_invalidation();
         // Root layout establishes the transform reused by subsequent routing, update, and paint.
         self.root_transform = Transform::root(viewport);
-        self.layout_allocated_node_ref(root, style, &atlas, outer);
+        self.layout_node_ref(root, style, &atlas, outer);
         // Cache only derived geometry; the persistent Node remains the authoritative tree.
         self.root_content_size = root.state.layout.content_size;
         // Layout may hide or remove the current transient target, so validate identities now.

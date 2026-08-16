@@ -350,54 +350,31 @@ impl ContainerWidget for RootChrome {
     }
 
     fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: Constraints) -> Dimensioni {
-        let available = constraints.legacy_size();
         // Resolve chrome-only minimum/insets first, then measure the one application child inside
         // that body. Auto-size and placement therefore share root_chrome_geometry.
         let minimum = root_chrome_geometry(Recti::default(), Dimensioni::default(), &self.name, self.options, ctx.style(), ctx.atlas()).minimum_outer;
-        let outer = Recti::new(0, 0, available.width.max(minimum.width), available.height.max(minimum.height));
+        let outer = Recti::new(
+            0,
+            0,
+            constraints.width.bound().unwrap_or(minimum.width).max(minimum.width),
+            constraints.height.bound().unwrap_or(minimum.height).max(minimum.height),
+        );
         let shell = root_chrome_geometry(outer, Dimensioni::default(), &self.name, self.options, ctx.style(), ctx.atlas());
         // Convert the outer measurement bound into remaining application-content space.
         // chrome_occupancy = outer_extent - body_extent.
         let horizontal_chrome = outer.width.saturating_sub(shell.body.width);
         let vertical_chrome = outer.height.saturating_sub(shell.body.height);
-        let child_available = Dimensioni::new(
-            inset_available(available.width, horizontal_chrome),
-            inset_available(available.height, vertical_chrome),
-        );
-        let policy = ctx.child_policy(0).unwrap_or_else(crate::Policy::auto);
-        let child = ctx
-            .measure_child(
-                0,
-                Constraints::from_legacy_size(Dimensioni::new(
-                    policy.width.measurement_bound(child_available.width),
-                    policy.height.measurement_bound(child_available.height),
-                )),
-            )
-            .unwrap_or_default();
-        let child = Dimensioni::new(
-            policy.width.preferred_extent(child.width, child_available.width),
-            policy.height.preferred_extent(child.height, child_available.height),
-        );
+        let child_constraints = Constraints::new(constraints.width.shrink(horizontal_chrome), constraints.height.shrink(vertical_chrome));
+        let child = ctx.measure_child(0, child_constraints).unwrap_or_default();
         // Rebuild geometry with measured content and expose only its intrinsic outer extent.
         root_chrome_geometry(Recti::default(), child, &self.name, self.options, ctx.style(), ctx.atlas()).intrinsic_outer
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
-        // Provisional shell geometry supplies the exact measurement constraint for the child.
-        let shell = root_chrome_geometry(rect, Dimensioni::default(), &self.name, self.options, ctx.style(), ctx.atlas());
-        let policy = children.child_policy(0).unwrap_or_else(crate::Policy::auto);
-        let child = ctx
-            .measure_child(
-                children,
-                0,
-                Constraints::from_legacy_size(Dimensioni::new(
-                    policy.width.measurement_bound(shell.body.width.max(1)),
-                    policy.height.measurement_bound(shell.body.height.max(1)),
-                )),
-            )
-            .unwrap_or_default();
-        // Commit one snapshot used by layout, hit testing, surface paint, and overlay paint.
-        self.geometry = root_chrome_geometry(rect, child, &self.name, self.options, ctx.style(), ctx.atlas());
+        // The allocation completely determines chrome geometry. Desired child size was consumed by
+        // the earlier measurement phase when auto-sizing was requested; fixed roots need no second
+        // child query before assigning their exact body.
+        self.geometry = root_chrome_geometry(rect, Dimensioni::default(), &self.name, self.options, ctx.style(), ctx.atlas());
         let body = self.geometry.body;
         // The single child is application content and is clipped to the committed body.
         let _ = ctx.layout_child(children, 0, body);
@@ -616,13 +593,6 @@ pub(super) fn root_chrome_geometry(
         minimum_outer,
         intrinsic_outer,
     }
-}
-
-/// Removes root-chrome occupancy from a positive measurement bound while preserving intrinsic zero.
-fn inset_available(value: i32, inset: i32) -> i32 {
-    // A positive remainder stays positive because zero requests unconstrained child measurement.
-    // content_bound = max(available_bound - non_negative_chrome_inset, 1).
-    if value > 0 { value.saturating_sub(inset.max(0)).max(1) } else { 0 }
 }
 
 fn root_titlebar_height(style: &Style, atlas: &AtlasHandle) -> i32 {
