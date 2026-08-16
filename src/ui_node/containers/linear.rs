@@ -293,9 +293,72 @@ where
 
 /// Complete retained widget for one-dimensional child measurement and placement.
 ///
+/// `Linear` is the one concrete widget for every horizontal or vertical sequence. Its
+/// [`LinearParameters`] constructors use `horizontal` and `vertical` as convenient construction
+/// vocabulary, while [`LinearDirection`] retains both the coordinate axis and the leading edge.
+/// Every sequence therefore exposes the same `TypedWidgetHandle<Linear>` topology and configuration
+/// API instead of an orientation-specific facade.
+///
+/// # Retained data and ownership
+///
+/// [`Container`] is the sole strong owner of the authoritative [`Children`] collection. `Linear`
+/// retains a weak `ChildrenHandle`, one private `LinearItemSpec` per child, its direction and
+/// cross-axis policy, and a reusable `resolved_main` vector. The specifications store parent-owned
+/// main-axis tracks and optional fixed cross extents; they do not own or point to child nodes.
+///
 /// `specs` is the only metadata collection and is index-matched to the concrete container's
 /// authoritative `Children`. `resolved_main` is mutable placement scratch: it retains capacity
 /// between commits but is never read by immutable measurement or exposed as semantic state.
+/// Push, insert, removal, replacement, and clear operations update the child collection and
+/// specifications inside one checked topology closure. Failed insertion reconstructs the exact
+/// [`LinearItem`], preserving unique node ownership. Debug assertions verify synchronization at
+/// mutation and traversal boundaries.
+///
+/// The private `LinearAxis` adapter maps width/height and x/y into main/cross operations after the
+/// retained direction selects an axis. A trailing-edge direction changes only cursor origins and
+/// advancement; it does not reverse ownership, measurement, traversal, or track resolution.
+///
+/// # Immutable measurement
+///
+/// [`ContainerWidget::measure`] receives `&self`, so preferred-size measurement cannot mutate
+/// retained scratch. For a non-empty sequence it:
+///
+/// 1. Reads non-negative style spacing and separates the incoming main and cross constraints.
+/// 2. Measures intrinsic main-axis requirements and constructs a scalar `TrackResolver`.
+/// 3. Replays each track to obtain its resolved main extent.
+/// 4. Measures the child at that exact bounded main extent so responsive content, especially text,
+///    reports the correct cross extent.
+/// 5. Takes the maximum cross requirement, applies the horizontal non-empty control-line minimum
+///    when relevant, and resolves [`LinearCrossSize`] as desired content or an exact fixed extent.
+/// 6. Returns the track-sequence extent and resolved cross extent as desired size.
+///
+/// An empty sequence returns zero desired size. Scalar replay requires no temporary vector.
+/// Repeated intrinsic queries normally hit each child's bounded measurement cache instead of
+/// repeatedly executing leaf measurement.
+///
+/// # Mutable placement
+///
+/// Placement receives an exact parent-owned rectangle and mutable retained state. It:
+///
+/// 1. Clears `resolved_main` without releasing its capacity.
+/// 2. Measures an intrinsic main extent only for Content tracks. Fixed ignores intrinsic main size,
+///    while bounded Flex depends on the parent's remainder.
+/// 3. Constructs one `TrackResolver` and overwrites the scratch entries with exact extents.
+/// 4. Measures every child once at its exact main extent to determine responsive cross content. If
+///    the cross constraint is also the final allocation, the query warms the exact cache entry used
+///    when runtime commits the rectangle.
+/// 5. Resolves the shared line from content, the assigned cross extent, or a fixed extent.
+/// 6. Walks the resolved vector once, commits exact child rectangles, and publishes logical content
+///    size including cross-axis overflow.
+///
+/// Forward placement advances from the leading edge by `extent + gap`. Reverse placement begins at
+/// the trailing edge, subtracts an extent before placing, and then subtracts the gap. Both modes
+/// consume the same resolved vector, so direction changes origins without changing sizing.
+///
+/// Placement is linear in the child count and reuses `O(n)` output scratch. Cross-axis Stretch
+/// consumes only an exact placement allocation and does not manufacture desired size during
+/// measurement. Content and Fixed overflow remain visible, and every geometry accumulation uses
+/// saturating arithmetic.
 pub struct Linear {
     children: ChildrenHandle,
     specs: Vec<LinearItemSpec>,

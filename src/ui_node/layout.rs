@@ -28,7 +28,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-//! Retained layout contract, parent-owned track resolution, and shared linear layout.
+//! Retained layout contract, public sizing values, and parent-owned track resolution.
 //!
 //! # Model overview
 //!
@@ -44,6 +44,12 @@
 //!    [`TrackSize`], spacing, spans, or chrome.
 //! 3. The parent resolves every relationship and assigns each child one exact [`Recti`](crate::Recti)
 //!    through [`ContainerLayoutCtx::layout_child`](crate::ContainerLayoutCtx::layout_child).
+//!
+//! Here, a *parent* is simply the immediate container of a child. A track is one ordered,
+//! one-dimensional strip that the parent sizes: a width in a horizontal Linear, a height in a
+//! vertical Linear, or one row or column in a Grid. It is neither the child itself nor the child's
+//! final two-dimensional rectangle. [Parent-owned tracks](#parent-owned-tracks) defines the term in
+//! detail.
 //!
 //! The separation is the central invariant. A measurement bound is information used to answer a
 //! responsive size query. It is not an instruction to fill that bound. Conversely, an allocated
@@ -162,7 +168,41 @@
 //!
 //! ## Parent-owned tracks
 //!
-//! [`TrackSize`] describes one Linear or Grid relationship:
+//! A **track** is a one-dimensional strip of space whose extent is resolved by a container. Before
+//! resolution it has a sizing rule and a measured content requirement; after resolution it has one
+//! exact non-negative pixel extent. Ordering those extents and inserting gaps gives positions along
+//! that axis.
+//!
+//! In a horizontal [`Linear`](crate::Linear), there is one main-axis track per child and its extent
+//! is the child's allocated width. In a vertical Linear, the extent is the child's allocated
+//! height:
+//!
+//! ```text
+//! horizontal Linear main axis
+//! |-- track 0 --| gap |------ track 1 ------| gap |-- track 2 --|
+//! |    child 0  |     |       child 1       |     |    child 2  |
+//! ```
+//!
+//! Linear combines that main-axis extent with its cross-axis decision to construct the child's
+//! exact rectangle. The near one-to-one relationship makes "slot" a reasonable informal word for
+//! a Linear track, but it is not the common abstraction used here.
+//!
+//! A [`Grid`](crate::Grid) resolves two independent track sequences: column tracks provide widths
+//! and row tracks provide heights. A row or column track can be shared by several children, and a
+//! child can span several tracks. The child's conceptual slot is the two-dimensional intersection
+//! or span of those tracks; the final [`Recti`](crate::Recti) adds an exact origin. Thus a track is
+//! one axis of the geometry, while a slot or rectangle belongs to one child.
+//! Linear and Grid remain separate container algorithms. They share the [`TrackSize`] vocabulary
+//! and the scalar track-resolution arithmetic in this module, but each performs its own child
+//! measurement and exact rectangle placement. Grid does not construct, contain, or delegate to a
+//! Linear widget.
+//!
+//! "Parent-owned" means that the container stores and interprets the sizing relationship. The
+//! child reports desired content but does not know whether its parent treats it as content-sized,
+//! fixed, or flexible. Consequently, the same child node could occupy a content track in one
+//! container and a flexible track in another without changing the node itself.
+//!
+//! [`TrackSize`] describes the rule used to resolve one such Linear or Grid track:
 //!
 //! - [`TrackSize::Content`] reserves the measured non-negative content extent.
 //! - [`TrackSize::Fixed`] reserves an exact non-negative extent. Content may overflow it but cannot
@@ -259,93 +299,21 @@
 //! vector, summarizes it, and overwrites each entry with its resolved extent. Missing explicit
 //! track metadata defaults to Content, which is also how implicit Grid tracks behave.
 //!
-//! # Linear layout
+//! # Container consumers
 //!
-//! [`Linear`](crate::Linear) is the one concrete widget for every one-dimensional layout. Its public
-//! parameters use `horizontal` and `vertical` as constructor vocabulary, while retained direction
-//! selects both the coordinate axis and leading edge. Consequently every linear tree exposes the
-//! same `TypedWidgetHandle<Linear>` topology and configuration API.
+//! The scalar machinery in this module is intentionally container-neutral. Concrete retained
+//! containers consume it without being declared or re-exported here:
 //!
-//! ## Retained data
+//! - [`Linear`](crate::Linear) replays `TrackResolver` directly for one-dimensional measurement and
+//!   placement. Its retained state, cross-axis policy, direction handling, and exact placement
+//!   algorithm are documented on the container type.
+//! - [`Grid`](crate::Grid) uses the same resolver independently on both axes and uses
+//!   `resolve_tracks_in_place` for retained placement buffers. Its span allocation and
+//!   column-before-row measurement behavior are likewise documented on the container type.
 //!
-//! Internally, `Linear` contains:
-//!
-//! - a weak `ChildrenHandle` used by typed mutation methods;
-//! - one `LinearItemSpec` per child, containing its main-axis track and optional fixed cross extent;
-//! - one [`LinearDirection`](crate::LinearDirection) and one
-//!   [`LinearCrossSize`](crate::LinearCrossSize) as semantic layout state;
-//! - `resolved_main`, a reusable vector of exact main-axis extents.
-//!
-//! The concrete [`Container`](crate::Container) remains the only strong owner of the authoritative
-//! [`Children`](crate::Children) collection. Child nodes and specifications are parallel by index.
-//! Push, insert, removal, replacement, and clear operations update both collections inside one
-//! checked topology closure. Failed insertion reconstructs the exact
-//! [`LinearItem`](crate::LinearItem) so unique node ownership is never lost. Debug assertions check
-//! synchronization at mutation and traversal boundaries.
-//!
-//! `LinearAxis` privately maps width/height and x/y into main/cross operations after the retained
-//! direction selects an axis. A trailing-edge direction changes only cursor origins and advances;
-//! it does not reverse ownership, measurement, traversal, or track resolution.
-//!
-//! ## Immutable measurement
-//!
-//! [`ContainerWidget::measure`](crate::ContainerWidget::measure) receives `&self`, so preferred-size
-//! measurement cannot mutate retained scratch. For a non-empty linear container it:
-//!
-//! 1. Reads non-negative style spacing and separates the incoming main and cross constraints.
-//! 2. Measures intrinsic main-axis requirements and constructs a scalar `TrackResolver`.
-//! 3. Replays each track to obtain its resolved main extent.
-//! 4. Measures the child at that exact bounded main extent so responsive content, especially text,
-//!    can report the correct cross extent.
-//! 5. Takes the maximum cross requirement, applies the horizontal non-empty control-line minimum
-//!    when relevant, and resolves [`LinearCrossSize`](crate::LinearCrossSize) as desired content or
-//!    an exact fixed extent.
-//! 6. Returns the track-sequence extent and resolved cross extent as desired size.
-//!
-//! Empty linear containers return zero desired size. Repeated intrinsic queries during scalar
-//! replay normally hit the child's node-local measurement cache, retaining an allocation-free
-//! container algorithm without repeatedly executing leaf measurement.
-//!
-//! ## Mutable placement
-//!
-//! Placement receives an exact parent-owned rectangle and mutable retained state:
-//!
-//! 1. Clear `resolved_main` without releasing its capacity.
-//! 2. Measure an intrinsic main extent only for Content tracks. Fixed ignores intrinsic main size,
-//!    and bounded Flex depends on the parent's remainder, so measuring those here would be wasted.
-//! 3. Construct one `TrackResolver` and overwrite the scratch entries with exact resolved extents.
-//! 4. Measure every child once at its exact main extent to determine responsive cross content. If
-//!    the offered cross constraint also becomes the child's allocated cross extent—as it does for
-//!    stretched lines and fixed-cross items—the query warms the exact cache entry used when runtime
-//!    commits the child rectangle.
-//! 5. Resolve the shared line from content, the assigned cross extent, or a fixed extent.
-//! 6. Walk the resolved vector once, construct exact child rectangles, and call
-//!    [`ContainerLayoutCtx::layout_child`](crate::ContainerLayoutCtx::layout_child).
-//! 7. Publish logical content size from the resolved main span and any cross-axis overflow.
-//!
-//! Forward placement advances from the leading edge by `extent + gap`. Reverse placement begins at
-//! the trailing edge, subtracts an extent before placing, then subtracts the gap. Both modes consume
-//! the identical resolved vector, so direction cannot change sizing.
-//!
-//! # Grid integration
-//!
-//! [`Grid`](crate::Grid) uses the same track resolver on both axes. Grid additionally retains child
-//! spans, row-major derived placements, and a reusable occupancy bitmap. Spans are normalized to at
-//! least one row and column, and topology mutations rebuild placements before the state is visible.
-//!
-//! A spanning child's intrinsic deficit is distributed across the non-Fixed tracks in its span.
-//! Explicit Fixed tracks remain exact overflow boundaries. Integer deficit remainders go to earlier
-//! eligible tracks, matching the system's deterministic leading-pixel convention.
-//!
-//! Columns resolve before rows because a child's resolved column span is the width constraint used
-//! to measure wrapped height. Immutable Grid measurement replays scalar column resolution when a
-//! row needs a child's span width. This intentionally trades some cached recomputation for an
-//! allocation-free `measure(&self)` path. Mutable placement instead fills retained column and row
-//! vectors, resolves each track once, and uses those vectors for every final child rectangle.
-//!
-//! Grid always has an effective track on each axis, but an implicit empty Content track contributes
-//! zero. Empty generic grids therefore remain zero-sized unless explicit Fixed tracks contribute
-//! extent.
+//! Keeping only this short integration map here makes the ownership boundary explicit: this module
+//! defines measurement vocabulary and shared scalar resolution, while concrete topology and
+//! placement behavior live with the corresponding retained container.
 //!
 //! # Runtime integration
 //!
@@ -373,46 +341,35 @@
 //! one constraint query. Logical content size is committed placement output and may exceed the
 //! allocation, allowing scrolling and clipping without changing sibling origins.
 //!
-//! # Allocation and traversal optimizations
+//! # Shared allocation and traversal properties
 //!
-//! The implementation favors predictable retained reuse rather than per-pass temporary trees:
+//! The shared implementation favors predictable retained reuse rather than per-pass temporary
+//! trees:
 //!
 //! - `TrackResolver` uses constant auxiliary space. It stores six scalar accumulators rather than
 //!   copying track metadata or resolved extents.
-//! - Immutable Linear and Grid measurement uses scalar replay and performs no scratch-vector
-//!   allocation.
-//! - Linear placement reuses `resolved_main`; Grid placement reuses its column and row vectors;
-//!   Grid placement rebuilding reuses its occupancy bitmap. Clearing retains capacity.
 //! - Each node keeps a bounded four-entry measurement cache. Cache keys include both constraints,
 //!   measurement-relevant style values, and atlas identity. Invalidation clears entries but retains
 //!   vector capacity.
-//! - Exact-main child measurements made while resolving cross-axis content are reused when the
-//!   eventual cross allocation carries the same constraint; other responsive probes remain useful
-//!   bounded entries in the same node-local cache.
 //! - If measurement is cached, allocation is unchanged, and layout is not dirty, runtime skips the
 //!   complete placement subtree.
-//! - Placement computes every resolved track once before emitting rectangles. It does not rerun
-//!   parent sizing rules inside the child runtime.
 //!
-//! Track resolution is linear in the number of tracks and uses constant temporary space. Linear
-//! placement is linear in the number of children with retained `O(n)` output scratch. Grid retains
-//! `O(columns + rows)` resolved output; its immutable span measurement may replay track preferences
-//! to preserve the no-allocation `&self` contract.
+//! Track resolution is linear in the number of tracks and uses constant temporary space. Concrete
+//! containers decide whether to replay this scalar summary or retain resolved output buffers; those
+//! phase-specific choices are documented by [`Linear`](crate::Linear) and [`Grid`](crate::Grid).
 //!
 //! # Safety and correctness invariants
 //!
 //! - Public constructors and internal use sites normalize desired sizes, tracks, gaps, and
 //!   allocations to non-negative extents at their ownership boundaries.
 //! - Geometry accumulation uses saturating arithmetic.
-//! - A bounded main axis fills only through a valid Flex track; cross-axis Stretch consumes only an
-//!   exact placement allocation and does not manufacture desired size during measurement.
+//! - A bounded track axis fills only through a valid Flex track.
 //! - Content and Fixed overflow remain visible; Flex collapses to zero when no remainder exists.
 //! - Track gaps are counted once and only between tracks.
 //! - Parent containers are the sole authority for child rectangles.
-//! - Child/specification and child/span collections remain index-synchronized.
-//! - Reverse linear direction changes origins only.
-//! - Measurement scratch is never required through `&self`; mutable placement scratch retains
-//!   capacity and never becomes semantic state.
+//! - [`ContainerWidget::measure`](crate::ContainerWidget::measure) receives shared widget state, so
+//!   reusable mutable scratch belongs to placement implementations and never becomes measurement
+//!   semantics.
 
 use crate::Dimensioni;
 
@@ -484,7 +441,14 @@ impl Default for Constraints {
     }
 }
 
-/// Size of one parent-owned linear or grid track.
+/// Sizing rule for one parent-owned, one-dimensional Linear or Grid track.
+///
+/// A horizontal Linear track resolves to one child width, and a vertical Linear track resolves to
+/// one child height. Grid resolves column and row tracks independently; children may share or span
+/// them. A track is therefore an axis extent, not a child, grid cell, or final rectangle.
+///
+/// The parent stores this rule, combines it with measured child content and available space, and
+/// resolves it to an exact non-negative pixel extent during measurement or placement.
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub enum TrackSize {
     /// Uses the measured content extent.

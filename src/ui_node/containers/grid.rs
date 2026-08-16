@@ -124,8 +124,8 @@ impl From<Node> for GridItem {
 /// Private owner of Grid edge metadata indexed to an adjacent [`Children`] collection.
 ///
 /// Child ownership is deliberately not stored here. Every mutation receives the authoritative
-/// collection explicitly and updates spans before returning, preparing Grid metadata to move into
-/// layout state while the concrete container becomes the sole owner of retained nodes.
+/// collection explicitly and updates spans before returning. This keeps Grid metadata synchronized
+/// while the concrete [`Container`] remains the sole strong owner of retained nodes.
 #[derive(Default)]
 struct GridItems {
     /// Grid-owned spans matched one-for-one with the adjacent child collection.
@@ -322,11 +322,41 @@ impl GridParameters {
     }
 }
 
-/// Application-facing mutable Grid state.
+/// Application-facing mutable state for a retained two-dimensional container.
 ///
-/// This is the single retained authority for child ownership, child spans, and both track axes.
-/// Span and track changes preserve the identity and widget state of every existing child. Spans
-/// are Grid-owned parent-child placement metadata, not generic [`Node`] policy.
+/// [`Container`] is the sole strong owner of the authoritative [`Children`] collection. `Grid`
+/// retains only a weak `ChildrenHandle` for checked topology mutation and is the authority for the
+/// parallel child spans, both track axes, derived row-major placements, and reusable layout output.
+/// Span and track changes preserve the identity and widget state of every existing child because
+/// those relationships are Grid-owned metadata rather than generic [`Node`] policy.
+///
+/// # Spans and topology
+///
+/// Every [`GridSpan`] is normalized to at least one row and one column. Push, insert, removal,
+/// replacement, span changes, and column-track changes rebuild derived placements before the
+/// updated state becomes observable. A retained occupancy bitmap is reused during those rebuilds,
+/// and debug assertions keep children, spans, and placements index-synchronized.
+///
+/// A spanning child's intrinsic deficit is distributed across the non-Fixed tracks in its span.
+/// Explicit Fixed tracks remain exact overflow boundaries. Integer deficit remainders go to earlier
+/// eligible tracks, matching the track resolver's deterministic leading-pixel convention.
+///
+/// # Measurement and placement
+///
+/// Grid uses the shared scalar track resolver independently on both axes. Columns resolve before
+/// rows because a child's resolved column span supplies the width constraint used to measure wrapped
+/// height. Immutable [`ContainerWidget::measure`] replays scalar column resolution whenever a row
+/// needs a child's span width. That deliberate recomputation preserves the allocation-free `&self`
+/// measurement contract.
+///
+/// Mutable placement instead fills retained column and row vectors, resolves every track once, and
+/// reuses those exact extents for row measurement and final child rectangles. The vectors retain
+/// capacity between commits and are derived scratch rather than semantic Grid state. Grid therefore
+/// retains `O(columns + rows)` layout output while the shared scalar resolver itself uses constant
+/// temporary space.
+///
+/// Grid always has an effective track on each axis, but an implicit empty Content track contributes
+/// zero. An empty generic Grid remains zero-sized unless an explicit Fixed track contributes extent.
 pub struct Grid {
     /// Weak topology access coordinated with Grid-owned edge metadata below.
     children: ChildrenHandle,

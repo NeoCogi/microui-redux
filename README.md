@@ -392,7 +392,46 @@ change clears that node and its weakly linked ancestor caches, while topology op
 automatically. Ordinary traversal rejects nodes whose retained rectangles do not intersect the
 inherited viewport, regardless of which container owns them.
 
-### Preferred sizing and retained layout
+### Preferred sizing, tracks, and retained layout
+
+Layout traverses the retained node tree in three stages:
+
+```text
+constraints flow down -> desired sizes flow up -> exact rectangles flow down
+```
+
+A parent is the immediate container holding a child. During measurement, the parent sends each
+child `Constraints`: a width and height that are independently bounded or unbounded. These are
+questions about available space, not assigned sizes. Each child answers with its desired size, and
+containers combine those answers into desired sizes reported toward the root. Once the root has an
+actual rectangle, every parent walks downward again and assigns each child an exact
+`Recti { x, y, width, height }`.
+
+A **track** is the one-dimensional unit a parent sizes while turning those measurements into
+rectangles. It starts as a rule—`Content`, `Fixed`, or `Flex`—and resolves to one non-negative pixel
+extent:
+
+```text
+horizontal Linear inside 600 px
+
+| Content: 80 | gap: 10 | Flex(1): 400 | gap: 10 | Fixed: 100 |
+|   child 0   |         |    child 1   |         |   child 2  |
+```
+
+For a horizontal `Linear`, one track supplies each child's width; for a vertical `Linear`, one
+track supplies each child's height. The container combines that main-axis extent with its
+cross-axis rule to produce the child's rectangle.
+
+“Slot” is close to “track” for Linear, but it would obscure why Linear and Grid use the same sizing
+vocabulary and scalar resolver. They remain separate container algorithms: each measures its own
+children and places its own rectangles, and Grid does not construct, contain, or delegate to a
+Linear widget. Grid independently passes its row and column track data to the common resolver in
+`layout.rs`. Several children can use the same row or column track, and one child can span several
+tracks. A child's slot is the resulting two-dimensional area; a track is only one row, column,
+width, or height used to form that area. Tracks are parent-owned because the container stores and
+interprets these rules—the child reports desired content without knowing whether its parent will
+place it in a content, fixed, or flexible track.
+
 - Every built-in leaf reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout), while every container measures against its authoritative child collection.
 - A consumed or captured event conservatively dirties its recipient's retained measurement; the runtime propagates that invalidation through dependent ancestors at the next layout boundary. Typed-handle mutations use the same propagation path, so widget implementations do not manage layout caches.
 - `LeafWidget::measure` and `ContainerWidget::measure` report desired content, not an allocation. `Constraints` represents each axis as `AvailableSpace::Bounded(i32)` or `AvailableSpace::Unbounded`; bounded zero is not an unconstrained request.
@@ -404,7 +443,7 @@ inherited viewport, regardless of which container owns them.
 - Resolved outer rectangles and clips remain runtime stack locals. Node behavior works against its local content surface, while outer frame painting, standard hit routing, and conversion from screen input remain runtime-owned.
 - A public widget's Painter geometry and routed pointer positions share the derived content-local origin.
 - Built-in leaf and container constructors return a weak `TypedWidgetHandle<W>` plus one completed owning `Node`. Concrete container constructors consume child nodes, and `Node::custom_render` plus `Node::typed_custom_render` cover backend-typed custom-render leaves.
-- Every direction is a configuration of one `Linear` widget, Grid uses the same track resolver, and both containers apply identical content/fixed/flex, spacing, rounding, and overflow rules.
+- Every direction is a configuration of one `Linear` widget. Linear and Grid independently invoke the common scalar track resolver, so both apply identical content/fixed/flex, spacing, rounding, and overflow arithmetic without either container being implemented through the other.
 - `LinearCrossSize` gives every direction the same shared-line choices: desired content, stretching across exact allocation, or an exact fixed cross extent. `LinearDirection` combines axis and leading edge.
 - Negative desired extents are normalized to zero at the node boundary. A desired zero remains zero; generic containers do not substitute Style-owned fallback cells.
 
