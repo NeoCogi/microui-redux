@@ -61,7 +61,7 @@ mod input;
 pub use input::UiInputEvent;
 pub mod layout;
 mod scrollbar;
-pub use layout::{AvailableSpace, Constraints, LinearItem, RowHeight, TrackSize};
+pub use layout::{AvailableSpace, Constraints, Linear, LinearCrossSize, LinearDirection, LinearItem, LinearParameters, RowHeight, TrackSize};
 pub(crate) mod text_layout;
 pub use text_layout::TextWrap;
 mod widget;

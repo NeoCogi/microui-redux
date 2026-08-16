@@ -412,7 +412,7 @@
 use crate::Dimensioni;
 
 pub(in crate::ui_node) mod linear;
-pub use linear::{LinearItem, RowHeight};
+pub use linear::{Linear, LinearCrossSize, LinearDirection, LinearItem, LinearParameters, RowHeight};
 
 /// Available space on one measurement axis.
 ///

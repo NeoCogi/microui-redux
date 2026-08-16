@@ -6,23 +6,12 @@
 //
 
 use crate::{
-    AtlasHandle, Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, Dimensioni, MeasureCtx, Node, Recti, Style, TrackSize,
-    TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
+    Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, Dimensioni, Linear, LinearCrossSize, LinearParameters, MeasureCtx, Node, Recti,
+    TrackSize, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
 use crate::ui_node::layout::RowHeight;
-use crate::ui_node::layout::linear::{self as linear_layout, LinearAxis, LinearItem, LinearState};
-
-/// Returns the style-derived minimum height for a non-empty content-height Row.
-///
-/// This is Row behavior rather than a general track metric: empty Rows remain zero-sized, explicit
-/// fixed heights stay exact, and Grid no longer asks generic tracks to manufacture fallback cells.
-fn minimum_content_height(style: &Style, atlas: &AtlasHandle) -> i32 {
-    let padding = style.padding.max(0);
-    // A standard control line contains the selected font plus equal top and bottom padding. Use
-    // saturating arithmetic so hostile public style values cannot overflow retained measurement.
-    (atlas.get_font_height(style.font) as i32).saturating_add(padding * 2).max(padding * 2)
-}
+use crate::ui_node::layout::linear::{self as linear_layout, LinearItem};
 
 /// One-shot construction input for a horizontal [`Row`].
 ///
@@ -79,8 +68,7 @@ impl Default for RowParameters {
 /// type owns only the horizontal name, the shared line-height rule, and mutation methods that keep
 /// child ownership synchronized with its edge metadata.
 pub struct Row {
-    linear: LinearState,
-    height: RowHeight,
+    linear: Linear,
 }
 
 impl Row {
@@ -127,28 +115,41 @@ impl Row {
 
     /// Returns one child's width track.
     pub fn track(&self, index: usize) -> Option<TrackSize> {
-        self.linear.main(index)
+        self.linear.track(index)
     }
 
     /// Replaces one existing child's width track without replacing the child.
     pub fn set_track(&mut self, index: usize, track: TrackSize) -> bool {
-        self.linear.set_main(index, track)
+        self.linear.set_track(index, track)
     }
 
     /// Returns the shared line-height rule.
     pub const fn height(&self) -> RowHeight {
-        self.height
+        match self.linear.cross_size() {
+            LinearCrossSize::Content => RowHeight::Content,
+            LinearCrossSize::Stretch => RowHeight::Fill,
+            LinearCrossSize::Fixed(extent) => RowHeight::Fixed(extent),
+        }
     }
 
     /// Replaces the shared line-height rule.
     pub fn set_height(&mut self, height: RowHeight) {
-        self.height = height;
+        self.linear.set_cross_size(match height {
+            RowHeight::Content => LinearCrossSize::Content,
+            RowHeight::Fixed(extent) => LinearCrossSize::Fixed(extent),
+            RowHeight::Fill => LinearCrossSize::Stretch,
+        });
     }
 
     /// Creates a child-owning row and a weak typed handle to its mounted state.
     pub fn create(parameters: RowParameters) -> (TypedWidgetHandle<Self>, Node) {
-        let (children, linear) = LinearState::mount(parameters.items);
-        let widget = Self { linear, height: parameters.height };
+        let cross_size = match parameters.height {
+            RowHeight::Content => LinearCrossSize::Content,
+            RowHeight::Fixed(extent) => LinearCrossSize::Fixed(extent),
+            RowHeight::Fill => LinearCrossSize::Stretch,
+        };
+        let (children, linear) = Linear::mount(LinearParameters::horizontal(parameters.items).with_cross_size(cross_size));
+        let widget = Self { linear };
         let (handle, container) = Container::from_shared(children, widget);
         (handle, Node::container(container))
     }
@@ -156,13 +157,11 @@ impl Row {
 
 impl ContainerWidget for Row {
     fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: Constraints) -> Dimensioni {
-        let minimum = minimum_content_height(ctx.style(), ctx.atlas());
-        linear_layout::measure(ctx, &self.linear, LinearAxis::Horizontal, Some(self.height), minimum, constraints)
+        linear_layout::measure(ctx, &self.linear, constraints)
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
-        let minimum = minimum_content_height(ctx.style(), ctx.atlas());
-        linear_layout::place(ctx, children, &mut self.linear, LinearAxis::Horizontal, Some(self.height), minimum, rect);
+        linear_layout::place(ctx, children, &mut self.linear, rect);
     }
 }
 
@@ -188,8 +187,8 @@ mod tests {
     /// unused bounded space even when its direct arithmetic tests continue to pass.
     fn measure_content_row(width: AvailableSpace) -> Dimensioni {
         let child = Node::widget(Custom::create(CustomParameters::new("content")));
-        let (children, linear) = LinearState::mount([child]);
-        let row = Row { linear, height: RowHeight::Content };
+        let (children, linear) = Linear::mount(LinearParameters::horizontal([child]));
+        let row = Row { linear };
         let style = Style::default();
         let atlas = test_atlas();
         let mut children = children.borrow_mut();

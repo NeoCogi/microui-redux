@@ -6,11 +6,11 @@
 //
 
 use crate::{
-    Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, Dimensioni, MeasureCtx, Node, Recti, TrackSize, TypedWidgetHandle, UiInputEvent,
-    Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
+    Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, Dimensioni, Linear, LinearDirection, LinearParameters, MeasureCtx, Node, Recti,
+    TrackSize, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
-use crate::ui_node::layout::linear::{self as linear_layout, LinearAxis, LinearItem, LinearState};
+use crate::ui_node::layout::linear::{self as linear_layout, LinearItem};
 
 /// One-shot construction input for a vertical [`Column`].
 pub struct ColumnParameters {
@@ -50,7 +50,7 @@ impl Default for ColumnParameters {
 
 /// A vertical sequence whose child heights are parent-owned [`LinearItem`] tracks.
 pub struct Column {
-    linear: LinearState,
+    linear: Linear,
 }
 
 impl Column {
@@ -97,28 +97,36 @@ impl Column {
 
     /// Returns one child's height track.
     pub fn track(&self, index: usize) -> Option<TrackSize> {
-        self.linear.main(index)
+        self.linear.track(index)
     }
 
     /// Replaces one existing child's height track without replacing the child.
     pub fn set_track(&mut self, index: usize, track: TrackSize) -> bool {
-        self.linear.set_main(index, track)
+        self.linear.set_track(index, track)
     }
 
     /// Returns whether child zero is anchored at the bottom of the allocation.
     pub const fn is_reversed(&self) -> bool {
-        self.linear.reversed()
+        self.linear.direction().is_reversed()
     }
 
     /// Changes placement direction without changing item order or sizing.
     pub fn set_reversed(&mut self, reversed: bool) {
-        self.linear.set_reversed(reversed);
+        self.linear.set_direction(if reversed {
+            LinearDirection::BottomToTop
+        } else {
+            LinearDirection::TopToBottom
+        });
     }
 
     /// Creates a child-owning column and a weak typed handle to its mounted state.
     pub fn create(parameters: ColumnParameters) -> (TypedWidgetHandle<Self>, Node) {
-        let (children, mut linear) = LinearState::mount(parameters.items);
-        linear.set_reversed(parameters.reversed);
+        let linear_parameters = if parameters.reversed {
+            LinearParameters::vertical(parameters.items).reversed()
+        } else {
+            LinearParameters::vertical(parameters.items)
+        };
+        let (children, linear) = Linear::mount(linear_parameters);
         let (handle, container) = Container::from_shared(children, Self { linear });
         (handle, Node::container(container))
     }
@@ -128,11 +136,11 @@ impl ContainerWidget for Column {
     fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: Constraints) -> Dimensioni {
         // A Column reports its widest desired child but stretches children across its exact width
         // during placement. Main-axis sizing is otherwise identical to Row.
-        linear_layout::measure(ctx, &self.linear, LinearAxis::Vertical, None, 0, constraints)
+        linear_layout::measure(ctx, &self.linear, constraints)
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
-        linear_layout::place(ctx, children, &mut self.linear, LinearAxis::Vertical, None, 0, rect);
+        linear_layout::place(ctx, children, &mut self.linear, rect);
     }
 }
 
