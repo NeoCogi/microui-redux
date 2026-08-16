@@ -100,7 +100,8 @@ call site must state that relationship directly.
 - [x] Created branch `layout-model-cleanup` from `extract-window-manager`.
 - [x] Recorded the target contract and explicit non-goals.
 - [x] Added direct tests for bounded, unbounded, overflowing, and rounded track allocation.
-- [ ] Record representative demo layout geometry before changing behavior.
+- [x] Recorded exact rectangles for the three-button remainder row, calculator
+      fraction/remainder column, and the log panel's bottom-margin stack before changing behavior.
 
 ### Phase 2: core sizing
 

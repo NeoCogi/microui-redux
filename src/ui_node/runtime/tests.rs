@@ -268,6 +268,23 @@ fn layout_root(runtime: &mut UiRuntime, root: &mut Node, style: &Style, atlas: c
     runtime.layout_tree_root(root, style, atlas, Recti::new(10, 20, 80, 60), Recti::new(0, 0, 320, 240));
 }
 
+/// Creates the fixed-size leaf used by layout characterization tests and returns its runtime id.
+fn layout_probe(name: &'static str) -> (RuntimeNodeId, Node) {
+    let (probe, _) = Probe::new(name, Rc::new(RefCell::new(Vec::new())));
+    let node = Node::widget(probe);
+    (node.id(), node)
+}
+
+fn committed_rect(runtime: &UiRuntime, root: &Node, id: RuntimeNodeId) -> Recti {
+    runtime
+        .debug_node_rect(std::slice::from_ref(root), id)
+        .expect("the characterized child must have a committed rectangle")
+}
+
+fn rect_components(rect: Recti) -> (i32, i32, i32, i32) {
+    (rect.x, rect.y, rect.width, rect.height)
+}
+
 fn empty_input() -> InputSnapshot {
     Input::default().snapshot()
 }
@@ -275,6 +292,71 @@ fn empty_input() -> InputSnapshot {
 fn next_input(input: &mut Input) -> (UiInputEvent, InputSnapshot) {
     let event = input.pop_event().expect("test input must contain one queued event");
     (event, input.snapshot())
+}
+
+#[test]
+fn demo_remainder_row_geometry_is_preserved_as_an_explicit_baseline() {
+    // `demo-full` uses this sequence for its three-button rows. The first remainder leaves 109
+    // pixels for the final remainder track; spacing is outside all three tracks.
+    let (label_id, label) = layout_probe("label");
+    let (middle_id, middle) = layout_probe("middle");
+    let (last_id, last) = layout_probe("last");
+    let (_, mut root) = crate::Row::create(crate::RowParameters::new(
+        [SizePolicy::Fixed(86), SizePolicy::Remainder(109), SizePolicy::Remainder(0)],
+        SizePolicy::Auto,
+        [label, middle, last],
+    ));
+    let style = Style { spacing: 4, ..Style::default() };
+    let mut runtime = UiRuntime::new();
+    runtime.begin_update();
+    runtime.layout_tree_root(&mut root, &style, test_atlas(), Recti::new(0, 0, 400, 40), Recti::new(0, 0, 400, 40));
+
+    assert_eq!(rect_components(committed_rect(&runtime, &root, label_id)), (0, 0, 86, 20));
+    assert_eq!(rect_components(committed_rect(&runtime, &root, middle_id)), (90, 0, 197, 20));
+    assert_eq!(rect_components(committed_rect(&runtime, &root, last_id)), (291, 0, 109, 20));
+}
+
+#[test]
+fn calculator_fraction_and_remainder_geometry_is_preserved_as_an_explicit_baseline() {
+    // The calculator assigns one quarter of the gap-adjusted column to the display and gives the
+    // exact remainder to the keypad. This records the visible result rather than the legacy enum
+    // implementation that happened to produce it.
+    let (display_id, display) = layout_probe("display");
+    let display = display.with_policy(Policy::new(SizePolicy::Auto, SizePolicy::Fraction(0.25)));
+    let (keypad_id, keypad) = layout_probe("keypad");
+    let keypad = keypad.with_policy(Policy::new(SizePolicy::Auto, SizePolicy::Remainder(0)));
+    let (_, mut root) = crate::Column::create(crate::ColumnParameters::new([display, keypad]));
+    let style = Style { spacing: 4, ..Style::default() };
+    let mut runtime = UiRuntime::new();
+    runtime.begin_update();
+    runtime.layout_tree_root(&mut root, &style, test_atlas(), Recti::new(0, 0, 320, 420), Recti::new(0, 0, 320, 420));
+
+    assert_eq!(rect_components(committed_rect(&runtime, &root, display_id)), (0, 0, 320, 104));
+    assert_eq!(rect_components(committed_rect(&runtime, &root, keypad_id)), (0, 108, 320, 312));
+}
+
+#[test]
+fn demo_stack_remainder_margin_geometry_is_preserved_as_an_explicit_baseline() {
+    // The log panel uses one stack item with `Remainder(24)`, intentionally leaving a 24-pixel
+    // strip below its scrolling child for the submission row that follows it.
+    let (content_id, content) = layout_probe("content");
+    let (_, mut root) = crate::Stack::create(crate::StackParameters::new(
+        SizePolicy::Remainder(0),
+        SizePolicy::Remainder(24),
+        crate::StackDirection::TopToBottom,
+        [content],
+    ));
+    let mut runtime = UiRuntime::new();
+    runtime.begin_update();
+    runtime.layout_tree_root(
+        &mut root,
+        &Style::default(),
+        test_atlas(),
+        Recti::new(0, 0, 400, 300),
+        Recti::new(0, 0, 400, 300),
+    );
+
+    assert_eq!(rect_components(committed_rect(&runtime, &root, content_id)), (0, 0, 400, 276));
 }
 
 #[test]
