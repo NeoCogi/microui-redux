@@ -41,10 +41,20 @@ impl TrackResolver {
             }
         }
 
-        let flexible_space = available
-            .bound()
-            .map(|bound| bound.saturating_sub(total_gap).saturating_sub(reserved).max(0))
-            .unwrap_or(0);
+        // Remaining bounded space belongs to the track sequence only when at least one valid flex
+        // track can receive it. Content-only and fixed-only sequences keep their desired extent;
+        // merely measuring them under a larger bound must not turn unused space into content.
+        let flexible_space = if total_flex > 0.0 {
+            available
+                .bound()
+                .map(|bound| bound.saturating_sub(total_gap).saturating_sub(reserved).max(0))
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        // The summary is the exact span produced by replay: every reserved pixel, every pixel that
+        // valid flex tracks divide, and every inter-track gap. Invalid flex tracks resolve to zero
+        // and therefore contribute no otherwise-unowned remainder to this value.
         let extent = reserved.saturating_add(flexible_space).saturating_add(total_gap);
         Self {
             available,
@@ -138,6 +148,33 @@ mod tests {
         );
         assert_eq!(content, [10, 8, 18]);
         assert_eq!(extent, 40);
+    }
+
+    #[test]
+    fn bounded_content_and_fixed_tracks_do_not_claim_unused_space() {
+        // A bound informs responsive measurement; without a valid flex recipient it is not itself
+        // part of the track sequence's desired size.
+        let mut content = [10, 99];
+        let extent = resolve_tracks(AvailableSpace::bounded(100), 2, &[TrackSize::Content, TrackSize::Fixed(8)], &mut content);
+
+        assert_eq!(content, [10, 8]);
+        assert_eq!(extent, 20);
+    }
+
+    #[test]
+    fn invalid_flex_weights_do_not_create_phantom_extent() {
+        // Invalid bounded flex tracks resolve to zero. Their surrounding gaps remain real, but the
+        // unused bounded remainder has no owner and must stay outside the reported content span.
+        let mut content = [10, 20, 30];
+        let extent = resolve_tracks(
+            AvailableSpace::bounded(100),
+            2,
+            &[TrackSize::Content, TrackSize::Flex(0.0), TrackSize::Flex(f32::NAN)],
+            &mut content,
+        );
+
+        assert_eq!(content, [10, 0, 0]);
+        assert_eq!(extent, 14);
     }
 
     #[test]

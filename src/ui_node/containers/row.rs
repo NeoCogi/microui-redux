@@ -152,7 +152,25 @@ impl Widget for Row {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Custom, CustomParameters};
+    use crate::test_support::test_atlas;
+    use crate::{AvailableSpace, Custom, CustomParameters, Style};
+
+    /// Measures one ordinary content-width row through its public container contract.
+    ///
+    /// Keeping this fixture at the Row boundary ensures the shared scalar solver cannot report
+    /// unused bounded space even when its direct arithmetic tests continue to pass.
+    fn measure_content_row(width: AvailableSpace) -> Dimensioni {
+        let child = Node::widget(Custom::create(CustomParameters::new("content")));
+        let (children, linear) = LinearState::mount([child]);
+        let row = Row { linear, height: TrackSize::Content };
+        let style = Style::default();
+        let atlas = test_atlas();
+        let mut children = children.borrow_mut();
+        let mut ctx = MeasureCtx::new(&style, &atlas, &mut children);
+
+        // Height remains unbounded so this probe isolates the main-axis bounded measurement rule.
+        row.measure(&mut ctx, Constraints::new(width, AvailableSpace::Unbounded))
+    }
 
     #[test]
     fn row_mutations_keep_nodes_and_tracks_synchronized() {
@@ -178,5 +196,14 @@ mod tests {
         assert!(!first_state.is_alive());
         drop(node);
         assert!(!row.is_alive());
+    }
+
+    #[test]
+    fn bounded_content_row_reports_its_desired_width() {
+        let desired = measure_content_row(AvailableSpace::Unbounded);
+        let bounded = measure_content_row(AvailableSpace::bounded(desired.width.saturating_add(100)));
+
+        assert_eq!(bounded.width, desired.width);
+        assert_eq!(bounded.height, desired.height);
     }
 }

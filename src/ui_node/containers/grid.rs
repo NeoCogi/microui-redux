@@ -1039,6 +1039,12 @@ mod tests {
         let measured = grid_size(&mut ctx, &empty, crate::Constraints::unbounded());
         assert_eq!(measured.width, 12);
         assert_eq!(measured.height, 10);
+
+        // A larger finite measurement offer does not belong to any content or fixed track. The
+        // empty configured Grid therefore reports exactly the same desired track span.
+        let bounded = grid_size(&mut ctx, &empty, crate::Constraints::bounded(Dimensioni::new(100, 100)));
+        assert_eq!(bounded.width, measured.width);
+        assert_eq!(bounded.height, measured.height);
     }
 
     #[test]
