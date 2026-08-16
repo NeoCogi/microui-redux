@@ -67,10 +67,10 @@ impl LinearItem {
         self.node
     }
 
-    fn into_parts(self) -> (Node, LinearPlacement) {
+    fn into_parts(self) -> (Node, LinearItemLayout) {
         (
             self.node,
-            LinearPlacement {
+            LinearItemLayout {
                 main: self.main,
                 fixed_cross: self.fixed_cross,
             },
@@ -85,182 +85,206 @@ impl From<Node> for LinearItem {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-struct LinearPlacement {
+struct LinearItemLayout {
     main: TrackSize,
     fixed_cross: Option<i32>,
 }
 
-/// Index-matched edge metadata kept adjacent to the authoritative child collection.
-#[derive(Default)]
-struct LinearItems {
-    placements: Vec<LinearPlacement>,
-}
-
-impl LinearItems {
-    fn from_items<T>(items: impl IntoIterator<Item = T>) -> (Children, Self)
-    where
-        T: Into<LinearItem>,
-    {
-        let (nodes, placements): (Vec<_>, Vec<_>) = items.into_iter().map(Into::into).map(LinearItem::into_parts).unzip();
-        let children: Children = nodes.into_iter().collect();
-        let result = Self { placements };
-        result.debug_assert_synchronized(children.len());
-        (children, result)
-    }
-
-    fn placement(&self, index: usize) -> LinearPlacement {
-        self.placements.get(index).copied().unwrap_or(LinearPlacement {
-            main: TrackSize::Content,
-            fixed_cross: None,
-        })
-    }
-
-    fn push(&mut self, children: &mut Children, item: LinearItem) {
-        self.debug_assert_synchronized(children.len());
-        let (node, placement) = item.into_parts();
+/// Collects construction or replacement input into the runtime's split ownership representation.
+///
+/// The concrete container remains the sole strong owner of `Children`; linear state retains only
+/// the index-matched relationship metadata that Row or Column interprets. Building both outputs in
+/// one function keeps their order and length identical before either becomes observable.
+fn collect_items<T>(items: impl IntoIterator<Item = T>) -> (Children, Vec<LinearItemLayout>)
+where
+    T: Into<LinearItem>,
+{
+    let mut children = Children::new();
+    let mut layouts = Vec::new();
+    for item in items {
+        // Split each unique unmounted owner exactly once, preserving iterator order in both
+        // adjacent collections.
+        let (node, layout) = item.into().into_parts();
         children.push(node);
-        self.placements.push(placement);
-        self.debug_assert_synchronized(children.len());
+        layouts.push(layout);
     }
-
-    #[allow(clippy::result_large_err)] // Failure preserves the unique node and its edge metadata.
-    fn insert(&mut self, children: &mut Children, index: usize, item: LinearItem) -> Result<(), LinearItem> {
-        self.debug_assert_synchronized(children.len());
-        let (node, placement) = item.into_parts();
-        match children.insert(index, node) {
-            Ok(()) => {
-                self.placements.insert(index, placement);
-                self.debug_assert_synchronized(children.len());
-                Ok(())
-            }
-            Err(node) => Err(LinearItem {
-                node,
-                main: placement.main,
-                fixed_cross: placement.fixed_cross,
-            }),
-        }
-    }
-
-    fn remove_drop(&mut self, children: &mut Children, index: usize) -> bool {
-        self.debug_assert_synchronized(children.len());
-        if index >= children.len() {
-            return false;
-        }
-        let removed = children.remove_drop(index);
-        debug_assert!(removed, "LinearItems validated the child index before removal");
-        self.placements.remove(index);
-        self.debug_assert_synchronized(children.len());
-        true
-    }
-
-    fn clear(&mut self, children: &mut Children) {
-        children.clear();
-        self.placements.clear();
-        self.debug_assert_synchronized(children.len());
-    }
-
-    fn replace<T>(&mut self, children: &mut Children, items: impl IntoIterator<Item = T>)
-    where
-        T: Into<LinearItem>,
-    {
-        let (replacement, metadata) = Self::from_items(items);
-        *children = replacement;
-        *self = metadata;
-    }
-
-    fn set_main(&mut self, index: usize, track: TrackSize) -> bool {
-        let Some(placement) = self.placements.get_mut(index) else {
-            return false;
-        };
-        placement.main = track;
-        true
-    }
-
-    fn debug_assert_synchronized(&self, child_count: usize) {
-        debug_assert_eq!(
-            child_count,
-            self.placements.len(),
-            "linear child and placement collections must remain index-synchronized"
-        );
-    }
+    debug_assert_eq!(children.len(), layouts.len());
+    (children, layouts)
 }
 
-/// Mounted state shared structurally by Row and Column.
+/// Complete retained linear state shared structurally by Row and Column.
+///
+/// `layouts` is the only metadata collection and is index-matched to the concrete container's
+/// authoritative `Children`. `resolved_main` is mutable placement scratch: it retains capacity
+/// between commits but is never read by immutable measurement or exposed as semantic state.
 pub(super) struct LinearState {
     children: ChildrenHandle,
-    items: LinearItems,
+    layouts: Vec<LinearItemLayout>,
     reversed: bool,
+    resolved_main: Vec<i32>,
 }
 
 impl LinearState {
+    /// Mounts ordered linear items and installs one weak topology capability beside their layouts.
     pub(super) fn mount<T>(items: impl IntoIterator<Item = T>) -> (Rc<RefCell<Children>>, Self)
     where
         T: Into<LinearItem>,
     {
-        let (children, items) = LinearItems::from_items(items);
+        let (children, layouts) = collect_items(items);
         let children = Rc::new(RefCell::new(children));
         let state = Self {
             children: ChildrenHandle::new(&children),
-            items,
+            layouts,
             reversed: false,
+            resolved_main: Vec::new(),
         };
+        state.debug_assert_synchronized(children.borrow().len());
         (children, state)
     }
 
+    /// Returns the mounted child count while the concrete collection is available.
     pub(super) fn len(&self) -> Option<usize> {
         self.children.len()
     }
 
+    /// Returns whether the mounted collection is empty while topology is available.
     pub(super) fn is_empty(&self) -> Option<bool> {
         self.children.is_empty()
     }
 
+    /// Appends one node and its relationship metadata as one observable topology mutation.
     #[allow(clippy::result_large_err)] // Failure preserves the unique node and its edge metadata.
     pub(super) fn push(&mut self, item: impl Into<LinearItem>) -> Result<(), LinearItem> {
-        let items = &mut self.items;
-        self.children.try_update_with(item.into(), |children, item| items.push(children, item))
+        let layouts = &mut self.layouts;
+        let resolved_main = &mut self.resolved_main;
+        self.children.try_update_with(item.into(), |children, item| {
+            debug_assert_eq!(children.len(), layouts.len());
+            let (node, layout) = item.into_parts();
+            children.push(node);
+            layouts.push(layout);
+            // No resolved extent may survive a topology change, but retaining capacity keeps the
+            // next committed placement allocation-free when the previous capacity is sufficient.
+            resolved_main.clear();
+            debug_assert_eq!(children.len(), layouts.len());
+        })
     }
 
+    /// Inserts one node and layout together, reconstructing the exact input if insertion fails.
     #[allow(clippy::result_large_err)]
     pub(super) fn insert(&mut self, index: usize, item: LinearItem) -> Result<(), LinearItem> {
-        let items = &mut self.items;
-        self.children.try_update_with(item, |children, item| items.insert(children, index, item))?
+        let layouts = &mut self.layouts;
+        let resolved_main = &mut self.resolved_main;
+        self.children.try_update_with(item, |children, item| {
+            debug_assert_eq!(children.len(), layouts.len());
+            let (node, layout) = item.into_parts();
+            match children.insert(index, node) {
+                Ok(()) => {
+                    layouts.insert(index, layout);
+                    resolved_main.clear();
+                    debug_assert_eq!(children.len(), layouts.len());
+                    Ok(())
+                }
+                Err(node) => Err(LinearItem {
+                    node,
+                    main: layout.main,
+                    fixed_cross: layout.fixed_cross,
+                }),
+            }
+        })?
     }
 
+    /// Drops one indexed child owner and its relationship metadata if that index exists.
     pub(super) fn remove_drop(&mut self, index: usize) -> Option<bool> {
-        let items = &mut self.items;
-        self.children.try_update_with((), |children, ()| items.remove_drop(children, index)).ok()
+        let layouts = &mut self.layouts;
+        let resolved_main = &mut self.resolved_main;
+        self.children
+            .try_update_with((), |children, ()| {
+                debug_assert_eq!(children.len(), layouts.len());
+                if index >= children.len() {
+                    return false;
+                }
+                let removed = children.remove_drop(index);
+                debug_assert!(removed, "linear state validated the child index before removal");
+                layouts.remove(index);
+                resolved_main.clear();
+                debug_assert_eq!(children.len(), layouts.len());
+                true
+            })
+            .ok()
     }
 
+    /// Drops all child owners and metadata while retaining reusable vector allocations.
     pub(super) fn clear(&mut self) -> Option<()> {
-        let items = &mut self.items;
-        self.children.try_update_with((), |children, ()| items.clear(children)).ok()
+        let layouts = &mut self.layouts;
+        let resolved_main = &mut self.resolved_main;
+        self.children
+            .try_update_with((), |children, ()| {
+                children.clear();
+                layouts.clear();
+                resolved_main.clear();
+                debug_assert_eq!(children.len(), layouts.len());
+            })
+            .ok()
     }
 
+    /// Replaces the complete child/layout sequence without exposing an intermediate mismatch.
     pub(super) fn replace<T, I>(&mut self, replacement: I) -> Result<(), I>
     where
         T: Into<LinearItem>,
         I: IntoIterator<Item = T>,
     {
-        let items = &mut self.items;
-        self.children
-            .try_update_with(replacement, |children, replacement| items.replace(children, replacement))
+        let layouts = &mut self.layouts;
+        let resolved_main = &mut self.resolved_main;
+        self.children.try_update_with(replacement, |children, replacement| {
+            // Construct both replacement collections before assigning either authoritative field.
+            let (replacement, replacement_layouts) = collect_items(replacement);
+            *children = replacement;
+            *layouts = replacement_layouts;
+            resolved_main.clear();
+            debug_assert_eq!(children.len(), layouts.len());
+        })
     }
 
+    /// Returns one child's main-axis relationship when its metadata index exists.
     pub(super) fn main(&self, index: usize) -> Option<TrackSize> {
-        self.items.placements.get(index).map(|placement| placement.main)
+        self.layouts.get(index).map(|layout| layout.main)
     }
 
+    /// Replaces one main-axis track and discards any resolved placement derived from the old track.
     pub(super) fn set_main(&mut self, index: usize, track: TrackSize) -> bool {
-        self.items.set_main(index, track)
+        let Some(layout) = self.layouts.get_mut(index) else {
+            return false;
+        };
+        layout.main = track;
+        self.resolved_main.clear();
+        true
     }
 
+    /// Returns whether main-axis origins are committed from the trailing edge.
     pub(super) const fn reversed(&self) -> bool {
         self.reversed
     }
 
+    /// Selects forward or trailing-edge placement without changing item order or sizing.
     pub(super) fn set_reversed(&mut self, reversed: bool) {
         self.reversed = reversed;
+    }
+
+    /// Returns one index-matched layout, defaulting defensively for a release-build mismatch.
+    fn layout(&self, index: usize) -> LinearItemLayout {
+        self.layouts.get(index).copied().unwrap_or(LinearItemLayout {
+            main: TrackSize::Content,
+            fixed_cross: None,
+        })
+    }
+
+    /// Checks the only retained parallel-collection invariant at mutation and traversal boundaries.
+    fn debug_assert_synchronized(&self, child_count: usize) {
+        debug_assert_eq!(
+            child_count,
+            self.layouts.len(),
+            "linear child and layout collections must remain index-synchronized"
+        );
     }
 }
 
@@ -365,14 +389,14 @@ pub(super) fn measure_linear(
     if count == 0 {
         return Dimensioni::default();
     }
-    state.items.debug_assert_synchronized(count);
+    state.debug_assert_synchronized(count);
     let gap = ctx.style().spacing.max(0);
     let main_space = orientation.main_space(constraints);
     let cross_space = orientation.cross_space(constraints);
     let mut resolver = track_resolver_for_measure(ctx, state, orientation, main_space, cross_space, gap);
     let mut cross_content = 0;
     for index in 0..count {
-        let placement = state.items.placement(index);
+        let placement = state.layout(index);
         let initial = measure_child(ctx, orientation, index, AvailableSpace::Unbounded, cross_space, placement);
         let main = resolver.next(placement.main, orientation.main(initial));
         let child = measure_child(ctx, orientation, index, AvailableSpace::Bounded(main), cross_space, placement);
@@ -395,7 +419,7 @@ fn track_resolver_for_measure(
         gap,
         ctx.child_count(),
         (0..ctx.child_count()).map(|index| {
-            let placement = state.items.placement(index);
+            let placement = state.layout(index);
             let child = measure_child(ctx, orientation, index, AvailableSpace::Unbounded, cross_space, placement);
             (placement.main, orientation.main(child))
         }),
@@ -408,7 +432,7 @@ fn measure_child(
     index: usize,
     main: AvailableSpace,
     cross: AvailableSpace,
-    placement: LinearPlacement,
+    placement: LinearItemLayout,
 ) -> Dimensioni {
     let cross = placement.fixed_cross.map(AvailableSpace::Bounded).unwrap_or(cross);
     ctx.measure_child(index, orientation.constraints(main, cross)).unwrap_or_default()
@@ -418,7 +442,7 @@ fn measure_child(
 pub(super) fn layout_linear(
     ctx: &mut ContainerLayoutCtx<'_>,
     children: &mut Children,
-    state: &LinearState,
+    state: &mut LinearState,
     orientation: Orientation,
     line_track: Option<TrackSize>,
     minimum_cross: i32,
@@ -429,70 +453,74 @@ pub(super) fn layout_linear(
         ctx.set_content_size(Dimensioni::default());
         return;
     }
-    state.items.debug_assert_synchronized(count);
+    state.debug_assert_synchronized(count);
     let gap = ctx.style().spacing.max(0);
     let main_space = AvailableSpace::Bounded(orientation.main_extent(rect).max(0));
     let cross_space = AvailableSpace::Bounded(orientation.cross_extent(rect).max(0));
 
-    let mut resolver = track_resolver_for_layout(ctx, children, state, orientation, main_space, cross_space, gap);
+    // Resolve every main-axis extent once into retained scratch. Only Content needs an intrinsic
+    // main-axis measurement under a bounded allocation: Fixed ignores content and Flex divides the
+    // remaining bound. The subsequent bounded measurement supplies responsive cross-axis content.
+    let layouts = &state.layouts;
+    let resolved_main = &mut state.resolved_main;
+    resolved_main.clear();
+    for (index, layout) in layouts.iter().copied().enumerate() {
+        let content = if matches!(layout.main, TrackSize::Content) {
+            let desired = measure_layout_child(ctx, children, orientation, index, AvailableSpace::Unbounded, cross_space, layout);
+            orientation.main(desired)
+        } else {
+            0
+        };
+        resolved_main.push(content.max(0));
+    }
+
+    // TrackResolver reads the complete immutable summary before this loop replaces desired content
+    // with exact allocated extents. The retained vector then drives both cross measurement and
+    // placement, avoiding a second resolver and another intrinsic child-measurement replay.
+    let mut resolver = TrackResolver::new(
+        main_space,
+        gap,
+        count,
+        layouts.iter().zip(resolved_main.iter()).map(|(layout, content)| (layout.main, *content)),
+    );
+    for (layout, extent) in layouts.iter().zip(resolved_main.iter_mut()) {
+        *extent = resolver.next(layout.main, *extent);
+    }
+    let extent = resolver.extent();
+
+    // Responsive children are measured once at their exact main-axis extent. This pass determines
+    // the shared Row height or Column overflow width and also warms the exact measurement consumed
+    // by the runtime when each child rectangle is committed below.
     let mut cross_content = 0;
-    for index in 0..count {
-        let placement = state.items.placement(index);
-        let initial = measure_layout_child(ctx, children, orientation, index, AvailableSpace::Unbounded, cross_space, placement);
-        let main = resolver.next(placement.main, orientation.main(initial));
-        let child = measure_layout_child(ctx, children, orientation, index, AvailableSpace::Bounded(main), cross_space, placement);
-        cross_content = cross_content.max(placement.fixed_cross.unwrap_or_else(|| orientation.cross(child)).max(0));
+    for (index, (layout, main)) in layouts.iter().copied().zip(resolved_main.iter().copied()).enumerate() {
+        let child = measure_layout_child(ctx, children, orientation, index, AvailableSpace::Bounded(main), cross_space, layout);
+        cross_content = cross_content.max(layout.fixed_cross.unwrap_or_else(|| orientation.cross(child)).max(0));
     }
     let cross_content = cross_content.max(minimum_cross.max(0));
     let line_cross = line_track
         .map(|track| resolve_line_cross(Some(track), cross_space, cross_content))
         .unwrap_or_else(|| orientation.cross_extent(rect).max(0));
 
-    let extent = resolver.extent();
-    let mut resolver = track_resolver_for_layout(ctx, children, state, orientation, main_space, cross_space, gap);
-    let mut cursor = if state.reversed {
+    let reversed = state.reversed;
+    let mut cursor = if reversed {
         orientation.main_origin(rect).saturating_add(orientation.main_extent(rect))
     } else {
         orientation.main_origin(rect)
     };
-    for index in 0..count {
-        let placement = state.items.placement(index);
-        let initial = measure_layout_child(ctx, children, orientation, index, AvailableSpace::Unbounded, cross_space, placement);
-        let main = resolver.next(placement.main, orientation.main(initial));
-        if state.reversed {
+    for (index, (layout, main)) in layouts.iter().copied().zip(resolved_main.iter().copied()).enumerate() {
+        if reversed {
             cursor = cursor.saturating_sub(main);
         }
-        let cross = placement.fixed_cross.unwrap_or(line_cross);
+        let cross = layout.fixed_cross.unwrap_or(line_cross);
         let child_rect = orientation.rect(cursor, orientation.cross_origin(rect), main, cross);
         let _ = ctx.layout_child(children, index, child_rect);
-        if state.reversed {
+        if reversed {
             cursor = cursor.saturating_sub(gap);
         } else {
             cursor = cursor.saturating_add(main).saturating_add(gap);
         }
     }
     ctx.set_content_size(orientation.size(extent, line_cross.max(cross_content)));
-}
-
-fn track_resolver_for_layout(
-    ctx: &mut ContainerLayoutCtx<'_>,
-    children: &mut Children,
-    state: &LinearState,
-    orientation: Orientation,
-    main_space: AvailableSpace,
-    cross_space: AvailableSpace,
-    gap: i32,
-) -> TrackResolver {
-    TrackResolver::new(
-        main_space,
-        gap,
-        children.len(),
-        (0..children.len()).map(|index| {
-            let placement = state.items.placement(index);
-            let child = measure_layout_child(ctx, children, orientation, index, AvailableSpace::Unbounded, cross_space, placement);
-            (placement.main, orientation.main(child))
-        }),
-    )
 }
 
 fn measure_layout_child(
@@ -502,7 +530,7 @@ fn measure_layout_child(
     index: usize,
     main: AvailableSpace,
     cross: AvailableSpace,
-    placement: LinearPlacement,
+    placement: LinearItemLayout,
 ) -> Dimensioni {
     let cross = placement.fixed_cross.map(AvailableSpace::Bounded).unwrap_or(cross);
     ctx.measure_child(children, index, orientation.constraints(main, cross)).unwrap_or_default()

@@ -132,7 +132,7 @@ impl ContainerWidget for Column {
     }
 
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
-        layout_linear(ctx, children, &self.linear, Orientation::Vertical, None, 0, rect);
+        layout_linear(ctx, children, &mut self.linear, Orientation::Vertical, None, 0, rect);
     }
 }
 
