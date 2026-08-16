@@ -241,3 +241,57 @@ relationship does not leak onto the disclosure node or require a disclosure-spec
 - [x] `cargo test --all-targets` passes after this phase (231 library tests and four downstream API
       tests, with the three pre-existing manual baselines ignored). The `example-wgpu` demo build
       also succeeds.
+
+## Simplification plan
+
+The parent-owned layout contract remains the architectural boundary. This follow-up does not
+restore node-global sizing policy, allow allocation to reinterpret a resolved track, or change the
+frozen example geometry. It reduces the machinery used to implement that contract and closes gaps
+where the implementation does not yet match its documented desired-size semantics.
+
+### 1. Make bounded track extents exact
+
+- Add direct regressions for bounded axes containing only `Content` or `Fixed` tracks, invalid flex
+  weights, and empty configured grids.
+- Count bounded remaining space in the reported track extent only when at least one valid `Flex`
+  track receives it.
+- Keep content and fixed overflow visible and preserve deterministic flex-pixel rounding.
+- Add container-level coverage proving that a bounded measurement does not make a content-only Row
+  or Grid claim unused space.
+
+### 2. Simplify retained linear state and placement
+
+- Collapse the separate `LinearPlacement`, `LinearItems`, and `LinearState` ownership layers into
+  one retained linear state with one index-matched metadata vector.
+- Retain a reusable main-axis extent buffer for mutable placement, following Grid's existing
+  scratch-buffer pattern.
+- Measure intrinsic main-axis requirements once, resolve them in place through the shared track
+  solver, measure cross-axis requirements once at those resolved extents, and place directly from
+  the retained results.
+- Keep immutable preferred-size measurement scalar and allocation-free, because
+  `ContainerWidget::measure` receives `&self` and must not mutate retained scratch.
+- Preserve synchronized topology mutation, exact failure-value ownership, reverse placement, warm
+  allocation behavior, and the common Row/Column algorithm.
+
+### 3. Give Row height explicit semantics
+
+- Replace the single-track use of weighted `TrackSize::Flex(f32)` with a height mode that exposes
+  only the meaningful choices: content height, exact fixed height, or filling the assigned height.
+- Make content height the ordinary constructor default and use named configuration for fixed and
+  fill height behavior.
+- Migrate examples, built-ins, tests, and documentation without changing committed geometry.
+
+### 4. Reduce permanent process documentation
+
+- Keep the layout contract, enduring design decisions, this implementation plan, and a concise
+  validation summary in this document.
+- Remove branch chronology, transient command history, and duplicated completed-work narration
+  once the implementation is complete; commit history remains the authoritative work log.
+
+### Validation gates
+
+- Run formatting and `cargo test --all-targets` after each behavior-changing phase.
+- Re-run the warm-layout allocation regression and the exact demo geometry regressions.
+- Generate crate documentation and check the existing example configurations used by the redesign.
+- Review the final diff against both `layout-model-cleanup` and `extract-window-manager` so the
+  simplification can be evaluated independently from the original migration.
