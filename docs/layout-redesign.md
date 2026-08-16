@@ -183,6 +183,32 @@ relationship does not leak onto the disclosure node or require a disclosure-spec
       remains the one manual validation item; exact geometry assertions are the automated
       compatibility gate.
 
+### Follow-up: Weight Demo nested flex regression
+
+- [x] Reproduced the reported short Grid rows and traced the allocation chain:
+
+  ```text
+  Column --Flex(1)--> Row --exact cross axis--> Column --Content--> Grid
+  ```
+
+  The final content-sized edge was not a Grid exception or a solver error. It was a stale one-item
+  wrapper in `demo-full` that replaced the exact remaining height with the Grid's desired height.
+- [x] Kept the model unchanged and removed both one-child wrappers. The intended chain is now:
+
+  ```text
+  Column --Flex(1)--> Grid
+  ```
+
+  Each relationship has one owner, and no Grid-specific fill behavior leaks into `Node`, a general
+  trait, or the example authoring helpers.
+- [x] Added an exact committed-rectangle regression for the full Weight Demo content structure. At
+  a `268 x 216` body with four-pixel spacing, the Grid receives all remaining `136` pixels; after
+  its own row gap, its `1 : 2` tracks resolve to `44` and `88` pixels.
+- [x] Re-ran formatting and `cargo test --all-targets` (232 library tests and four downstream API
+      tests passed; the three manual baselines remain ignored), generated documentation, and
+      checked `demo-full` with both glow and wgpu. The wgpu check also covered `calculator` and
+      `simple`.
+
 ## Decisions and observations
 
 - [x] The old `AxisSlot::offered`/`advance` split is not part of the new contract. It exists only

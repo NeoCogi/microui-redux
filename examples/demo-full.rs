@@ -931,10 +931,11 @@ impl DemoNodes {
         self.push_item(LinearItem::new(node, height));
     }
 
-    fn grid(&mut self, widths: &[TrackSize], heights: &[TrackSize], f: impl FnOnce(&mut Self)) {
+    /// Adds a Grid with an explicit height relationship to this surrounding demo Column.
+    fn grid(&mut self, widths: &[TrackSize], heights: &[TrackSize], height: TrackSize, f: impl FnOnce(&mut Self)) {
         let items = Self::children(f).into_iter().map(GridItem::new);
         let (_, node) = Grid::create(GridParameters::new(widths.iter().copied(), heights.iter().copied(), items));
-        self.push(node);
+        self.push_item(LinearItem::new(node, height));
     }
 
     fn column(&mut self, f: impl FnOnce(&mut Self)) {
@@ -1946,17 +1947,15 @@ impl State {
                 tree.row(&[TrackSize::Flex(1.0)], TrackSize::Content, |tree| {
                     tree.widget(grid_weight_label);
                 });
-                tree.row(&[TrackSize::Flex(1.0)], TrackSize::Flex(1.0), |tree| {
-                    tree.column(|tree| {
-                        tree.grid(&cols, &rows, |tree| {
-                            tree.widget(button_grid_0);
-                            tree.widget(button_grid_1);
-                            tree.widget(button_grid_2);
-                            tree.widget(button_grid_3);
-                            tree.widget(button_grid_4);
-                            tree.widget(button_grid_5);
-                        });
-                    });
+                // Grid owns the remaining vertical slot directly. A one-item Row or Column would
+                // add a relationship that carries no layout meaning here.
+                tree.grid(&cols, &rows, TrackSize::Flex(1.0), |tree| {
+                    tree.widget(button_grid_0);
+                    tree.widget(button_grid_1);
+                    tree.widget(button_grid_2);
+                    tree.widget(button_grid_3);
+                    tree.widget(button_grid_4);
+                    tree.widget(button_grid_5);
                 });
             }),
             "weight",

@@ -338,6 +338,64 @@ fn calculator_flex_geometry_is_preserved_as_an_explicit_baseline() {
 }
 
 #[test]
+fn demo_weight_grid_fills_remaining_height_and_preserves_one_to_two_heights() {
+    // This is the layout structure used by demo-full's Weight Demo. The Grid is the outer Column's
+    // flexible item, so it receives the resolved remaining height directly. A content-sized
+    // container inserted between those nodes would create a different edge and correctly shrink
+    // the Grid back to its intrinsic height.
+    fn row(node: Node, height: TrackSize) -> Node {
+        crate::Row::create(crate::RowParameters::new(height, [LinearItem::flex(node, 1.0)])).1
+    }
+
+    let (_, row_label) = crate::ListItem::create(crate::ListItemParameters::with_opt("Row weights 1 : 2 : 3", WidgetOption::NO_INTERACT));
+    let row_label = row(row_label, TrackSize::Content);
+
+    let row_buttons = [layout_button("w1").1, layout_button("w2").1, layout_button("w3").1];
+    let (_, row_buttons) = crate::Row::create(crate::RowParameters::new(
+        TrackSize::Fixed(28),
+        row_buttons
+            .into_iter()
+            .zip([TrackSize::Flex(1.0), TrackSize::Flex(2.0), TrackSize::Flex(3.0)])
+            .map(|(button, width)| LinearItem::new(button, width)),
+    ));
+
+    let (_, grid_label) = crate::ListItem::create(crate::ListItemParameters::with_opt("Grid weights rows 1 : 2", WidgetOption::NO_INTERACT));
+    let grid_label = row(grid_label, TrackSize::Content);
+
+    let (g1_id, g1) = layout_button("g1");
+    let (g2_id, g2) = layout_button("g2");
+    let (g3_id, g3) = layout_button("g3");
+    let (g4_id, g4) = layout_button("g4");
+    let (g5_id, g5) = layout_button("g5");
+    let (g6_id, g6) = layout_button("g6");
+    let (_, grid) = crate::Grid::create(crate::GridParameters::new(
+        [TrackSize::Flex(1.0); 3],
+        [TrackSize::Flex(1.0), TrackSize::Flex(2.0)],
+        [g1, g2, g3, g4, g5, g6],
+    ));
+    let (_, mut root) = crate::Column::create(crate::ColumnParameters::new([
+        LinearItem::content(row_label),
+        LinearItem::fixed(row_buttons, 28),
+        LinearItem::content(grid_label),
+        LinearItem::flex(grid, 1.0),
+    ]));
+    let style = Style { spacing: 4, ..Style::default() };
+    let mut runtime = UiRuntime::new();
+    runtime.begin_update();
+    runtime.layout_tree_root(&mut root, &style, test_atlas(), Recti::new(0, 0, 268, 216), Recti::new(0, 0, 268, 216));
+
+    // The content labels consume 20 pixels each, the explicit button row consumes 28, and the
+    // outer three gaps consume 12. The Grid therefore owns all 136 remaining pixels. Its own
+    // four-pixel gap leaves 132 pixels, split exactly 44:88 by the 1:2 row weights.
+    assert_eq!(rect_components(committed_rect(&runtime, &root, g1_id)), (0, 80, 87, 44));
+    assert_eq!(rect_components(committed_rect(&runtime, &root, g2_id)), (91, 80, 87, 44));
+    assert_eq!(rect_components(committed_rect(&runtime, &root, g3_id)), (182, 80, 86, 44));
+    assert_eq!(rect_components(committed_rect(&runtime, &root, g4_id)), (0, 128, 87, 88));
+    assert_eq!(rect_components(committed_rect(&runtime, &root, g5_id)), (91, 128, 87, 88));
+    assert_eq!(rect_components(committed_rect(&runtime, &root, g6_id)), (182, 128, 86, 88));
+}
+
+#[test]
 fn demo_column_bottom_margin_geometry_is_preserved_as_an_explicit_baseline() {
     // The log panel uses one flexible Column item followed by an explicit 24-pixel spacer below
     // its scrolling child for the submission row that follows it.
