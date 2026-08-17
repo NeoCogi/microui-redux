@@ -80,9 +80,10 @@
 //!
 //! A concrete `*Parameters` value is one-shot initialization. Semantic values, interaction state,
 //! event ports, and [`Widget`] phases live in one concrete widget object rather than a parallel
-//! `*State` allocation. Built-in leaf and container constructors both return
-//! `(TypedWidgetHandle<ConcreteWidget>, Node)`; callers that need no typed leaf access can mount a
-//! custom widget with [`Node::widget`]. A concrete container holds only weak topology capabilities;
+//! `*State` allocation. Handle-bearing built-in leaf and container constructors return
+//! `(TypedWidgetHandle<ConcreteWidget>, Node)`. The stateless [`Custom`] exception returns its
+//! concrete runtime from [`Custom::create`]; mount it with [`Node::widget`], [`Node::custom_render`],
+//! or [`Node::typed_custom_render`]. A concrete container holds only weak topology capabilities;
 //! the generic [`Container`] remains the sole strong owner of its heterogeneous children.
 //!
 //! # Update and paint boundary

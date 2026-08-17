@@ -158,7 +158,7 @@ There are two frame values and one shared frame trait in the public lifecycle:
 
 | Type | What it represents | What ending it does |
 | --- | --- | --- |
-| `ContextFrame<'ctx, B>` | The application-level paint/submission frame. It exclusively borrows `Context<B>` while committed retained UI is painted and recorded. | `render_ui(self)` paints and submits once. Dropping without submission cancels. |
+| `ContextFrame<'ctx, B, State = ()>` | The application-level paint/submission frame. It exclusively borrows `Context<B, State>` while committed retained UI is painted and recorded. | `render_ui(self)` paints and submits once. Dropping without submission cancels. |
 | `B::Frame<'backend>` | The backend-level RAII frame. It exclusively borrows the concrete backend only while the recorded display list is executing. | Its `Drop` implementation performs backend-specific, best-effort finalization. WGPU/Vulkan submit and present there; GL flushes before the outer window runner swaps buffers. |
 | `RendererFrame` | The common trait implemented by every `B::Frame<'_>`. | Defines the standard UI operations: atlas quads/triangles, flush boundaries, and external textures. |
 
@@ -446,7 +446,7 @@ place it in a content, fixed, or flexible track.
 - Parent containers assign each node one exact retained parent-local allocation. Sizing relationships belong to parent-child edges such as `LinearItem`; `Node` has no global placement policy. Child offsets and clips remain node-local and are resolved through a composed transform during traversal.
 - Resolved outer rectangles and clips remain runtime stack locals. Node behavior works against its local content surface, while outer frame painting, standard hit routing, and conversion from screen input remain runtime-owned.
 - A public widget's Painter geometry and routed pointer positions share the derived content-local origin.
-- Built-in leaf and container constructors return a weak `TypedWidgetHandle<W>` plus one completed owning `Node`. Concrete container constructors consume child nodes, and `Node::custom_render` plus `Node::typed_custom_render` cover backend-typed custom-render leaves.
+- Handle-bearing built-in leaf and container constructors return a weak `TypedWidgetHandle<W>` plus one completed owning `Node`. The stateless `Custom::create` exception returns a `Custom` runtime for mounting through `Node::widget`, `Node::custom_render`, or `Node::typed_custom_render`. Concrete container constructors consume child nodes.
 - Every direction is a configuration of one `Linear` widget. Linear and Grid independently invoke the common scalar track resolver, so both apply identical content/fixed/flex, spacing, rounding, and overflow arithmetic without either container being implemented through the other.
 - `LinearCrossSize` gives every direction the same shared-line choices: desired content, stretching across exact allocation, or an exact fixed cross extent. `LinearDirection` combines axis and leading edge.
 - Negative desired extents are normalized to zero at the node boundary. A desired zero remains zero; generic containers do not substitute Style-owned fallback cells.
@@ -506,6 +506,11 @@ Textboxes and text areas retain arbitrary UTF-8 and keep their byte cursor on Un
 boundaries. Left/right movement and deletion operate on one scalar value at a time, not on a
 user-perceived grapheme cluster. Combining sequences and multi-scalar emoji can therefore require
 more than one cursor or deletion operation.
+
+File-dialog paths also cross the public API as UTF-8 `String` values. On platforms that permit
+non-UTF-8 paths, the default current directory and enumerated directory entries are converted
+lossily. Accepting a typed name is lexical: the resulting path is not required to exist or identify
+a regular file.
 
 Rendering coverage is a separate atlas concern. Text measurement and drawing iterate Unicode
 scalar values and use the same lookup rules:

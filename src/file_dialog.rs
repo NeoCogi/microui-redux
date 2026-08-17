@@ -53,6 +53,12 @@ use crate::ui_node::RuntimeNodeId;
 use crate::window_manager::WindowManager;
 
 /// One-shot configuration used to open a file dialog.
+///
+/// # Path encoding
+///
+/// File-dialog paths cross the public API as UTF-8 [`String`] values. On platforms that permit
+/// non-UTF-8 paths, the default current directory and directory entries encountered while browsing
+/// are converted lossily.
 #[derive(Clone, Debug)]
 pub struct FileDialogRequest {
     title: String,
@@ -120,8 +126,10 @@ impl Default for FileDialogRequest {
 
 /// Path accepted by a file dialog.
 ///
-/// Acceptance does not imply that the path exists or identifies a regular file. Applications that
-/// require those conditions must validate [`FileDialogResult::file_path`] after completion.
+/// `file_name` and `file_path` are UTF-8 [`String`] values. On platforms that permit non-UTF-8
+/// paths, filesystem entries encountered by the dialog are converted lossily. Acceptance does not
+/// imply that the path exists or identifies a regular file; applications that require those
+/// conditions must validate [`FileDialogResult::file_path`] after completion.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FileDialogResult {
     /// Selected basename suitable for display.
