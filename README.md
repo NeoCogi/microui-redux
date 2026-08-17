@@ -767,3 +767,31 @@ Version `0.6.0` introduced retained `WidgetTree` authoring on top of the older p
     - [x] Simple example
     - [x] Full API example with 3D rendering and dialogs
 - [x] Add documentation
+
+## Bundled asset attribution and licenses
+
+The repository's BSD 3-Clause license covers the project code and the facepalm
+demo image described below. The bundled third-party fonts and icons retain their
+original names, authorship, and license terms:
+
+- **Open Sans Regular** (`OpenSans-Regular`, stored as `assets/NORMAL.ttf`) and
+  **Open Sans Bold** (`OpenSans-Bold`, stored as `assets/BOLD.ttf`) — copyright
+  2020 The Open Sans Project Authors; licensed under the
+  [SIL Open Font License 1.1](https://github.com/googlefonts/opensans/blob/main/OFL.txt).
+- **Fixedsys Excelsior 3.01 Regular** (`FixedsysExcelsiorIIIb`, stored as
+  `assets/CONSOLE.ttf`) — version 3.010 (2007), by Darien Valentine; released
+  into the public domain, with the
+  [CC0 dedication](https://creativecommons.org/publicdomain/zero/1.0/) applying
+  where a public-domain release is not permitted. See the project's
+  [distribution terms](https://github.com/kika/fixedsys#distribution-terms).
+  The bundled TTF itself does not contain a formal license field.
+- **Material Design Icons by Google** — the icon PNGs in `assets/` (all PNGs
+  there except `WHITE.png`, which is a plain atlas texel) are derived from
+  Google's Material Design Icons and are licensed under the
+  [Apache License 2.0](https://github.com/google/material-design-icons/blob/master/LICENSE).
+- **Facepalm demo image** (`examples/FACEPALM.png`) — copyright Raja Lehtihet &
+  Wael El Oraiby; licensed under this repository's
+  [BSD 3-Clause license](LICENSE).
+
+The font names above come from the TTFs' embedded name records; `NORMAL.ttf`,
+`BOLD.ttf`, and `CONSOLE.ttf` are only the filenames used by this repository.
