@@ -820,6 +820,8 @@ mod tests {
     struct CompletionModel {
         /// Live operation retained until its matching terminal event is delivered.
         session: Option<FileDialogSession>,
+        /// Total completion payloads delivered by the shared service source.
+        deliveries: usize,
         /// Terminal snapshots recorded exclusively by the subscribed callback.
         completions: Vec<FileDialogStatus>,
     }
@@ -827,6 +829,10 @@ mod tests {
     impl CompletionModel {
         /// Records the event for the live session and releases the completed capability.
         fn completed(&mut self, event: &FileDialogCompleted) {
+            // Count every service delivery before application-level session filtering. This catches
+            // accidental duplicate terminal emission even after the first event clears the session.
+            self.deliveries += 1;
+
             // A Context shares one source across every file dialog, so ignore events for any other
             // operation the application may be coordinating independently.
             let Some(session) = self.session.as_ref() else {
@@ -960,6 +966,7 @@ mod tests {
                 file_path: "/retained-test/picked.txt".to_owned(),
             })]
         );
+        assert_eq!(model.deliveries, 1);
         assert!(model.session.is_none());
         assert!(context.window_manager.file_dialogs.is_empty());
     }
@@ -978,6 +985,7 @@ mod tests {
         click_node_with_state(&mut context, &mut model, root, cancel);
 
         assert_eq!(model.completions, [FileDialogStatus::Cancelled]);
+        assert_eq!(model.deliveries, 1);
         assert!(model.session.is_none());
         assert!(context.window_manager.file_dialogs.is_empty());
     }
@@ -992,8 +1000,11 @@ mod tests {
         assert!(context.cancel_file_dialog(model.session.as_ref().unwrap()));
         assert!(model.completions.is_empty());
         context.update_ui_state(Dimensioni::new(900, 700), &mut model);
+        // A later synchronization pass must not replay the already-delivered terminal transition.
+        context.update_ui_state(Dimensioni::new(900, 700), &mut model);
 
         assert_eq!(model.completions, [FileDialogStatus::Cancelled]);
+        assert_eq!(model.deliveries, 1);
         assert!(model.session.is_none());
         assert!(context.window_manager.file_dialogs.is_empty());
     }

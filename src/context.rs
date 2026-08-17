@@ -49,7 +49,7 @@ use crate::{Dimensioni, ImageSource, KeyCode, KeyMode, MouseButton, Node, Recti,
 /// State-only handlers registered with [`Context::subscribe`] remain the simpler default. Use
 /// [`Context::subscribe_context`] when a handler must create, show, hide, move, resize, raise, or
 /// destroy a retained root, or when it must open or cancel a file dialog in direct response to a
-/// typed widget event.
+/// typed retained UI event.
 pub struct EventContext<'a> {
     /// Exclusive access to the context-owned root and input transaction domain.
     window_manager: &'a mut WindowManager,
@@ -275,7 +275,7 @@ impl<B: RendererBackend> Context<B> {
 }
 
 impl<B: RendererBackend, State: 'static> Context<B, State> {
-    /// Drains ordered input, dispatches native widget events, and commits layout for `dimensions`.
+    /// Drains ordered input, dispatches typed retained UI events, and commits layout for `dimensions`.
     ///
     /// One synchronization layout always runs first. Each queued input event then causes exactly
     /// one route followed by one full eligible-tree update and another layout commit. Geometry
@@ -283,7 +283,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// queue, the initial layout is the complete synchronization commit. This method performs no
     /// timer synthesis, painting, or backend submission.
     ///
-    /// Events retain FIFO order within each widget port. When multiple ports are ready at one
+    /// Events retain FIFO order within each retained source port. When multiple ports are ready at one
     /// dispatch boundary, they are drained in subscription order. Dispatch repeats until all
     /// subscribed ports are empty, including events emitted by application-state methods.
     /// Context-aware subscribers receive [`EventContext`] only at these boundaries; their root and
@@ -312,9 +312,9 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         });
     }
 
-    /// Subscribes the context's application state to one native widget event.
+    /// Subscribes the context's application state to one typed retained UI event.
     ///
-    /// A widget event port accepts one subscription and returns
+    /// A retained event port accepts one subscription and returns
     /// [`crate::SubscribeError::AlreadySubscribed`] for another.
     pub fn subscribe<E: crate::WidgetEvent>(&mut self, event: crate::WidgetEventHandle<E>, method: fn(&mut State, &E)) -> Result<(), crate::SubscribeError> {
         self.event_dispatcher.subscribe(event, method)
@@ -322,7 +322,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
 
     /// Subscribes the context's application state with one bound application value.
     ///
-    /// A widget event port accepts one subscription and returns
+    /// A retained event port accepts one subscription and returns
     /// [`crate::SubscribeError::AlreadySubscribed`] for another.
     pub fn subscribe_with<E: crate::WidgetEvent, BoundContext: 'static>(
         &mut self,
@@ -496,6 +496,34 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// Subscribe once during application setup, then use [`FileDialogCompleted::is_for`] to match
     /// an event to a retained [`FileDialogSession`]. The source is Context-owned and remains alive
     /// when an individual terminal dialog controller and root are removed.
+    ///
+    /// ```no_run
+    /// use microui_redux::prelude::*;
+    ///
+    /// struct Model {
+    ///     dialog: Option<FileDialogSession>,
+    /// }
+    ///
+    /// impl Model {
+    ///     fn dialog_completed(&mut self, event: &FileDialogCompleted) {
+    ///         let Some(session) = self.dialog.as_ref() else { return };
+    ///         if !event.is_for(session) {
+    ///             return;
+    ///         }
+    ///         match event.status() {
+    ///             FileDialogStatus::Accepted(result) => println!("{}", result.file_path),
+    ///             FileDialogStatus::Cancelled => println!("cancelled"),
+    ///             FileDialogStatus::Pending => unreachable!(),
+    ///         }
+    ///         self.dialog = None;
+    ///     }
+    /// }
+    ///
+    /// fn subscribe<B: RendererBackend>(context: &mut Context<B, Model>) {
+    ///     let completed = context.file_dialog_completed();
+    ///     context.subscribe(completed, Model::dialog_completed).unwrap();
+    /// }
+    /// ```
     pub fn file_dialog_completed(&self) -> crate::WidgetEventHandle<FileDialogCompleted> {
         // Project only a weak typed capability; WindowManager remains the sole event-source owner.
         self.window_manager.file_dialog_completed()

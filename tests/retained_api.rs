@@ -69,7 +69,8 @@ impl RendererBackend for TestBackend {
     fn destroy_texture(&mut self, _id: TextureId) {}
 }
 
-fn context() -> Context<TestBackend> {
+fn context_with_state<State: 'static>() -> Context<TestBackend, State> {
+    // Build the smallest public atlas accepted by the downstream test renderer.
     let pixels = [255, 255, 255, 255];
     let icons = [("white", Recti::new(0, 0, 1, 1))];
     let font = FontEntry {
@@ -87,19 +88,54 @@ fn context() -> Context<TestBackend> {
         fonts: &fonts,
         format: SourceFormat::Raw,
     };
+    // Context infers the application state type from this helper's return value.
     Context::new(TestBackend { atlas: AtlasHandle::from(&source) })
 }
 
-#[test]
-fn downstream_file_dialog_session_is_polled_and_cancelled_without_widget_access() {
-    let mut context = context();
-    let request: microui_redux::FileDialogRequest = FileDialogRequest::default();
-    let session = context.open_file_dialog(request);
+fn context() -> Context<TestBackend> {
+    // Most downstream tests use the polling-only unit application state.
+    context_with_state()
+}
 
-    assert_eq!(session.status(), FileDialogStatus::Pending);
-    assert!(context.cancel_file_dialog(&session));
-    assert_eq!(session.status(), FileDialogStatus::Cancelled);
-    assert!(!context.cancel_file_dialog(&session));
+#[derive(Default)]
+struct FileDialogModel {
+    /// Live session retained until its matching event reaches application state.
+    session: Option<FileDialogSession>,
+    /// Terminal result observed only through the Context-owned typed source.
+    completion: Option<FileDialogStatus>,
+}
+
+impl FileDialogModel {
+    /// Applies the completion belonging to this downstream model's live session.
+    fn file_dialog_completed(&mut self, event: &FileDialogCompleted) {
+        // Ignore another concurrent operation's event without inspecting either session status.
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        if !event.is_for(session) {
+            return;
+        }
+
+        // Retain the terminal payload and release the completed session in the callback itself.
+        self.completion = Some(event.status().clone());
+        self.session = None;
+    }
+}
+
+#[test]
+fn downstream_file_dialog_completion_is_subscriber_driven_without_widget_access() {
+    let mut context = context_with_state::<FileDialogModel>();
+    let completed = context.file_dialog_completed();
+    context.subscribe(completed, FileDialogModel::file_dialog_completed).unwrap();
+    let mut model = FileDialogModel::default();
+    model.session = Some(context.open_file_dialog(FileDialogRequest::default()));
+
+    // Explicit cancellation queues one event; the retained update delivers it without frame polling.
+    assert!(context.cancel_file_dialog(model.session.as_ref().unwrap()));
+    assert!(model.completion.is_none());
+    context.update_ui_state(Dimensioni::new(320, 240), &mut model);
+    assert_eq!(model.completion, Some(FileDialogStatus::Cancelled));
+    assert!(model.session.is_none());
 }
 
 #[test]

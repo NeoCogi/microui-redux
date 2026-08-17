@@ -11,9 +11,9 @@
 - [x] Add regression tests for popup dismissal, same-transaction placement, and file-dialog opening.
 - [x] Update public lifecycle documentation and examples.
 - [x] Run formatting, focused tests, the complete test suite, and Clippy.
-- [ ] Publish file-dialog completion through a Context-owned typed event source.
-- [ ] Remove file-dialog status polling from application frame code.
-- [ ] Verify accepted, cancelled, and explicitly cancelled completion delivery.
+- [x] Publish file-dialog completion through a Context-owned typed event source.
+- [x] Remove file-dialog status polling from application frame code.
+- [x] Verify accepted, cancelled, and explicitly cancelled completion delivery.
 
 The boxes above are the delivery checklist. A box is checked only in the commit that completes and
 verifies that step.

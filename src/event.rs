@@ -27,13 +27,14 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-//! Context-owned dispatch for typed widget events.
+//! Context-owned dispatch for typed retained UI events.
 //!
-//! This module connects native events produced by retained widgets to methods on one application
-//! state value. Its central rule is deliberately narrow:
+//! This module connects native events produced by retained widgets and semantic events produced by
+//! Context-owned services to methods on one application state value. Its central rule is
+//! deliberately narrow:
 //!
 //! > One [`crate::Context`] owns one [`EventDispatcher`] for one application state type, while each
-//! > widget owns and queues the payloads for its own event ports.
+//! > retained producer owns and queues the payloads for its own event ports.
 //!
 //! There is no public event bus, application-wide message enum, global queue, multicast list,
 //! payload downcast, or independent dispatcher lifetime. The public surface consists of event payload
@@ -43,9 +44,9 @@
 //!
 //! # Ownership
 //!
-//! The context owns both sides of an update transaction: its retained root forest contains the
-//! widgets that produce events, and its dispatcher contains the handlers that consume them. Neither a
-//! handle nor a subscription keeps a removed widget alive.
+//! The context owns both sides of an update transaction: its retained root forest and services
+//! contain the event producers, and its dispatcher contains the handlers that consume them. Neither
+//! a handle nor a subscription keeps a removed producer alive.
 //!
 //! ```text
 //! Context<B, State>
@@ -54,6 +55,9 @@
 //! │      └── owns concrete Widget
 //! │             └── owns Rc<RefCell<WidgetEventPort<E>>>
 //! │                         └── owns Option<Vec<E>>
+//! ├── owns retained services
+//! │      └── owns Rc<RefCell<WidgetEventPort<E>>>
+//! │                  └── owns Option<Vec<E>>
 //! │
 //! └── owns EventDispatcher<State>
 //!        └── owns Vec<Box<dyn EventDispatch<State>>>
@@ -67,11 +71,12 @@
 //! dispatch boundary ── lends &mut EventContext<'_> ──> opted-in Handler
 //! ```
 //!
-//! The only strong event-port owner is the widget. Consequently:
+//! The only strong event-port owner is its retained producer. Consequently:
 //!
-//! - cloning a handle does not extend widget lifetime;
-//! - registering a handler does not extend widget lifetime;
-//! - removing the widget immediately destroys its port and queued payloads; and
+//! - cloning a handle does not extend producer lifetime;
+//! - registering a handler does not extend producer lifetime;
+//! - removing a widget immediately destroys its port and queued payloads;
+//! - a Context-owned service source remains alive for the Context lifetime; and
 //! - the next dispatch prunes the now-dead subscription.
 //!
 //! `Rc<RefCell<_>>` makes the port shareable inside the retained UI thread while preserving
@@ -101,7 +106,7 @@
 //! Connecting installs an empty queue. A second connection fails with
 //! [`SubscribeError::AlreadySubscribed`]. Emission while connected appends the owned payload to
 //! that queue; emission while disconnected is intentionally discarded, so subscribing never
-//! replays historical widget activity. Draining moves the complete queue out and leaves the port
+//! replays historical retained activity. Draining moves the complete queue out and leaves the port
 //! connected with a new empty queue. Dropping the exclusive listener disconnects the port and
 //! clears anything still pending.
 //!
@@ -110,8 +115,8 @@
 //! A normal application subscription follows this path:
 //!
 //! ```text
-//! typed widget handle
-//!      │ changed() / submitted() / ...
+//! typed retained source
+//!      │ changed() / submitted() / completed() / ...
 //!      v
 //! WidgetEventHandle<E>
 //!      │ Context::subscribe(handle, State::method)
@@ -334,12 +339,14 @@ use crate::Widget;
 /// normal flow-control mechanism.
 const MAX_EVENT_DISPATCHES: usize = 1_000_000;
 
-/// Marker implemented by every native semantic event payload emitted by a widget.
+/// Marker implemented by every typed semantic event payload emitted by retained UI.
 ///
 /// An event is an owned snapshot of the semantic fact the widget is reporting. For example, a
 /// textbox change event contains the text as it existed when the change occurred rather than a
 /// reference back into the mutable widget. This lets the port retain the event until the safe
-/// context dispatch boundary.
+/// context dispatch boundary. Context-owned retained services may use the same contract for
+/// lifecycle events such as [`crate::FileDialogCompleted`]; no service-specific behavior enters the
+/// dispatcher.
 ///
 /// The `'static` bound is required because subscriptions of different concrete event types coexist
 /// behind the dispatcher's `EventDispatch` boundary. It does not require event values to be `Clone`,
@@ -359,7 +366,7 @@ pub trait TypedWidget<E: WidgetEvent>: Widget {
     fn event(&self) -> WidgetEventHandle<E>;
 }
 
-/// One widget-owned typed event queue and its connection state.
+/// One retained-producer-owned typed event queue and its connection state.
 ///
 /// `None` means that no listener exists and emissions are discarded. `Some(queue)` means exactly
 /// one listener is connected. Keeping those states in one field makes it impossible for the
@@ -419,7 +426,7 @@ impl<E: WidgetEvent> WidgetEventPort<E> {
 /// The non-owning reference used by both public handles and exclusive listeners.
 type WeakWidgetEventPort<E> = Weak<RefCell<WidgetEventPort<E>>>;
 
-/// Weak, typed capability identifying one native event source owned by a retained widget.
+/// Weak, typed capability identifying one event source owned by retained UI.
 ///
 /// Holding or cloning this value does not keep the widget or its pending events alive.
 /// The event type parameter prevents connecting a handler for one payload type to another port at
@@ -429,7 +436,7 @@ pub struct WidgetEventHandle<E: WidgetEvent> {
 }
 
 impl<E: WidgetEvent> WidgetEventHandle<E> {
-    /// Creates a weak handle to a live widget-owned port.
+    /// Creates a weak handle to a live retained-producer-owned port.
     pub(crate) fn new(port: &Rc<RefCell<WidgetEventPort<E>>>) -> Self {
         Self { port: Rc::downgrade(port) }
     }
@@ -442,11 +449,12 @@ impl<E: WidgetEvent> WidgetEventHandle<E> {
         Self { port: Weak::new() }
     }
 
-    /// Returns whether the concrete widget still owns this event source.
+    /// Returns whether the concrete retained producer still owns this event source.
     ///
     /// This is a liveness observation, not an ownership claim. The handle remains weak, and a later
-    /// attempt to subscribe can still report [`SubscribeError::WidgetExpired`] if the widget is
-    /// removed between operations.
+    /// attempt to subscribe can still report [`SubscribeError::WidgetExpired`] if the producer is
+    /// removed between operations. The variant retains its established widget-oriented name for API
+    /// compatibility.
     pub fn is_alive(&self) -> bool {
         self.port.strong_count() != 0
     }
@@ -495,16 +503,16 @@ impl<E: WidgetEvent> fmt::Debug for WidgetEventHandle<E> {
     }
 }
 
-/// Failure to subscribe an application-state method to a widget event.
+/// Failure to subscribe an application-state method to a retained UI event.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum SubscribeError {
-    /// The widget that owns the event port has already been removed or was unavailable when its
-    /// typed handle projected the event capability.
+    /// The retained producer that owns the event port has already been removed or was unavailable
+    /// when its typed handle projected the event capability.
     WidgetExpired,
     /// The event port already has its exclusive listener.
     ///
     /// In normal application code this means the port is already subscribed through its owning
-    /// context. Framework controllers use the same exclusivity rule for directly drained ports.
+    /// context. Framework controllers and Context-owned services use the same exclusivity rule.
     AlreadySubscribed,
 }
 
@@ -522,8 +530,8 @@ impl std::error::Error for SubscribeError {}
 /// Exclusive weak queue reader retained by either a state subscription or framework controller.
 ///
 /// Creation and destruction of this value are the connection lifetime of a port. It remains weak
-/// so the subscription side cannot keep a removed widget alive. There is intentionally no `Clone`
-/// implementation: duplicating a listener would violate the single-consumer queue contract.
+/// so the subscription side cannot keep a removed producer alive. There is intentionally no
+/// `Clone` implementation: duplicating a listener would violate the single-consumer queue contract.
 pub(crate) struct WidgetEventListener<E: WidgetEvent> {
     port: WeakWidgetEventPort<E>,
 }
@@ -627,7 +635,7 @@ impl<Target, BoundContext, E: WidgetEvent> EventHandler<Target, E> for BoundCont
 /// `Target` remains common to the whole vector; the implementation retains each concrete event and
 /// handler type. This is the module's only dynamic dispatch boundary.
 trait EventDispatch<Target> {
-    /// Reports whether the concrete widget still owns the subscribed port.
+    /// Reports whether the concrete retained producer still owns the subscribed port.
     fn is_alive(&self) -> bool;
     /// Drains one port batch into `target` and returns the number of delivered payloads.
     fn dispatch(&self, target: &mut Target, context: &mut crate::EventContext<'_>) -> usize;
@@ -675,7 +683,7 @@ where
 /// Vector position is subscription order and therefore the deterministic cross-port sweep order.
 /// Each boxed element retains concrete payload and handler types behind [`EventDispatch`]. This
 /// type is crate-private because its lifetime must not diverge from the context that owns the
-/// corresponding retained widget forest.
+/// corresponding retained widget forest and Context-owned service sources.
 pub(crate) struct EventDispatcher<Target> {
     subscriptions: Vec<Box<dyn EventDispatch<Target>>>,
 }
