@@ -11,6 +11,9 @@
 - [x] Add regression tests for popup dismissal, same-transaction placement, and file-dialog opening.
 - [x] Update public lifecycle documentation and examples.
 - [x] Run formatting, focused tests, the complete test suite, and Clippy.
+- [ ] Publish file-dialog completion through a Context-owned typed event source.
+- [ ] Remove file-dialog status polling from application frame code.
+- [ ] Verify accepted, cancelled, and explicitly cancelled completion delivery.
 
 The boxes above are the delivery checklist. A box is checked only in the commit that completes and
 verifies that step.
@@ -21,8 +24,9 @@ verifies that step.
    widget borrows have ended and before the next layout commit.
 2. Use one general mechanism for windows, dialogs, and popups. The mechanism must not know what a
    combo box, menu, file dialog, or other composite control is.
-3. Remove frame-polled command flags from the full demo. Opening a popup or file dialog should be a
-   direct consequence of the typed event that requested it.
+3. Remove frame-polled transient orchestration from the full demo. Opening a popup or file dialog
+   should be a direct consequence of the typed event that requested it, and file-dialog completion
+   should arrive as a typed event rather than an application-polled status.
 4. Keep widget-specific behavior in the widget or application code that composes it. In particular,
    combo selection and open state remain `Combo` concerns; root visibility, modal policy, placement,
    and z-order remain `WindowManager` concerns.
@@ -36,8 +40,10 @@ verifies that step.
 - Do not move application state into `WindowManager` or make it generic over the renderer or state
   type.
 - Do not let widget code re-enter `Context` while its retained cell is borrowed.
-- Do not replace the file-dialog session result with a generalized asynchronous runtime. Polling a
-  one-shot completion value remains supported; this work removes frame-polled UI *commands*.
+- Do not add a generalized asynchronous runtime. Native file-dialog completion is synchronous with
+  the existing Context update transaction and uses the same typed dispatch path as retained widget
+  events. The legacy status snapshot may remain available, but normal application code must not
+  poll it per frame.
 - Do not add a second root lifetime model. Synchronous `Context` methods remain authoritative, and
   the event-time capability delegates to those same `WindowManager` operations.
 
@@ -195,7 +201,7 @@ then remains observational and opening placement uses the geometry that routed t
 
 The file dialog remains a specialized retained widget tree because directory navigation and
 selection are intrinsically file-dialog behavior. No file-dialog behavior is added to the general
-event system. A context-aware button handler simply invokes the existing operation at the safe
+event dispatcher. A context-aware button handler invokes the existing operation at the safe
 transaction boundary:
 
 ```rust
@@ -210,8 +216,36 @@ fn open_dialog(
 }
 ```
 
-The returned session remains the one-shot completion capability. Its status is result observation,
-not a command that reconstructs or resubmits UI.
+`WindowManager` also owns one typed completion source for the Context lifetime. The application
+subscribes once during setup, while the event identifies the particular session that completed:
+
+```rust
+fn file_dialog_completed(&mut self, event: &FileDialogCompleted) {
+    let Some(session) = self.dialog_session.as_ref() else {
+        return;
+    };
+    if !event.is_for(session) {
+        return;
+    }
+
+    match event.status() {
+        FileDialogStatus::Accepted(result) => self.open_file(result),
+        FileDialogStatus::Cancelled => self.note_cancellation(),
+        FileDialogStatus::Pending => unreachable!(),
+    }
+    self.dialog_session = None;
+}
+
+context.subscribe(
+    context.file_dialog_completed(),
+    State::file_dialog_completed,
+)?;
+```
+
+The context-owned source, not the individual controller, owns the event port. Completion can
+therefore remove the dialog root and controller before application dispatch without losing the
+queued event. `FileDialogSession::status` remains a synchronous compatibility snapshot, but retained
+application flow is driven by `FileDialogCompleted` and does not inspect that snapshot each frame.
 
 ## Implementation steps
 
@@ -225,4 +259,7 @@ not a command that reconstructs or resubmits UI.
 6. Convert the full demo's popup, combo, and file-dialog opening handlers to context-aware
    subscriptions; remove `open_popup`, `open_dialog`, and `combo_open`.
 7. Subscribe to combo-popup dismissal and reconcile the combo's retained semantic state.
-8. Run `cargo fmt --check`, focused library/integration tests, `cargo test`, and Clippy.
+8. Add a Context-owned typed file-dialog completion source and emit exactly once for every terminal
+   transition that still has an observable session.
+9. Subscribe the demo to that source once and remove its frame-time status inspection.
+10. Run `cargo fmt --check`, focused library/integration tests, `cargo test`, and Clippy.
