@@ -5,10 +5,10 @@
 - [x] Record the goals, ownership design, non-goals, API sketch, and implementation order.
 - [x] Add a safe context-mutation capability to context-owned event dispatch.
 - [x] Prove context-aware handlers can mutate every retained root kind before the next layout commit.
-- [ ] Move the demo popup and file-dialog opening out of frame-polled boolean flags.
-- [ ] Reconcile the demo combo popup entirely through typed events and authoritative retained state.
-- [ ] Publish combo anchor geometry during update instead of mutating state during paint.
-- [ ] Add regression tests for popup dismissal, same-transaction placement, and file-dialog opening.
+- [x] Move the demo popup and file-dialog opening out of frame-polled boolean flags.
+- [x] Reconcile the demo combo popup entirely through typed events and authoritative retained state.
+- [x] Publish combo anchor geometry during update instead of mutating state during paint.
+- [x] Add regression tests for popup dismissal, same-transaction placement, and file-dialog opening.
 - [ ] Update public lifecycle documentation and examples.
 - [ ] Run formatting, focused tests, the complete test suite, and Clippy.
 

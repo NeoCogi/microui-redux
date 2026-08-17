@@ -1118,9 +1118,6 @@ struct State {
     popup_button_submitted: [WidgetEventHandle<ButtonSubmitted>; 2],
     stack_direction_button_submitted: [WidgetEventHandle<ButtonSubmitted>; 6],
     weight_button_submitted: [WidgetEventHandle<ButtonSubmitted>; 9],
-    open_popup: bool,
-    open_dialog: bool,
-    combo_open: bool,
     triangle_data: Rc<RefCell<TriangleState>>,
     background_swatch_state: TypedWidgetHandle<ColorSwatch>,
 }
@@ -1381,6 +1378,15 @@ impl State {
         ];
         let combo_item_states = combo_item_pairs.each_ref().map(|(state, _)| state.clone());
         let combo_item_submitted = combo_item_pairs.each_ref().map(|(handle, _)| handle.submitted());
+        let combo_labels: Vec<String> = combo_item_states
+            .iter()
+            .map(|item| item.try_read(|item| item.label().to_owned()).expect("combo item state unavailable"))
+            .collect();
+        // Seed the retained combo once from the statically constructed demo items. Selection changes
+        // remain widget-owned; no frame callback needs to recopy these unchanged labels.
+        combo_typed_state
+            .try_update(|combo| combo.update_items(&combo_labels))
+            .expect("combo state unavailable");
         let combo_items = combo_item_pairs.map(|(_, runtime)| runtime);
         let window_info_value_pairs = std::array::from_fn(|_| stateful_leaf::<ListItemBuilder>(ListItemParameters::with_opt("", WidgetOption::NO_INTERACT)));
         let window_info_value_states = window_info_value_pairs.each_ref().map(|(state, _)| state.clone());
@@ -1533,9 +1539,6 @@ impl State {
             popup_button_submitted,
             stack_direction_button_submitted,
             weight_button_submitted,
-            open_popup: false,
-            open_dialog: false,
-            combo_open: false,
             triangle_data,
             background_swatch_state,
         };
@@ -1559,7 +1562,7 @@ impl State {
         context.subscribe(self.submit_buf_submitted.clone(), Self::text_submitted).unwrap();
         context.subscribe(self.submit_button_submitted.clone(), Self::submit_button).unwrap();
         for (index, submitted) in self.test_button_submitted.iter().enumerate() {
-            context.subscribe_with(submitted.clone(), index, Self::test_button).unwrap();
+            context.subscribe_context_with(submitted.clone(), index, Self::test_button).unwrap();
         }
         for (submitted, label) in self.tree_button_submitted.iter().zip([
             "Pressed button 1",
@@ -1571,10 +1574,11 @@ impl State {
         ]) {
             context.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
         }
-        context.subscribe(self.combo_submitted.clone(), Self::combo_submitted).unwrap();
+        context.subscribe_context(self.combo_submitted.clone(), Self::combo_submitted).unwrap();
         for (index, submitted) in self.combo_item_submitted.iter().enumerate() {
-            context.subscribe_with(submitted.clone(), index, Self::combo_item).unwrap();
+            context.subscribe_context_with(submitted.clone(), index, Self::combo_item).unwrap();
         }
+        context.subscribe(self.combo_popup_root.submitted(), Self::combo_popup_submitted).unwrap();
         for (submitted, label) in self.popup_button_submitted.iter().zip(["Hello", "World"]) {
             context.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
         }
@@ -1642,15 +1646,25 @@ impl State {
         self.submit_log(text);
     }
 
-    fn test_button(&mut self, index: &usize, _: &ButtonSubmitted) {
+    fn test_button(&mut self, index: &usize, context: &mut EventContext<'_>, _: &ButtonSubmitted) {
         match index {
             0 => self.write_log("Pressed button 1"),
             1 => self.write_log("Pressed button 2"),
             2 => self.write_log("Pressed button 3"),
-            3 => self.open_popup = true,
+            3 => {
+                // Apply the popup request at the typed-event boundary. WindowManager owns placement,
+                // exclusivity, and the layout commit; State needs no frame-polled command flag.
+                let popup_width = (self.style.default_cell_width + self.style.padding.max(0) * 2).max(80);
+                context.set_root_visible(self.popup_root.id(), true).expect("test popup root must exist");
+                context
+                    .set_root_size(self.popup_root.id(), Dimensioni::new(popup_width, 1))
+                    .expect("test popup root must exist");
+            }
             4 => self.write_log("Pressed button 4"),
-            5 if self.dialog_session.is_none() && !self.open_dialog => {
-                self.open_dialog = true;
+            5 if self.dialog_session.is_none() => {
+                // File-dialog construction uses the same safe context capability without introducing
+                // file-dialog behavior into the general event dispatcher.
+                self.dialog_session = Some(context.open_file_dialog(FileDialogRequest::default()));
                 self.write_log("Open dialog!");
             }
             5 => {}
@@ -1662,11 +1676,21 @@ impl State {
         self.write_log(label);
     }
 
-    fn combo_submitted(&mut self, event: &ComboSubmitted) {
-        self.combo_open = event.open;
+    fn combo_submitted(&mut self, context: &mut EventContext<'_>, event: &ComboSubmitted) {
+        // Combo owns the semantic toggle; WindowManager owns the independently retained popup root.
+        // Reconcile them once, at the event boundary that joins the two application-chosen pieces.
+        context
+            .set_root_visible(self.combo_popup_root.id(), event.open)
+            .expect("combo popup root must exist");
+        if event.open {
+            // Combo published this anchor during the update that emitted `event`, so placement uses
+            // the same committed geometry that routed the click rather than a previous paint.
+            let anchor = self.combo_typed_state.try_read(Combo::anchor).expect("combo unavailable");
+            context.set_root_rect(self.combo_popup_root.id(), anchor).expect("combo popup root must exist");
+        }
     }
 
-    fn combo_item(&mut self, index: &usize, _: &ListItemSubmitted) {
+    fn combo_item(&mut self, index: &usize, context: &mut EventContext<'_>, _: &ListItemSubmitted) {
         let labels: Vec<String> = self
             .combo_item_states
             .iter()
@@ -1676,9 +1700,21 @@ impl State {
             .combo_typed_state
             .try_update(|combo| combo.select(*index, &labels))
             .expect("combo state unavailable");
-        self.combo_open = false;
+        // Selection closes both authorities in the same dispatch transaction: Combo commits its
+        // semantic state above, and the context hides the retained root before the next layout.
+        context
+            .set_root_visible(self.combo_popup_root.id(), false)
+            .expect("combo popup root must exist");
         if let Some(label) = selected {
             self.write_log(format!("Selected: {label}").as_str());
+        }
+    }
+
+    fn combo_popup_submitted(&mut self, event: &RootSubmitted) {
+        // Outside dismissal is generic root policy. Reflect that typed fact into the composed Combo
+        // so its next header click opens instead of toggling stale semantic state closed.
+        if matches!(event, RootSubmitted::PopupDismissed) {
+            self.combo_typed_state.try_update(Combo::close_popup).expect("combo state unavailable");
         }
     }
 
@@ -2172,35 +2208,6 @@ impl State {
             value_fps
                 .try_update(|value| value.set_label(format!("{:.1}", self.fps)))
                 .expect("window fps state unavailable");
-        }
-
-        let combo_labels: Vec<String> = self
-            .combo_item_states
-            .iter()
-            .map(|item| item.try_read(|item| item.label().to_owned()).expect("combo item state unavailable"))
-            .collect();
-        self.combo_typed_state
-            .try_update(|combo| combo.update_items(&combo_labels))
-            .expect("combo state unavailable");
-
-        let combo_anchor = self.combo_typed_state.try_read(Combo::anchor).expect("combo unavailable");
-        if self.combo_open {
-            ctx.set_root_visible(self.combo_popup_root.id(), true).expect("combo popup root must exist");
-            ctx.set_root_rect(self.combo_popup_root.id(), combo_anchor)
-                .expect("combo popup root must exist");
-        } else {
-            ctx.set_root_visible(self.combo_popup_root.id(), false).expect("combo popup root must exist");
-        }
-        if self.open_popup {
-            let popup_width = (self.style.default_cell_width + self.style.padding.max(0) * 2).max(80);
-            ctx.set_root_visible(self.popup_root.id(), true).expect("test popup root must exist");
-            ctx.set_root_size(self.popup_root.id(), Dimensioni::new(popup_width, 1))
-                .expect("test popup root must exist");
-            self.open_popup = false;
-        }
-        if self.open_dialog {
-            self.dialog_session = Some(ctx.open_file_dialog(FileDialogRequest::default()));
-            self.open_dialog = false;
         }
     }
 

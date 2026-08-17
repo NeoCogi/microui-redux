@@ -90,7 +90,7 @@ pub struct Combo {
     open: bool,
     /// Label text for the currently selected item.
     label: String,
-    /// Framework-owned popup anchor snapshot published by the latest paint.
+    /// Popup anchor snapshot published by the latest retained update.
     last_anchor: Recti,
     /// Initialization-only font.
     font: FontChoice,
@@ -103,10 +103,10 @@ pub struct Combo {
 }
 
 impl Combo {
-    /// Returns the popup anchor published by the latest completed combo paint.
+    /// Returns the popup anchor published by the latest completed combo update.
     ///
-    /// This geometry is intended for positioning the popup during a later update/commit; it does not
-    /// retroactively affect the frame that produced it.
+    /// Update uses the layout geometry that routed the current event, allowing a context-aware
+    /// subscriber to position a retained popup before the layout immediately following dispatch.
     pub fn anchor(&self) -> Recti {
         self.last_anchor
     }
@@ -304,8 +304,16 @@ impl Combo {
         Dimensioni::new(width, height)
     }
 
-    /// Updates popup open state and records header submissions.
+    /// Publishes current geometry, updates popup-open state, and records header submissions.
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>) {
+        // Anchor publication belongs to retained update rather than paint. A submitted handler can
+        // therefore read the geometry after traversal borrows end and position its popup in the same
+        // input transaction, while paint remains observational.
+        let screen_header = ctx.screen_content_rect();
+        self.last_anchor = rect(screen_header.x, screen_header.y + screen_header.height, screen_header.width, 1);
+
+        // The Combo owns only semantic open state. The application composes that state with whichever
+        // retained root it selected as popup content through the typed submission event below.
         let submitted = if ctx.clicked() {
             self.open = !self.open;
             Some(ComboSubmitted { open: self.open })
@@ -317,10 +325,10 @@ impl Combo {
         }
     }
 
-    /// Paints the combo header and publishes the read-only popup anchor below it.
-    fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
+    /// Paints the combo header from already-committed retained state.
+    fn paint_widget(&self, ctx: &mut WidgetPaintCtx<'_>) {
         let header = ctx.local_rect();
-        let screen_header = ctx.screen_content_rect();
+        // Painting records visuals only; semantic and placement state was finalized during update.
         ctx.draw_widget_fill(header, ControlColor::Button);
 
         let indicator_size = ctx.atlas().get_icon_size(ctx.style().icons.expand_down);
@@ -331,7 +339,6 @@ impl Combo {
         let mut text_rect = header;
         let reserved_width = indicator_size.width;
         text_rect.width = (text_rect.width - reserved_width).max(0);
-        self.last_anchor = rect(screen_header.x, screen_header.y + screen_header.height, screen_header.width, 1);
         let font = ctx.style().resolve_font_choice(self.font);
         ctx.draw_control_text_with_font(font, self.label.as_str(), text_rect, ControlColor::Text, self.opt);
 

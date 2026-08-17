@@ -667,7 +667,7 @@ impl WindowManager {
 mod tests {
     use super::*;
     use crate::test_support::{AllocationMeasurement, NoopRenderer, test_atlas};
-    use crate::{Button, ButtonParameters, Context, Dimensioni, MouseButton, WindowOption, rect};
+    use crate::{Button, ButtonParameters, ButtonSubmitted, Context, Dimensioni, EventContext, MouseButton, WindowOption, rect};
     use std::{
         fs,
         time::{Instant, SystemTime, UNIX_EPOCH},
@@ -720,6 +720,49 @@ mod tests {
         assert_eq!(session.status(), FileDialogStatus::Pending);
         assert_eq!(session.status(), FileDialogStatus::Pending);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn context_aware_handler_opens_file_dialog_in_the_input_transaction() {
+        #[derive(Default)]
+        struct Model {
+            session: Option<FileDialogSession>,
+        }
+
+        impl Model {
+            fn open(&mut self, context: &mut EventContext<'_>, _: &ButtonSubmitted) {
+                // Create the retained dialog directly at the safe typed-event boundary. No frame
+                // callback or application command flag participates in its lifetime.
+                self.session = Some(context.open_file_dialog(FileDialogRequest::default()));
+            }
+        }
+
+        let dimensions = Dimensioni::new(900, 700);
+        let mut context: Context<NoopRenderer, Model> = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions);
+        let (button, button_node) = Button::create(ButtonParameters::new("open dialog"));
+        let button_id = button_node.id();
+        let window = context.create_window("window", rect(0, 0, 140, 90), button_node);
+        context
+            .set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+            .unwrap();
+        context.subscribe_context(button.submitted(), Model::open).unwrap();
+        let mut model = Model::default();
+        context.update_ui_state(dimensions, &mut model);
+        let button_rect = context.debug_root_node_rect(window.id(), button_id).unwrap();
+
+        context.mousedown(button_rect.x + 1, button_rect.y + 1, MouseButton::LEFT);
+        context.update_ui_state(dimensions, &mut model);
+
+        let session = model.session.as_ref().expect("handler must retain the returned completion session");
+        let dialog = context
+            .window_manager
+            .file_dialogs
+            .iter()
+            .find(|dialog| dialog.belongs_to(session))
+            .map(|dialog| dialog.root.id())
+            .expect("same-transaction dialog construction must retain its controller");
+        assert_eq!(session.status(), FileDialogStatus::Pending);
+        assert_eq!(context.debug_modal_root(), Some(dialog));
     }
 
     #[test]

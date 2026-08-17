@@ -32,10 +32,10 @@ use super::*;
 
 use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, test_atlas};
 use crate::{
-    color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Custom, CustomParameters, Constraints, Context,
-    Dimensioni, Disclosure, DisclosureParameters, EventContext, Grid, GridParameters, KeyMode, Linear, LinearItem, LinearParameters, MouseButton, Node,
-    ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Style, Textbox, TextboxChanged, TextBlock, TextBlockParameters,
-    TextboxParameters, TrackSize, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
+    color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Combo, ComboParameters, ComboSubmitted, Custom,
+    CustomParameters, Constraints, Context, Dimensioni, Disclosure, DisclosureParameters, EventContext, Grid, GridParameters, KeyMode, Linear, LinearItem,
+    LinearParameters, MouseButton, Node, ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Style, Textbox, TextboxChanged,
+    TextBlock, TextBlockParameters, TextboxParameters, TrackSize, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
 };
 use crate::render::{FrameInfo, RenderError};
 use std::{
@@ -867,6 +867,66 @@ fn context_aware_handler_creates_and_mutates_every_root_kind_before_layout() {
     assert!(context.debug_root_node_count(window.id()).is_some());
     assert!(context.debug_root_node_count(dialog.id()).is_some());
     assert!(context.debug_root_node_count(popup.id()).is_some());
+}
+
+#[test]
+fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
+    struct Model {
+        combo: TypedWidgetHandle<Combo>,
+        popup: RootHandle,
+    }
+
+    impl Model {
+        fn combo_submitted(&mut self, context: &mut EventContext<'_>, event: &ComboSubmitted) {
+            // Compose the semantic Combo with an ordinary retained popup through the general root
+            // API; neither EventContext nor WindowManager needs to know this root belongs to a combo.
+            context.set_root_visible(self.popup.id(), event.open).unwrap();
+            if event.open {
+                let anchor = self.combo.anchor().expect("mounted combo must publish an anchor");
+                context.set_root_rect(self.popup.id(), anchor).unwrap();
+            }
+        }
+
+        fn popup_submitted(&mut self, event: &RootSubmitted) {
+            // Generic outside dismissal becomes typed application input after traversal, where the
+            // composed widget can safely reconcile its retained semantic state.
+            if matches!(event, RootSubmitted::PopupDismissed) {
+                self.combo.close_popup().expect("mounted combo must remain available");
+            }
+        }
+    }
+
+    let dimensions = Dimensioni::new(320, 240);
+    let mut context: Context<NoopRenderer, Model> = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions);
+    let (combo, combo_node) = Combo::create(ComboParameters::new());
+    let combo_id = combo_node.id();
+    let source = context.create_window("combo source", rect(10, 10, 140, 90), combo_node);
+    context
+        .set_root_options(source.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+    let popup = context.create_popup("combo choices", Node::widget(DesiredSize(Dimensioni::new(100, 60))));
+    let mut model = Model {
+        combo: combo.clone(),
+        popup: popup.clone(),
+    };
+    context.subscribe_context(combo.submitted(), Model::combo_submitted).unwrap();
+    context.subscribe(popup.submitted(), Model::popup_submitted).unwrap();
+    context.update_ui_state(dimensions, &mut model);
+    let combo_rect = context.debug_root_node_rect(source.id(), combo_id).unwrap();
+
+    context.mousedown(combo_rect.x + 1, combo_rect.y + 1, MouseButton::LEFT);
+    context.update_ui_state(dimensions, &mut model);
+
+    let anchor = combo.anchor().unwrap();
+    assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(true));
+    assert_eq!(popup.widget().try_read(|root| (root.rect().x, root.rect().y)), Some((anchor.x, anchor.y)));
+    assert_eq!(combo.is_open(), Some(true));
+
+    context.mousedown(300, 220, MouseButton::LEFT);
+    context.update_ui_state(dimensions, &mut model);
+
+    assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(false));
+    assert_eq!(combo.is_open(), Some(false));
 }
 
 #[test]

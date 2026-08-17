@@ -130,6 +130,42 @@ fn combo_run_toggles_open_state() {
 }
 
 #[test]
+fn combo_update_publishes_anchor_and_paint_does_not_mutate_it() {
+    let atlas = make_test_atlas();
+    let style = Style::default();
+    let mut combo = ComboBuilder::create_widget(ComboParameters::new());
+    let update_rect = rect(30, 40, 100, 20);
+    let mut update = WidgetUpdateCtx::new_with_interaction(
+        update_rect,
+        update_rect,
+        &style,
+        &atlas,
+        true,
+        false,
+        false,
+        false,
+        false,
+        MouseButton::NONE,
+        KeyMode::NONE,
+        KeyCode::NONE,
+    );
+
+    // Update publishes the screen-space edge that a context-aware submission handler will consume.
+    combo.update(&mut update, None);
+    let anchor = combo.anchor();
+    assert_eq!((anchor.x, anchor.y, anchor.width, anchor.height), (30, 60, 100, 1));
+
+    // Deliberately paint at unrelated geometry. Paint must record commands without replacing the
+    // transaction's already-committed anchor snapshot.
+    let paint_rect = rect(5, 7, 50, 12);
+    let mut display_list = crate::render::DisplayList::new();
+    let mut paint = WidgetPaintCtx::new_with_content_geometry(paint_rect, &mut display_list, paint_rect, &style, &atlas, false, false, false, false);
+    combo.paint(&mut paint);
+    let anchor = combo.anchor();
+    assert_eq!((anchor.x, anchor.y, anchor.width, anchor.height), (30, 60, 100, 1));
+}
+
+#[test]
 fn combo_select_updates_label_and_closes_popup() {
     let mut combo = ComboBuilder::create_widget(ComboParameters::new());
     let items = ["Apple", "Banana", "Cherry"];
