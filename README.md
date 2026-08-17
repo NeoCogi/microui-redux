@@ -7,10 +7,9 @@
 using unique owning `Node` trees, typed weak widget handles, context-owned roots, and typed backend
 frames.
 
-> **Development status:** this source tree is being prepared for the 0.8 alpha. Its package metadata
-> still identifies it as `0.8.0-pre-alpha`; the alpha version will be finalized as a separate
-> release step. The 0.8 line is a breaking retained-API redesign and is not API-compatible with
-> 0.7.
+> **Alpha status:** `0.8.0-alpha.1` is the first public alpha of the breaking retained-API redesign.
+> The 0.8 line is not API-compatible with 0.7 and may continue to evolve before the stable 0.8.0
+> release.
 
 Compared with [microui-rs](https://github.com/neocogi/microui-rs), this crate embraces standard
 library types, reusable retained trees, and richer widgets such as custom rendering callbacks,
@@ -20,17 +19,17 @@ dialogs, and a file dialog.
 
 - [Rendering and backend integration](src/render/RENDER.md)
 - [Typed event architecture](#context-owned-typed-events)
-- [Version history](#version-080-pre-alpha)
+- [Version history](#version-080-alpha1)
 - [`simple` example](examples/simple.rs) and
   [`retained-custom-drawing` example](examples/retained-custom-drawing.rs)
 
 ## Dependency and backend
 
-During this prerelease documentation pass, the package version remains:
+Use the explicit alpha version while the retained API is being evaluated:
 
 ```toml
 [dependencies]
-microui-redux = "0.8.0-pre-alpha"
+microui-redux = "0.8.0-alpha.1"
 ```
 
 `microui-redux` does not create a native window or graphics device. Applications provide a
@@ -631,14 +630,14 @@ together. If both atlas-loading features are enabled, `prebuilt-atlas` takes pre
 To export an atlas as Rust, enable `save-to-rust` (and `png_source` when serializing PNG-backed atlas data) and call `AtlasHandle::to_rust_files`. The helper binary requires `builder`, `save-to-rust`, and `png_source`:
 `cargo run --bin atlas_export --features "builder save-to-rust png_source" -- --output path/to/atlas.rs`
 
-### Version 0.8.0-pre-alpha
+### Version 0.8.0-alpha.1
 
-`0.8.0-pre-alpha` is the current alpha candidate. It is a breaking retained-API redesign relative
-to `0.7.0`. The manifest and this heading must be updated together when the final alpha identifier
-is selected.
+`0.8.0-alpha.1` is the first public alpha of the breaking retained-API redesign relative to
+`0.7.0`. It is intended for integration testing and API feedback before the stable `0.8.0`
+release.
 
 - [x] Replaced retained tree building with unique owning `Node` values.
-    - [x] Built-in leaf and container constructors return `(TypedWidgetHandle<W>, Node)`.
+    - [x] Handle-bearing built-in leaf and container constructors return `(TypedWidgetHandle<W>, Node)`; stateless `Custom::create` returns a runtime for explicit `Node` mounting.
     - [x] Moving or mounting a node transfers its single owner; typed widget handles remain weak.
     - [x] Public runtime node identity and generic interaction-result lookup were removed.
 - [x] Merged semantic state and runtime behavior into concrete widgets.

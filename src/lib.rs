@@ -162,7 +162,7 @@
 //! measurement results.
 //! Retained application logic uses typed weak widget handles returned beside mounted nodes.
 //! The [`retained`] module and repository examples document the 0.8 alpha retained-authoring API.
-//! The source tree remains versioned `0.8.0-pre-alpha` until alpha release metadata is finalized.
+//! This release is versioned `0.8.0-alpha.1`, the first public alpha of that redesign.
 //!
 //! # Rendering pipeline
 //!
