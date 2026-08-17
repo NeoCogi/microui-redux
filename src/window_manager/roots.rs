@@ -430,7 +430,8 @@ impl WindowManager {
 
     /// Performs one synchronization layout, then one full update/layout pair per queued event.
     pub(crate) fn update(&mut self, dimensions: Dimensioni, atlas: &crate::AtlasHandle) {
-        self.update_with(dimensions, atlas, &mut (), |_| false);
+        // Polling contexts have no application dispatcher, so the safe boundary performs no work.
+        self.update_with(dimensions, atlas, &mut (), |_, _| false);
     }
 
     /// Performs the retained update while exposing each safe subscriber-dispatch boundary.
@@ -439,7 +440,7 @@ impl WindowManager {
         dimensions: Dimensioni,
         atlas: &crate::AtlasHandle,
         dispatch_state: &mut DispatchState,
-        mut after_event: impl FnMut(&mut DispatchState) -> bool,
+        mut after_event: impl FnMut(&mut Self, &mut DispatchState) -> bool,
     ) {
         self.ui_commit = None;
         let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
@@ -452,7 +453,7 @@ impl WindowManager {
         self.layout(viewport, atlas);
         // Subscriber invocations may already be waiting without a raw input event. If they mutate
         // retained state, commit that state before routing the first queued event.
-        if after_event(dispatch_state) {
+        if after_event(self, dispatch_state) {
             self.layout(viewport, atlas);
         }
 
@@ -468,7 +469,7 @@ impl WindowManager {
             // Application subscribers run only after the complete cross-root update has released
             // retained borrows. Their state/topology changes are therefore safe and become visible
             // to the layout immediately below, before routing the next raw input event.
-            after_event(dispatch_state);
+            after_event(self, dispatch_state);
             self.layout(viewport, atlas);
         }
         self.ui_commit = Some(dimensions);

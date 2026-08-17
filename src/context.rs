@@ -38,6 +38,114 @@ use crate::file_dialog::{FileDialogRequest, FileDialogSession};
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, FrameInfo, RenderError, Renderer, RendererBackend};
 use crate::{Dimensioni, ImageSource, KeyCode, KeyMode, MouseButton, Node, Recti, Style, TextureId};
 
+/// Context-owned UI mutation capability available to an application event handler.
+///
+/// [`Context::update_ui_state`] creates this short-lived façade only after the complete retained
+/// widget update has released every widget borrow. Mutations therefore use the same authoritative
+/// [`WindowManager`] operations as [`Context`] without allowing handler code to re-enter an active
+/// widget traversal. The capability owns no roots or renderer resources and cannot outlive the
+/// dispatch call that lent it.
+///
+/// State-only handlers registered with [`Context::subscribe`] remain the simpler default. Use
+/// [`Context::subscribe_context`] when a handler must create, show, hide, move, resize, raise, or
+/// destroy a retained root, or when it must open or cancel a file dialog in direct response to a
+/// typed widget event.
+pub struct EventContext<'a> {
+    /// Exclusive access to the context-owned root and input transaction domain.
+    window_manager: &'a mut WindowManager,
+}
+
+impl<'a> EventContext<'a> {
+    /// Lends one already-exclusive window manager to an application dispatch transaction.
+    pub(crate) fn new(window_manager: &'a mut WindowManager) -> Self {
+        // Keep construction private so application code can only receive this capability at the
+        // borrow-safe boundary established by Context::update_ui_state.
+        Self { window_manager }
+    }
+
+    /// Creates an open retained window around one uniquely owned application node.
+    ///
+    /// The returned handle is weak; the parent [`Context`] remains the sole root owner.
+    pub fn create_window(&mut self, name: &str, rect: Recti, content: Node) -> RootHandle {
+        // Delegate to the same non-generic owner used by Context::create_window so event-time and
+        // ordinary root construction have identical lifetime, z-order, and invalidation behavior.
+        self.window_manager.create_window(name, rect, content)
+    }
+
+    /// Creates a hidden retained dialog around one uniquely owned application node.
+    ///
+    /// Show the returned root with [`Self::set_root_visible`]. A shown dialog enters the existing
+    /// modal stack before the layout immediately following this event dispatch.
+    pub fn create_dialog(&mut self, name: &str, rect: Recti, content: Node) -> RootHandle {
+        // WindowManager remains the only place that distinguishes modal root policy.
+        self.window_manager.create_dialog(name, rect, content)
+    }
+
+    /// Creates a hidden auto-sized popup around one uniquely owned application node.
+    ///
+    /// The operation is generic root construction; this capability has no knowledge of the button,
+    /// combo, menu, or other application behavior that may later show the popup.
+    pub fn create_popup(&mut self, name: &str, content: Node) -> RootHandle {
+        // Register the persistent tree through the ordinary popup root path.
+        self.window_manager.create_popup(name, content)
+    }
+
+    /// Replaces a retained root rectangle before the next layout commit.
+    pub fn set_root_rect(&mut self, root: RootId, rect: Recti) -> Result<(), RootMutationError> {
+        // Preserve WindowManager's checked root identity and active-chrome reconciliation.
+        self.window_manager.set_root_rect(root, rect)
+    }
+
+    /// Replaces a retained root size without changing its origin.
+    pub fn set_root_size(&mut self, root: RootId, size: Dimensioni) -> Result<(), RootMutationError> {
+        // Size is still authoritative root state rather than an application-side deferred value.
+        self.window_manager.set_root_size(root, size)
+    }
+
+    /// Replaces the chrome options for a retained root.
+    pub fn set_root_options(&mut self, root: RootId, options: WindowOption) -> Result<(), RootMutationError> {
+        // Apply option-dependent capture cleanup in the shared WindowManager implementation.
+        self.window_manager.set_root_options(root, options)
+    }
+
+    /// Shows or hides a retained root while preserving its tree and concrete widget state.
+    ///
+    /// Dialog modal-stack changes and popup exclusivity use the same policy as
+    /// [`Context::set_root_visible`].
+    pub fn set_root_visible(&mut self, root: RootId, visible: bool) -> Result<(), RootMutationError> {
+        // Mutate the root synchronously at the safe dispatch boundary so the following layout sees
+        // the requested visibility without an application-owned frame flag.
+        self.window_manager.set_root_visible(root, visible)
+    }
+
+    /// Raises a registered root and reports whether it still exists.
+    pub fn bring_root_to_front(&mut self, root: RootId) -> bool {
+        // Let WindowManager preserve the active modal root above the requested ordinary root.
+        self.window_manager.bring_root_to_front(root)
+    }
+
+    /// Permanently unregisters a root and drops its complete retained tree.
+    pub fn destroy_root(&mut self, root: RootId) -> bool {
+        // Root destruction also expires every weak widget and root handle owned by the removed tree.
+        self.window_manager.destroy_root(root)
+    }
+
+    /// Opens a retained file dialog and returns its read-only completion session.
+    pub fn open_file_dialog(&mut self, request: FileDialogRequest) -> FileDialogSession {
+        // FileDialogController construction remains specialized inside the file-dialog module; this
+        // façade merely exposes the existing Context-owned operation at the safe event boundary.
+        self.window_manager.open_file_dialog(request)
+    }
+
+    /// Cancels a pending file-dialog session owned by this context.
+    ///
+    /// Returns `false` when the session is terminal or belongs to another context.
+    pub fn cancel_file_dialog(&mut self, session: &FileDialogSession) -> bool {
+        // Delegate ownership verification and retained-root removal to WindowManager.
+        self.window_manager.cancel_file_dialog(session)
+    }
+}
+
 /// Primary entry point used to drive the UI over a rendering backend.
 ///
 /// `Context` is the only public ordered input-queue boundary. Input forwarding calls append raw
@@ -190,8 +298,16 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     pub fn update_ui_state(&mut self, dimensions: Dimensioni, state: &mut State) {
         assert!(dimensions.width > 0 && dimensions.height > 0, "update_ui_state dimensions must be positive");
         let atlas = self.renderer.atlas();
-        self.window_manager
-            .update_with(dimensions, &atlas, state, |state| self.event_dispatcher.dispatch(state));
+        // Split the two Context-owned transaction participants before entering WindowManager. The
+        // dispatch closure can then lend the manager back through EventContext without aliasing the
+        // independently borrowed application dispatcher.
+        let window_manager = &mut self.window_manager;
+        let event_dispatcher = &mut self.event_dispatcher;
+        window_manager.update_with(dimensions, &atlas, state, |window_manager, state| {
+            // This closure runs only after complete retained traversals release widget borrows.
+            let mut event_context = EventContext::new(window_manager);
+            event_dispatcher.dispatch_with_context(state, &mut event_context)
+        });
     }
 
     /// Subscribes the context's application state to one native widget event.
@@ -213,6 +329,36 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         method: fn(&mut State, &BoundContext, &E),
     ) -> Result<(), crate::SubscribeError> {
         self.event_dispatcher.subscribe_with(event, context, method)
+    }
+
+    /// Subscribes a state method that also needs safe context-owned UI mutation access.
+    ///
+    /// The supplied [`EventContext`] exists only for one dispatch call after retained widget borrows
+    /// have ended. Root or file-dialog mutations performed through it are committed by the layout
+    /// immediately following that dispatch boundary. Use [`Context::subscribe`] when the handler
+    /// only mutates application or widget state.
+    pub fn subscribe_context<E: crate::WidgetEvent>(
+        &mut self,
+        event: crate::WidgetEventHandle<E>,
+        method: for<'a> fn(&mut State, &mut EventContext<'a>, &E),
+    ) -> Result<(), crate::SubscribeError> {
+        // Store the typed function pointer in the same context-owned dispatcher as state-only
+        // subscriptions; only its invocation adapter differs.
+        self.event_dispatcher.subscribe_context(event, method)
+    }
+
+    /// Subscribes a context-aware state method with one immutable bound application value.
+    ///
+    /// The bound value precedes [`EventContext`] and the event payload in the method signature,
+    /// matching the established [`Context::subscribe_with`] argument order.
+    pub fn subscribe_context_with<E: crate::WidgetEvent, BoundContext: 'static>(
+        &mut self,
+        event: crate::WidgetEventHandle<E>,
+        context: BoundContext,
+        method: for<'a> fn(&mut State, &BoundContext, &mut EventContext<'a>, &E),
+    ) -> Result<(), crate::SubscribeError> {
+        // The dispatcher owns the bound value and preserves ordinary subscription ordering.
+        self.event_dispatcher.subscribe_context_with(event, context, method)
     }
 }
 

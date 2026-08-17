@@ -213,7 +213,7 @@ pub mod retained {
         Node, ScrollArea, ScrollAreaOption, ScrollAreaParameters, TrackSize, UiInputEvent, Widget, TextWrap, TypedWidgetHandle, WidgetBuilder,
         WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
     };
-    pub use crate::context::{Context, ContextFrame};
+    pub use crate::context::{Context, ContextFrame, EventContext};
     pub use crate::window_manager::{RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted, WindowOption};
 }
 
@@ -232,11 +232,11 @@ pub mod prelude {
     pub use crate::input::{KeyCode, KeyMode, MouseButton};
     pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame, TextureId};
     pub use crate::retained::{
-        ChildParticipation, Children, Container, ContainerLayoutCtx, ContainerWidget, Context, ContextFrame, CustomRenderArgs, AvailableSpace, Constraints,
-        CustomRenderHandle, Disclosure, DisclosureParameters, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, Linear, LinearCrossSize, LinearDirection,
-        LinearItem, LinearParameters, Node, RootChanged, RootHandle, MeasureCtx, RootId, RootMutationError, RootChrome, RootSubmitted, ScrollArea,
-        ScrollAreaOption, ScrollAreaParameters, TrackSize, LeafWidget, TextWrap, UiInputEvent, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption,
-        WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx, WindowOption,
+        ChildParticipation, Children, Container, ContainerLayoutCtx, ContainerWidget, Context, ContextFrame, EventContext, CustomRenderArgs, AvailableSpace,
+        Constraints, CustomRenderHandle, Disclosure, DisclosureParameters, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, Linear, LinearCrossSize,
+        LinearDirection, LinearItem, LinearParameters, Node, RootChanged, RootHandle, MeasureCtx, RootId, RootMutationError, RootChrome, RootSubmitted,
+        ScrollArea, ScrollAreaOption, ScrollAreaParameters, TrackSize, LeafWidget, TextWrap, UiInputEvent, TypedWidgetHandle, Widget, WidgetBuilder,
+        WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx, WindowOption,
     };
     pub use crate::math::{expand_rect, rect, vec2};
     pub use crate::theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, color};
@@ -258,7 +258,7 @@ pub use atlas::{
     AtlasHandle, AtlasSource, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry,
     FontId, IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON,
 };
-pub use context::{Context, ContextFrame};
+pub use context::{Context, ContextFrame, EventContext};
 pub use window_manager::{RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted, WindowOption};
 pub use event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventHandle};
 pub use file_dialog::{FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};

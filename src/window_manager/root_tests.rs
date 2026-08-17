@@ -33,9 +33,9 @@ use super::*;
 use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, test_atlas};
 use crate::{
     color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Custom, CustomParameters, Constraints, Context,
-    Dimensioni, Disclosure, DisclosureParameters, Grid, GridParameters, KeyMode, Linear, LinearItem, LinearParameters, MouseButton, Node, ScrollArea,
-    ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Style, Textbox, TextboxChanged, TextBlock, TextBlockParameters, TextboxParameters,
-    TrackSize, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
+    Dimensioni, Disclosure, DisclosureParameters, EventContext, Grid, GridParameters, KeyMode, Linear, LinearItem, LinearParameters, MouseButton, Node,
+    ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Style, Textbox, TextboxChanged, TextBlock, TextBlockParameters,
+    TextboxParameters, TrackSize, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
 };
 use crate::render::{FrameInfo, RenderError};
 use std::{
@@ -803,6 +803,70 @@ fn widget_handle_events_invoke_state_methods_without_polling() {
     ctx.update_ui_state(dimensions, &mut model);
 
     assert_eq!(model.submissions, ["first", "second", "first"]);
+}
+
+#[test]
+fn context_aware_handler_creates_and_mutates_every_root_kind_before_layout() {
+    #[derive(Default)]
+    struct Model {
+        window: Option<RootHandle>,
+        dialog: Option<RootHandle>,
+        popup: Option<RootHandle>,
+    }
+
+    impl Model {
+        fn create_roots(&mut self, context: &mut EventContext<'_>, _: &ButtonSubmitted) {
+            // Construct every root kind through the same dispatch capability. The nodes move into
+            // Context ownership exactly as they do through the ordinary Context façade.
+            let window = context.create_window("event window", rect(30, 40, 90, 70), empty_content());
+            let dialog = context.create_dialog("event dialog", rect(50, 60, 100, 80), empty_content());
+            let popup = context.create_popup("event popup", empty_content());
+
+            // Exercise generic root mutation while the event boundary owns exclusive WindowManager
+            // access. The layout following dispatch must observe every change.
+            context.set_root_size(window.id(), Dimensioni::new(110, 75)).unwrap();
+            context.set_root_visible(dialog.id(), true).unwrap();
+            context.set_root_visible(popup.id(), true).unwrap();
+            context.set_root_rect(popup.id(), rect(180, 30, 1, 1)).unwrap();
+
+            self.window = Some(window);
+            self.dialog = Some(dialog);
+            self.popup = Some(popup);
+        }
+    }
+
+    let (submitted, button) = button_content("create roots");
+    let button_id = button.id();
+    let dimensions = Dimensioni::new(320, 240);
+    let mut context: Context<NoopRenderer, Model> = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions);
+    let source = context.create_window("source", rect(0, 0, 140, 100), button);
+    context
+        .set_root_options(source.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+    context.subscribe_context(submitted, Model::create_roots).unwrap();
+    let mut model = Model::default();
+    context.update_ui_state(dimensions, &mut model);
+    let button_rect = context.debug_root_node_rect(source.id(), button_id).unwrap();
+
+    context.mousedown(button_rect.x + 1, button_rect.y + 1, MouseButton::LEFT);
+    context.update_ui_state(dimensions, &mut model);
+
+    let window = model.window.as_ref().expect("event handler must retain the weak window handle");
+    let dialog = model.dialog.as_ref().expect("event handler must retain the weak dialog handle");
+    let popup = model.popup.as_ref().expect("event handler must retain the weak popup handle");
+    assert_eq!(
+        window.widget().try_read(|root| {
+            let rect = root.rect();
+            (rect.x, rect.y, rect.width, rect.height)
+        }),
+        Some((30, 40, 110, 75))
+    );
+    assert_eq!(dialog.widget().try_read(RootChrome::is_visible), Some(true));
+    assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(true));
+    assert_eq!(popup.widget().try_read(|root| (root.rect().x, root.rect().y)), Some((180, 30)));
+    assert!(context.debug_root_node_count(window.id()).is_some());
+    assert!(context.debug_root_node_count(dialog.id()).is_some());
+    assert!(context.debug_root_node_count(popup.id()).is_some());
 }
 
 #[test]

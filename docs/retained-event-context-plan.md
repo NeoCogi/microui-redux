@@ -3,8 +3,8 @@
 ## Status
 
 - [x] Record the goals, ownership design, non-goals, API sketch, and implementation order.
-- [ ] Add a safe context-mutation capability to context-owned event dispatch.
-- [ ] Prove context-aware handlers can mutate every retained root kind before the next layout commit.
+- [x] Add a safe context-mutation capability to context-owned event dispatch.
+- [x] Prove context-aware handlers can mutate every retained root kind before the next layout commit.
 - [ ] Move the demo popup and file-dialog opening out of frame-polled boolean flags.
 - [ ] Reconcile the demo combo popup entirely through typed events and authoritative retained state.
 - [ ] Publish combo anchor geometry during update instead of mutating state during paint.
@@ -226,4 +226,3 @@ not a command that reconstructs or resubmits UI.
    subscriptions; remove `open_popup`, `open_dialog`, and `combo_open`.
 7. Subscribe to combo-popup dismissal and reconcile the combo's retained semantic state.
 8. Run `cargo fmt --check`, focused library/integration tests, `cargo test`, and Clippy.
-

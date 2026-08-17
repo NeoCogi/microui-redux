@@ -295,7 +295,7 @@ use crate::Widget;
 /// Maximum number of native events handled in one dispatch transaction.
 ///
 /// The limit applies across all subscriptions and all cascade sweeps initiated by one call to
-/// [`EventDispatcher::dispatch`]. It is a correctness guard against mutually emitting handlers, not a
+/// [`EventDispatcher::dispatch_with_context`]. It is a correctness guard against mutually emitting handlers, not a
 /// normal flow-control mechanism.
 const MAX_EVENT_DISPATCHES: usize = 1_000_000;
 
@@ -525,13 +525,15 @@ impl<E: WidgetEvent> Drop for WidgetEventListener<E> {
 /// supplied application `Target`. The trait therefore uses `&self`, making stateless handler
 /// behavior part of the event-system contract instead of accepting an arbitrary stateful closure.
 trait EventHandler<Target, E: WidgetEvent> {
-    /// Applies one concrete event payload to the dispatch target.
-    fn handle(&self, target: &mut Target, event: &E);
+    /// Applies one concrete event payload to the dispatch target and optional UI mutation façade.
+    fn handle(&self, target: &mut Target, context: &mut crate::EventContext<'_>, event: &E);
 }
 
 /// A plain `fn(&mut Target, &E)` is already a complete typed event handler.
 impl<Target, E: WidgetEvent> EventHandler<Target, E> for fn(&mut Target, &E) {
-    fn handle(&self, target: &mut Target, event: &E) {
+    fn handle(&self, target: &mut Target, _context: &mut crate::EventContext<'_>, event: &E) {
+        // State-only handlers deliberately ignore the context capability, preserving their existing
+        // signature and keeping context access opt-in at registration.
         self(target, event);
     }
 }
@@ -545,8 +547,43 @@ struct BoundEventHandler<Target, BoundContext, E: WidgetEvent> {
 }
 
 impl<Target, BoundContext, E: WidgetEvent> EventHandler<Target, E> for BoundEventHandler<Target, BoundContext, E> {
-    fn handle(&self, target: &mut Target, event: &E) {
+    fn handle(&self, target: &mut Target, _event_context: &mut crate::EventContext<'_>, event: &E) {
+        // Bound state-only handlers retain the same invocation order and do not receive UI access.
         (self.method)(target, &self.context, event);
+    }
+}
+
+/// Explicit adapter for a state method that opts into context-owned UI mutation access.
+///
+/// A higher-ranked function pointer accepts whichever short lifetime belongs to the current
+/// dispatch boundary. The handler cannot store that borrow in `'static` application state.
+struct ContextEventHandler<Target, E: WidgetEvent> {
+    /// Concrete application method invoked for each owned event payload.
+    method: for<'a> fn(&mut Target, &mut crate::EventContext<'a>, &E),
+}
+
+impl<Target, E: WidgetEvent> EventHandler<Target, E> for ContextEventHandler<Target, E> {
+    /// Invokes the method with the exclusive capability lent by the current dispatch transaction.
+    fn handle(&self, target: &mut Target, context: &mut crate::EventContext<'_>, event: &E) {
+        // No Context or WindowManager reference is stored in the subscription; the borrow enters and
+        // leaves entirely within this call.
+        (self.method)(target, context, event);
+    }
+}
+
+/// Explicit adapter for a context-aware target method with one subscription-owned bound value.
+struct BoundContextEventHandler<Target, BoundContext, E: WidgetEvent> {
+    /// Immutable application value retained for the subscription lifetime.
+    context: BoundContext,
+    /// Concrete method receiving state, the bound value, safe UI access, and the event payload.
+    method: for<'a> fn(&mut Target, &BoundContext, &mut crate::EventContext<'a>, &E),
+}
+
+impl<Target, BoundContext, E: WidgetEvent> EventHandler<Target, E> for BoundContextEventHandler<Target, BoundContext, E> {
+    /// Invokes the context-aware method without erasing its event or bound-value types.
+    fn handle(&self, target: &mut Target, event_context: &mut crate::EventContext<'_>, event: &E) {
+        // Keep argument order consistent with Context::subscribe_context_with.
+        (self.method)(target, &self.context, event_context, event);
     }
 }
 
@@ -558,7 +595,7 @@ trait EventDispatch<Target> {
     /// Reports whether the concrete widget still owns the subscribed port.
     fn is_alive(&self) -> bool;
     /// Drains one port batch into `target` and returns the number of delivered payloads.
-    fn dispatch(&self, target: &mut Target) -> usize;
+    fn dispatch(&self, target: &mut Target, context: &mut crate::EventContext<'_>) -> usize;
 }
 
 /// Concrete binding between one typed port listener and one typed target handler.
@@ -586,11 +623,13 @@ where
     ///
     /// Detaching before the first invocation is essential: handler code may cause widgets to emit
     /// without colliding with a live mutable borrow of this port.
-    fn dispatch(&self, target: &mut Target) -> usize {
+    fn dispatch(&self, target: &mut Target, context: &mut crate::EventContext<'_>) -> usize {
         let events = self.listener.drain();
         let count = events.len();
         for event in events {
-            self.handler.handle(target, &event);
+            // The port borrow ended when drain returned, so a context-aware handler may safely
+            // mutate or destroy retained roots before the next payload is delivered.
+            self.handler.handle(target, context, &event);
         }
         count
     }
@@ -633,6 +672,29 @@ impl<Target: 'static> EventDispatcher<Target> {
         self.add(event, BoundEventHandler { context, method })
     }
 
+    /// Registers a target method that receives the dispatch transaction's UI mutation capability.
+    pub(crate) fn subscribe_context<E: WidgetEvent>(
+        &mut self,
+        event: WidgetEventHandle<E>,
+        method: for<'a> fn(&mut Target, &mut crate::EventContext<'a>, &E),
+    ) -> Result<(), SubscribeError> {
+        // Wrap the higher-ranked function pointer explicitly so ordinary state-only handlers retain
+        // their original adapter and public signature.
+        self.add(event, ContextEventHandler { method })
+    }
+
+    /// Registers a context-aware target method with one subscription-owned immutable value.
+    pub(crate) fn subscribe_context_with<E: WidgetEvent, BoundContext: 'static>(
+        &mut self,
+        event: WidgetEventHandle<E>,
+        context: BoundContext,
+        method: for<'a> fn(&mut Target, &BoundContext, &mut crate::EventContext<'a>, &E),
+    ) -> Result<(), SubscribeError> {
+        // Store the typed bound value beside the typed function pointer; no closure or payload
+        // downcast is introduced.
+        self.add(event, BoundContextEventHandler { context, method })
+    }
+
     /// Connects the port and appends its concrete subscription in sweep order.
     ///
     /// The fallible connection is completed before `Vec::push`; a failed subscription therefore
@@ -656,7 +718,9 @@ impl<Target: 'static> EventDispatcher<Target> {
     /// The cumulative count is checked after every drained port batch. Arithmetic overflow and a
     /// transaction exceeding [`MAX_EVENT_DISPATCHES`] both panic because either indicates a broken
     /// event feedback loop rather than recoverable input.
-    pub(crate) fn dispatch(&mut self, target: &mut Target) -> bool {
+    pub(crate) fn dispatch_with_context(&mut self, target: &mut Target, context: &mut crate::EventContext<'_>) -> bool {
+        // Prune subscriptions whose weak event ports expired before lending UI mutation access to
+        // any application method.
         self.subscriptions.retain(|subscription| subscription.is_alive());
 
         let mut dispatched = 0usize;
@@ -664,7 +728,7 @@ impl<Target: 'static> EventDispatcher<Target> {
             let before = dispatched;
             for subscription in &self.subscriptions {
                 dispatched = dispatched
-                    .checked_add(subscription.dispatch(target))
+                    .checked_add(subscription.dispatch(target, context))
                     .expect("widget event dispatch count overflowed");
                 assert!(
                     dispatched <= MAX_EVENT_DISPATCHES,
@@ -676,6 +740,19 @@ impl<Target: 'static> EventDispatcher<Target> {
             }
         }
         dispatched != 0
+    }
+
+    /// Delivers pending events with an otherwise unused context capability in focused unit tests.
+    ///
+    /// Production dispatch always uses [`Self::dispatch_with_context`] and the live context-owned
+    /// window manager. Tests for isolated widget ports do not exercise root mutation, so constructing
+    /// an empty manager here keeps their scope narrow without weakening the production signature.
+    #[cfg(test)]
+    pub(crate) fn dispatch(&mut self, target: &mut Target) -> bool {
+        // The temporary manager is owned for exactly this dispatch and cannot affect a real context.
+        let mut window_manager = crate::window_manager::WindowManager::new(crate::Style::default());
+        let mut context = crate::EventContext::new(&mut window_manager);
+        self.dispatch_with_context(target, &mut context)
     }
 }
 
