@@ -1605,6 +1605,10 @@ impl State {
         ]) {
             context.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
         }
+        // Subscribe once to the Context-owned service source. Every later dialog session reports
+        // completion through this handler, so frame processing never inspects session status.
+        let file_dialog_completed = context.file_dialog_completed();
+        context.subscribe(file_dialog_completed, Self::file_dialog_completed).unwrap();
     }
 
     fn background_changed(&mut self, index: &usize, event: &SliderChanged) {
@@ -1662,8 +1666,8 @@ impl State {
             }
             4 => self.write_log("Pressed button 4"),
             5 if self.dialog_session.is_none() => {
-                // File-dialog construction uses the same safe context capability without introducing
-                // file-dialog behavior into the general event dispatcher.
+                // File-dialog construction uses the same safe context capability. Its terminal
+                // result returns through the typed subscription installed once during setup.
                 self.dialog_session = Some(context.open_file_dialog(FileDialogRequest::default()));
                 self.write_log("Open dialog!");
             }
@@ -2211,21 +2215,28 @@ impl State {
         }
     }
 
-    fn poll_file_dialog(&mut self) {
-        let Some(status) = self.dialog_session.as_ref().map(FileDialogSession::status) else {
+    fn file_dialog_completed(&mut self, event: &FileDialogCompleted) {
+        // The Context exposes one completion source for every session. Match exact ownership before
+        // applying this terminal result to the currently retained demo operation.
+        let Some(session) = self.dialog_session.as_ref() else {
             return;
         };
-        match status {
-            FileDialogStatus::Pending => {}
+        if !event.is_for(session) {
+            return;
+        }
+
+        // Completion is delivered once at the retained event boundary. Update application state
+        // immediately and release the terminal session; no frame-time reconciliation is necessary.
+        match event.status() {
             FileDialogStatus::Accepted(result) => {
                 self.write_log(format!("Selected file: {}", result.file_name).as_str());
-                self.dialog_session = None;
             }
             FileDialogStatus::Cancelled => {
                 self.write_log("File dialog canceled");
-                self.dialog_session = None;
             }
+            FileDialogStatus::Pending => unreachable!("file-dialog completion events are terminal"),
         }
+        self.dialog_session = None;
     }
 
     fn process_frame(&mut self, ctx: &mut Context<SelectedBackend, Self>) {
@@ -2250,7 +2261,6 @@ impl State {
         self.suzanne_window(ctx);
         self.stack_direction_window(ctx);
         self.weight_window(ctx);
-        self.poll_file_dialog();
     }
 }
 
