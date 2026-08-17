@@ -109,6 +109,11 @@ pub fn atlas_config() -> builder::Config<'static> {
             path: "assets/CONSOLE.ttf",
             size: 14,
         },
+        builder::FontAsset {
+            name: "calculator-display",
+            path: "assets/CONSOLE.ttf",
+            size: 28,
+        },
     ];
 
     builder::Config {

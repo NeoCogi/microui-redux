@@ -41,6 +41,7 @@ use microui_redux::prelude::*;
 const DISPLAY_MAX_LEN: usize = 24;
 const DISPLAY_HEIGHT_FRACTION: f32 = 0.20;
 const KEYPAD_ROW_HEIGHT_WEIGHT: f32 = 1.0;
+const DISPLAY_FONT: &str = "calculator-display";
 
 #[derive(Copy, Clone)]
 enum Operator {
@@ -322,10 +323,12 @@ impl State {
 fn main() {
     let atlas = atlas_assets::load_atlas();
     let mut fw = Application::new(atlas.clone(), move |_gl, ctx| {
-        let (display_state, display_runtime) = Textbox::create(TextboxParameters::with_opt(
-            "0",
-            WidgetOption::FRAME | WidgetOption::ALIGN_RIGHT | WidgetOption::NO_INTERACT,
-        ));
+        let display_font = atlas
+            .font_id(DISPLAY_FONT)
+            .expect("calculator display font should be baked into the example atlas");
+        let (display_state, display_runtime) = Textbox::create(
+            TextboxParameters::with_opt("0", WidgetOption::FRAME | WidgetOption::ALIGN_RIGHT | WidgetOption::NO_INTERACT).font(display_font.into()),
+        );
         let mut buttons = [
             CalcButton::new("AC", Action::ClearAll),
             CalcButton::new("CE", Action::ClearEntry),
@@ -356,7 +359,7 @@ fn main() {
             .map(|button| button.widget.take().expect("calculator tree is built once"))
             .collect::<Vec<_>>();
         let (_, grid) = Grid::create(GridParameters::new(columns, rows, button_nodes));
-        let (_, keypad_column) = Linear::create(LinearParameters::vertical([grid]));
+        let (_, keypad_column) = Linear::create(LinearParameters::vertical([LinearItem::flex(grid, 1.0)]));
         let (_, keypad_row) = Linear::create(LinearParameters::horizontal([LinearItem::flex(keypad_column, 1.0)]).stretch_cross());
         let display_weight = DISPLAY_HEIGHT_FRACTION;
         let (_, tree) = Linear::create(LinearParameters::vertical([

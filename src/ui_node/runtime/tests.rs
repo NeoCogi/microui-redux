@@ -342,6 +342,29 @@ fn calculator_flex_geometry_is_preserved_as_an_explicit_baseline() {
 }
 
 #[test]
+fn calculator_keypad_grid_fills_its_nested_linear_allocation() {
+    let (display_id, display) = layout_probe("display");
+    let buttons = (0..20).map(|_| layout_probe("key").1).collect::<Vec<_>>();
+    let first_button_id = buttons.first().expect("calculator keypad has buttons").id();
+    let last_button_id = buttons.last().expect("calculator keypad has buttons").id();
+    let (_, grid) = crate::Grid::create(crate::GridParameters::new([TrackSize::Flex(1.0); 4], [TrackSize::Flex(1.0); 5], buttons));
+    let (_, keypad_column) = crate::Linear::create(crate::LinearParameters::vertical([LinearItem::flex(grid, 1.0)]));
+    let (_, keypad_row) = crate::Linear::create(crate::LinearParameters::horizontal([LinearItem::flex(keypad_column, 1.0)]).stretch_cross());
+    let (_, mut root) = crate::Linear::create(crate::LinearParameters::vertical([
+        LinearItem::flex(display, 0.2),
+        LinearItem::flex(keypad_row, 0.8),
+    ]));
+    let style = Style { spacing: 4, ..Style::default() };
+    let mut runtime = UiRuntime::new();
+    runtime.begin_update();
+    runtime.layout_tree_root(&mut root, &style, test_atlas(), Recti::new(0, 0, 320, 420), Recti::new(0, 0, 320, 420));
+
+    assert_eq!(rect_components(committed_rect(&runtime, &root, display_id)), (0, 0, 320, 84));
+    assert_eq!(rect_components(committed_rect(&runtime, &root, first_button_id)), (0, 88, 77, 64));
+    assert_eq!(rect_components(committed_rect(&runtime, &root, last_button_id)), (243, 357, 77, 63));
+}
+
+#[test]
 fn demo_weight_grid_fills_remaining_height_and_preserves_one_to_two_heights() {
     // This is the layout structure used by demo-full's Weight Demo. The Grid is the outer vertical Linear's
     // flexible item, so it receives the resolved remaining height directly. A content-sized

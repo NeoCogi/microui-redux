@@ -570,6 +570,11 @@ const FONTS: &[builder::FontAsset<'static>] = &[
         path: "assets/CONSOLE.ttf",
         size: 14,
     },
+    builder::FontAsset {
+        name: "calculator-display",
+        path: "assets/CONSOLE.ttf",
+        size: 28,
+    },
 ];
 
 let config = builder::Config {
