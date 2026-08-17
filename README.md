@@ -92,7 +92,7 @@ rust-src --toolchain nightly`).
 
 ## Key Concepts
 
-- **Context**: owns the high-level `Renderer`, the only ordered input queue, and retained root windows. Applications enqueue through Context methods, call `update_ui(dimensions)` to drain input and commit layout, use typed widget handles between traversals, synchronize again if a mutation can affect layout, then call `frame(FrameInfo).render_ui()?` to paint and submit once.
+- **Context**: owns the high-level `Renderer`, the only ordered input queue, retained root windows, typed application subscriptions, and retained service event sources. `Context<B>` applications call `update_ui(dimensions)`, while `Context<B, State>` applications call `update_ui_state(dimensions, state)` to dispatch typed events. Both commit layout before `frame(FrameInfo).render_ui()?` paints and submits once; neither rebuilds roots or polls transient UI commands per frame.
 - **Container**: the generic retained branch owner. It stores one erased concrete `ContainerWidget` and one authoritative opaque `Children` collection. The concrete widget owns semantic state, configuration, event ports, and layout policy; only the generic container owns children strongly.
 - **Layout engine + flows**: parent container widgets measure and assign child rectangles through scoped child-aware APIs and `ContainerLayoutCtx`. Linear, Grid, and Disclosure expose their layout configuration and topology through `TypedWidgetHandle<W>`; ScrollArea accepts one arbitrary content node and owns only viewport state.
 - **Widget**: the common update/paint contract. A leaf additionally implements `LeafWidget` for intrinsic measurement; a branch implements `ContainerWidget` for child-aware measurement and placement. Concrete widgets combine semantic values, interaction state, native event ports, and runtime phases; `*Parameters` are only one-shot initialization.
@@ -264,7 +264,12 @@ cargo run --example backend-frame-cube --features example-wgpu
 
 ### Current retained authoring model
 
-The supported authoring path is retained widget trees registered as context-owned roots. Applications call `Context::create_window(...)`, `Context::create_dialog(...)`, or `Context::create_popup(...)` once, mutate leaves and containers through weak `TypedWidgetHandle<W>` values, commit polling contexts with `Context::update_ui(...)` or event-driven contexts with `Context::update_ui_state(...)`, and paint with `Context::frame(FrameInfo).render_ui()?`.
+The supported authoring path is retained widget trees registered as context-owned roots.
+Applications call `Context::create_window(...)`, `Context::create_dialog(...)`, or
+`Context::create_popup(...)` once, mutate leaves and containers through weak
+`TypedWidgetHandle<W>` values, commit contexts without application callbacks through
+`Context::update_ui(...)` or subscriber-driven contexts through `Context::update_ui_state(...)`,
+and paint with `Context::frame(FrameInfo).render_ui()?`.
 
 Root creation consumes one persistent application `Node` and returns a non-owning `RootHandle`.
 Roots cannot be replaced while retaining their identity: mutate descendants through a container
@@ -306,9 +311,10 @@ ctx.frame(info).render_ui()?;
 ```
 
 An event-driven context is constructed as `Context::<Backend, Model>::new(backend)`. It owns
-the sole event dispatcher for its complete root forest. Each subscribed widget port queues its own
-native payloads, and the context drains those queues into `Model` after retained widget borrows
-have ended. A port accepts one state method; compose additional effects inside that method.
+the sole event dispatcher for its complete root forest and Context-owned retained services. Each
+subscribed source queues its own typed payloads, and the context drains those queues into `Model`
+after retained widget borrows have ended. A port accepts one state method; compose additional
+effects inside that method.
 
 Retained trees are the supported public authoring path. Each non-cloneable `Node` owns one concrete
 leaf or one generic `Container`. A container owns its opaque children and one concrete branch
@@ -326,9 +332,10 @@ the concrete `Disclosure` widget owns expansion state and the weak body-topology
 ### Context-owned typed events
 
 The retained UI is one transaction domain. A `Context<B, State>` owns the hardware-input FIFO, all
-window/dialog/popup roots, and one typed event dispatcher for `State`. Widgets remain independent
-of the application state type: each concrete widget owns only its native
-`WidgetEventPort<Event>`.
+window/dialog/popup roots, Context-owned services, and one typed event dispatcher for `State`.
+Widgets and retained services remain independent of the application state type: each producer owns
+only its typed `WidgetEventPort<Event>`, while the dispatcher stores the application method that
+consumes it.
 
 The example above registers native widget endpoints with `Context::subscribe`. Bound application
 values can be attached without changing native widget payloads:
@@ -337,16 +344,18 @@ values can be attached without changing native widget payloads:
 context.subscribe_with(slider.changed(), index, Model::slider_changed)?;
 ```
 
-There is no public standalone `Session`. Polling-only contexts use `Context<B>` and
-`Context::update_ui`; event-driven contexts use `Context<B, State>` and
-`Context::update_ui_state`.
+There is no public standalone event `Session`. Contexts without application callbacks use
+`Context<B>` and `Context::update_ui`; subscriber-driven contexts use `Context<B, State>` and
+`Context::update_ui_state`. Both retain their trees and roots between updates.
 
 ```text
 Context input FIFO
     -> route one raw event through the eligible root tree
     -> widget mutates local state and appends E to WidgetEventPort<E>
     -> complete cross-root update releases retained widget borrows
+    -> framework services publish any resulting lifecycle events
     -> context dispatcher drains subscribed ports into &mut State
+    -> context-aware handlers may mutate retained roots and services
     -> layout commits before the next raw event is routed
 ```
 
@@ -358,7 +367,8 @@ large batch may cross the threshold before the dispatcher panics.
 
 Event ownership and ordering follow these rules:
 
-- A widget is the sole strong owner of its typed event ports.
+- A retained producer is the sole strong owner of its typed event ports. Usually that producer is a
+  widget; a Context-owned service source remains alive for the Context lifetime.
 - `WidgetEventHandle<Event>` and context subscription records hold weak port references.
 - Each port accepts one context subscription and discards events while unsubscribed.
 - Removing a widget drops its pending events; dead context bindings are pruned during dispatch.
@@ -374,7 +384,76 @@ or an earlier subscription runs in the next sweep. Application logic that requir
 should express it inside one state method or one event type.
 
 The context dispatcher is the one dynamic boundary. It erases the concrete event type of each
-subscription so one `Context<B, State>` can subscribe to heterogeneous native widget events.
+subscription so one `Context<B, State>` can subscribe to heterogeneous widget and retained-service
+events. It has no popup, combo, file-dialog, or other control-specific branch.
+
+### Event-time root and service coordination
+
+Handlers that only mutate application or widget state continue to use `Context::subscribe` and
+`Context::subscribe_with`. A handler that must create, show, hide, move, resize, raise, or destroy a
+Context-owned root—or open or cancel a retained file dialog—uses `subscribe_context` or
+`subscribe_context_with` and receives a short-lived `EventContext<'_>`:
+
+```rust
+impl Model {
+    fn show_popup(
+        &mut self,
+        event_context: &mut EventContext<'_>,
+        _: &ButtonSubmitted,
+    ) {
+        event_context
+            .set_root_visible(self.popup.id(), true)
+            .expect("popup root must remain registered");
+    }
+}
+
+ctx.subscribe_context(open_button.submitted(), Model::show_popup)?;
+```
+
+`EventContext` owns nothing. It is an exclusive borrow of the Context-owned `WindowManager`, lent
+only after the complete retained-tree update has released its widget borrows and returned before
+the following layout. Rust therefore prevents a handler from retaining it, and the same generic
+root operations work for windows, dialogs, and popups without a `PopupController`, overlay
+registry, per-control command enum, or second root lifetime model.
+
+The full demo now composes `Combo` and its popup root entirely through typed events. `Combo`
+publishes its screen-space anchor during update, the `ComboSubmitted` handler updates popup
+visibility and placement in that input transaction, and `RootSubmitted::PopupDismissed` closes the
+combo's semantic state after an outside press. Paint remains observational, and application state
+contains no per-frame `combo_open` or `open_popup` command flags.
+
+The retained file-dialog service uses the same generic dispatch mechanism. Opening occurs directly
+inside a context-aware handler. `WindowManager` owns one typed completion source for the Context
+lifetime, so removing a completed dialog controller and root cannot discard the queued terminal
+event. Applications subscribe once and match completion to the exact live session:
+
+```rust
+impl Model {
+    fn file_dialog_completed(&mut self, event: &FileDialogCompleted) {
+        let Some(session) = self.dialog_session.as_ref() else {
+            return;
+        };
+        if !event.is_for(session) {
+            return;
+        }
+
+        match event.status() {
+            FileDialogStatus::Accepted(result) => self.open_file(&result.file_path),
+            FileDialogStatus::Cancelled => self.note_cancellation(),
+            FileDialogStatus::Pending => unreachable!(),
+        }
+        self.dialog_session = None;
+    }
+}
+
+let completed = ctx.file_dialog_completed();
+ctx.subscribe(completed, Model::file_dialog_completed)?;
+```
+
+Accepted, in-dialog cancelled, title-closed, and explicitly cancelled sessions each publish one
+terminal `FileDialogCompleted` event at a safe dispatch boundary. `FileDialogSession::status`
+remains a synchronous compatibility snapshot, but retained application flow and `demo-full` do not
+inspect it from frame processing.
 
 ### Retained node identity
 
@@ -630,11 +709,19 @@ together. If both atlas-loading features are enabled, `prebuilt-atlas` takes pre
 To export an atlas as Rust, enable `save-to-rust` (and `png_source` when serializing PNG-backed atlas data) and call `AtlasHandle::to_rust_files`. The helper binary requires `builder`, `save-to-rust`, and `png_source`:
 `cargo run --bin atlas_export --features "builder save-to-rust png_source" -- --output path/to/atlas.rs`
 
+### Version 0.9
+- [ ] Menus
+- [ ] Key navigation
+- [ ] Async/Multi-Threading?
+- [ ] Theming/Skinning
+    - [ ] Win311 Theme
+
 ### Version 0.8.0-alpha.1
 
 `0.8.0-alpha.1` is the first public alpha of the breaking retained-API redesign relative to
 `0.7.0`. It is intended for integration testing and API feedback before the stable `0.8.0`
-release.
+release. The current 0.8 alpha work also completes event-time coordination for transient roots and
+file-dialog results, removing the remaining application-level frame polling from `demo-full`.
 
 - [x] Replaced retained tree building with unique owning `Node` values.
     - [x] Handle-bearing built-in leaf and container constructors return `(TypedWidgetHandle<W>, Node)`; stateless `Custom::create` returns a runtime for explicit `Node` mounting.
@@ -648,14 +735,22 @@ release.
     - [x] Context owns the ordered input FIFO, complete root forest, renderer, and application event dispatcher.
     - [x] `update_ui` and `update_ui_state` commit layout after every queued input event.
     - [x] `ContextFrame::render_ui` is paint-only and rejects missing, stale, or dimension-mismatched commits before backend acquisition.
+    - [x] `EventContext<'_>` lends safe Context-owned mutation access only after retained widget borrows end and before the next layout commit.
 - [x] Added context-owned typed application events.
     - [x] Widgets expose weak `WidgetEventHandle<E>` endpoints for their native event types.
     - [x] `Context<B, State>::subscribe` and `subscribe_with` dispatch into application state after retained widget borrows end.
-    - [x] Removed the public standalone event `Session`; polling-only applications continue to use `Context<B>`.
+    - [x] `subscribe_context` and `subscribe_context_with` opt handlers into the same typed dispatch with short-lived root and service mutation access.
+    - [x] Context-owned services publish typed lifecycle events through the same generic dispatcher without control-specific dispatcher branches.
+    - [x] Removed the public standalone event `Session`; applications without model callbacks continue to use `Context<B>` without rebuilding retained roots.
 - [x] Extracted backend-independent retained root management.
     - [x] Windows, dialogs, and popups remain context-owned until explicit destruction.
     - [x] `RootHandle` exposes typed chrome state and events without extending root lifetime.
     - [x] Modal routing, popup dismissal, focus, capture, root movement, and resizing share one retained window manager.
+- [x] Removed frame-polled transient-root and file-dialog coordination from the full demo.
+    - [x] Popup and file-dialog opening mutate Context-owned state directly from the typed event that requested them; application command flags were removed.
+    - [x] Combo anchor geometry is published during update, and popup dismissal reconciles the combo's semantic open state through `RootSubmitted`.
+    - [x] File-dialog acceptance and cancellation publish exactly one `FileDialogCompleted` event through a Context-lifetime source; application frame code no longer polls session status.
+    - [x] The general layer remains unaware of combos and file-dialog behavior: `EventContext` exposes existing root/service operations, while specialized payloads stay with their owners.
 - [x] Unified rendering behind recorded painter operations and typed backend frames.
     - [x] `Painter` records backend-neutral work into the framework-owned display list.
     - [x] `RendererBackend::Frame<'a>` gives each backend one exclusive submission frame.
@@ -667,6 +762,7 @@ release.
     - [x] Runtime construction, generated Rust embedding, and external PNG loading share serialized atlas metadata.
 - [x] Documented the alpha API and known limitations.
     - [x] Documented the context-owned typed-event architecture.
+    - [x] Documented event-time `EventContext` ownership, generic transient-root coordination, and subscriber-driven file-dialog completion.
     - [x] Documented UTF-8 editing, atlas glyph coverage, scalar-value fallback, and text-layout limits.
     - [x] Documented the trusted atlas-metadata contract, external-atlas workflow, and UTF-8 file-dialog path boundary.
 
