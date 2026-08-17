@@ -7,7 +7,7 @@
 using unique owning `Node` trees, typed weak widget handles, context-owned roots, and typed backend
 frames.
 
-> **Alpha status:** `0.8.0-alpha.1` is the first public alpha of the breaking retained-API redesign.
+> **Alpha status:** `0.8.0-alpha.2` is the current public alpha of the breaking retained-API redesign.
 > The 0.8 line is not API-compatible with 0.7 and may continue to evolve before the stable 0.8.0
 > release.
 
@@ -19,7 +19,7 @@ dialogs, and a file dialog.
 
 - [Rendering and backend integration](src/render/RENDER.md)
 - [Typed event architecture](#context-owned-typed-events)
-- [Version history](#version-080-alpha1)
+- [Version history](#version-080-alpha2)
 - [`simple` example](examples/simple.rs) and
   [`retained-custom-drawing` example](examples/retained-custom-drawing.rs)
 
@@ -29,7 +29,7 @@ Use the explicit alpha version while the retained API is being evaluated:
 
 ```toml
 [dependencies]
-microui-redux = "0.8.0-alpha.1"
+microui-redux = "0.8.0-alpha.2"
 ```
 
 `microui-redux` does not create a native window or graphics device. Applications provide a
@@ -716,12 +716,12 @@ To export an atlas as Rust, enable `save-to-rust` (and `png_source` when seriali
 - [ ] Theming/Skinning
     - [ ] Win311 Theme
 
-### Version 0.8.0-alpha.1
+### Version 0.8.0-alpha.2
 
-`0.8.0-alpha.1` is the first public alpha of the breaking retained-API redesign relative to
+`0.8.0-alpha.2` builds on the first public alpha of the breaking retained-API redesign relative to
 `0.7.0`. It is intended for integration testing and API feedback before the stable `0.8.0`
-release. The current 0.8 alpha work also completes event-time coordination for transient roots and
-file-dialog results, removing the remaining application-level frame polling from `demo-full`.
+release. This alpha completes event-time coordination for transient roots and file-dialog results,
+removing the remaining application-level frame polling from `demo-full`.
 
 - [x] Replaced retained tree building with unique owning `Node` values.
     - [x] Handle-bearing built-in leaf and container constructors return `(TypedWidgetHandle<W>, Node)`; stateless `Custom::create` returns a runtime for explicit `Node` mounting.
