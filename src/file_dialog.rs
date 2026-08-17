@@ -27,11 +27,14 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
-//! Context-owned retained file picker with an application-polled session result.
+//! Context-owned retained file picker with typed completion delivery.
 //!
 //! Opening a dialog constructs its retained shell once. Context advances navigation, selection,
-//! and completion after each queued input event; applications only retain a [`FileDialogSession`]
-//! and inspect [`FileDialogSession::status`] after [`crate::Context::update_ui`].
+//! and completion after each queued input event. Applications subscribe once through
+//! [`crate::Context::file_dialog_completed`], retain a [`FileDialogSession`] while the operation is
+//! pending, and receive a [`FileDialogCompleted`] event in the update transaction that accepts or
+//! cancels it. [`FileDialogSession::status`] remains available for synchronous inspection, but
+//! application frame code does not need to poll it.
 //!
 //! Paths cross the public API as UTF-8 [`String`] values. On platforms that permit non-UTF-8 paths,
 //! directory entries are converted lossily. Accepting a typed name is lexical: the dialog does not
@@ -149,6 +152,51 @@ pub enum FileDialogStatus {
     Cancelled,
 }
 
+/// One terminal transition emitted by the Context-owned file-dialog service.
+///
+/// Subscribe to [`crate::Context::file_dialog_completed`] once during application setup. A Context
+/// uses one shared typed event source for all of its file-dialog sessions, so [`Self::is_for`]
+/// identifies which retained session completed. [`Self::status`] is always terminal: it returns
+/// either [`FileDialogStatus::Accepted`] or [`FileDialogStatus::Cancelled`], never
+/// [`FileDialogStatus::Pending`].
+#[derive(Clone, Debug)]
+pub struct FileDialogCompleted {
+    /// Opaque identity of the session whose retained controller reached a terminal state.
+    session: FileDialogSessionId,
+    /// Weak identity of the exact status allocation owned by the application session.
+    session_status: Weak<RefCell<FileDialogStatus>>,
+    /// Owned terminal snapshot produced before the dialog controller and root are removed.
+    status: FileDialogStatus,
+}
+
+impl FileDialogCompleted {
+    /// Creates the completion payload emitted by the Context-owned service.
+    fn new(session: FileDialogSessionId, session_status: Weak<RefCell<FileDialogStatus>>, status: FileDialogStatus) -> Self {
+        // A pending value is a controller state, not a completion event. Rejecting it here keeps
+        // the public event contract true even if a future internal caller is added incorrectly.
+        assert!(!matches!(status, FileDialogStatus::Pending), "file-dialog completion must be terminal");
+        Self { session, session_status, status }
+    }
+
+    /// Returns whether this event completed the supplied session.
+    ///
+    /// Both the Context-local id and the session's private allocation identity are checked, so a
+    /// session created by another Context cannot match even when both counters produced the same id.
+    pub fn is_for(&self, session: &FileDialogSession) -> bool {
+        // Weak pointer comparison preserves exact identity without extending application ownership
+        // or keeping an otherwise abandoned session alive until the event queue is drained.
+        self.session == session.id && Weak::ptr_eq(&self.session_status, &Rc::downgrade(&session.status))
+    }
+
+    /// Returns the terminal completion snapshot carried by this event.
+    pub fn status(&self) -> &FileDialogStatus {
+        // Borrow the event-owned value so handlers can inspect results without another clone.
+        &self.status
+    }
+}
+
+impl crate::WidgetEvent for FileDialogCompleted {}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 struct FileDialogSessionId(usize);
 
@@ -164,9 +212,46 @@ pub struct FileDialogSession {
 impl FileDialogSession {
     /// Returns a repeatable owned snapshot of the current status.
     ///
-    /// Terminal snapshots remain available after Context has removed the dialog root.
+    /// Terminal snapshots remain available after Context has removed the dialog root. Retained
+    /// applications should normally subscribe to [`crate::Context::file_dialog_completed`] instead
+    /// of inspecting this method from every frame.
     pub fn status(&self) -> FileDialogStatus {
+        // Clone only the small lifecycle snapshot; accepted paths are cloned when callers opt into
+        // this compatibility observation API.
         self.status.borrow().clone()
+    }
+}
+
+/// Stable typed completion source owned for the lifetime of one Context.
+///
+/// Controllers are short-lived and are removed as soon as they complete. Keeping this source in
+/// WindowManager lets the queued terminal event survive that removal until application dispatch.
+pub(crate) struct FileDialogEvents {
+    /// Strong owner of the single-subscriber completion queue.
+    completed: Rc<RefCell<WidgetEventPort<FileDialogCompleted>>>,
+}
+
+impl FileDialogEvents {
+    /// Creates the disconnected completion source for a new Context.
+    pub(crate) fn new() -> Self {
+        // The queue allocates event storage only after an application subscribes and completion is
+        // emitted, following the same lazy behavior as widget-owned event ports.
+        Self {
+            completed: Rc::new(RefCell::new(WidgetEventPort::new())),
+        }
+    }
+
+    /// Returns a weak typed handle suitable for the ordinary Context dispatcher.
+    fn completed(&self) -> WidgetEventHandle<FileDialogCompleted> {
+        // The handle does not retain WindowManager; Context remains the sole source owner.
+        WidgetEventHandle::new(&self.completed)
+    }
+
+    /// Queues one terminal event for delivery at the next safe application-dispatch boundary.
+    fn emit(&self, event: FileDialogCompleted) {
+        // Emission only appends to the connected queue and never invokes application code while a
+        // file-dialog controller or WindowManager collection is borrowed.
+        self.completed.borrow_mut().emit(event);
     }
 }
 
@@ -176,8 +261,10 @@ struct DialogRows {
 }
 
 enum ControllerDisposition {
+    /// The retained controller remains active after processing its queued semantic actions.
     Pending,
-    Remove,
+    /// The controller should be removed, optionally after publishing an observed terminal state.
+    Remove(Option<FileDialogStatus>),
 }
 
 pub(crate) struct FileDialogController {
@@ -538,37 +625,48 @@ impl FileDialogController {
     }
 
     fn complete(&mut self, completion: FileDialogStatus) {
+        // Ignore a repeated terminal action. Only the first transition can be observed or emitted.
         if let Some(status) = self.status.upgrade()
             && matches!(*status.borrow(), FileDialogStatus::Pending)
         {
+            // Store the owned snapshot in the session before process() reports controller removal.
             *status.borrow_mut() = completion;
         }
     }
 
     fn accept_submitted(&mut self) {
+        // An empty filename deliberately leaves the controller pending.
         if let Some(completion) = self.accepted_status() {
             self.complete(completion);
         }
     }
 
     fn cancel_submitted(&mut self) {
+        // Button cancellation and title cancellation share the same terminal status.
         self.complete(FileDialogStatus::Cancelled);
     }
 
     fn root_cancelled(&mut self) {
+        // RootSubmitted reports the retained title-close action after RootChrome has committed it.
         self.complete(FileDialogStatus::Cancelled);
     }
 
     fn process(&mut self) -> ControllerDisposition {
         let Some(status) = self.status.upgrade() else {
-            return ControllerDisposition::Remove;
+            // Dropping the only session abandons the operation. There is no live session to match,
+            // so remove its retained UI without publishing an application completion.
+            return ControllerDisposition::Remove(None);
         };
         if !matches!(*status.borrow(), FileDialogStatus::Pending) {
-            return ControllerDisposition::Remove;
+            // Preserve a terminal state installed before this pass and publish it exactly once when
+            // WindowManager removes this controller below.
+            return ControllerDisposition::Remove(Some(status.borrow().clone()));
         }
         if !self.root.widget().is_alive() {
+            // Unexpected external root removal is still an observable cancellation for a live
+            // session and follows the same typed completion path.
             *status.borrow_mut() = FileDialogStatus::Cancelled;
-            return ControllerDisposition::Remove;
+            return ControllerDisposition::Remove(Some(FileDialogStatus::Cancelled));
         }
 
         enum Action {
@@ -610,7 +708,9 @@ impl FileDialogController {
             }
         }
         if !matches!(*status.borrow(), FileDialogStatus::Pending) {
-            return ControllerDisposition::Remove;
+            // Clone the terminal snapshot once for the event; accepted paths stay owned by both the
+            // compatibility session snapshot and the queued typed payload.
+            return ControllerDisposition::Remove(Some(status.borrow().clone()));
         }
         ControllerDisposition::Pending
     }
@@ -626,9 +726,19 @@ fn replace_column_rows(handle: &TypedWidgetHandle<Linear>, nodes: Vec<Node>) -> 
 }
 
 impl WindowManager {
+    /// Returns the Context-lifetime completion source shared by all file-dialog sessions.
+    pub(crate) fn file_dialog_completed(&self) -> WidgetEventHandle<FileDialogCompleted> {
+        // The specialized service owns its port; the generic dispatcher receives only a weak typed
+        // handle and remains unaware of file-dialog behavior.
+        self.file_dialog_events.completed()
+    }
+
     pub(crate) fn open_file_dialog(&mut self, request: FileDialogRequest) -> FileDialogSession {
+        // Allocate a Context-local identity before constructing the retained controller tree.
         let id = FileDialogSessionId(self.next_file_dialog_id);
         self.next_file_dialog_id = self.next_file_dialog_id.checked_add(1).expect("file-dialog session id counter overflowed");
+        // The application session owns the observable status; the controller keeps only a weak
+        // reference so dropping the session abandons and removes the retained operation.
         let status = Rc::new(RefCell::new(FileDialogStatus::Pending));
         let controller = FileDialogController::new(self, id, Rc::downgrade(&status), request);
         self.file_dialogs.push(controller);
@@ -636,30 +746,44 @@ impl WindowManager {
     }
 
     pub(crate) fn cancel_file_dialog(&mut self, session: &FileDialogSession) -> bool {
+        // Match both opaque identity and status allocation so foreign Context sessions are rejected.
         let Some(index) = self.file_dialogs.iter().position(|dialog| dialog.belongs_to(session)) else {
             return false;
         };
         if !matches!(*session.status.borrow(), FileDialogStatus::Pending) {
             return false;
         }
+        // Commit the session snapshot before publishing the terminal event and removing its UI.
         *session.status.borrow_mut() = FileDialogStatus::Cancelled;
-        let dialog = self.file_dialogs.remove(index);
-        let removed = self.destroy_root(dialog.root.id());
-        debug_assert!(removed, "pending file-dialog controller must own a registered root");
+        self.remove_file_dialog(index, Some(FileDialogStatus::Cancelled));
         true
     }
 
     pub(crate) fn process_file_dialogs(&mut self) {
+        // Use an index loop because terminal controllers are removed in place while pending ones
+        // preserve their relative order.
         let mut index = 0;
         while index < self.file_dialogs.len() {
             match self.file_dialogs[index].process() {
                 ControllerDisposition::Pending => index += 1,
-                ControllerDisposition::Remove => {
-                    let dialog = self.file_dialogs.remove(index);
-                    let _ = self.destroy_root(dialog.root.id());
-                }
+                ControllerDisposition::Remove(completion) => self.remove_file_dialog(index, completion),
             }
         }
+    }
+
+    /// Removes one terminal controller and publishes its optional completion exactly once.
+    fn remove_file_dialog(&mut self, index: usize, completion: Option<FileDialogStatus>) {
+        // Detach the controller first so no collection borrow is live while the service event is
+        // queued or the retained root registry is mutated.
+        let dialog = self.file_dialogs.remove(index);
+        if let Some(status) = completion {
+            // The event source belongs to WindowManager rather than this short-lived controller, so
+            // removing the controller cannot invalidate the queued payload or its subscription.
+            self.file_dialog_events.emit(FileDialogCompleted::new(dialog.id, dialog.status.clone(), status));
+        }
+        // Root destruction releases the complete retained dialog tree and restores modal routing.
+        let removed = self.destroy_root(dialog.root.id());
+        debug_assert!(removed, "pending file-dialog controller must own a registered root");
     }
 }
 
@@ -682,12 +806,61 @@ mod tests {
         Context::new_test(NoopRenderer { atlas: test_atlas() }, Dimensioni::new(900, 700))
     }
 
-    fn controller<'a>(ctx: &'a Context<NoopRenderer>, session: &FileDialogSession) -> &'a FileDialogController {
+    fn controller<'a, State: 'static>(ctx: &'a Context<NoopRenderer, State>, session: &FileDialogSession) -> &'a FileDialogController {
+        // Locate the Context-owned controller by the session's exact identity rather than assuming
+        // only one dialog exists in tests that exercise shared completion delivery.
         ctx.window_manager
             .file_dialogs
             .iter()
             .find(|dialog| dialog.belongs_to(session))
             .expect("pending session must have a controller")
+    }
+
+    #[derive(Default)]
+    struct CompletionModel {
+        /// Live operation retained until its matching terminal event is delivered.
+        session: Option<FileDialogSession>,
+        /// Terminal snapshots recorded exclusively by the subscribed callback.
+        completions: Vec<FileDialogStatus>,
+    }
+
+    impl CompletionModel {
+        /// Records the event for the live session and releases the completed capability.
+        fn completed(&mut self, event: &FileDialogCompleted) {
+            // A Context shares one source across every file dialog, so ignore events for any other
+            // operation the application may be coordinating independently.
+            let Some(session) = self.session.as_ref() else {
+                return;
+            };
+            if !event.is_for(session) {
+                return;
+            }
+
+            // Copy the terminal snapshot into test state, then drop the now-finished session. No
+            // frame callback or FileDialogSession::status polling participates in this flow.
+            self.completions.push(event.status().clone());
+            self.session = None;
+        }
+    }
+
+    fn completion_context() -> (Context<NoopRenderer, CompletionModel>, CompletionModel) {
+        // Subscribe once to the Context-owned source before any individual operation is opened.
+        let dimensions = Dimensioni::new(900, 700);
+        let mut context = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions);
+        let completed = context.file_dialog_completed();
+        context.subscribe(completed, CompletionModel::completed).unwrap();
+        (context, CompletionModel::default())
+    }
+
+    fn click_node_with_state(context: &mut Context<NoopRenderer, CompletionModel>, model: &mut CompletionModel, root: crate::RootId, node: RuntimeNodeId) {
+        // Route move and press in one retained transaction; completion must reach the subscriber
+        // before update_ui_state returns.
+        let rect = context.debug_root_node_rect(root, node).expect("node rect should be laid out");
+        let x = rect.x + rect.width / 2;
+        let y = rect.y + rect.height / 2;
+        context.mousemove(x, y);
+        context.mousedown(x, y, MouseButton::LEFT);
+        context.update_ui_state(Dimensioni::new(900, 700), model);
     }
 
     fn click_node(ctx: &mut Context<NoopRenderer>, root: crate::RootId, node: RuntimeNodeId, batched: bool) {
@@ -763,6 +936,80 @@ mod tests {
             .expect("same-transaction dialog construction must retain its controller");
         assert_eq!(session.status(), FileDialogStatus::Pending);
         assert_eq!(context.debug_modal_root(), Some(dialog));
+    }
+
+    #[test]
+    fn accepted_file_dialog_dispatches_completion_without_frame_polling() {
+        let (mut context, mut model) = completion_context();
+        let request = FileDialogRequest::new().with_initial_directory("/retained-test");
+        model.session = Some(context.open_file_dialog(request));
+        context.update_ui_state(Dimensioni::new(900, 700), &mut model);
+
+        // Enter a filename through retained state, then activate the ordinary dialog button.
+        let session = model.session.as_ref().unwrap();
+        let dialog = controller(&context, session);
+        let root = dialog.root.id();
+        let open = dialog.ok_button_id;
+        dialog.file_name_box.try_update_with("picked.txt", |state, name| state.set_text(name)).unwrap();
+        click_node_with_state(&mut context, &mut model, root, open);
+
+        assert_eq!(
+            model.completions,
+            [FileDialogStatus::Accepted(FileDialogResult {
+                file_name: "picked.txt".to_owned(),
+                file_path: "/retained-test/picked.txt".to_owned(),
+            })]
+        );
+        assert!(model.session.is_none());
+        assert!(context.window_manager.file_dialogs.is_empty());
+    }
+
+    #[test]
+    fn cancelled_file_dialog_dispatches_completion_without_frame_polling() {
+        let (mut context, mut model) = completion_context();
+        model.session = Some(context.open_file_dialog(FileDialogRequest::default()));
+        context.update_ui_state(Dimensioni::new(900, 700), &mut model);
+
+        // Activate the retained Cancel button and observe its event in this same update transaction.
+        let session = model.session.as_ref().unwrap();
+        let dialog = controller(&context, session);
+        let root = dialog.root.id();
+        let cancel = dialog.cancel_button_id;
+        click_node_with_state(&mut context, &mut model, root, cancel);
+
+        assert_eq!(model.completions, [FileDialogStatus::Cancelled]);
+        assert!(model.session.is_none());
+        assert!(context.window_manager.file_dialogs.is_empty());
+    }
+
+    #[test]
+    fn explicit_file_dialog_cancel_dispatches_completion_on_the_next_update() {
+        let (mut context, mut model) = completion_context();
+        model.session = Some(context.open_file_dialog(FileDialogRequest::default()));
+
+        // Explicit cancellation occurs outside retained input routing but queues the identical typed
+        // terminal event for the next safe Context-owned dispatch boundary.
+        assert!(context.cancel_file_dialog(model.session.as_ref().unwrap()));
+        assert!(model.completions.is_empty());
+        context.update_ui_state(Dimensioni::new(900, 700), &mut model);
+
+        assert_eq!(model.completions, [FileDialogStatus::Cancelled]);
+        assert!(model.session.is_none());
+        assert!(context.window_manager.file_dialogs.is_empty());
+    }
+
+    #[test]
+    fn completion_does_not_match_same_numbered_session_from_another_context() {
+        let mut owner: Context<NoopRenderer> = context();
+        let mut foreign: Context<NoopRenderer> = context();
+        let owner_session = owner.open_file_dialog(FileDialogRequest::default());
+        let foreign_session = foreign.open_file_dialog(FileDialogRequest::default());
+
+        // Both fresh Contexts allocate local session id 1; private allocation identity must still
+        // prevent a completion from being mistaken for the foreign operation.
+        let event = FileDialogCompleted::new(owner_session.id, Rc::downgrade(&owner_session.status), FileDialogStatus::Cancelled);
+        assert!(event.is_for(&owner_session));
+        assert!(!event.is_for(&foreign_session));
     }
 
     #[test]

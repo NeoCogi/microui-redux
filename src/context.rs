@@ -34,7 +34,7 @@
 //! input, layout, modal, style, and display-list operation is delegated to [`WindowManager`].
 
 use crate::window_manager::{RootHandle, RootId, RootMutationError, WindowManager, WindowOption};
-use crate::file_dialog::{FileDialogRequest, FileDialogSession};
+use crate::file_dialog::{FileDialogCompleted, FileDialogRequest, FileDialogSession};
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, FrameInfo, RenderError, Renderer, RendererBackend};
 use crate::{Dimensioni, ImageSource, KeyCode, KeyMode, MouseButton, Node, Recti, Style, TextureId};
 
@@ -491,8 +491,22 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
 // Context-owned file-dialog façade.
 
 impl<B: RendererBackend, State: 'static> Context<B, State> {
-    /// Opens a retained file dialog and returns its read-only polling session.
+    /// Returns the typed completion source shared by this Context's file-dialog sessions.
+    ///
+    /// Subscribe once during application setup, then use [`FileDialogCompleted::is_for`] to match
+    /// an event to a retained [`FileDialogSession`]. The source is Context-owned and remains alive
+    /// when an individual terminal dialog controller and root are removed.
+    pub fn file_dialog_completed(&self) -> crate::WidgetEventHandle<FileDialogCompleted> {
+        // Project only a weak typed capability; WindowManager remains the sole event-source owner.
+        self.window_manager.file_dialog_completed()
+    }
+
+    /// Opens a retained file dialog and returns its unique session capability.
+    ///
+    /// Completion is delivered through [`Context::file_dialog_completed`] during a retained update
+    /// transaction. The session keeps the operation observable and can also be cancelled directly.
     pub fn open_file_dialog(&mut self, request: FileDialogRequest) -> FileDialogSession {
+        // Construct the specialized retained tree in the non-generic WindowManager service.
         self.window_manager.open_file_dialog(request)
     }
 
@@ -500,6 +514,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     ///
     /// Returns `false` when the session is terminal or belongs to another Context.
     pub fn cancel_file_dialog(&mut self, session: &FileDialogSession) -> bool {
+        // Successful cancellation queues the same typed completion event as an in-dialog cancel.
         self.window_manager.cancel_file_dialog(session)
     }
 }
