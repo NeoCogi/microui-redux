@@ -37,9 +37,9 @@
 //!
 //! There is no public event bus, application-wide message enum, global queue, multicast list,
 //! payload downcast, or independent dispatcher lifetime. The public surface consists of event payload
-//! types, weak [`WidgetEventHandle`] values, and [`crate::Context::subscribe`] /
-//! [`crate::Context::subscribe_with`]. Everything that actually dispatches events is owned by the
-//! context.
+//! types, weak [`WidgetEventHandle`] values, state-only [`crate::Context::subscribe`] methods, and
+//! opt-in context-aware [`crate::Context::subscribe_context`] methods. Everything that actually
+//! dispatches events or mutates retained roots is owned by the context.
 //!
 //! # Ownership
 //!
@@ -63,6 +63,8 @@
 //!                                         └── Weak ──────────────┐
 //!                                                                │
 //! WidgetEventHandle<E> ───────────────────── Weak ───────────────┘
+//!
+//! dispatch boundary ── lends &mut EventContext<'_> ──> opted-in Handler
 //! ```
 //!
 //! The only strong event-port owner is the widget. Consequently:
@@ -125,7 +127,10 @@
 //!
 //! [`crate::Context::subscribe_with`] follows the same path but captures one application value in
 //! the concrete handler. That value belongs to the subscription and lives until the context is
-//! dropped or the dead subscription is pruned.
+//! dropped or the dead subscription is pruned. [`crate::Context::subscribe_context`] and
+//! [`crate::Context::subscribe_context_with`] use parallel typed adapters whose methods also receive
+//! a short-lived [`crate::EventContext`]. The dispatcher stores no context borrow; it lends the
+//! capability only while invoking the method at the safe boundary below.
 //!
 //! Application code therefore needs no separate dispatcher value:
 //!
@@ -154,6 +159,31 @@
 //!     dimensions: Dimensioni,
 //! ) {
 //!     context.update_ui_state(dimensions, model);
+//! }
+//! ```
+//!
+//! A handler that must mutate a retained root opts into context access explicitly. The ordinary
+//! state-only signature above remains unchanged:
+//!
+//! ```no_run
+//! use microui_redux::prelude::*;
+//!
+//! struct Model {
+//!     popup: RootHandle,
+//! }
+//!
+//! impl Model {
+//!     fn show_popup(&mut self, context: &mut EventContext<'_>, _: &ButtonSubmitted) {
+//!         // The root remains Context-owned. EventContext is only an exclusive transaction borrow.
+//!         context.set_root_visible(self.popup.id(), true).unwrap();
+//!     }
+//! }
+//!
+//! fn subscribe<B: RendererBackend>(
+//!     context: &mut Context<B, Model>,
+//!     submitted: WidgetEventHandle<ButtonSubmitted>,
+//! ) {
+//!     context.subscribe_context(submitted, Model::show_popup).unwrap();
 //! }
 //! ```
 //!
@@ -191,12 +221,15 @@
 //!              │       └── widgets append native payloads to their own ports
 //!              ├── finish framework-controller work
 //!              ├── dispatch application handlers with &mut State
+//!              │       └── opted-in handlers also receive &mut EventContext<'_>
 //!              └── commit layout before routing the next raw input event
 //! ```
 //!
-//! This boundary gives handlers exclusive `&mut State` without coupling widgets to `State`, and it
-//! ensures state-driven widget or topology changes are reflected by layout before the next input
-//! event is hit-tested.
+//! This boundary gives handlers exclusive `&mut State` without coupling widgets to `State`. Because
+//! the complete tree traversal has ended, the context may also lend its independent `WindowManager`
+//! field through [`crate::EventContext`] without aliasing a widget borrow or the event dispatcher.
+//! State-driven widget, root, or topology changes are therefore reflected by layout before the next
+//! input event is hit-tested.
 //!
 //! # Ordering and cascades
 //!
@@ -273,9 +306,11 @@
 //! queue buffer into the dispatch batch; when that batch is dropped, its capacity is released
 //! rather than retained by the port.
 //!
-//! Each subscription adds one vector entry and one boxed concrete [`Subscription`]. The handler is
-//! statically dispatched inside that subscription; only [`EventDispatch`] is dynamically
-//! dispatched. Dispatcher dispatch first scans the `S` subscriptions to prune dead widgets, then
+//! Each subscription adds one vector entry and one boxed concrete [`Subscription`]. Context-aware
+//! handlers add no queue, controller, or retained owner; their adapter contains only the supplied
+//! function pointer and optional bound value. The handler is statically dispatched inside that
+//! subscription; only [`EventDispatch`] is dynamically dispatched. Dispatcher dispatch first scans
+//! the `S` subscriptions to prune dead widgets, then
 //! visits every subscription once per cascade sweep and invokes handlers once per delivered event.
 //! With `D` delivered events and `R` sweeps, the work is O(`D + S * R`). Ordinary non-cascading
 //! delivery uses one productive sweep followed by one empty sweep.

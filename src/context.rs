@@ -42,7 +42,7 @@ use crate::{Dimensioni, ImageSource, KeyCode, KeyMode, MouseButton, Node, Recti,
 ///
 /// [`Context::update_ui_state`] creates this short-lived façade only after the complete retained
 /// widget update has released every widget borrow. Mutations therefore use the same authoritative
-/// [`WindowManager`] operations as [`Context`] without allowing handler code to re-enter an active
+/// window-manager operations as [`Context`] without allowing handler code to re-enter an active
 /// widget traversal. The capability owns no roots or renderer resources and cannot outlive the
 /// dispatch call that lent it.
 ///
@@ -286,6 +286,8 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// Events retain FIFO order within each widget port. When multiple ports are ready at one
     /// dispatch boundary, they are drained in subscription order. Dispatch repeats until all
     /// subscribed ports are empty, including events emitted by application-state methods.
+    /// Context-aware subscribers receive [`EventContext`] only at these boundaries; their root and
+    /// file-dialog mutations complete before the layout commit for the current raw input event.
     ///
     /// Context-owned input, style, and root mutations invalidate a prior commit automatically.
     /// Mutations made through weak typed widget handles cannot notify Context; callers

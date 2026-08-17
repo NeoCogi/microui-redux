@@ -9,8 +9,8 @@
 - [x] Reconcile the demo combo popup entirely through typed events and authoritative retained state.
 - [x] Publish combo anchor geometry during update instead of mutating state during paint.
 - [x] Add regression tests for popup dismissal, same-transaction placement, and file-dialog opening.
-- [ ] Update public lifecycle documentation and examples.
-- [ ] Run formatting, focused tests, the complete test suite, and Clippy.
+- [x] Update public lifecycle documentation and examples.
+- [x] Run formatting, focused tests, the complete test suite, and Clippy.
 
 The boxes above are the delivery checklist. A box is checked only in the commit that completes and
 verifies that step.
