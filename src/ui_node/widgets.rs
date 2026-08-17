@@ -77,7 +77,7 @@ mod text_block;
 mod text_edit;
 mod textbox;
 
-use control::{content_height, inline_content_size, layout_inline_content, layout_scaled_visual_content, scaled_visual_content_size, text_size, widget_fill_color};
+use control::{content_height, inline_content_size, place_inline_content, place_scaled_visual_content, scaled_visual_content_size, text_size, widget_fill_color};
 
 pub use button::{Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonSubmitted};
 pub use checkbox::{Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters};

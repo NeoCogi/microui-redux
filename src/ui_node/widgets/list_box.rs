@@ -126,12 +126,12 @@ impl ListBox {
             ctx.draw_rect(rect, ctx.style().colors[colorid as usize]);
         }
         let visual_size = self.image.map(TextureId::size);
-        let layout = layout_inline_content(rect, ctx.style(), &self.label, visual_size);
+        let placement = place_inline_content(rect, ctx.style(), &self.label, visual_size);
         if !self.label.is_empty() {
             let font = ctx.style().resolve_font_choice(self.font);
-            ctx.draw_control_text_with_font(font, &self.label, layout.text, ControlColor::Text, self.opt);
+            ctx.draw_control_text_with_font(font, &self.label, placement.text, ControlColor::Text, self.opt);
         }
-        if let (Some(image), Some(visual)) = (self.image, layout.visual) {
+        if let (Some(image), Some(visual)) = (self.image, placement.visual) {
             let color = ctx.style().colors[ControlColor::Text as usize];
             ctx.push_image(image, visual, color);
         }

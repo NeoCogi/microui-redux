@@ -50,10 +50,11 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Shared sizing, coloring, and inline-content helpers for retained controls.
+//! Shared sizing, coloring, and inline-content placement helpers for retained controls.
 //!
 //! The split widget modules keep concrete widget state small; this file holds common sizing,
-//! coloring, and submit helpers used by buttons, lists, combos, checkboxes, and custom controls.
+//! exact content placement, coloring, and submit helpers used by buttons, lists, combos,
+//! checkboxes, and custom controls.
 use crate::*;
 /// Measures text with the widget's resolved font choice.
 pub(super) fn text_size(style: &Style, atlas: &AtlasHandle, font: FontChoice, text: &str) -> Dimensioni {
@@ -105,8 +106,8 @@ pub(super) fn scaled_visual_content_size(constraints: Constraints, visual_size: 
 }
 
 #[derive(Copy, Clone)]
-/// Resolved inline placement for an optional visual and text region.
-pub(super) struct InlineContentLayout {
+/// Exact inline placement for an optional visual and text region inside resolved bounds.
+pub(super) struct InlineContentPlacement {
     /// Optional visual/icon rectangle.
     pub(super) visual: Option<Recti>,
     /// Text rectangle.
@@ -114,7 +115,7 @@ pub(super) struct InlineContentLayout {
 }
 
 /// Places an optional visual before text while keeping visual-only content centered.
-pub(super) fn layout_inline_content(bounds: Recti, style: &Style, label: &str, visual_size: Option<Dimensioni>) -> InlineContentLayout {
+pub(super) fn place_inline_content(bounds: Recti, style: &Style, label: &str, visual_size: Option<Dimensioni>) -> InlineContentPlacement {
     let padding = style.padding.max(0);
     let visual_size = visual_size.unwrap_or_default();
     let has_visual = visual_size.width > 0 && visual_size.height > 0;
@@ -122,7 +123,7 @@ pub(super) fn layout_inline_content(bounds: Recti, style: &Style, label: &str, v
 
     if !has_visual {
         // Text-only controls can use the whole bounds; text alignment is handled by draw helpers.
-        return InlineContentLayout { visual: None, text: bounds };
+        return InlineContentPlacement { visual: None, text: bounds };
     }
 
     let visual_width = visual_size.width.min((bounds.width - padding * 2).max(0)).max(0);
@@ -133,7 +134,7 @@ pub(super) fn layout_inline_content(bounds: Recti, style: &Style, label: &str, v
         // Visual-only controls center the visual and do not reserve a text rect.
         let visual_x = bounds.x + ((bounds.width - visual_width) / 2).max(0);
         let visual = rect(visual_x, visual_y, visual_width, visual_height);
-        return InlineContentLayout {
+        return InlineContentPlacement {
             visual: Some(visual),
             text: Recti::default(),
         };
@@ -144,14 +145,14 @@ pub(super) fn layout_inline_content(bounds: Recti, style: &Style, label: &str, v
     let text_x = visual.x + visual.width;
     let right = bounds.x + bounds.width;
     let text = rect(text_x, bounds.y, (right - text_x).max(0), bounds.height);
-    InlineContentLayout { visual: Some(visual), text }
+    InlineContentPlacement { visual: Some(visual), text }
 }
 
 /// Places an image-like visual by fitting it to the button bounds while preserving aspect ratio.
-pub(super) fn layout_scaled_visual_content(bounds: Recti, visual_size: Option<Dimensioni>) -> InlineContentLayout {
+pub(super) fn place_scaled_visual_content(bounds: Recti, visual_size: Option<Dimensioni>) -> InlineContentPlacement {
     let visual_size = visual_size.unwrap_or_default();
     if visual_size.width <= 0 || visual_size.height <= 0 || bounds.width <= 0 || bounds.height <= 0 {
-        return InlineContentLayout { visual: None, text: bounds };
+        return InlineContentPlacement { visual: None, text: bounds };
     }
 
     let mut width = bounds.width;
@@ -167,7 +168,7 @@ pub(super) fn layout_scaled_visual_content(bounds: Recti, visual_size: Option<Di
         width.max(0),
         height.max(0),
     );
-    InlineContentLayout { visual: Some(visual), text: bounds }
+    InlineContentPlacement { visual: Some(visual), text: bounds }
 }
 
 /// Selects which control color should be painted for a widget's fill policy and state.

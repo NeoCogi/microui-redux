@@ -30,8 +30,8 @@
 
 //! Button widget state and rendering.
 //!
-//! Buttons support text, arbitrary atlas icons, and external textures through one shared layout
-//! path.
+//! Buttons support text, arbitrary atlas icons, and external textures through one shared inline
+//! placement path.
 
 use super::*;
 use std::{cell::RefCell, rc::Rc};
@@ -203,39 +203,39 @@ impl Button {
         let font = ctx.style().resolve_font_choice(self.font);
         match &self.content {
             ButtonContent::Text { label, icon } => {
-                // Text/icon buttons use atlas icon metrics when laying out the inline visual.
+                // Text/icon buttons use atlas icon metrics when placing the inline visual.
                 let visual_size = icon.map(|icon| ctx.atlas().get_icon_size(icon));
-                let layout = layout_inline_content(rect, ctx.style(), label, visual_size);
+                let placement = place_inline_content(rect, ctx.style(), label, visual_size);
                 if !label.is_empty() {
-                    ctx.draw_control_text_with_font(font, label, layout.text, ControlColor::Text, self.opt);
+                    ctx.draw_control_text_with_font(font, label, placement.text, ControlColor::Text, self.opt);
                 }
-                if let (Some(icon), Some(visual)) = (icon, layout.visual) {
+                if let (Some(icon), Some(visual)) = (icon, placement.visual) {
                     let color = ctx.style().colors[ControlColor::Text as usize];
                     ctx.draw_icon(*icon, visual, color);
                 }
             }
             ButtonContent::Image { label, image } => {
                 let visual_size = image.map(TextureId::size);
-                let layout = layout_inline_content(rect, ctx.style(), label, visual_size);
+                let placement = place_inline_content(rect, ctx.style(), label, visual_size);
                 if !label.is_empty() {
-                    ctx.draw_control_text_with_font(font, label, layout.text, ControlColor::Text, self.opt);
+                    ctx.draw_control_text_with_font(font, label, placement.text, ControlColor::Text, self.opt);
                 }
-                if let (Some(image), Some(visual)) = (*image, layout.visual) {
+                if let (Some(image), Some(visual)) = (*image, placement.visual) {
                     let color = ctx.style().colors[ControlColor::Text as usize];
                     ctx.push_image(image, visual, color);
                 }
             }
             ButtonContent::ScaledImage { label, image } => {
                 let visual_size = image.map(TextureId::size);
-                let layout = if visual_size.is_some() {
-                    layout_scaled_visual_content(rect, visual_size)
+                let placement = if visual_size.is_some() {
+                    place_scaled_visual_content(rect, visual_size)
                 } else {
-                    layout_inline_content(rect, ctx.style(), label, visual_size)
+                    place_inline_content(rect, ctx.style(), label, visual_size)
                 };
                 if !label.is_empty() {
-                    ctx.draw_control_text_with_font(font, label, layout.text, ControlColor::Text, self.opt);
+                    ctx.draw_control_text_with_font(font, label, placement.text, ControlColor::Text, self.opt);
                 }
-                if let (Some(image), Some(visual)) = (*image, layout.visual) {
+                if let (Some(image), Some(visual)) = (*image, placement.visual) {
                     let color = ctx.style().colors[ControlColor::Text as usize];
                     ctx.push_image(image, visual, color);
                 }

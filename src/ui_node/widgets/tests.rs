@@ -75,15 +75,15 @@ fn image_widgets_measure_external_texture_dimensions() {
 }
 
 #[test]
-fn inline_image_layout_keeps_visual_and_text_rects_separate() {
+fn inline_image_placement_keeps_visual_and_text_rects_separate() {
     let style = Style::default();
-    let layout = layout_inline_content(rect(10, 20, 60, 18), &style, "aa", Some(Dimensioni::new(13, 5)));
-    let visual = layout.visual.expect("visual rect");
+    let placement = place_inline_content(rect(10, 20, 60, 18), &style, "aa", Some(Dimensioni::new(13, 5)));
+    let visual = placement.visual.expect("visual rect");
 
     assert_eq!(visual.x, 10 + style.padding);
     assert_eq!(visual.width, 13);
-    assert!(layout.text.x >= visual.x + visual.width);
-    assert!(layout.text.width > 0);
+    assert!(placement.text.x >= visual.x + visual.width);
+    assert!(placement.text.width > 0);
 }
 
 #[test]
