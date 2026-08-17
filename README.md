@@ -40,7 +40,7 @@ API for downstream applications.
 
 ## Demo
 
-Clone the repository and run the demo with exactly one backend feature:
+Clone the repository and run the demo with one backend feature:
 
 ```bash
 cargo run --example demo-full --features example-vulkan
@@ -50,6 +50,8 @@ cargo run --example demo-full --features example-wgpu
 
 `example-backend` is only a shared gate for example code paths; it is not runnable by itself.
 Running with only `--features example-backend` will fail intentionally at compile time.
+Backend features are additive for Cargo tooling. If several are enabled together, examples select
+Glow first, then Vulkan, then WGPU; enable only the backend you want for normal interactive runs.
 
 `demo-full` loads `examples/FACEPALM.png` and `assets/suzanne.obj` from disk at runtime. Run it
 from the repository root so those relative paths resolve.
@@ -108,7 +110,9 @@ Widgets record backend-neutral drawing through a framework-created `Painter`; `R
 ### How `SelectedBackend::Frame<'a>` works
 
 `SelectedBackend` is not a special type supplied by microui-redux. The examples define it as an
-ordinary compile-time alias for exactly one concrete renderer:
+ordinary compile-time alias for one concrete renderer. The feature guards use Glow, Vulkan, then
+WGPU precedence so the aliases remain well-defined when additive Cargo tooling enables several
+backend features:
 
 ```rust
 #[cfg(feature = "example-glow")]
@@ -592,8 +596,8 @@ If `fonts` is empty, `builder::Config` falls back to `default_font` + `default_f
 - `save-to-rust` – enables `AtlasHandle::to_rust_files` to emit the current atlas as Rust code for embedding.
 - `prebuilt-atlas` – opt-in example atlas embedding; without it, examples build their atlas at runtime.
 - `external-atlas` – example-only loader for a repository-root `atlas.png` paired with the checked-in `examples/common/external_atlas_metadata.rs` metadata.
-- `example-backend` – shared internal gate used by examples; pair it with exactly one concrete backend.
-- `example-glow` / `example-vulkan` / `example-wgpu` – concrete example backends; choose exactly one when running examples.
+- `example-backend` – shared internal gate used by examples; pair it with at least one concrete backend.
+- `example-glow` / `example-vulkan` / `example-wgpu` – concrete example backends. Features are additive; examples select Glow, then Vulkan, then WGPU when several are enabled. Enable only the desired backend for normal interactive runs.
 
 Disabling default features leaves only the raw RGBA upload path (`ImageSource::Raw { .. }`):
 `cargo build --no-default-features`
@@ -611,7 +615,8 @@ To embed the generated atlas instead, add `prebuilt-atlas` explicitly:
 an existing `atlas.png` whose pixels match the checked-in metadata exactly; `atlas.png` is ignored
 by Git and excluded from the crate package. The repository does not currently provide a command
 that regenerates this pair. Prefer `builder` or `prebuilt-atlas` unless you maintain both files
-together.
+together. If both atlas-loading features are enabled, `prebuilt-atlas` takes precedence over
+`external-atlas`.
 
 To export an atlas as Rust, enable `save-to-rust` (and `png_source` when serializing PNG-backed atlas data) and call `AtlasHandle::to_rust_files`. The helper binary requires `builder`, `save-to-rust`, and `png_source`:
 `cargo run --bin atlas_export --features "builder save-to-rust png_source" -- --output path/to/atlas.rs`
@@ -776,19 +781,19 @@ original names, authorship, and license terms:
 
 - **Open Sans Regular** (`OpenSans-Regular`, stored as `assets/NORMAL.ttf`) and
   **Open Sans Bold** (`OpenSans-Bold`, stored as `assets/BOLD.ttf`) — copyright
-  2020 The Open Sans Project Authors; licensed under the
-  [SIL Open Font License 1.1](https://github.com/googlefonts/opensans/blob/main/OFL.txt).
+  2020 The Open Sans Project Authors; licensed under the bundled
+  [SIL Open Font License 1.1](LICENSES/OFL-1.1.txt).
 - **Fixedsys Excelsior 3.01 Regular** (`FixedsysExcelsiorIIIb`, stored as
   `assets/CONSOLE.ttf`) — version 3.010 (2007), by Darien Valentine; released
   into the public domain, with the
-  [CC0 dedication](https://creativecommons.org/publicdomain/zero/1.0/) applying
+  bundled [CC0 dedication](LICENSES/CC0-1.0.txt) applying
   where a public-domain release is not permitted. See the project's
   [distribution terms](https://github.com/kika/fixedsys#distribution-terms).
   The bundled TTF itself does not contain a formal license field.
 - **Material Design Icons by Google** — the icon PNGs in `assets/` (all PNGs
   there except `WHITE.png`, which is a plain atlas texel) are derived from
   Google's Material Design Icons and are licensed under the
-  [Apache License 2.0](https://github.com/google/material-design-icons/blob/master/LICENSE).
+  bundled [Apache License 2.0](LICENSES/Apache-2.0.txt).
 - **Facepalm demo image** (`examples/FACEPALM.png`) — copyright Raja Lehtihet &
   Wael El Oraiby; licensed under this repository's
   [BSD 3-Clause license](LICENSE).

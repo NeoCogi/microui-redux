@@ -42,7 +42,7 @@
 //! No backend handle is captured and no second frame is opened. The supplied frame already owns
 //! the backend's exclusive mutable borrow and is finalized by `Drop` after display-list execution.
 //!
-//! Run with exactly one backend, for example:
+//! Run with one backend, for example:
 //!
 //! ```text
 //! cargo run --example backend-frame-cube --features example-glow

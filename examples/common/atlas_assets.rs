@@ -53,7 +53,7 @@
 //! Default atlas asset configuration shared by examples and the build-time atlas exporter.
 
 use microui_redux::prelude::AtlasHandle;
-#[cfg(feature = "external-atlas")]
+#[cfg(all(feature = "external-atlas", not(feature = "prebuilt-atlas")))]
 use std::fs;
 
 #[cfg(all(not(feature = "prebuilt-atlas"), not(feature = "external-atlas"), feature = "builder"))]

@@ -4,7 +4,7 @@ authors = ["Raja Lehtihet", "Wael El Oraiby"]
 version = "0.8.0-pre-alpha"
 edition = "2024"
 readme = "README.md"
-license = "BSD-3-Clause"
+license = "BSD-3-Clause AND OFL-1.1 AND Apache-2.0 AND CC0-1.0"
 description = "Retained Rust MicroUI-inspired GUI library"
 repository = "https://github.com/NeoCogi/microui-redux"
 autoexamples = false
@@ -22,7 +22,8 @@ save-to-rust = []
 prebuilt-atlas = ["png_source"]
 external-atlas = ["png_source"]
 example-backend = []
-# Example backends are only used by examples and are wired to optional deps.
+# Example backends are only used by examples and are wired to optional deps. They remain additive:
+# examples select Glow, then Vulkan, then WGPU when more than one is enabled.
 example-glow = ["example-backend", "dep:sdl2", "dep:glow"]
 example-vulkan = [
     "example-backend",

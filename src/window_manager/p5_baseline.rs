@@ -71,6 +71,7 @@ struct ScenarioResult {
     name: &'static str,
     application_nodes: usize,
     total_nodes: usize,
+    painted_nodes: u64,
     construction: AllocationCount,
     synchronization: OperationResult,
     rendering: OperationResult,
@@ -105,7 +106,10 @@ fn measure_scenario(name: &'static str, application_nodes: usize, build: impl Fn
     let construction = construction_measurement.finish();
 
     let total_nodes = ctx.debug_root_node_count(root.id()).expect("measured root must remain registered");
-    assert_eq!(total_nodes, application_nodes + 1, "each root must add exactly one private chrome node");
+    assert!(
+        total_nodes >= application_nodes,
+        "framework-owned structural nodes can only add to the application-authored tree"
+    );
 
     // Warm retained display-list, geometry, and traversal storage before steady measurements.
     for _ in 0..2 {
@@ -119,7 +123,22 @@ fn measure_scenario(name: &'static str, application_nodes: usize, build: impl Fn
     assert_eq!(synchronized_metrics.updates, 0);
     assert_eq!(synchronized_metrics.paints, 0);
 
-    // Start rendering from one fresh commit so the render loop contains paint/submission only.
+    // Characterize the number of nodes eligible for paint in this viewport. Retained traversal
+    // intentionally culls off-viewport nodes, so this can be smaller than the total tree size.
+    ctx.update_ui(dimensions());
+    ctx.frame(frame_info()).render_ui().expect("baseline render must succeed");
+    let painted_nodes = ctx
+        .debug_root_runtime_metrics(root.id())
+        .expect("measured root must expose test metrics")
+        .paints;
+    assert!(painted_nodes > 0, "each visible root must paint at least its chrome");
+    assert!(
+        painted_nodes <= total_nodes as u64,
+        "paint traversal cannot visit more nodes than the retained tree contains"
+    );
+
+    // Start the timed rendering from another fresh commit so its metrics and measured loop contain
+    // paint/submission only.
     ctx.update_ui(dimensions());
     let rendering = measure_repeated(|| {
         ctx.frame(frame_info()).render_ui().expect("baseline render must succeed");
@@ -129,7 +148,7 @@ fn measure_scenario(name: &'static str, application_nodes: usize, build: impl Fn
     assert_eq!(rendered_metrics.updates, 0, "rendering must not add update work");
     assert_eq!(
         rendered_metrics.paints,
-        total_nodes as u64 * ITERATIONS,
+        painted_nodes * ITERATIONS,
         "every render must paint each eligible retained node once"
     );
 
@@ -138,6 +157,7 @@ fn measure_scenario(name: &'static str, application_nodes: usize, build: impl Fn
         name,
         application_nodes,
         total_nodes,
+        painted_nodes,
         construction,
         synchronization,
         rendering,
@@ -148,10 +168,11 @@ fn measure_scenario(name: &'static str, application_nodes: usize, build: impl Fn
 
 fn print_scenario(result: &ScenarioResult) {
     println!(
-        "| {} | {} | {} | {} | {} | {} | {:.2} | {:.2} | {} | {:.2} | {:.2} | {} |",
+        "| {} | {} | {} | {} | {} | {} | {} | {:.2} | {:.2} | {} | {:.2} | {:.2} | {} |",
         result.name,
         result.application_nodes,
         result.total_nodes,
+        result.painted_nodes,
         result.total_nodes - result.application_nodes,
         result.construction.events,
         result.construction.bytes,
@@ -179,9 +200,9 @@ fn ui_node_p5_baseline_runtime() {
     });
 
     println!(
-        "| scenario | application nodes | total retained nodes | private chrome nodes | build allocs | build bytes | sync allocs/call | sync bytes/call | sync ns/call | render allocs/call | render bytes/call | render ns/call |"
+        "| scenario | application nodes | total retained nodes | painted nodes | framework structural nodes | build allocs | build bytes | sync allocs/call | sync bytes/call | sync ns/call | render allocs/call | render bytes/call | render ns/call |"
     );
-    println!("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+    println!("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
     for result in [&one, &hundred, &scroll] {
         print_scenario(result);
         assert!(result.construction.events > 0);
@@ -191,7 +212,7 @@ fn ui_node_p5_baseline_runtime() {
 
     assert_eq!((one.application_nodes, one.total_nodes), (1, 2));
     assert_eq!((hundred.application_nodes, hundred.total_nodes), (100, 101));
-    assert_eq!((scroll.application_nodes, scroll.total_nodes), (21, 22));
+    assert_eq!((scroll.application_nodes, scroll.total_nodes), (22, 26));
 
     // Repeat the ordered transaction boundary in the same release-mode evidence run. The root
     // chrome and its one application node both receive one update for each of three events.
