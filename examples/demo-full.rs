@@ -143,17 +143,15 @@ impl Widget for PainterDemo {
 
         self.phase = (self.phase + 0.025) % (PI * 2.0);
         if ctx.hovered() {
-            if let Some(event) = input {
-                match event {
-                    UiInputEvent::MouseMove { pos, .. }
-                    | UiInputEvent::MouseDrag { pos, .. }
-                    | UiInputEvent::MouseDown { pos, .. }
-                    | UiInputEvent::MouseUp { pos, .. }
-                    | UiInputEvent::Scroll { pos, .. } => {
-                        self.star_center = Some(Vec2f::new(pos.x as f32, pos.y as f32));
-                    }
-                    _ => {}
-                }
+            if let Some(
+                UiInputEvent::MouseMove { pos, .. }
+                | UiInputEvent::MouseDrag { pos, .. }
+                | UiInputEvent::MouseDown { pos, .. }
+                | UiInputEvent::MouseUp { pos, .. }
+                | UiInputEvent::Scroll { pos, .. },
+            ) = input
+            {
+                self.star_center = Some(Vec2f::new(pos.x as f32, pos.y as f32));
             }
         } else {
             self.star_center = None;
@@ -571,12 +569,13 @@ impl Widget for FalloffEditor {
             self.active = None;
         }
 
-        if ctx.active() && (mouse_delta.x != 0 || mouse_delta.y != 0) {
-            if let Some(target) = self.active {
-                let point = Self::local_to_graph(graph, mouse_local);
-                self.drag_target(target, point);
-                changed = true;
-            }
+        if ctx.active()
+            && (mouse_delta.x != 0 || mouse_delta.y != 0)
+            && let Some(target) = self.active
+        {
+            let point = Self::local_to_graph(graph, mouse_local);
+            self.drag_target(target, point);
+            changed = true;
         }
 
         let _ = changed;

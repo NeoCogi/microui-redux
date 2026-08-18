@@ -601,6 +601,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::result_large_err)] // The test verifies that failed mutation returns the exact owner.
     fn ownership_moving_widget_access_returns_the_same_unmounted_node_on_failure() {
         let (column_state, column_node) = crate::Linear::create(crate::LinearParameters::vertical(std::iter::empty::<Node>()));
         let (_, candidate) = text_node("candidate");

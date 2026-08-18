@@ -126,10 +126,7 @@ fn parse_face(parts: &[&str], face_verts: &mut Vec<(u32, u32, u32)>, faces: &mut
     };
 
     for p in parts {
-        match parse_face_part(p) {
-            Ok(vuv) => face_verts.push(vuv),
-            Err(err) => return Result::Err(err),
-        }
+        face_verts.push(parse_face_part(p)?);
     }
 
     faces.push(of);
@@ -144,12 +141,12 @@ fn parse_line(
     face_verts: &mut Vec<(u32, u32, u32)>,
     faces: &mut Vec<ObjFace>,
 ) -> Result<i32, String> {
-    if line == "" {
+    if line.is_empty() {
         return Result::Ok(0);
     }
 
-    let parts: Vec<&str> = line.split(|x| x == ' ' || x == '\t').filter(|&x| x != "").collect();
-    if parts.len() == 0 {
+    let parts: Vec<&str> = line.split([' ', '\t']).filter(|x| !x.is_empty()).collect();
+    if parts.is_empty() {
         return Result::Err(String::from("No part!"));
     }
 
@@ -205,7 +202,7 @@ impl Obj {
         let mut lines = String::new();
         f.read_to_string(&mut lines).unwrap();
 
-        Self::from_byte_stream(lines.as_str().as_bytes())
+        Self::from_byte_stream(lines.as_bytes())
     }
 
     pub fn to_polymesh(&self) -> PolyMesh {
@@ -213,9 +210,9 @@ impl Obj {
         let mut pm = PolyMesh::new();
         pm.set_vertices(self.verts.clone(), self.normals.clone(), self.uvs.clone());
 
-        for (_, f) in self.faces.iter().enumerate() {
+        for f in &self.faces {
             for i in 0..f.len {
-                let (v_id, n_id, uv_id) = self.face_verts[(f.vs_idx + i) as usize];
+                let (v_id, n_id, uv_id) = self.face_verts[f.vs_idx + i];
                 verts.push(PolyVertex {
                     pos: v_id as _,
                     normal: n_id as _,

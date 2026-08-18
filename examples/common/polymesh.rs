@@ -121,19 +121,17 @@ impl<'a> PolyMesh {
         self.v_tex = tex;
     }
 
-    pub fn add_poly(&mut self, verts: &Vec<PolyVertex>) {
+    pub fn add_poly(&mut self, verts: &[PolyVertex]) {
         let len = verts.len();
         let start = self.vertices.len();
 
         let mut norm_verts = [Vec3f::zero(); 3];
-        let mut i = 0;
-        for v in verts {
+        for (i, v) in verts.iter().enumerate() {
             if i < 3 {
                 norm_verts[i] = self.v_positions[v.pos].position;
             }
-            self.vertices.push(v.clone());
+            self.vertices.push(*v);
             self.bbox.add(&self.v_positions[v.pos].position);
-            i += 1;
         }
 
         self.polys.push(Polygon { len, start });
@@ -210,7 +208,7 @@ impl<'a> PolymeshTrait for &'a PolyMesh {
     type Vertex = &'a PolyVertex;
 
     fn polys(&self) -> Self::PolyIter {
-        PolyMeshIterator { mesh: *self, poly_id: 0 }
+        PolyMeshIterator { mesh: self, poly_id: 0 }
     }
 
     fn get_vertex_position(&self, index: usize) -> Vec3f {

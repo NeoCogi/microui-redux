@@ -62,7 +62,7 @@ impl View3D {
             dimension,
             scroll,
             bounds,
-            pvm: camera.projection_matrix().clone() * camera.view_matrix().clone(),
+            pvm: *camera.projection_matrix() * *camera.view_matrix(),
         }
     }
 
@@ -80,7 +80,7 @@ impl View3D {
         // TODO: do proper computation of the far plane
         let far_plane = self.bounds.extent().length() * 100.0;
         self.camera = self.camera.with_far_plane(far_plane);
-        self.pvm = self.camera.projection_matrix().clone() * self.camera.view_matrix().clone();
+        self.pvm = *self.camera.projection_matrix() * *self.camera.view_matrix();
     }
 
     pub fn update_drag(&mut self, prev: Vec2i, curr: Vec2i) -> UpdateResult {
@@ -103,7 +103,7 @@ impl View3D {
             }
         };
 
-        self.pvm = self.camera.projection_matrix().clone() * self.camera.view_matrix().clone();
+        self.pvm = *self.camera.projection_matrix() * *self.camera.view_matrix();
         handled
     }
 
@@ -121,7 +121,7 @@ impl View3D {
             self.camera.near_plane(),
             self.camera.far_plane(),
         );
-        self.pvm = self.camera.projection_matrix().clone() * self.camera.view_matrix().clone();
+        self.pvm = *self.camera.projection_matrix() * *self.camera.view_matrix();
         UpdateResult::Handled
     }
 
@@ -150,10 +150,10 @@ impl View3D {
     }
 
     pub fn projection_matrix(&self) -> Mat4f {
-        self.camera.projection_matrix().clone()
+        *self.camera.projection_matrix()
     }
 
     pub fn view_matrix(&self) -> Mat4f {
-        self.camera.view_matrix().clone()
+        *self.camera.view_matrix()
     }
 }

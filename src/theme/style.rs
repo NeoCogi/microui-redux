@@ -168,10 +168,10 @@ impl Style {
     /// font IDs are preserved.
     pub fn bind_default_named_fonts(&mut self, atlas: &AtlasHandle) {
         let default_font = FontId::default();
-        if self.font == default_font {
-            if let Some(font) = atlas.font_id(FontRole::Body.atlas_name()) {
-                self.font = font;
-            }
+        if self.font == default_font
+            && let Some(font) = atlas.font_id(FontRole::Body.atlas_name())
+        {
+            self.font = font;
         }
         if self.small_font == default_font {
             self.small_font = atlas.font_id(FontRole::Small.atlas_name()).unwrap_or(self.font);
@@ -289,8 +289,10 @@ mod tests {
 
     #[test]
     fn frame_border_resolves_geometry_and_color_without_role_policy() {
-        let mut style = Style::default();
-        style.frame_border_width = -4;
+        let style = Style {
+            frame_border_width: -4,
+            ..Style::default()
+        };
         let border = style.frame_border();
         let expected = style.colors[crate::ControlColor::Border as usize];
 

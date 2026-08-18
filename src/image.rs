@@ -35,7 +35,7 @@ use crate::{Color4b, color4b};
 use png::{BitDepth, ColorType, Decoder, Transformations};
 #[cfg(any(feature = "builder", feature = "png_source"))]
 use std::io::Cursor;
-use std::io::{Error, ErrorKind};
+use std::io::Error;
 
 #[derive(Copy, Clone)]
 /// Describes image bytes that can be uploaded to a texture or decoded into an atlas.
@@ -63,7 +63,7 @@ pub enum ImageSource<'a> {
 pub fn load_image_bytes(source: ImageSource) -> std::io::Result<(usize, usize, Vec<Color4b>)> {
     match source {
         ImageSource::Raw { width, height, pixels } => {
-            let expected = validate_rgba_buffer(width, height, pixels.len()).map_err(|err| Error::new(ErrorKind::Other, err))?;
+            let expected = validate_rgba_buffer(width, height, pixels.len()).map_err(Error::other)?;
             let width_usize = width as usize;
             let height_usize = height as usize;
             let mut colors = Vec::with_capacity(expected / 4);
@@ -105,17 +105,15 @@ fn decode_png_to_colors(bytes: &[u8]) -> std::io::Result<(usize, usize, Vec<Colo
     let mut cursor = Cursor::new(bytes);
     let mut decoder = Decoder::new(&mut cursor);
     decoder.set_transformations(Transformations::normalize_to_color8());
-    let mut reader = decoder
-        .read_info()
-        .map_err(|e| Error::new(ErrorKind::Other, format!("PNG decode error: {}", e)))?;
+    let mut reader = decoder.read_info().map_err(|e| Error::other(format!("PNG decode error: {}", e)))?;
     let buf_size = reader
         .output_buffer_size()
-        .ok_or_else(|| Error::new(ErrorKind::Other, "PNG decoder did not report output size"))?;
+        .ok_or_else(|| Error::other("PNG decoder did not report output size"))?;
     let mut img_data = vec![0; buf_size];
     let info = reader.next_frame(&mut img_data)?;
 
     if info.bit_depth != BitDepth::Eight {
-        return Err(Error::new(ErrorKind::Other, format!("Unsupported PNG bit depth: {:?}", info.bit_depth)));
+        return Err(Error::other(format!("Unsupported PNG bit depth: {:?}", info.bit_depth)));
     }
 
     let pixel_size = match info.color_type {
@@ -128,7 +126,7 @@ fn decode_png_to_colors(bytes: &[u8]) -> std::io::Result<(usize, usize, Vec<Colo
 
     let pixel_count = (info.width as usize)
         .checked_mul(info.height as usize)
-        .ok_or_else(|| Error::new(ErrorKind::Other, "PNG dimensions overflow pixel count"))?;
+        .ok_or_else(|| Error::other("PNG dimensions overflow pixel count"))?;
     let mut pixels = vec![Color4b::default(); pixel_count];
     let line_size = info.line_size;
     // The decoder can normalize bit depth, but not all color models become RGBA directly. Expand
@@ -149,7 +147,7 @@ fn decode_png_to_colors(bytes: &[u8]) -> std::io::Result<(usize, usize, Vec<Colo
                     color4b(c, c, c, a)
                 }
                 ColorType::Indexed => {
-                    return Err(Error::new(ErrorKind::Other, "Indexed PNGs are not supported"));
+                    return Err(Error::other("Indexed PNGs are not supported"));
                 }
                 ColorType::Rgb => color4b(line[xx], line[xx + 1], line[xx + 2], 0xFF),
                 ColorType::Rgba => {

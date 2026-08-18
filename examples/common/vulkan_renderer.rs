@@ -1213,6 +1213,7 @@ impl UiResources {
         self.record_with_descriptor(ctx, command_buffer, vertices, width, height, self.descriptor_set, None)
     }
 
+    #[allow(clippy::too_many_arguments)] // Mirrors the explicit Vulkan draw state passed to record.
     fn record_custom(
         &mut self,
         ctx: &mut VulkanContext,
@@ -1226,6 +1227,7 @@ impl UiResources {
         self.record_with_descriptor(ctx, command_buffer, vertices, width, height, descriptor_set, area)
     }
 
+    #[allow(clippy::too_many_arguments)] // Mirrors the explicit Vulkan draw state passed to record.
     fn record_with_descriptor(
         &mut self,
         ctx: &mut VulkanContext,
@@ -1244,7 +1246,7 @@ impl UiResources {
             Some(offset) => offset,
             None => return Err(format!("invalid frame index for UI upload offset: {}", frame)),
         };
-        let vertex_bytes = unsafe { std::slice::from_raw_parts(vertices.as_ptr() as *const u8, vertices.len() * std::mem::size_of::<Vertex>()) };
+        let vertex_bytes = unsafe { std::slice::from_raw_parts(vertices.as_ptr() as *const u8, std::mem::size_of_val(vertices)) };
         let copy_size = vertex_bytes.len() as u64;
         let dst_offset = self.vertex_offset;
         self.ensure_staging_buffer(ctx, frame, frame_staging_offset + copy_size)?;
@@ -1693,13 +1695,13 @@ impl MeshResources {
         let vertex_bytes = unsafe {
             std::slice::from_raw_parts(
                 submission.mesh.vertices().as_ptr() as *const u8,
-                submission.mesh.vertices().len() * std::mem::size_of::<MeshVertex>(),
+                std::mem::size_of_val(submission.mesh.vertices()),
             )
         };
         let index_bytes = unsafe {
             std::slice::from_raw_parts(
                 submission.mesh.indices().as_ptr() as *const u8,
-                submission.mesh.indices().len() * std::mem::size_of::<u32>(),
+                std::mem::size_of_val(submission.mesh.indices()),
             )
         };
         let frame = ctx.current_frame;
@@ -1865,7 +1867,7 @@ impl VulkanContext {
             .map_err(|err| format!("enumerate_required_extensions failed: {err:?}"))?
             .to_vec();
         let surface_extension = khr::surface::NAME.as_ptr();
-        if !extension_names.iter().any(|ext| *ext == surface_extension) {
+        if !extension_names.contains(&surface_extension) {
             extension_names.push(surface_extension);
         }
 
@@ -2377,6 +2379,7 @@ impl VulkanContext {
     }
 
     /// Executes one complete Vulkan frame from an acquired image through submit and present.
+    #[allow(clippy::too_many_arguments)] // Frame recording keeps Vulkan state explicit at the call boundary.
     fn draw_frame(
         &mut self,
         acquired: AcquiredVulkanFrame,
@@ -2529,6 +2532,7 @@ impl VulkanContext {
     }
 
     /// Records the graphics command buffer by replaying queued UI and custom commands in order.
+    #[allow(clippy::too_many_arguments)] // Command recording keeps Vulkan state explicit at the call boundary.
     fn record_command_buffer(
         &mut self,
         command_buffer: vk::CommandBuffer,
@@ -2640,7 +2644,7 @@ impl VulkanContext {
 
     /// Prefers mailbox presentation when available, otherwise falls back to FIFO.
     fn choose_present_mode(available_present_modes: &[vk::PresentModeKHR]) -> vk::PresentModeKHR {
-        if available_present_modes.iter().any(|&mode| mode == vk::PresentModeKHR::MAILBOX) {
+        if available_present_modes.contains(&vk::PresentModeKHR::MAILBOX) {
             vk::PresentModeKHR::MAILBOX
         } else {
             vk::PresentModeKHR::FIFO

@@ -298,35 +298,34 @@ impl DensePacker {
 
     /// Finds the lowest suitable skyline placement for the requested rectangle.
     fn find_skyline(&self, w: i32, h: i32, allow_rotation: bool) -> Option<(usize, Recti)> {
-        let mut bottom = std::i32::MAX;
-        let mut width = std::i32::MAX;
+        let mut bottom = i32::MAX;
+        let mut width = i32::MAX;
         let mut index = None;
         let mut rect = Rect::new(0, 0, 0, 0);
 
         // keep the `bottom` and `width` as small as possible
         for i in 0..self.skylines.len() {
-            if let Some(r) = self.can_put(i, w, h) {
-                if r.bottom() < bottom || (r.bottom() == bottom && self.skylines[i].width < width) {
-                    bottom = r.bottom();
-                    width = self.skylines[i].width;
-                    index = Some(i);
-                    rect = r;
-                }
+            if let Some(r) = self.can_put(i, w, h)
+                && (r.bottom() < bottom || (r.bottom() == bottom && self.skylines[i].width < width))
+            {
+                bottom = r.bottom();
+                width = self.skylines[i].width;
+                index = Some(i);
+                rect = r;
             }
 
-            if allow_rotation {
-                if let Some(r) = self.can_put(i, h, w) {
-                    if r.bottom() < bottom || (r.bottom() == bottom && self.skylines[i].width < width) {
-                        bottom = r.bottom();
-                        width = self.skylines[i].width;
-                        index = Some(i);
-                        rect = r;
-                    }
-                }
+            if allow_rotation
+                && let Some(r) = self.can_put(i, h, w)
+                && (r.bottom() < bottom || (r.bottom() == bottom && self.skylines[i].width < width))
+            {
+                bottom = r.bottom();
+                width = self.skylines[i].width;
+                index = Some(i);
+                rect = r;
             }
         }
 
-        if let Some(index) = index { Some((index, rect)) } else { None }
+        index.map(|index| (index, rect))
     }
 
     /// Splits skyline segments after placing `rect` at segment `i`.

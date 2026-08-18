@@ -88,9 +88,9 @@ pub struct FontId(usize);
 /// Handle referencing a bitmap icon stored in the atlas.
 pub struct IconId(usize);
 
-impl Into<u32> for IconId {
-    fn into(self) -> u32 {
-        self.0 as _
+impl From<IconId> for u32 {
+    fn from(value: IconId) -> Self {
+        value.0 as _
     }
 }
 

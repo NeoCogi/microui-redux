@@ -177,8 +177,10 @@ mod tests {
 
     #[test]
     fn frame_geometry_derives_inside_content() {
-        let mut style = Style::default();
-        style.frame_border_width = 2;
+        let style = Style {
+            frame_border_width: 2,
+            ..Style::default()
+        };
         let geometry = frame_geometry(Recti::new(10, 20, 30, 40), true, &style);
         assert_eq!(rect_tuple(geometry.outer), (10, 20, 30, 40));
         assert_eq!(geometry.content.map(rect_tuple), Some((12, 22, 26, 36)));
@@ -186,8 +188,10 @@ mod tests {
 
     #[test]
     fn zero_width_frame_keeps_the_complete_content_rect() {
-        let mut style = Style::default();
-        style.frame_border_width = 0;
+        let style = Style {
+            frame_border_width: 0,
+            ..Style::default()
+        };
         let outer = Recti::new(10, 20, 30, 40);
         let geometry = frame_geometry(outer, true, &style);
         assert_eq!(geometry.content.map(rect_tuple), Some(rect_tuple(outer)));
@@ -195,8 +199,10 @@ mod tests {
 
     #[test]
     fn transparent_border_keeps_structural_inset() {
-        let mut style = Style::default();
-        style.frame_border_width = 1;
+        let mut style = Style {
+            frame_border_width: 1,
+            ..Style::default()
+        };
         style.colors[crate::ControlColor::Border as usize] = color(0, 0, 0, 0);
         assert_eq!(frame_geometry(Recti::new(4, 5, 8, 7), true, &style).content.map(rect_tuple), Some((5, 6, 6, 5)));
     }

@@ -32,7 +32,7 @@
 
 use super::*;
 use crate::image::{ImageSource, load_image_bytes};
-use std::io::{Error, ErrorKind};
+use std::io::Error;
 
 /// Describes a font baked into an [`AtlasSource`].
 pub struct FontEntry<'a> {
@@ -135,13 +135,13 @@ impl AtlasHandle {
     /// white tile at icon index zero. Treat metadata as trusted and satisfy the [`AtlasSource`]
     /// field contracts before constructing the handle.
     pub fn try_from<'a>(source: &AtlasSource<'a>) -> std::io::Result<Self> {
-        let width = i32::try_from(source.width).map_err(|_| Error::new(ErrorKind::Other, "Atlas width exceeds i32::MAX"))?;
-        let height = i32::try_from(source.height).map_err(|_| Error::new(ErrorKind::Other, "Atlas height exceeds i32::MAX"))?;
+        let width = i32::try_from(source.width).map_err(|_| Error::other("Atlas width exceeds i32::MAX"))?;
+        let height = i32::try_from(source.height).map_err(|_| Error::other("Atlas height exceeds i32::MAX"))?;
         let pixels = match source.format {
             SourceFormat::Raw => {
                 let (raw_width, raw_height, pixels) = load_image_bytes(ImageSource::Raw { width, height, pixels: source.pixels })?;
                 if raw_width != source.width || raw_height != source.height {
-                    return Err(Error::new(ErrorKind::Other, "Atlas dimensions do not match raw data"));
+                    return Err(Error::other("Atlas dimensions do not match raw data"));
                 }
                 pixels
             }
@@ -149,7 +149,7 @@ impl AtlasHandle {
             SourceFormat::Png => {
                 let (png_width, png_height, pixels) = load_image_bytes(ImageSource::Png { bytes: source.pixels })?;
                 if png_width != source.width || png_height != source.height {
-                    return Err(Error::new(ErrorKind::Other, "Atlas dimensions do not match PNG data"));
+                    return Err(Error::other("Atlas dimensions do not match PNG data"));
                 }
                 pixels
             }

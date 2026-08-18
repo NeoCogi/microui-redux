@@ -978,6 +978,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::result_large_err)] // The test verifies that failed mutation returns the exact owner.
     fn grid_widget_handle_preserves_a_grid_item_when_access_fails() {
         let (_, child) = text_node("candidate");
         let child_id = child.id();

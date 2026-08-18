@@ -41,7 +41,7 @@ use fontdue::*;
 use std::{
     collections::HashMap,
     fs::File,
-    io::{BufWriter, Cursor, Error, ErrorKind, Read, Result, Seek, Write},
+    io::{BufWriter, Cursor, Error, Read, Result, Seek, Write},
     path::Path,
 };
 
@@ -100,7 +100,7 @@ pub struct Config<'a> {
 impl Builder {
     /// Creates a builder using the provided configuration and assets.
     #[cfg(feature = "builder")]
-    pub fn from_config<'a>(config: &'a Config) -> Result<Builder> {
+    pub fn from_config(config: &Config) -> Result<Builder> {
         let rp_config = PackerConfig {
             width: config.texture_width as _,
             height: config.texture_height as _,
@@ -125,7 +125,7 @@ impl Builder {
         }
         if config.fonts.is_empty() {
             if config.default_font.is_empty() {
-                return Err(Error::new(ErrorKind::Other, "Atlas config must provide either `fonts` or `default_font`"));
+                return Err(Error::other("Atlas config must provide either `fonts` or `default_font`"));
             }
             builder.add_font(config.default_font.as_str(), config.default_font_size)?;
         } else {
@@ -146,7 +146,7 @@ impl Builder {
     /// Adds an icon under a stable lookup key and returns its [`IconId`].
     pub fn add_icon_named(&mut self, name: &str, path: &str) -> Result<IconId> {
         if self.atlas.icons.iter().any(|(existing, _)| existing == name) {
-            return Err(Error::new(ErrorKind::Other, format!("Icon name '{}' already exists in the atlas", name)));
+            return Err(Error::other(format!("Icon name '{}' already exists in the atlas", name)));
         }
         let (width, height, pixels) = Self::load_icon(path)?;
         let rect = self.add_tile(width, height, pixels.as_slice())?;
@@ -166,7 +166,7 @@ impl Builder {
     /// [`FontId`].
     pub fn add_font_named(&mut self, name: &str, path: &str, size: usize) -> Result<FontId> {
         if self.atlas.fonts.iter().any(|(existing, _)| existing == name) {
-            return Err(Error::new(ErrorKind::Other, format!("Font name '{}' already exists in the atlas", name)));
+            return Err(Error::other(format!("Font name '{}' already exists in the atlas", name)));
         }
         let font = Self::load_font(path)?;
         let mut entries = HashMap::new();
@@ -220,7 +220,7 @@ impl Builder {
 
             let mut writer = encoder.write_header()?;
 
-            writer.write_image_data(atlas.0.pixels.iter().map(|c| [c.x, c.y, c.z, c.w]).flatten().collect::<Vec<u8>>().as_slice())?;
+            writer.write_image_data(atlas.0.pixels.iter().flat_map(|c| [c.x, c.y, c.z, c.w]).collect::<Vec<u8>>().as_slice())?;
         }
         cursor.seek(std::io::SeekFrom::Start(0))?;
         cursor.read_to_end(&mut w)?;
@@ -230,7 +230,7 @@ impl Builder {
     /// Writes the atlas texture to disk as a PNG.
     pub fn save_png_image(atlas: AtlasHandle, path: &str) -> Result<()> {
         let file = File::create(path)?;
-        let ref mut w = BufWriter::new(file);
+        let mut w = BufWriter::new(file);
         let bytes = Self::png_image_bytes(atlas)?;
         w.write_all(bytes.as_slice())?;
         Ok(())
@@ -264,7 +264,7 @@ impl Builder {
                     "Bitmap size of {}x{} is not enough to hold the atlas, please resize",
                     self.atlas.width, self.atlas.height
                 );
-                Err(Error::new(ErrorKind::Other, error))
+                Err(Error::other(error))
             }
             _ => Ok(Recti::new(0, 0, 0, 0)),
         }
@@ -274,11 +274,11 @@ impl Builder {
     fn load_font(path: &str) -> Result<fontdue::Font> {
         let mut data = Vec::new();
         File::open(path)
-            .map_err(|e| Error::new(ErrorKind::Other, format!("Cannot open font file '{}': {}", path, e)))?
+            .map_err(|e| Error::other(format!("Cannot open font file '{}': {}", path, e)))?
             .read_to_end(&mut data)
-            .map_err(|e| Error::new(ErrorKind::Other, format!("Cannot read font file '{}': {}", path, e)))?;
+            .map_err(|e| Error::other(format!("Cannot read font file '{}': {}", path, e)))?;
 
-        let font = fontdue::Font::from_bytes(data, FontSettings::default()).map_err(|error| Error::new(ErrorKind::Other, format!("{}", error)))?;
+        let font = fontdue::Font::from_bytes(data, FontSettings::default()).map_err(|error| Error::other(error.to_string()))?;
         Ok(font)
     }
 

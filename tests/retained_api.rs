@@ -127,8 +127,10 @@ fn downstream_file_dialog_completion_is_subscriber_driven_without_widget_access(
     let mut context = context_with_state::<FileDialogModel>();
     let completed = context.file_dialog_completed();
     context.subscribe(completed, FileDialogModel::file_dialog_completed).unwrap();
-    let mut model = FileDialogModel::default();
-    model.session = Some(context.open_file_dialog(FileDialogRequest::default()));
+    let mut model = FileDialogModel {
+        session: Some(context.open_file_dialog(FileDialogRequest::default())),
+        ..FileDialogModel::default()
+    };
 
     // Explicit cancellation queues one event; the retained update delivers it without frame polling.
     assert!(context.cancel_file_dialog(model.session.as_ref().unwrap()));

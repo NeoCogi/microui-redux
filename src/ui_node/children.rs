@@ -93,6 +93,7 @@ impl ChildrenHandle {
 
     /// Appends an unmounted node or returns it unchanged when mutation is unavailable.
     #[cfg(test)]
+    #[allow(clippy::result_large_err)] // Failure deliberately returns the unique node owner unchanged.
     pub(crate) fn try_push(&self, node: Node) -> Result<(), Node> {
         // Upgrade and borrow before consuming the node so failure preserves its unique ownership.
         let Some(owner) = self.cell.upgrade() else {

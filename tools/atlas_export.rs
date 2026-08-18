@@ -58,7 +58,11 @@
 //! code inside `build.rs`.
 
 use microui_redux::SourceFormat;
-use std::{env, error::Error, path::PathBuf};
+use std::{
+    env,
+    error::Error,
+    path::{Path, PathBuf},
+};
 
 #[path = "../examples/common/atlas_assets.rs"]
 mod atlas_assets;
@@ -87,7 +91,7 @@ fn parse_output_arg() -> Result<PathBuf, Box<dyn Error>> {
 }
 
 /// Builds the default atlas and emits it as PNG-compressed Rust bytes.
-fn export_atlas(path: &PathBuf) -> Result<(), Box<dyn Error>> {
+fn export_atlas(path: &Path) -> Result<(), Box<dyn Error>> {
     let atlas = atlas_assets::load_atlas();
     // PNG source keeps the embedded atlas self-contained without storing raw RGBA in `.rodata`.
     atlas.to_rust_files("PREBUILT_ATLAS", SourceFormat::Png, path.to_str().unwrap())?;

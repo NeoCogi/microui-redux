@@ -78,6 +78,7 @@ struct Uniforms {
     _pad: [f32; 2],
 }
 
+#[allow(clippy::enum_variant_names)] // The prefix makes queued draw operations explicit at use sites.
 enum RenderCommand {
     // Draw the queued UI vertices up to this index with the atlas texture.
     DrawUiTo(usize),
@@ -177,6 +178,7 @@ impl WgpuRenderer {
     }
 
     /// Creates a sampled RGBA texture plus the bind group used to draw with it.
+    #[allow(clippy::too_many_arguments)] // Texture creation keeps the related WGPU resources explicit.
     fn create_gpu_texture(
         device: &wgpu::Device,
         queue: &wgpu::Queue,

@@ -185,10 +185,10 @@ impl DisplayList {
             clip: previous_clip,
             kind: DrawKind::SolidTriangles { triangles: previous_triangles },
         }) = self.ops.last_mut()
+            && same_rect(*previous_clip, clip)
+            && previous_triangles.extend(&range)
         {
-            if same_rect(*previous_clip, clip) && previous_triangles.extend(&range) {
-                return;
-            }
+            return;
         }
 
         self.push(clip, DrawKind::SolidTriangles { triangles: range });

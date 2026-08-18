@@ -34,7 +34,7 @@
 //! mesh rendering for the demo application.
 
 use core::slice;
-use std::{collections::HashMap, io, sync::Arc, usize};
+use std::{collections::HashMap, io, sync::Arc};
 
 use microui_redux::{prelude::*, render::Vertex};
 use glow::*;
@@ -198,7 +198,7 @@ impl GLRenderer {
 impl GlFrameOps for GLRenderer {
     /// Flushes the accumulated UI quad batch through the shared atlas pipeline.
     fn flush(&mut self) {
-        if self.verts.len() == 0 || self.indices.len() == 0 {
+        if self.verts.is_empty() || self.indices.is_empty() {
             return;
         }
 
@@ -224,7 +224,7 @@ impl GlFrameOps for GLRenderer {
 
             // Bind the atlas texture on texture unit 0.
             gl.bind_texture(glow::TEXTURE_2D, Some(self.tex_o));
-            gl.active_texture(glow::TEXTURE0 + 0);
+            gl.active_texture(glow::TEXTURE0);
             let tex_uniform_id = gl.get_uniform_location(self.program, "uTexture").unwrap();
             gl.uniform_1_i32(Some(&tex_uniform_id), 0);
             debug_assert_eq!(gl.get_error(), 0);
@@ -234,7 +234,7 @@ impl GlFrameOps for GLRenderer {
             let tm = ortho4(0.0, self.width as f32, self.height as f32, 0.0, -1.0, 1.0);
             let tm_ptr = tm.col.as_ptr() as *const _ as *const f32;
             let slice = std::slice::from_raw_parts(tm_ptr, 16);
-            gl.uniform_matrix_4_f32_slice(Some(&viewport), false, &slice);
+            gl.uniform_matrix_4_f32_slice(Some(&viewport), false, slice);
             debug_assert_eq!(gl.get_error(), 0);
 
             // Resolve attribute locations and bind the shared vertex/index buffers.
@@ -290,17 +290,17 @@ impl GlFrameOps for GLRenderer {
         }
 
         let is = self.verts.len() as u16;
-        self.indices.push(is + 0);
+        self.indices.push(is);
         self.indices.push(is + 1);
         self.indices.push(is + 2);
         self.indices.push(is + 2);
         self.indices.push(is + 3);
-        self.indices.push(is + 0);
+        self.indices.push(is);
 
-        self.verts.push(v0.clone());
-        self.verts.push(v1.clone());
-        self.verts.push(v2.clone());
-        self.verts.push(v3.clone());
+        self.verts.push(*v0);
+        self.verts.push(*v1);
+        self.verts.push(*v2);
+        self.verts.push(*v3);
     }
 
     /// Appends one triangle to the normal indexed UI batch, flushing first if the `u16` budget
@@ -311,7 +311,7 @@ impl GlFrameOps for GLRenderer {
         }
 
         let is = self.verts.len() as u16;
-        self.indices.push(is + 0);
+        self.indices.push(is);
         self.indices.push(is + 1);
         self.indices.push(is + 2);
 
@@ -402,7 +402,7 @@ impl GlFrameOps for GLRenderer {
 
             gl.use_program(Some(self.program));
             gl.bind_texture(glow::TEXTURE_2D, Some(tex));
-            gl.active_texture(glow::TEXTURE0 + 0);
+            gl.active_texture(glow::TEXTURE0);
             let tex_uniform_id = gl.get_uniform_location(self.program, "uTexture").unwrap();
             gl.uniform_1_i32(Some(&tex_uniform_id), 0);
 
@@ -410,7 +410,7 @@ impl GlFrameOps for GLRenderer {
             let tm = ortho4(0.0, self.width as f32, self.height as f32, 0.0, -1.0, 1.0);
             let tm_ptr = tm.col.as_ptr() as *const _ as *const f32;
             let slice = std::slice::from_raw_parts(tm_ptr, 16);
-            gl.uniform_matrix_4_f32_slice(Some(&viewport), false, &slice);
+            gl.uniform_matrix_4_f32_slice(Some(&viewport), false, slice);
 
             let pos_attrib_id = gl.get_attrib_location(self.program, "vertexPosition").unwrap();
             let tex_attrib_id = gl.get_attrib_location(self.program, "vertexTexCoord").unwrap();
@@ -544,7 +544,7 @@ impl GLRenderer {
             gl.use_program(Some(self.program));
             // Sample the atlas so the shader path stays identical to normal UI; UVs point at white.
             gl.bind_texture(glow::TEXTURE_2D, Some(self.tex_o));
-            gl.active_texture(glow::TEXTURE0 + 0);
+            gl.active_texture(glow::TEXTURE0);
             if let Some(tex_uniform_id) = gl.get_uniform_location(self.program, "uTexture") {
                 gl.uniform_1_i32(Some(&tex_uniform_id), 0);
             }
@@ -553,7 +553,7 @@ impl GLRenderer {
                 let tm = ortho4(0.0, self.width as f32, self.height as f32, 0.0, -1.0, 1.0);
                 let tm_ptr = tm.col.as_ptr() as *const _ as *const f32;
                 let slice = std::slice::from_raw_parts(tm_ptr, 16);
-                gl.uniform_matrix_4_f32_slice(Some(&viewport), false, &slice);
+                gl.uniform_matrix_4_f32_slice(Some(&viewport), false, slice);
             }
 
             let pos_attrib_id = gl.get_attrib_location(self.program, "vertexPosition").unwrap();
@@ -563,7 +563,7 @@ impl GLRenderer {
             // Colored draws are emitted with non-indexed triangles, so only ARRAY_BUFFER is needed.
             gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, None);
 
-            let vertices_u8: &[u8] = core::slice::from_raw_parts(vertices.as_ptr() as *const u8, vertices.len() * core::mem::size_of::<Vertex>());
+            let vertices_u8: &[u8] = core::slice::from_raw_parts(vertices.as_ptr() as *const u8, std::mem::size_of_val(vertices));
             gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertices_u8, glow::DYNAMIC_DRAW);
 
             gl.enable_vertex_attrib_array(pos_attrib_id);
@@ -681,12 +681,12 @@ pub fn create_program(gl: &glow::Context, vertex_shader_source: &str, fragment_s
             gl.shader_source(shader, shader_source);
             gl.compile_shader(shader);
             if !gl.get_shader_compile_status(shader) {
-                let error_string = format!("{}", gl.get_shader_info_log(shader));
+                let error_string = gl.get_shader_info_log(shader);
                 for shader in shaders {
                     gl.delete_shader(shader);
                 }
                 gl.delete_program(program);
-                return Err(io::Error::new(io::ErrorKind::Other, error_string));
+                return Err(io::Error::other(error_string));
             }
             gl.attach_shader(program, shader);
             shaders.push(shader);
@@ -695,12 +695,12 @@ pub fn create_program(gl: &glow::Context, vertex_shader_source: &str, fragment_s
         // Link once both stages compiled successfully.
         gl.link_program(program);
         if !gl.get_program_link_status(program) {
-            let error_string = format!("{}", gl.get_program_info_log(program));
+            let error_string = gl.get_program_info_log(program);
             for shader in shaders {
                 gl.delete_shader(shader);
             }
             gl.delete_program(program);
-            return Err(io::Error::new(io::ErrorKind::Other, error_string));
+            return Err(io::Error::other(error_string));
         }
 
         for shader in shaders {
@@ -719,9 +719,8 @@ pub fn get_active_program_attributes(gl: &glow::Context, program: NativeProgram)
         let attrib_count = gl.get_active_attributes(program);
         for index in 0..attrib_count {
             let attr = gl.get_active_attribute(program, index);
-            match attr {
-                Some(attr) => attribs.push(attr),
-                _ => (),
+            if let Some(attr) = attr {
+                attribs.push(attr);
             }
         }
     }
@@ -735,16 +734,15 @@ pub fn get_active_program_uniforms(gl: &glow::Context, program: NativeProgram) -
         let attrib_count = gl.get_active_uniforms(program);
         for index in 0..attrib_count {
             let uni = gl.get_active_uniform(program, index);
-            match uni {
-                Some(uni) => unis.push(uni),
-                _ => (),
+            if let Some(uni) = uni {
+                unis.push(uni);
             }
         }
     }
     unis
 }
 
-static SOLID_VERTEX_SHADER: &'static str = "#version 100
+static SOLID_VERTEX_SHADER: &str = "#version 100
 uniform highp mat4 pvm;
 attribute highp vec3 position;
 void main()
@@ -753,13 +751,13 @@ void main()
     gl_Position = pvm * pos;
 }";
 
-static SOLID_PIXEL_SHADER: &'static str = "#version 100
+static SOLID_PIXEL_SHADER: &str = "#version 100
 void main()
 {
     gl_FragColor = vec4(0.0, 0.5, 1.0, 1.0);
 }";
 
-static POLYMESH_VERTEX_SHADER: &'static str = "
+static POLYMESH_VERTEX_SHADER: &str = "
 #version 300 es
 in highp    vec4        position;
 in highp    vec3        normal;
@@ -781,7 +779,7 @@ void main() {
     v_uv        = uv;
 }";
 
-static POLYMESH_PIXEL_SHADER: &'static str = "
+static POLYMESH_PIXEL_SHADER: &str = "
 #version 300 es
 precision mediump float;
 
@@ -941,7 +939,7 @@ impl PolyMeshRenderer {
 
             let tm_ptr = pvm.col.as_ptr() as *const _ as *const f32;
             let slice = std::slice::from_raw_parts(tm_ptr, 16);
-            gl.uniform_matrix_4_f32_slice(Some(&self.solid_uniforms["pvm"]), false, &slice);
+            gl.uniform_matrix_4_f32_slice(Some(&self.solid_uniforms["pvm"]), false, slice);
             debug_assert_eq!(gl.get_error(), 0);
 
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vb));
@@ -996,7 +994,7 @@ impl PolyMeshRenderer {
             }
         }
 
-        if self.indices.len() > 0 {
+        if !self.indices.is_empty() {
             unsafe {
                 // update the vertex buffer
                 let vertices_u8: &[u8] = core::slice::from_raw_parts(
@@ -1057,12 +1055,12 @@ impl PolyMeshRenderer {
 
             let tm_ptr = pvm.col.as_ptr() as *const _ as *const f32;
             let slice = std::slice::from_raw_parts(tm_ptr, 16);
-            gl.uniform_matrix_4_f32_slice(Some(&self.model_uniforms["pvm"]), false, &slice);
+            gl.uniform_matrix_4_f32_slice(Some(&self.model_uniforms["pvm"]), false, slice);
             debug_assert_eq!(gl.get_error(), 0);
 
             let tm_ptr = view_model.col.as_ptr() as *const _ as *const f32;
             let slice = std::slice::from_raw_parts(tm_ptr, 16);
-            gl.uniform_matrix_4_f32_slice(Some(&self.model_uniforms["view_model"]), false, &slice);
+            gl.uniform_matrix_4_f32_slice(Some(&self.model_uniforms["view_model"]), false, slice);
             debug_assert_eq!(gl.get_error(), 0);
 
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vb));
@@ -1123,7 +1121,7 @@ impl PolyMeshRenderer {
             }
         }
 
-        if self.indices.len() > 0 {
+        if !self.indices.is_empty() {
             unsafe {
                 // Submit the last partial batch after the polygon walk finishes.
                 // update the vertex buffer

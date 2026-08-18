@@ -288,6 +288,7 @@ impl Widget for TopologyMutator {
         &self.opt
     }
 
+    #[allow(clippy::result_large_err)] // Failed topology changes must preserve the unique node owner.
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _event: Option<&UiInputEvent>) {
         let Some(candidate) = self.candidate.take() else { return };
         let same_container = self
@@ -676,6 +677,7 @@ fn topology_mutation_is_blocked_for_the_active_container_and_visible_in_a_later_
 }
 
 #[test]
+#[allow(clippy::result_large_err)] // The assertion exercises the ownership-preserving mutation result.
 fn programmatic_topology_mutation_needs_only_an_empty_queue_layout_commit() {
     let (_, first, _) = CommitProbe::new(10, None);
     let (column, content) = Linear::create(LinearParameters::vertical([first]));
@@ -1117,6 +1119,7 @@ fn popup_switch_is_atomic_when_the_visible_popup_state_is_borrowed() {
 }
 
 #[test]
+#[allow(clippy::result_large_err)] // The assertion exercises the ownership-preserving mutation result.
 fn dynamic_container_root_changes_descendants_without_replacing_the_root() {
     let mut ctx = context();
     let (column, content) = Linear::create(LinearParameters::vertical(std::iter::empty::<Node>()));

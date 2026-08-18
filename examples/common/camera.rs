@@ -57,12 +57,12 @@ pub struct Camera {
 impl Camera {
     fn project_to_track_ball(pt: &Vec2f, r: f32) -> f32 {
         let d = pt.length();
-        if d < r * 0.70710678118654752440 {
+        if d < r * std::f32::consts::FRAC_1_SQRT_2 {
             // inside the sphere
             (r * r - d * d).sqrt()
         } else {
             // project on a hyperbola
-            let t = r / 1.41421356237309504880;
+            let t = r / std::f32::consts::SQRT_2;
             t * t / d
         }
     }
@@ -81,8 +81,8 @@ impl Camera {
             return *self;
         }
 
-        let zs = Self::project_to_track_ball(&start, TRACKBALL_SIZE);
-        let ze = Self::project_to_track_ball(&end, TRACKBALL_SIZE);
+        let zs = Self::project_to_track_ball(start, TRACKBALL_SIZE);
+        let ze = Self::project_to_track_ball(end, TRACKBALL_SIZE);
 
         let start_axis = Vec3f::normalize(&Vec3f::new(start.x, start.y, zs));
         let end_axis = Vec3f::normalize(&Vec3f::new(end.x, end.y, ze));
@@ -111,7 +111,7 @@ impl Camera {
     fn unproject(pvm: &Mat4f, pt: &Vec3f) -> Vec3f {
         let lb = Vec2f::new(-1.0, -1.0);
         let tr = Vec2f::new(1.0, 1.0);
-        unproject3(&Mat4f::identity(), &pvm, &lb, &tr, pt)
+        unproject3(&Mat4f::identity(), pvm, &lb, &tr, pt)
     }
 
     pub fn pan(&self, viewport: Dimensioni, from: &Vec2f, to: &Vec2f) -> Self {
@@ -176,19 +176,19 @@ impl Camera {
         let projection = perspective(fov, aspect, near, far);
 
         Self {
-            target: target,
-            distance: distance,
-            rotation: rotation,
+            target,
+            distance,
+            rotation,
 
             pos: cam_pos,
             up: cam_up,
             direction: cam_dir,
 
-            view: view,
-            projection: projection,
+            view,
+            projection,
 
-            fov: fov,
-            aspect: aspect,
+            fov,
+            aspect,
             near_plane: near,
             far_plane: far,
         }

@@ -57,7 +57,7 @@ impl AtlasHandle {
                 .as_str(),
             );
         }
-        icons.push_str("]");
+        icons.push(']');
         let mut fonts = String::from_str("&[\n").unwrap();
         for (n, f) in &self.0.fonts {
             let mut char_entries = String::from_str("&[\n").unwrap();
@@ -84,14 +84,11 @@ impl AtlasHandle {
                 .as_str(),
             );
         }
-        fonts.push_str("]");
+        fonts.push(']');
         font_meta.push_str(format!("icons: {},\n", icons).as_str());
         font_meta.push_str(format!("fonts: {},\n", fonts).as_str());
         let (source_pixels, source_format) = match format {
-            SourceFormat::Raw => (
-                self.0.pixels.iter().map(|p| [p.x, p.y, p.z, p.w]).flatten().collect::<Vec<_>>(),
-                "SourceFormat::Raw",
-            ),
+            SourceFormat::Raw => (self.0.pixels.iter().flat_map(|p| [p.x, p.y, p.z, p.w]).collect::<Vec<_>>(), "SourceFormat::Raw"),
             #[cfg(feature = "png_source")]
             SourceFormat::Png => (self.png_image_bytes()?, "SourceFormat::Png"),
         };
@@ -111,7 +108,7 @@ impl AtlasHandle {
     #[cfg(feature = "png_source")]
     fn png_image_bytes(&self) -> Result<Vec<u8>> {
         let mut bytes = Vec::new();
-        let pixels = self.0.pixels.iter().map(|c| [c.x, c.y, c.z, c.w]).flatten().collect::<Vec<_>>();
+        let pixels = self.0.pixels.iter().flat_map(|c| [c.x, c.y, c.z, c.w]).collect::<Vec<_>>();
         {
             let mut encoder = png::Encoder::new(&mut bytes, self.width() as _, self.height() as _);
             encoder.set_color(ColorType::Rgba);
