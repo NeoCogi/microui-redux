@@ -46,7 +46,9 @@ src/render/
 ├── geometry.rs      internal tessellation and final clipping geometry
 ├── painter.rs       public widget-local recorder
 ├── performance.rs   test-only timing, allocation, and submission benchmark
-├── renderer.rs      public frame/resource owner and operation executor
+└── renderer.rs      public frame/resource owner and operation executor
+
+docs/
 └── RENDER.md        architecture and integration guide
 ```
 
@@ -549,9 +551,9 @@ recording-time software triangle clipping are introduced for benchmark gains.
 
 ## Working examples
 
-- [`examples/retained-custom-drawing.rs`](../../examples/retained-custom-drawing.rs)
+- [`examples/retained-custom-drawing.rs`](../examples/retained-custom-drawing.rs)
   implements a retained custom widget using `WidgetPaintCtx::painter`.
-- [`examples/texture-clipping-smoke.rs`](../../examples/texture-clipping-smoke.rs)
+- [`examples/texture-clipping-smoke.rs`](../examples/texture-clipping-smoke.rs)
   exercises low-level display-list execution, texture upload, clipping, and
   final vertices.
 - `examples/common/glow_renderer.rs`,
