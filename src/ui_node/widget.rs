@@ -274,9 +274,9 @@ pub trait Widget {
     ///
     /// Paint is observational with respect to application-authored semantic state, topology,
     /// interaction, and committed layout. Implementations may maintain private rendering caches or
-    /// publish framework-owned, paint-derived read-only geometry for later application use, but
-    /// neither may alter the current commit. Mutating retained UI through an independently captured
-    /// typed widget handle is a contract violation rather than a deferred-next-frame operation.
+    /// neither may alter the current commit nor publish application-coordination events. Mutating
+    /// retained UI through an independently captured typed widget handle is a contract violation
+    /// rather than a deferred-next-frame operation.
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>);
     /// Returns the effective widget options used by generic dispatch.
     ///

@@ -88,10 +88,10 @@ display-list execution, or backend acquisition. Input belongs to `update_ui`; by
 starts, widgets record only committed visual state.
 
 Widget paint is observational with respect to application-authored semantic state, topology,
-interaction, and committed layout. Built-in widgets may publish framework-owned, paint-derived
-read-only geometry for later application use, or maintain private rendering caches; neither may
-alter the current commit. Backend custom-render callbacks may maintain callback-private rendering
-caches only. A callback that captures a `TypedWidgetHandle` and mutates retained UI during rendering
+interaction, and committed layout. Widgets may maintain private rendering caches, but cannot alter
+the current commit or publish application-coordination events. Backend custom-render callbacks may
+maintain callback-private rendering caches only. A callback that captures a `TypedWidgetHandle` and
+mutates retained UI during rendering
 violates the contract; the mutation is not scheduled as deferred work, and weak handles cannot
 invalidate the already selected commit. Perform semantic mutations before `update_ui` and create
 the frame only after that commit is complete.
@@ -108,8 +108,8 @@ normal atlas work is flushed immediately before each barrier.
 custom widget can draw without knowing its screen position or the concrete
 backend. `WidgetUpdateCtx` deliberately has no painter or display-list access,
 so visual ordering cannot depend on work recorded during update. A `Widget::paint` implementation
-may update private rendering caches or publish framework-owned, paint-derived read-only geometry;
-it must not change application-authored semantic state or the current committed layout:
+may update private rendering caches; it must not change application-authored semantic state, publish
+coordination events, or alter the current committed layout:
 
 ```rust
 use microui_redux::prelude::*;

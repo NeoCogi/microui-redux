@@ -882,8 +882,7 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
             // API; neither EventContext nor WindowManager needs to know this root belongs to a combo.
             context.set_root_visible(self.popup.id(), event.open).unwrap();
             if event.open {
-                let anchor = self.combo.anchor().expect("mounted combo must publish an anchor");
-                context.set_root_rect(self.popup.id(), anchor).unwrap();
+                context.set_root_rect(self.popup.id(), event.anchor).unwrap();
             }
         }
 
@@ -901,9 +900,7 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     let (combo, combo_node) = Combo::create(ComboParameters::new());
     let combo_id = combo_node.id();
     let source = context.create_window("combo source", rect(10, 10, 140, 90), combo_node);
-    context
-        .set_root_options(source.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
-        .unwrap();
+    context.set_root_options(source.id(), WindowOption::FRAME).unwrap();
     let popup = context.create_popup("combo choices", Node::widget(DesiredSize(Dimensioni::new(100, 60))));
     let mut model = Model {
         combo: combo.clone(),
@@ -922,9 +919,20 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     assert_eq!(popup.widget().try_read(|root| (root.rect().x, root.rect().y)), Some((anchor.x, anchor.y)));
     assert_eq!(combo.is_open(), Some(true));
 
-    context.mousedown(300, 220, MouseButton::LEFT);
+    // Root chrome is outside the composed popup. Its press dismisses the popup and reconciles the
+    // shared Combo state before the subsequent drag can move the source window.
+    let title = context.debug_root_chrome(source.id()).unwrap().0.unwrap();
+    let title_x = title.x + title.width / 2;
+    let title_y = title.y + title.height / 2;
+    context.mousedown(title_x, title_y, MouseButton::LEFT);
     context.update_ui_state(dimensions, &mut model);
+    assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(false));
+    assert_eq!(combo.is_open(), Some(false));
+    assert_eq!(source.widget().try_read(RootChrome::is_moving), Some(true));
 
+    context.mousemove(title_x + 15, title_y + 10);
+    context.update_ui_state(dimensions, &mut model);
+    assert_eq!(source.widget().try_read(|root| (root.rect().x, root.rect().y)), Some((25, 20)));
     assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(false));
     assert_eq!(combo.is_open(), Some(false));
 }

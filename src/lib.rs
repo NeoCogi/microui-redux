@@ -126,10 +126,9 @@
 //!
 //! Update and paint traverse parent before children and siblings in forward order. Later work sees
 //! successful earlier cross-cell mutations, work already completed does not rerun, and each input
-//! transaction's final layout observes the resulting state and topology. Paint is observational
-//! with respect to application-authored semantic state and the committed layout. Built-in widgets
-//! may publish framework-owned, paint-derived read-only geometry for later use or update private
-//! rendering caches; custom-render callbacks may update callback-private rendering caches only.
+//! transaction's final layout observes the resulting state and topology. Paint is observational and
+//! may update private rendering caches only. Custom-render callbacks may update callback-private
+//! rendering caches only.
 //!
 //! ```
 //! use microui_redux::prelude::*;

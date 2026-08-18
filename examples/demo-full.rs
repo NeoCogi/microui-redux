@@ -1388,7 +1388,8 @@ impl State {
             .try_update(|combo| combo.update_items(&combo_labels))
             .expect("combo state unavailable");
         let combo_items = combo_item_pairs.map(|(_, runtime)| runtime);
-        let window_info_value_pairs = std::array::from_fn(|_| stateful_leaf::<ListItemBuilder>(ListItemParameters::with_opt("", WidgetOption::NO_INTERACT)));
+        let window_info_value_pairs =
+            ["40, 40", "300, 450", "0.0"].map(|label| stateful_leaf::<ListItemBuilder>(ListItemParameters::with_opt(label, WidgetOption::NO_INTERACT)));
         let window_info_value_states = window_info_value_pairs.each_ref().map(|(state, _)| state.clone());
         let window_info_values = window_info_value_pairs.map(|(_, runtime)| runtime);
         let (submit_button_submitted, submit_button) = centered_button("Submit");
@@ -1579,6 +1580,7 @@ impl State {
             context.subscribe_context_with(submitted.clone(), index, Self::combo_item).unwrap();
         }
         context.subscribe(self.combo_popup_root.submitted(), Self::combo_popup_submitted).unwrap();
+        context.subscribe_context(self.demo_root.changed(), Self::demo_root_changed).unwrap();
         for (submitted, label) in self.popup_button_submitted.iter().zip(["Hello", "World"]) {
             context.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
         }
@@ -1687,10 +1689,11 @@ impl State {
             .set_root_visible(self.combo_popup_root.id(), event.open)
             .expect("combo popup root must exist");
         if event.open {
-            // Combo published this anchor during the update that emitted `event`, so placement uses
-            // the same committed geometry that routed the click rather than a previous paint.
-            let anchor = self.combo_typed_state.try_read(Combo::anchor).expect("combo unavailable");
-            context.set_root_rect(self.combo_popup_root.id(), anchor).expect("combo popup root must exist");
+            // The submission owns the geometry from the update that routed this click, so opening
+            // needs neither a widget-state read nor a previous-frame anchor snapshot.
+            context
+                .set_root_rect(self.combo_popup_root.id(), event.anchor)
+                .expect("combo popup root must exist");
         }
     }
 
@@ -1720,6 +1723,27 @@ impl State {
         if matches!(event, RootSubmitted::PopupDismissed) {
             self.combo_typed_state.try_update(Combo::close_popup).expect("combo state unavailable");
         }
+    }
+
+    fn demo_root_changed(&mut self, context: &mut EventContext<'_>, event: &RootChanged) {
+        // Root chrome emits only after a user-driven move or resize, replacing the old frame-time
+        // rectangle readback. Clamp the demo-specific minimum at this same mutation boundary.
+        let mut rect = event.rect;
+        rect.width = rect.width.max(240);
+        rect.height = rect.height.max(300);
+        if (rect.width, rect.height) != (event.rect.width, event.rect.height) {
+            context.set_root_rect(self.demo_root.id(), rect).expect("demo root must exist");
+        }
+
+        // Update retained diagnostics from the event snapshot rather than sampling RootChrome on
+        // every frame. The FPS field is independently produced by the frame callback below.
+        let [value_pos, value_size, _] = &self.window_info_value_states;
+        value_pos
+            .try_update(|value| value.set_label(format!("{}, {}", rect.x, rect.y)))
+            .expect("window position state unavailable");
+        value_size
+            .try_update(|value| value.set_label(format!("{}, {}", rect.width, rect.height)))
+            .expect("window size state unavailable");
     }
 
     fn submit_log(&mut self, text: String) {
@@ -2195,24 +2219,11 @@ impl State {
 
     fn weight_window(&mut self, _ctx: &mut Context<SelectedBackend, Self>) {}
 
-    fn test_window(&mut self, ctx: &mut Context<SelectedBackend, Self>) {
-        {
-            let mut win = self.demo_root.widget().try_read(RootChrome::rect).unwrap_or_else(|| rect(40, 40, 300, 450));
-            win.width = win.width.max(240);
-            win.height = win.height.max(300);
-            ctx.set_root_rect(self.demo_root.id(), win).expect("demo root must exist");
-
-            let [value_pos, value_size, value_fps] = &self.window_info_value_states;
-            value_pos
-                .try_update(|value| value.set_label(format!("{}, {}", win.x, win.y)))
-                .expect("window position state unavailable");
-            value_size
-                .try_update(|value| value.set_label(format!("{}, {}", win.width, win.height)))
-                .expect("window size state unavailable");
-            value_fps
-                .try_update(|value| value.set_label(format!("{:.1}", self.fps)))
-                .expect("window fps state unavailable");
-        }
+    fn update_fps_label(&mut self) {
+        // FPS is produced by this frame callback rather than discovered by polling retained UI.
+        self.window_info_value_states[2]
+            .try_update(|value| value.set_label(format!("{:.1}", self.fps)))
+            .expect("window fps state unavailable");
     }
 
     fn file_dialog_completed(&mut self, event: &FileDialogCompleted) {
@@ -2234,7 +2245,6 @@ impl State {
             FileDialogStatus::Cancelled => {
                 self.write_log("File dialog canceled");
             }
-            FileDialogStatus::Pending => unreachable!("file-dialog completion events are terminal"),
         }
         self.dialog_session = None;
     }
@@ -2254,7 +2264,7 @@ impl State {
         self.style_window(ctx);
         self.log_window(ctx);
         self.typography_window(ctx);
-        self.test_window(ctx);
+        self.update_fps_label();
         self.triangle_window(ctx);
         self.painter_window(ctx);
         self.falloff_window(ctx);

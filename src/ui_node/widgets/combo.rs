@@ -36,6 +36,11 @@
 use super::*;
 use std::{cell::RefCell, rc::Rc};
 
+/// Compares rectangles structurally because the external geometry type does not implement equality.
+fn same_rect(left: Recti, right: Recti) -> bool {
+    (left.x, left.y, left.width, left.height) == (right.x, right.y, right.width, right.height)
+}
+
 /// One-shot construction input for a [`Combo`].
 pub struct ComboParameters {
     /// Font used for the current label.
@@ -202,7 +207,7 @@ impl Combo {
 }
 
 impl TypedWidgetHandle<Combo> {
-    /// Returns the latest popup anchor while the combo is retained.
+    /// Returns the latest update-derived popup anchor while the combo is retained.
     pub fn anchor(&self) -> Option<Recti> {
         self.try_read(Combo::anchor)
     }
@@ -265,11 +270,21 @@ pub struct ComboChanged {
 impl crate::WidgetEvent for ComboChanged {}
 
 /// Popup-state snapshot emitted when the user submits the combo header.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug)]
 pub struct ComboSubmitted {
     /// Whether the triggering header submission left the popup open.
     pub open: bool,
+    /// Screen-space popup anchor from the update that handled the submission.
+    pub anchor: Recti,
 }
+
+impl PartialEq for ComboSubmitted {
+    fn eq(&self, other: &Self) -> bool {
+        self.open == other.open && same_rect(self.anchor, other.anchor)
+    }
+}
+
+impl Eq for ComboSubmitted {}
 
 impl crate::WidgetEvent for ComboSubmitted {}
 
@@ -306,17 +321,18 @@ impl Combo {
 
     /// Publishes current geometry, updates popup-open state, and records header submissions.
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>) {
-        // Anchor publication belongs to retained update rather than paint. A submitted handler can
-        // therefore read the geometry after traversal borrows end and position its popup in the same
-        // input transaction, while paint remains observational.
         let screen_header = ctx.screen_content_rect();
-        self.last_anchor = rect(screen_header.x, screen_header.y + screen_header.height, screen_header.width, 1);
+        let anchor = rect(screen_header.x, screen_header.y + screen_header.height, screen_header.width, 1);
+        let clicked = ctx.clicked();
+        // Publish geometry before emitting a click so its handler can position the popup from this
+        // exact input transaction without a frame-time state read.
+        self.last_anchor = anchor;
 
         // The Combo owns only semantic open state. The application composes that state with whichever
         // retained root it selected as popup content through the typed submission event below.
-        let submitted = if ctx.clicked() {
+        let submitted = if clicked {
             self.open = !self.open;
-            Some(ComboSubmitted { open: self.open })
+            Some(ComboSubmitted { open: self.open, anchor })
         } else {
             None
         };

@@ -130,7 +130,10 @@ impl<'a> EventContext<'a> {
         self.window_manager.destroy_root(root)
     }
 
-    /// Opens a retained file dialog and returns its read-only completion session.
+    /// Opens a retained file dialog and returns its must-use completion session.
+    ///
+    /// The session reports `None` while pending and a terminal [`crate::FileDialogStatus`] after
+    /// acceptance or cancellation. Dropping it while pending abandons the Context-owned operation.
     pub fn open_file_dialog(&mut self, request: FileDialogRequest) -> FileDialogSession {
         // FileDialogController construction remains specialized inside the file-dialog module; this
         // façade merely exposes the existing Context-owned operation at the safe event boundary.
@@ -513,7 +516,6 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     ///         match event.status() {
     ///             FileDialogStatus::Accepted(result) => println!("{}", result.file_path),
     ///             FileDialogStatus::Cancelled => println!("cancelled"),
-    ///             FileDialogStatus::Pending => unreachable!(),
     ///         }
     ///         self.dialog = None;
     ///     }
@@ -532,7 +534,8 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// Opens a retained file dialog and returns its unique session capability.
     ///
     /// Completion is delivered through [`Context::file_dialog_completed`] during a retained update
-    /// transaction. The session keeps the operation observable and can also be cancelled directly.
+    /// transaction. The must-use session keeps the operation observable and can also be cancelled
+    /// directly; its synchronous status is `None` until a terminal outcome is available.
     pub fn open_file_dialog(&mut self, request: FileDialogRequest) -> FileDialogSession {
         // Construct the specialized retained tree in the non-generic WindowManager service.
         self.window_manager.open_file_dialog(request)
@@ -730,10 +733,10 @@ impl<B: RendererBackend, State: 'static> ContextFrame<'_, B, State> {
     /// exists for these dimensions or when raw input is pending. This operation is paint-only: it
     /// does not route input, update semantic state, run layout, synthesize timers, or produce a
     /// generic frame-result/resource-state object. Widget paint is observational with respect to
-    /// application-authored semantic state, topology, interaction, and committed layout. Built-in
-    /// widgets may publish framework-owned, paint-derived read-only geometry for later use or update
-    /// private rendering caches; custom-render callbacks may update callback-private rendering
-    /// caches only. Neither kind of cache can alter the current commit.
+    /// application-authored semantic state, topology, interaction, and committed layout. Widgets
+    /// may update private rendering caches; custom-render callbacks may update callback-private
+    /// rendering caches only. Neither kind of cache can alter the current commit or publish
+    /// application-coordination events.
     pub fn render_ui(mut self) -> Result<(), RenderError> {
         let dimensions = self.info.dimensions();
         if !self.context.window_manager.can_render(dimensions) {

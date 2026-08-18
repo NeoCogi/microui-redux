@@ -339,12 +339,12 @@ use crate::Widget;
 /// normal flow-control mechanism.
 const MAX_EVENT_DISPATCHES: usize = 1_000_000;
 
-/// Marker implemented by every typed semantic event payload emitted by retained UI.
+/// Marker implemented by every typed event payload emitted by retained UI.
 ///
-/// An event is an owned snapshot of the semantic fact the widget is reporting. For example, a
-/// textbox change event contains the text as it existed when the change occurred rather than a
-/// reference back into the mutable widget. This lets the port retain the event until the safe
-/// context dispatch boundary. Context-owned retained services may use the same contract for
+/// An event is an owned snapshot of the semantic or lifecycle fact its producer is reporting. For
+/// example, a textbox change contains the text as it existed when the change occurred rather than a
+/// reference into the mutable widget. This lets the port hold the payload until a safe context
+/// dispatch boundary. Context-owned retained services use the same contract for
 /// lifecycle events such as [`crate::FileDialogCompleted`]; no service-specific behavior enters the
 /// dispatcher.
 ///
@@ -386,8 +386,8 @@ impl<E: WidgetEvent> WidgetEventPort<E> {
 
     /// Appends an event when a listener is connected, otherwise discards it.
     ///
-    /// The widget calls this only after it has committed the semantic state described by `event`.
-    /// Delivery is deferred; this method never invokes application code.
+    /// The widget calls this only after committing the semantic or lifecycle state described by
+    /// `event`. Delivery is deferred; this method never invokes application code.
     pub(crate) fn emit(&mut self, event: E) {
         if let Some(pending) = &mut self.pending {
             pending.push(event);

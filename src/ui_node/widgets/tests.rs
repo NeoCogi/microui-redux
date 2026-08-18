@@ -130,7 +130,7 @@ fn combo_run_toggles_open_state() {
 }
 
 #[test]
-fn combo_update_publishes_anchor_and_paint_does_not_mutate_it() {
+fn combo_update_publishes_anchor_while_paint_remains_observational() {
     let atlas = make_test_atlas();
     let style = Style::default();
     let mut combo = ComboBuilder::create_widget(ComboParameters::new());
@@ -155,14 +155,17 @@ fn combo_update_publishes_anchor_and_paint_does_not_mutate_it() {
     let anchor = combo.anchor();
     assert_eq!((anchor.x, anchor.y, anchor.width, anchor.height), (30, 60, 100, 1));
 
-    // Deliberately paint at unrelated geometry. Paint must record commands without replacing the
-    // transaction's already-committed anchor snapshot.
-    let paint_rect = rect(5, 7, 50, 12);
+    // Paint remains observational even if a manually constructed test context disagrees with the
+    // committed update geometry.
+    let paint_rect = rect(100, 110, 80, 16);
     let mut display_list = crate::render::DisplayList::new();
     let mut paint = WidgetPaintCtx::new_with_content_geometry(paint_rect, &mut display_list, paint_rect, &style, &atlas, false, false, false, false);
     combo.paint(&mut paint);
-    let anchor = combo.anchor();
-    assert_eq!((anchor.x, anchor.y, anchor.width, anchor.height), (30, 60, 100, 1));
+    let painted_anchor = combo.anchor();
+    assert_eq!(
+        (painted_anchor.x, painted_anchor.y, painted_anchor.width, painted_anchor.height),
+        (anchor.x, anchor.y, anchor.width, anchor.height)
+    );
 }
 
 #[test]

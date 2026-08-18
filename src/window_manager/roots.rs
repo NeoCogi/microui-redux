@@ -454,6 +454,10 @@ impl WindowManager {
         // Subscriber invocations may already be waiting without a raw input event. If they mutate
         // retained state, commit that state before routing the first queued event.
         if after_event(self, dispatch_state) {
+            // A context-aware handler may open a dialog without retaining its session, or an
+            // ordinary handler may drop a previously pending session. Settle those ownership
+            // changes before the abandoned modal can participate in layout or consume input.
+            self.process_file_dialogs();
             self.layout(viewport, atlas);
         }
 
@@ -469,7 +473,12 @@ impl WindowManager {
             // Application subscribers run only after the complete cross-root update has released
             // retained borrows. Their state/topology changes are therefore safe and become visible
             // to the layout immediately below, before routing the next raw input event.
-            after_event(self, dispatch_state);
+            if after_event(self, dispatch_state) {
+                // Dispatch can itself create or abandon a file-dialog session. Reconcile the
+                // service a second time so an unobserved modal never survives into the next queued
+                // input event. Skip the sweep when no application event was delivered.
+                self.process_file_dialogs();
+            }
             self.layout(viewport, atlas);
         }
         self.ui_commit = Some(dimensions);

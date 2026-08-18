@@ -416,16 +416,25 @@ the following layout. Rust therefore prevents a handler from retaining it, and t
 root operations work for windows, dialogs, and popups without a `PopupController`, overlay
 registry, per-control command enum, or second root lifetime model.
 
-The full demo now composes `Combo` and its popup root entirely through typed events. `Combo`
-publishes its screen-space anchor during update, the `ComboSubmitted` handler updates popup
-visibility and placement in that input transaction, and `RootSubmitted::PopupDismissed` closes the
-combo's semantic state after an outside press. Paint remains observational, and application state
-contains no per-frame `combo_open` or `open_popup` command flags.
+The full demo composes `Combo` and its popup root entirely through typed events. `ComboSubmitted`
+carries the screen-space anchor from the update that routed the header click, so its context-aware
+handler updates popup visibility and placement in the triggering input transaction. The demo state
+already owns both retained handles: `RootSubmitted::PopupDismissed` closes the combo's shared
+semantic state after an outside press. Starting a source-window move or resize is such an outside
+press, so the popup is closed before any `RootChanged` movement and requires no geometry-following
+mechanism. This coordination stays with the composed control owner instead of leaking popup policy
+into the base widget or window-manager abstractions. Paint does no coordination, and application
+state performs no per-frame popup polling. The `RootChanged` handler updates the demo window's
+position and size diagnostics and enforces its minimum size; only the FPS label remains
+frame-produced data.
 
 The retained file-dialog service uses the same generic dispatch mechanism. Opening occurs directly
 inside a context-aware handler. `WindowManager` owns one typed completion source for the Context
 lifetime, so removing a completed dialog controller and root cannot discard the queued terminal
-event. Applications subscribe once and match completion to the exact live session:
+event. The returned `FileDialogSession` is a must-use ownership capability: dropping a pending
+session abandons the operation, and a session dropped by an event handler is removed before layout
+or the next queued input can route through its modal root. Applications subscribe once and match
+completion to the exact live session:
 
 ```rust
 impl Model {
@@ -440,7 +449,6 @@ impl Model {
         match event.status() {
             FileDialogStatus::Accepted(result) => self.open_file(&result.file_path),
             FileDialogStatus::Cancelled => self.note_cancellation(),
-            FileDialogStatus::Pending => unreachable!(),
         }
         self.dialog_session = None;
     }
@@ -452,8 +460,9 @@ ctx.subscribe(completed, Model::file_dialog_completed)?;
 
 Accepted, in-dialog cancelled, title-closed, and explicitly cancelled sessions each publish one
 terminal `FileDialogCompleted` event at a safe dispatch boundary. `FileDialogSession::status`
-remains a synchronous compatibility snapshot, but retained application flow and `demo-full` do not
-inspect it from frame processing.
+remains a synchronous compatibility snapshot: it returns `None` while pending and
+`Some(FileDialogStatus)` after completion. Retained application flow and `demo-full` do not inspect
+it from frame processing.
 
 ### Retained node identity
 
@@ -562,12 +571,11 @@ may change. There is no transaction snapshot or rollback, but every input transa
 complete layout before the next event is routed.
 
 `Widget::paint` is observational with respect to application-authored semantic state, topology,
-interaction, and committed layout. A built-in widget may publish framework-owned, paint-derived
-read-only geometry for later application use—`TypedWidgetHandle<Combo>::anchor`, for example—or update a private
-rendering cache, but neither can alter the current commit. Registered custom-render callbacks may
-update only callback-private rendering caches. Mutating retained UI through an independently
-captured typed widget handle during either callback violates the contract; it is not a deferred-next-frame
-update. Commit semantic changes before creating the frame.
+interaction, and committed layout; it may update only private rendering caches. Registered
+custom-render callbacks likewise update only callback-private rendering caches. Mutating retained
+UI through an independently captured typed widget handle during either callback violates the
+contract; it is not a deferred-next-frame update. Commit semantic changes before creating the
+frame.
 
 ## Fonts and typography
 
@@ -748,8 +756,11 @@ removing the remaining application-level frame polling from `demo-full`.
     - [x] Modal routing, popup dismissal, focus, capture, root movement, and resizing share one retained window manager.
 - [x] Removed frame-polled transient-root and file-dialog coordination from the full demo.
     - [x] Popup and file-dialog opening mutate Context-owned state directly from the typed event that requested them; application command flags were removed.
-    - [x] Combo anchor geometry is published during update, and popup dismissal reconciles the combo's semantic open state through `RootSubmitted`.
+    - [x] `ComboSubmitted` carries same-transaction opening geometry; the demo's existing shared state reconciles `RootSubmitted::PopupDismissed` back into `Combo`, so source-root interaction closes the popup before movement and needs neither geometry APIs nor frame polling.
+    - [x] Demo window position, size, and minimum-size reconciliation consume `RootChanged` rather than polling `RootChrome` from frame processing.
     - [x] File-dialog acceptance and cancellation publish exactly one `FileDialogCompleted` event through a Context-lifetime source; application frame code no longer polls session status.
+    - [x] Abandoned file-dialog sessions are settled after application dispatch and before layout or the next queued input; `FileDialogSession` warns when its ownership capability is ignored.
+    - [x] `FileDialogStatus` represents terminal outcomes only; `FileDialogSession::status()` uses `None` for pending while completion handlers exhaustively match accepted or cancelled outcomes.
     - [x] The general layer remains unaware of combos and file-dialog behavior: `EventContext` exposes existing root/service operations, while specialized payloads stay with their owners.
 - [x] Unified rendering behind recorded painter operations and typed backend frames.
     - [x] `Painter` records backend-neutral work into the framework-owned display list.
