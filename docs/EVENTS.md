@@ -83,6 +83,29 @@ replays historical retained activity. Draining moves the complete queue out and 
 connected with a new empty queue. Dropping the exclusive listener disconnects the port and
 clears anything still pending.
 
+### Exclusive-listener policy
+
+The one-listener rule is an architectural policy, not a Rust ownership restriction. A multicast
+design could retain one queue reader and invoke several handlers with the same borrowed `&E`, as
+C# events invoke a delegate list. This module instead binds each port to one application-state
+method. When one event has several consequences, that method composes those effects explicitly.
+
+This policy provides:
+
+- exactly one queue drainer, with no competing-consumer interpretation;
+- one explicit place in application state that defines the consequences of a port's event;
+- simple connection lifetime: dropping the listener disconnects the entire port, with no
+  per-handler unsubscribe or handler-list mutation during dispatch;
+- direct movement of owned payloads from one producer queue to one handler, without multicast
+  storage, payload cloning, or shared payload wrappers; and
+- deterministic FIFO delivery without an additional same-port handler-ordering policy.
+
+Cloning a [`WidgetEventHandle`] therefore clones only the weak capability identifying the port;
+it does not create another subscriber slot. Supporting multicast later would require grouping an
+ordered handler list behind the port's single queue reader. Merely allowing several listeners to
+connect would be incorrect because the first listener to drain the queue would consume the events
+before the others observed them.
+
 ## Subscription
 
 A normal application subscription follows this path:
