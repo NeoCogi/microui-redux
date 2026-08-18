@@ -95,8 +95,6 @@ pub struct Combo {
     open: bool,
     /// Label text for the currently selected item.
     label: String,
-    /// Popup anchor snapshot published by the latest retained update.
-    last_anchor: Recti,
     /// Initialization-only font.
     font: FontChoice,
     /// Base widget options.
@@ -108,14 +106,6 @@ pub struct Combo {
 }
 
 impl Combo {
-    /// Returns the popup anchor published by the latest completed combo update.
-    ///
-    /// Update uses the layout geometry that routed the current event, allowing a context-aware
-    /// subscriber to position a retained popup before the layout immediately following dispatch.
-    pub fn anchor(&self) -> Recti {
-        self.last_anchor
-    }
-
     /// Returns the currently selected item index.
     pub fn selected(&self) -> usize {
         self.selected
@@ -207,11 +197,6 @@ impl Combo {
 }
 
 impl TypedWidgetHandle<Combo> {
-    /// Returns the latest update-derived popup anchor while the combo is retained.
-    pub fn anchor(&self) -> Option<Recti> {
-        self.try_read(Combo::anchor)
-    }
-
     /// Returns the selected item index while the combo is retained.
     pub fn selected(&self) -> Option<usize> {
         self.try_read(Combo::selected)
@@ -319,18 +304,13 @@ impl Combo {
         Dimensioni::new(width, height)
     }
 
-    /// Publishes current geometry, updates popup-open state, and records header submissions.
+    /// Updates popup-open state and records header submissions with their routed geometry.
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>) {
-        let screen_header = ctx.screen_content_rect();
-        let anchor = rect(screen_header.x, screen_header.y + screen_header.height, screen_header.width, 1);
-        let clicked = ctx.clicked();
-        // Publish geometry before emitting a click so its handler can position the popup from this
-        // exact input transaction without a frame-time state read.
-        self.last_anchor = anchor;
-
         // The Combo owns only semantic open state. The application composes that state with whichever
         // retained root it selected as popup content through the typed submission event below.
-        let submitted = if clicked {
+        let submitted = if ctx.clicked() {
+            let screen_header = ctx.screen_content_rect();
+            let anchor = rect(screen_header.x, screen_header.y + screen_header.height, screen_header.width, 1);
             self.open = !self.open;
             Some(ComboSubmitted { open: self.open, anchor })
         } else {
@@ -404,7 +384,6 @@ impl WidgetBuilder for ComboBuilder {
             selected: 0,
             open: false,
             label: String::new(),
-            last_anchor: Recti::default(),
             font: parameters.font,
             opt: parameters.opt,
             changed_event: Rc::new(RefCell::new(crate::event::WidgetEventPort::new())),

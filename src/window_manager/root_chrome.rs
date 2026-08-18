@@ -228,7 +228,7 @@ impl crate::WidgetEvent for RootChanged {}
 pub enum RootSubmitted {
     /// The user submitted the root's close affordance.
     Close,
-    /// The user dismissed a popup by interacting outside it.
+    /// Popup policy dismissed this root through an outside press or replacement by another popup.
     PopupDismissed,
 }
 

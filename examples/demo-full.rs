@@ -1718,8 +1718,9 @@ impl State {
     }
 
     fn combo_popup_submitted(&mut self, event: &RootSubmitted) {
-        // Outside dismissal is generic root policy. Reflect that typed fact into the composed Combo
-        // so its next header click opens instead of toggling stale semantic state closed.
+        // Outside dismissal and replacement by another popup are generic root policy. Reflect that
+        // typed fact into the composed Combo so its next header click opens instead of toggling
+        // stale semantic state closed.
         if matches!(event, RootSubmitted::PopupDismissed) {
             self.combo_typed_state.try_update(Combo::close_popup).expect("combo state unavailable");
         }

@@ -874,6 +874,7 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     struct Model {
         combo: TypedWidgetHandle<Combo>,
         popup: RootHandle,
+        submitted_anchor: Option<Recti>,
     }
 
     impl Model {
@@ -884,10 +885,11 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
             if event.open {
                 context.set_root_rect(self.popup.id(), event.anchor).unwrap();
             }
+            self.submitted_anchor = Some(event.anchor);
         }
 
         fn popup_submitted(&mut self, event: &RootSubmitted) {
-            // Generic outside dismissal becomes typed application input after traversal, where the
+            // Generic popup dismissal becomes typed application input after traversal, where the
             // composed widget can safely reconcile its retained semantic state.
             if matches!(event, RootSubmitted::PopupDismissed) {
                 self.combo.close_popup().expect("mounted combo must remain available");
@@ -902,9 +904,11 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     let source = context.create_window("combo source", rect(10, 10, 140, 90), combo_node);
     context.set_root_options(source.id(), WindowOption::FRAME).unwrap();
     let popup = context.create_popup("combo choices", Node::widget(DesiredSize(Dimensioni::new(100, 60))));
+    let replacement = context.create_popup("replacement", Node::widget(DesiredSize(Dimensioni::new(80, 40))));
     let mut model = Model {
         combo: combo.clone(),
         popup: popup.clone(),
+        submitted_anchor: None,
     };
     context.subscribe_context(combo.submitted(), Model::combo_submitted).unwrap();
     context.subscribe(popup.submitted(), Model::popup_submitted).unwrap();
@@ -914,7 +918,7 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     context.mousedown(combo_rect.x + 1, combo_rect.y + 1, MouseButton::LEFT);
     context.update_ui_state(dimensions, &mut model);
 
-    let anchor = combo.anchor().unwrap();
+    let anchor = model.submitted_anchor.expect("combo submission must carry its routed anchor");
     assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(true));
     assert_eq!(popup.widget().try_read(|root| (root.rect().x, root.rect().y)), Some((anchor.x, anchor.y)));
     assert_eq!(combo.is_open(), Some(true));
@@ -934,6 +938,22 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     context.update_ui_state(dimensions, &mut model);
     assert_eq!(source.widget().try_read(|root| (root.rect().x, root.rect().y)), Some((25, 20)));
     assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(false));
+    assert_eq!(combo.is_open(), Some(false));
+
+    // Reopen the composed popup, then replace it through generic popup exclusivity. The displaced
+    // root's dismissal event must close Combo's semantic state in the same update transaction.
+    context.mouseup(title_x + 15, title_y + 10, MouseButton::LEFT);
+    context.update_ui_state(dimensions, &mut model);
+    let moved_combo_rect = context.debug_root_node_rect(source.id(), combo_id).unwrap();
+    context.mousedown(moved_combo_rect.x + 1, moved_combo_rect.y + 1, MouseButton::LEFT);
+    context.update_ui_state(dimensions, &mut model);
+    assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(true));
+    assert_eq!(combo.is_open(), Some(true));
+
+    context.set_root_visible(replacement.id(), true).unwrap();
+    context.update_ui_state(dimensions, &mut model);
+    assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(false));
+    assert_eq!(replacement.widget().try_read(RootChrome::is_visible), Some(true));
     assert_eq!(combo.is_open(), Some(false));
 }
 
@@ -1117,12 +1137,16 @@ fn dynamic_container_root_changes_descendants_without_replacing_the_root() {
 }
 
 #[test]
-fn showing_a_popup_atomically_hides_the_previous_one() {
+fn showing_a_popup_atomically_hides_and_dismisses_the_previous_one() {
     let mut ctx = context();
     let first = ctx.create_popup("first", empty_content());
     let second = ctx.create_popup("second", empty_content());
-    let mut dispatcher = event_counter(first.submitted());
-    let mut submissions = 0;
+    let mut dispatcher = crate::event::EventDispatcher::new();
+    fn record(events: &mut Vec<RootSubmitted>, event: &RootSubmitted) {
+        events.push(*event);
+    }
+    dispatcher.subscribe(first.submitted(), record).unwrap();
+    let mut submissions = Vec::new();
 
     ctx.set_root_visible(first.id(), true).unwrap();
     assert_eq!(first.widget().try_read(RootChrome::is_visible), Some(true));
@@ -1130,8 +1154,8 @@ fn showing_a_popup_atomically_hides_the_previous_one() {
 
     assert_eq!(first.widget().try_read(RootChrome::is_visible), Some(false));
     assert_eq!(second.widget().try_read(RootChrome::is_visible), Some(true));
-    assert!(!dispatcher.dispatch(&mut submissions));
-    assert_eq!(submissions, 0);
+    assert!(dispatcher.dispatch(&mut submissions));
+    assert_eq!(submissions, [RootSubmitted::PopupDismissed]);
 }
 
 #[test]

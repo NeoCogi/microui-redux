@@ -420,13 +420,13 @@ The full demo composes `Combo` and its popup root entirely through typed events.
 carries the screen-space anchor from the update that routed the header click, so its context-aware
 handler updates popup visibility and placement in the triggering input transaction. The demo state
 already owns both retained handles: `RootSubmitted::PopupDismissed` closes the combo's shared
-semantic state after an outside press. Starting a source-window move or resize is such an outside
-press, so the popup is closed before any `RootChanged` movement and requires no geometry-following
-mechanism. This coordination stays with the composed control owner instead of leaking popup policy
-into the base widget or window-manager abstractions. Paint does no coordination, and application
-state performs no per-frame popup polling. The `RootChanged` handler updates the demo window's
-position and size diagnostics and enforces its minimum size; only the FPS label remains
-frame-produced data.
+semantic state after an outside press or replacement by another popup. Starting a source-window
+move or resize is such an outside press, so the popup is closed before any `RootChanged` movement
+and requires no geometry-following mechanism. This coordination stays with the composed control
+owner instead of leaking popup policy into the base widget or window-manager abstractions. Paint
+does no coordination, and application state performs no per-frame popup polling. The `RootChanged`
+handler updates the demo window's position and size diagnostics and enforces its minimum size; only
+the FPS label remains frame-produced data.
 
 The retained file-dialog service uses the same generic dispatch mechanism. Opening occurs directly
 inside a context-aware handler. `WindowManager` owns one typed completion source for the Context
@@ -756,7 +756,7 @@ removing the remaining application-level frame polling from `demo-full`.
     - [x] Modal routing, popup dismissal, focus, capture, root movement, and resizing share one retained window manager.
 - [x] Removed frame-polled transient-root and file-dialog coordination from the full demo.
     - [x] Popup and file-dialog opening mutate Context-owned state directly from the typed event that requested them; application command flags were removed.
-    - [x] `ComboSubmitted` carries same-transaction opening geometry; the demo's existing shared state reconciles `RootSubmitted::PopupDismissed` back into `Combo`, so source-root interaction closes the popup before movement and needs neither geometry APIs nor frame polling.
+    - [x] `ComboSubmitted` carries same-transaction opening geometry; the demo's existing shared state reconciles `RootSubmitted::PopupDismissed` back into `Combo`, so source-root interaction or replacement by another popup closes its semantic state without geometry APIs or frame polling.
     - [x] Demo window position, size, and minimum-size reconciliation consume `RootChanged` rather than polling `RootChrome` from frame processing.
     - [x] File-dialog acceptance and cancellation publish exactly one `FileDialogCompleted` event through a Context-lifetime source; application frame code no longer polls session status.
     - [x] Abandoned file-dialog sessions are settled after application dispatch and before layout or the next queued input; `FileDialogSession` warns when its ownership capability is ignored.

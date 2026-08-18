@@ -389,8 +389,9 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// Creates a hidden auto-sized popup around one uniquely owned application node.
     ///
     /// Showing places it at the current pointer position. An outside press hides it and records a
-    /// submission before ordinary routing may continue beneath the popup boundary. While a dialog
-    /// is active, a shown popup remains visible but is kept below the dialog and receives no input.
+    /// submission before ordinary routing may continue beneath the popup boundary. Showing another
+    /// popup also hides this one and records the same dismissal. While a dialog is active, a shown
+    /// popup remains visible but is kept below the dialog and receives no input.
     pub fn create_popup(&mut self, name: &str, content: Node) -> RootHandle {
         self.window_manager.create_popup(name, content)
     }
