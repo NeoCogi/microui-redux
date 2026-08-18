@@ -28,7 +28,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-#![doc = include_str!("render/RENDER.md")]
+#![doc = include_str!("../docs/RENDER.md")]
 
 mod backend;
 mod color;
