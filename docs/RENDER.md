@@ -551,11 +551,10 @@ recording-time software triangle clipping are introduced for benchmark gains.
 
 ## Working examples
 
-- [`examples/retained-custom-drawing.rs`](../examples/retained-custom-drawing.rs)
-  implements a retained custom widget using `WidgetPaintCtx::painter`.
-- [`examples/texture-clipping-smoke.rs`](../examples/texture-clipping-smoke.rs)
-  exercises low-level display-list execution, texture upload, clipping, and
-  final vertices.
+- `examples/retained-custom-drawing.rs` implements a retained custom widget using
+  `WidgetPaintCtx::painter`.
+- `examples/texture-clipping-smoke.rs` exercises low-level display-list execution, texture upload,
+  clipping, and final vertices.
 - `examples/common/glow_renderer.rs`,
   `examples/common/vulkan_renderer.rs`, and
   `examples/common/wgpu_renderer.rs` are complete backend implementations.
