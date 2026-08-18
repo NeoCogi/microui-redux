@@ -54,10 +54,10 @@
 //! ├── owns retained root forest
 //! │      └── owns concrete Widget
 //! │             └── owns Rc<RefCell<WidgetEventPort<E>>>
-//! │                         └── owns Option<Vec<E>>
+//! │                         └── owns WidgetEventPortState<E>
 //! ├── owns retained services
 //! │      └── owns Rc<RefCell<WidgetEventPort<E>>>
-//! │                  └── owns Option<Vec<E>>
+//! │                  └── owns WidgetEventPortState<E>
 //! │
 //! └── owns EventDispatcher<State>
 //!        └── owns Vec<Box<dyn EventDispatch<State>>>
@@ -85,7 +85,7 @@
 //!
 //! # The port state machine
 //!
-//! [`WidgetEventPort`] uses `Option<Vec<E>>` for both subscription state and storage. It has
+//! [`WidgetEventPort`] uses an explicit state enum for both subscription state and storage. It has
 //! exactly two stable states:
 //!
 //! ```text
@@ -93,8 +93,8 @@
 //!      ┌─────────────────────────────────────────────────┐
 //!      │                                                 v
 //! ┌──────────────┐                               ┌────────────────────┐
-//! │ disconnected │                               │ connected          │
-//! │ pending: None│                               │ pending: Some(FIFO)│
+//! │ Disconnected │                               │ Connected          │
+//! │              │                               │ pending: FIFO      │
 //! └──────────────┘                               └────────────────────┘
 //!      │      ^                                      │          │
 //!      │      │ listener drop / dispatcher drop      │ emit(E)  │ drain
@@ -366,13 +366,20 @@ pub trait TypedWidget<E: WidgetEvent>: Widget {
     fn event(&self) -> WidgetEventHandle<E>;
 }
 
-/// One retained-producer-owned typed event queue and its connection state.
+/// Explicit connection and queue state for one retained event port.
 ///
-/// `None` means that no listener exists and emissions are discarded. `Some(queue)` means exactly
-/// one listener is connected. Keeping those states in one field makes it impossible for the
-/// connection flag and queue lifetime to disagree.
+/// The queue exists only in `Connected`, so "disconnected" and "connected but empty" remain
+/// distinct without a boolean whose value must agree with a separate collection.
+enum WidgetEventPortState<E> {
+    /// No listener exists; emitted events are discarded.
+    Disconnected,
+    /// Exactly one listener exists and owns the right to drain this FIFO.
+    Connected { pending: Vec<E> },
+}
+
+/// One retained-producer-owned typed event queue and its connection state.
 pub(crate) struct WidgetEventPort<E: WidgetEvent> {
-    pending: Option<Vec<E>>,
+    state: WidgetEventPortState<E>,
 }
 
 impl<E: WidgetEvent> WidgetEventPort<E> {
@@ -381,7 +388,9 @@ impl<E: WidgetEvent> WidgetEventPort<E> {
     /// Widgets construct their ports before they are mounted or subscribed, so the initial state
     /// deliberately has no queue allocation and records no events.
     pub(crate) fn new() -> Self {
-        Self { pending: None }
+        Self {
+            state: WidgetEventPortState::Disconnected,
+        }
     }
 
     /// Appends an event when a listener is connected, otherwise discards it.
@@ -389,7 +398,7 @@ impl<E: WidgetEvent> WidgetEventPort<E> {
     /// The widget calls this only after committing the semantic or lifecycle state described by
     /// `event`. Delivery is deferred; this method never invokes application code.
     pub(crate) fn emit(&mut self, event: E) {
-        if let Some(pending) = &mut self.pending {
+        if let WidgetEventPortState::Connected { pending } = &mut self.state {
             pending.push(event);
         }
     }
@@ -398,10 +407,10 @@ impl<E: WidgetEvent> WidgetEventPort<E> {
     ///
     /// The exclusive connection enforces the design's one-port/one-state-method rule.
     fn connect(&mut self) -> Result<(), SubscribeError> {
-        if self.pending.is_some() {
+        if matches!(&self.state, WidgetEventPortState::Connected { .. }) {
             return Err(SubscribeError::AlreadySubscribed);
         }
-        self.pending = Some(Vec::new());
+        self.state = WidgetEventPortState::Connected { pending: Vec::new() };
         Ok(())
     }
 
@@ -410,7 +419,7 @@ impl<E: WidgetEvent> WidgetEventPort<E> {
     /// Calling this for an already disconnected port is harmless. In normal operation it is called
     /// by the exclusive listener's [`Drop`] implementation.
     fn disconnect(&mut self) {
-        self.pending = None;
+        self.state = WidgetEventPortState::Disconnected;
     }
 
     /// Moves the complete pending batch out while preserving the connected state.
@@ -419,7 +428,10 @@ impl<E: WidgetEvent> WidgetEventPort<E> {
     /// event emitted recursively by that handler therefore enters the new empty queue and is
     /// observed by a subsequent dispatcher sweep.
     fn drain(&mut self) -> Vec<E> {
-        self.pending.as_mut().map(std::mem::take).unwrap_or_default()
+        match &mut self.state {
+            WidgetEventPortState::Disconnected => Vec::new(),
+            WidgetEventPortState::Connected { pending } => std::mem::take(pending),
+        }
     }
 }
 
@@ -875,7 +887,7 @@ mod tests {
         owner.borrow_mut().emit(1);
         drop(dispatcher);
         owner.borrow_mut().emit(2);
-        assert!(owner.borrow().pending.is_none());
+        assert!(matches!(&owner.borrow().state, WidgetEventPortState::Disconnected));
 
         let mut replacement = EventDispatcher::new();
         replacement.subscribe(event, State::record_and_cascade).unwrap();
