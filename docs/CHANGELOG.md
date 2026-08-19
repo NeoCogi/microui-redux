@@ -1,15 +1,15 @@
 # Version history and roadmap
 
-## Version 0.9
+## Roadmap to Version 0.9
 - [ ] Menus
 - [ ] Key navigation
 - [ ] Async/Multi-Threading?
 - [ ] Theming/Skinning
     - [ ] Win311 Theme
 
-## Version 0.8.0-alpha.2
+## Version 0.8.0-alpha.3
 
-`0.8.0-alpha.2` builds on the first public alpha of the breaking retained-API redesign relative to
+`0.8.0-alpha.3` builds on the first public alpha of the breaking retained-API redesign relative to
 `0.7.0`. It is intended for integration testing and API feedback before the stable `0.8.0`
 release. This alpha completes event-time coordination for transient roots and file-dialog results,
 removing the remaining application-level frame polling from `demo-full`.

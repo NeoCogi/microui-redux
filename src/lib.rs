@@ -161,7 +161,7 @@
 //! measurement results.
 //! Retained application logic uses typed weak widget handles returned beside mounted nodes.
 //! The [`retained`] module and repository examples document the 0.8 alpha retained-authoring API.
-//! This release is versioned `0.8.0-alpha.2` and adds retained event-time root and service
+//! This release is versioned `0.8.0-alpha.3` and adds retained event-time root and service
 //! coordination to that redesign.
 //!
 //! # Rendering pipeline
