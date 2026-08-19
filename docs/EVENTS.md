@@ -27,10 +27,8 @@ Context<B, State>
 ├── owns retained root forest
 │      └── owns concrete Widget
 │             └── owns Rc<RefCell<WidgetEventPort<E>>>
-│                         └── owns WidgetEventPortState<E>
 ├── owns retained services
 │      └── owns Rc<RefCell<WidgetEventPort<E>>>
-│                  └── owns WidgetEventPortState<E>
 │
 └── owns EventDispatcher<State>
        └── owns Vec<Box<dyn EventDispatch<State>>>
