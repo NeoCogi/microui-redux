@@ -31,7 +31,6 @@
 
 use std::cell::RefCell;
 use std::fmt;
-use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 
 use crate::Widget;
@@ -353,15 +352,14 @@ trait EventDispatch<Target> {
 /// Concrete binding between one typed port listener and one typed target handler.
 ///
 /// `Handler` is either the method pointer supplied to `subscribe` or the explicit
-/// [`BoundEventHandler`] created by `subscribe_with`. `PhantomData` records the handler's `Target`
-/// relationship even though the target value is borrowed only when dispatch runs.
-struct Subscription<Target, E: WidgetEvent, Handler> {
+/// [`BoundEventHandler`] created by `subscribe_with`. The [`EventDispatch`] implementation relates
+/// the handler to its target type; the target value itself is borrowed only when dispatch runs.
+struct Subscription<E: WidgetEvent, Handler> {
     listener: WidgetEventListener<E>,
     handler: Handler,
-    target: PhantomData<fn(&mut Target)>,
 }
 
-impl<Target, E, Handler> EventDispatch<Target> for Subscription<Target, E, Handler>
+impl<Target, E, Handler> EventDispatch<Target> for Subscription<E, Handler>
 where
     E: WidgetEvent,
     Handler: EventHandler<Target, E>,
@@ -452,11 +450,7 @@ impl<Target: 'static> EventDispatcher<Target> {
     /// The fallible connection is completed before `Vec::push`; a failed subscription therefore
     /// leaves the dispatcher unchanged.
     fn add<E: WidgetEvent, Handler: EventHandler<Target, E> + 'static>(&mut self, event: WidgetEventHandle<E>, handler: Handler) -> Result<(), SubscribeError> {
-        self.subscriptions.push(Box::new(Subscription {
-            listener: event.listen()?,
-            handler,
-            target: PhantomData,
-        }));
+        self.subscriptions.push(Box::new(Subscription { listener: event.listen()?, handler }));
         Ok(())
     }
 
