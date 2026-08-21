@@ -10,7 +10,7 @@ methods on one application state value. Its central rule remains deliberately na
 
 There is no public event bus, application-wide message enum, global queue, multicast list,
 payload downcast, or public standalone dispatcher lifetime. The public surface consists of event
-payload types, weak [`WidgetEventHandle`] values, state-only [`crate::Context::subscribe`] methods,
+payload types, weak [`WidgetEventPortHandle`] values, state-only [`crate::Context::subscribe`] methods,
 and opt-in context-aware [`crate::Context::subscribe_context`] methods. Context owns the
 application dispatcher.
 
@@ -32,8 +32,8 @@ Context<B, State>
                   └── owns Subscription<State, E, Handler>
                              ├── owns Handler
                              └── owns Weak port reference ─────┐
-                                                              │
-WidgetEventHandle<E> ──────────────────── Weak ────────────────┘
+                                                               │
+WidgetEventPortHandle<E> ──────────────── Weak ────────────────┘
 
 dispatch boundary ── lends &mut EventContext<'_> ──> opted-in Handler
 
@@ -101,7 +101,7 @@ This policy provides:
   storage, payload cloning, or shared payload wrappers; and
 - deterministic FIFO delivery without an additional same-port handler-ordering policy.
 
-Cloning a [`WidgetEventHandle`] therefore clones only the weak capability identifying the port;
+Cloning a [`WidgetEventPortHandle`] therefore clones only the weak capability identifying the port;
 it does not create another subscriber slot. Supporting multicast later would require grouping an
 ordered handler list inside the port's single subscription. Merely allowing several subscriptions
 to connect would be incorrect because the first one to drain the queue would consume the events
@@ -115,7 +115,7 @@ A normal application subscription follows this path:
 typed retained source
      │ changed() / submitted() / completed() / ...
      v
-WidgetEventHandle<E>
+WidgetEventPortHandle<E>
      │ Context::subscribe(handle, State::method)
      v
 EventDispatcher<State>::add
@@ -183,7 +183,7 @@ impl Model {
 
 fn subscribe<B: RendererBackend>(
     context: &mut Context<B, Model>,
-    submitted: WidgetEventHandle<ButtonSubmitted>,
+    submitted: WidgetEventPortHandle<ButtonSubmitted>,
 ) {
     context.subscribe_context(submitted, Model::show_popup).unwrap();
 }

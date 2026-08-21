@@ -186,12 +186,12 @@ impl TypedWidgetHandle<Textbox> {
     }
 
     /// Returns the textbox's native value-change endpoint.
-    pub fn changed(&self) -> WidgetEventHandle<TextboxChanged> {
+    pub fn changed(&self) -> WidgetEventPortHandle<TextboxChanged> {
         self.widget_event()
     }
 
     /// Returns the textbox's native submission endpoint.
-    pub fn submitted(&self) -> WidgetEventHandle<TextboxSubmitted> {
+    pub fn submitted(&self) -> WidgetEventPortHandle<TextboxSubmitted> {
         self.widget_event()
     }
 }
@@ -224,12 +224,12 @@ impl Textbox {
     }
 
     /// Returns the native event endpoint emitted after every user-originated text change.
-    pub fn changed(&self) -> crate::WidgetEventHandle<TextboxChanged> {
+    pub fn changed(&self) -> crate::WidgetEventPortHandle<TextboxChanged> {
         <Self as crate::TypedWidget<TextboxChanged>>::event(self)
     }
 
     /// Returns the native event endpoint emitted whenever the user submits the current text.
-    pub fn submitted(&self) -> crate::WidgetEventHandle<TextboxSubmitted> {
+    pub fn submitted(&self) -> crate::WidgetEventPortHandle<TextboxSubmitted> {
         <Self as crate::TypedWidget<TextboxSubmitted>>::event(self)
     }
 
@@ -277,14 +277,14 @@ impl Textbox {
 }
 
 impl crate::TypedWidget<TextboxChanged> for Textbox {
-    fn event(&self) -> crate::WidgetEventHandle<TextboxChanged> {
-        crate::WidgetEventHandle::new(&self.changed_event)
+    fn event(&self) -> crate::WidgetEventPortHandle<TextboxChanged> {
+        crate::WidgetEventPortHandle::new(&self.changed_event)
     }
 }
 
 impl crate::TypedWidget<TextboxSubmitted> for Textbox {
-    fn event(&self) -> crate::WidgetEventHandle<TextboxSubmitted> {
-        crate::WidgetEventHandle::new(&self.submitted_event)
+    fn event(&self) -> crate::WidgetEventPortHandle<TextboxSubmitted> {
+        crate::WidgetEventPortHandle::new(&self.submitted_event)
     }
 }
 

@@ -135,7 +135,7 @@ impl Checkbox {
     }
 
     /// Returns the native event endpoint emitted after every user-originated value change.
-    pub fn changed(&self) -> crate::WidgetEventHandle<CheckboxChanged> {
+    pub fn changed(&self) -> crate::WidgetEventPortHandle<CheckboxChanged> {
         <Self as crate::TypedWidget<CheckboxChanged>>::event(self)
     }
 
@@ -192,7 +192,7 @@ impl crate::TypedWidgetHandle<Checkbox> {
     }
 
     /// Returns the checkbox's native value-change endpoint.
-    pub fn changed(&self) -> crate::WidgetEventHandle<CheckboxChanged> {
+    pub fn changed(&self) -> crate::WidgetEventPortHandle<CheckboxChanged> {
         self.widget_event()
     }
 }
@@ -218,8 +218,8 @@ impl Widget for Checkbox {
 }
 
 impl crate::TypedWidget<CheckboxChanged> for Checkbox {
-    fn event(&self) -> crate::WidgetEventHandle<CheckboxChanged> {
-        crate::WidgetEventHandle::new(&self.changed_event)
+    fn event(&self) -> crate::WidgetEventPortHandle<CheckboxChanged> {
+        crate::WidgetEventPortHandle::new(&self.changed_event)
     }
 }
 

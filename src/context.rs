@@ -309,7 +309,11 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     ///
     /// A retained event port accepts one subscription and returns
     /// [`crate::SubscribeError::AlreadySubscribed`] for another.
-    pub fn subscribe<E: crate::WidgetEvent>(&mut self, event: crate::WidgetEventHandle<E>, method: fn(&mut State, &E)) -> Result<(), crate::SubscribeError> {
+    pub fn subscribe<E: crate::WidgetEvent>(
+        &mut self,
+        event: crate::WidgetEventPortHandle<E>,
+        method: fn(&mut State, &E),
+    ) -> Result<(), crate::SubscribeError> {
         self.event_dispatcher.subscribe(event, method)
     }
 
@@ -319,7 +323,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// [`crate::SubscribeError::AlreadySubscribed`] for another.
     pub fn subscribe_with<E: crate::WidgetEvent, BoundContext: 'static>(
         &mut self,
-        event: crate::WidgetEventHandle<E>,
+        event: crate::WidgetEventPortHandle<E>,
         context: BoundContext,
         method: fn(&mut State, &BoundContext, &E),
     ) -> Result<(), crate::SubscribeError> {
@@ -334,7 +338,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// application or widget state.
     pub fn subscribe_context<E: crate::WidgetEvent>(
         &mut self,
-        event: crate::WidgetEventHandle<E>,
+        event: crate::WidgetEventPortHandle<E>,
         method: for<'a> fn(&mut State, &mut EventContext<'a>, &E),
     ) -> Result<(), crate::SubscribeError> {
         // Store the typed function pointer in the same context-owned dispatcher as state-only
@@ -348,7 +352,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// matching the established [`Context::subscribe_with`] argument order.
     pub fn subscribe_context_with<E: crate::WidgetEvent, BoundContext: 'static>(
         &mut self,
-        event: crate::WidgetEventHandle<E>,
+        event: crate::WidgetEventPortHandle<E>,
         context: BoundContext,
         method: for<'a> fn(&mut State, &BoundContext, &mut EventContext<'a>, &E),
     ) -> Result<(), crate::SubscribeError> {

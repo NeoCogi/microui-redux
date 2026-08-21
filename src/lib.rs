@@ -206,7 +206,7 @@ mod window_manager;
 /// This module groups the stable retained concepts used by application code without exposing
 /// low-level renderer details or manual container drawing helpers through default imports.
 pub mod retained {
-    pub use crate::event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventHandle};
+    pub use crate::event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventPortHandle};
     pub use crate::file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};
     pub use crate::render::{CustomRenderArgs, CustomRenderHandle};
     pub use crate::ui_node::{
@@ -224,7 +224,7 @@ pub mod retained {
 /// The prelude intentionally favors retained authoring, widget state, style/input/image types, and
 /// renderer integration. Low-level backend and Renderer types live under [`render`].
 pub mod prelude {
-    pub use crate::event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventHandle};
+    pub use crate::event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventPortHandle};
     pub use crate::atlas::{
         AtlasHandle, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry, FontId,
         IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON,
@@ -262,7 +262,7 @@ pub use atlas::{
 };
 pub use context::{Context, ContextFrame, EventContext};
 pub use window_manager::{RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted, WindowOption};
-pub use event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventHandle};
+pub use event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventPortHandle};
 pub use file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};
 pub use image::{ImageSource, load_image_bytes};
 pub use input::{KeyCode, KeyMode, MouseButton};

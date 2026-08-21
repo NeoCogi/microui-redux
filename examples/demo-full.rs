@@ -1033,7 +1033,7 @@ fn static_label(text: impl Into<String>) -> Node {
     retained_leaf::<ListItemBuilder>(ListItemParameters::with_opt(text, WidgetOption::NO_INTERACT))
 }
 
-fn centered_button(label: impl Into<String>) -> (WidgetEventHandle<ButtonSubmitted>, Node) {
+fn centered_button(label: impl Into<String>) -> (WidgetEventPortHandle<ButtonSubmitted>, Node) {
     let (button, node) = Button::create(ButtonParameters::with_opt(label, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
     let submitted = button.submitted();
     (submitted, node)
@@ -1086,18 +1086,18 @@ struct DemoRuntimes {
 struct State {
     bg: [Real; 3],
     bg_slider_states: [TypedWidgetHandle<Slider>; 3],
-    bg_slider_changed: [WidgetEventHandle<SliderChanged>; 3],
+    bg_slider_changed: [WidgetEventPortHandle<SliderChanged>; 3],
     style_color_slider_states: [TypedWidgetHandle<Slider>; 56],
-    style_color_slider_changed: [WidgetEventHandle<SliderChanged>; 56],
+    style_color_slider_changed: [WidgetEventPortHandle<SliderChanged>; 56],
     style_value_slider_states: [TypedWidgetHandle<Slider>; 5],
-    style_value_slider_changed: [WidgetEventHandle<SliderChanged>; 5],
+    style_value_slider_changed: [WidgetEventPortHandle<SliderChanged>; 5],
     logbuf: Rc<RefCell<String>>,
     submit_buf_state: TypedWidgetHandle<Textbox>,
-    submit_buf_submitted: WidgetEventHandle<TextboxSubmitted>,
+    submit_buf_submitted: WidgetEventPortHandle<TextboxSubmitted>,
     combo_typed_state: TypedWidgetHandle<Combo>,
-    combo_submitted: WidgetEventHandle<ComboSubmitted>,
+    combo_submitted: WidgetEventPortHandle<ComboSubmitted>,
     combo_item_states: [TypedWidgetHandle<ListItem>; 4],
-    combo_item_submitted: [WidgetEventHandle<ListItemSubmitted>; 4],
+    combo_item_submitted: [WidgetEventPortHandle<ListItemSubmitted>; 4],
     style_color_swatch_states: [TypedWidgetHandle<ColorSwatch>; 14],
     window_info_value_states: [TypedWidgetHandle<ListItem>; 3],
     style: Style,
@@ -1110,13 +1110,13 @@ struct State {
     fps: f32,
     last_frame: Instant,
 
-    submit_button_submitted: WidgetEventHandle<ButtonSubmitted>,
+    submit_button_submitted: WidgetEventPortHandle<ButtonSubmitted>,
     log_text_state: TypedWidgetHandle<TextBlock>,
-    test_button_submitted: [WidgetEventHandle<ButtonSubmitted>; 6],
-    tree_button_submitted: [WidgetEventHandle<ButtonSubmitted>; 6],
-    popup_button_submitted: [WidgetEventHandle<ButtonSubmitted>; 2],
-    stack_direction_button_submitted: [WidgetEventHandle<ButtonSubmitted>; 6],
-    weight_button_submitted: [WidgetEventHandle<ButtonSubmitted>; 9],
+    test_button_submitted: [WidgetEventPortHandle<ButtonSubmitted>; 6],
+    tree_button_submitted: [WidgetEventPortHandle<ButtonSubmitted>; 6],
+    popup_button_submitted: [WidgetEventPortHandle<ButtonSubmitted>; 2],
+    stack_direction_button_submitted: [WidgetEventPortHandle<ButtonSubmitted>; 6],
+    weight_button_submitted: [WidgetEventPortHandle<ButtonSubmitted>; 9],
     triangle_data: Rc<RefCell<TriangleState>>,
     background_swatch_state: TypedWidgetHandle<ColorSwatch>,
 }

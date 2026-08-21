@@ -233,12 +233,12 @@ impl TypedWidgetHandle<Combo> {
     }
 
     /// Returns the combo's native selection-change endpoint.
-    pub fn changed(&self) -> WidgetEventHandle<ComboChanged> {
+    pub fn changed(&self) -> WidgetEventPortHandle<ComboChanged> {
         self.widget_event()
     }
 
     /// Returns the combo's native header-submission endpoint.
-    pub fn submitted(&self) -> WidgetEventHandle<ComboSubmitted> {
+    pub fn submitted(&self) -> WidgetEventPortHandle<ComboSubmitted> {
         self.widget_event()
     }
 }
@@ -281,12 +281,12 @@ impl Combo {
     }
 
     /// Returns the native event endpoint emitted after every selection change.
-    pub fn changed(&self) -> crate::WidgetEventHandle<ComboChanged> {
+    pub fn changed(&self) -> crate::WidgetEventPortHandle<ComboChanged> {
         <Self as crate::TypedWidget<ComboChanged>>::event(self)
     }
 
     /// Returns the native event endpoint emitted whenever the user submits the combo header.
-    pub fn submitted(&self) -> crate::WidgetEventHandle<ComboSubmitted> {
+    pub fn submitted(&self) -> crate::WidgetEventPortHandle<ComboSubmitted> {
         <Self as crate::TypedWidget<ComboSubmitted>>::event(self)
     }
 
@@ -347,14 +347,14 @@ impl Combo {
 }
 
 impl crate::TypedWidget<ComboChanged> for Combo {
-    fn event(&self) -> crate::WidgetEventHandle<ComboChanged> {
-        crate::WidgetEventHandle::new(&self.changed_event)
+    fn event(&self) -> crate::WidgetEventPortHandle<ComboChanged> {
+        crate::WidgetEventPortHandle::new(&self.changed_event)
     }
 }
 
 impl crate::TypedWidget<ComboSubmitted> for Combo {
-    fn event(&self) -> crate::WidgetEventHandle<ComboSubmitted> {
-        crate::WidgetEventHandle::new(&self.submitted_event)
+    fn event(&self) -> crate::WidgetEventPortHandle<ComboSubmitted> {
+        crate::WidgetEventPortHandle::new(&self.submitted_event)
     }
 }
 

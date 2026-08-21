@@ -44,7 +44,7 @@ use std::{cell::RefCell, path::Path, rc::Rc};
 use crate::{
     Button, ButtonParameters, ButtonSubmitted, IconId, Linear, LinearItem, LinearParameters, ListItem, ListItemParameters, ListItemSubmitted, Node, Recti,
     Context, EventContext, RootHandle, RootSubmitted, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Textbox, TextboxParameters, TextboxSubmitted,
-    ThemeIcons, TypedWidgetHandle, WidgetEventHandle, WidgetOption, WindowOption,
+    ThemeIcons, TypedWidgetHandle, WidgetEventPortHandle, WidgetOption, WindowOption,
 };
 use crate::event::WidgetEventPort;
 use crate::ui_node::RuntimeNodeId;
@@ -301,9 +301,9 @@ impl FileDialog {
             .expect("new file-dialog path event must be unsubscribed");
         ctx.subscribe_with(go_handle.submitted(), accessor, Self::dispatch_go::<State>)
             .expect("new file-dialog Go event must be unsubscribed");
-        ctx.subscribe_with(WidgetEventHandle::new(&folder_item_port), accessor, Self::dispatch_folder::<State>)
+        ctx.subscribe_with(WidgetEventPortHandle::new(&folder_item_port), accessor, Self::dispatch_folder::<State>)
             .expect("new file-dialog folder event must be unsubscribed");
-        ctx.subscribe_with(WidgetEventHandle::new(&file_item_port), accessor, Self::dispatch_file::<State>)
+        ctx.subscribe_with(WidgetEventPortHandle::new(&file_item_port), accessor, Self::dispatch_file::<State>)
             .expect("new file-dialog file event must be unsubscribed");
         ctx.subscribe_context_with(ok_handle.submitted(), accessor, Self::dispatch_accept::<State>)
             .expect("new file-dialog Open event must be unsubscribed");
@@ -429,8 +429,8 @@ impl FileDialog {
     }
 
     /// Returns the completion source owned by this component.
-    pub fn completed(&self) -> WidgetEventHandle<FileDialogCompleted> {
-        WidgetEventHandle::new(&self.completed)
+    pub fn completed(&self) -> WidgetEventPortHandle<FileDialogCompleted> {
+        WidgetEventPortHandle::new(&self.completed)
     }
 
     /// Returns the ordinary retained dialog root used by this component.

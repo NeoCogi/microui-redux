@@ -172,7 +172,7 @@ impl Slider {
     }
 
     /// Returns the native event endpoint emitted after every user-originated value change.
-    pub fn changed(&self) -> crate::WidgetEventHandle<SliderChanged> {
+    pub fn changed(&self) -> crate::WidgetEventPortHandle<SliderChanged> {
         <Self as crate::TypedWidget<SliderChanged>>::event(self)
     }
 
@@ -277,14 +277,14 @@ impl TypedWidgetHandle<Slider> {
     }
 
     /// Returns the slider's native value-change endpoint.
-    pub fn changed(&self) -> WidgetEventHandle<SliderChanged> {
+    pub fn changed(&self) -> WidgetEventPortHandle<SliderChanged> {
         self.widget_event()
     }
 }
 
 impl crate::TypedWidget<SliderChanged> for Slider {
-    fn event(&self) -> crate::WidgetEventHandle<SliderChanged> {
-        crate::WidgetEventHandle::new(&self.changed_event)
+    fn event(&self) -> crate::WidgetEventPortHandle<SliderChanged> {
+        crate::WidgetEventPortHandle::new(&self.changed_event)
     }
 }
 

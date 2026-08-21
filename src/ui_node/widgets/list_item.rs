@@ -159,7 +159,7 @@ impl ListItem {
     }
 
     /// Returns the native event endpoint emitted once for every user submission.
-    pub fn submitted(&self) -> crate::WidgetEventHandle<ListItemSubmitted> {
+    pub fn submitted(&self) -> crate::WidgetEventPortHandle<ListItemSubmitted> {
         <Self as crate::TypedWidget<ListItemSubmitted>>::event(self)
     }
 
@@ -229,7 +229,7 @@ impl TypedWidgetHandle<ListItem> {
     }
 
     /// Returns the list item's native submission endpoint.
-    pub fn submitted(&self) -> WidgetEventHandle<ListItemSubmitted> {
+    pub fn submitted(&self) -> WidgetEventPortHandle<ListItemSubmitted> {
         self.widget_event()
     }
 }
@@ -253,8 +253,8 @@ impl Widget for ListItem {
 }
 
 impl crate::TypedWidget<ListItemSubmitted> for ListItem {
-    fn event(&self) -> crate::WidgetEventHandle<ListItemSubmitted> {
-        crate::WidgetEventHandle::new(&self.submitted_event)
+    fn event(&self) -> crate::WidgetEventPortHandle<ListItemSubmitted> {
+        crate::WidgetEventPortHandle::new(&self.submitted_event)
     }
 }
 

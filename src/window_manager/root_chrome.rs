@@ -50,8 +50,8 @@ use super::RootId;
 pub struct RootHandle {
     id: RootId,
     widget: TypedWidgetHandle<RootChrome>,
-    changed: crate::WidgetEventHandle<RootChanged>,
-    submitted: crate::WidgetEventHandle<RootSubmitted>,
+    changed: crate::WidgetEventPortHandle<RootChanged>,
+    submitted: crate::WidgetEventPortHandle<RootSubmitted>,
 }
 
 impl RootHandle {
@@ -66,12 +66,12 @@ impl RootHandle {
     }
 
     /// Returns the native event endpoint emitted after each user-driven move or resize.
-    pub fn changed(&self) -> crate::WidgetEventHandle<RootChanged> {
+    pub fn changed(&self) -> crate::WidgetEventPortHandle<RootChanged> {
         self.changed.clone()
     }
 
     /// Returns the native event endpoint emitted for close and outside-popup submissions.
-    pub fn submitted(&self) -> crate::WidgetEventHandle<RootSubmitted> {
+    pub fn submitted(&self) -> crate::WidgetEventPortHandle<RootSubmitted> {
         self.submitted.clone()
     }
 }
@@ -252,8 +252,8 @@ pub(super) fn create_root_chrome(
     parameters: RootChromeParameters,
 ) -> (
     TypedWidgetHandle<RootChrome>,
-    crate::WidgetEventHandle<RootChanged>,
-    crate::WidgetEventHandle<RootSubmitted>,
+    crate::WidgetEventPortHandle<RootChanged>,
+    crate::WidgetEventPortHandle<RootSubmitted>,
     Container,
 ) {
     let changed_event = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
@@ -266,21 +266,21 @@ pub(super) fn create_root_chrome(
         changed_event.clone(),
         submitted_event.clone(),
     );
-    let changed = crate::WidgetEventHandle::new(&changed_event);
-    let submitted = crate::WidgetEventHandle::new(&submitted_event);
+    let changed = crate::WidgetEventPortHandle::new(&changed_event);
+    let submitted = crate::WidgetEventPortHandle::new(&submitted_event);
     let (handle, container) = Container::new(widget, [parameters.content]);
     (handle, changed, submitted, container)
 }
 
 impl crate::TypedWidget<RootChanged> for RootChrome {
-    fn event(&self) -> crate::WidgetEventHandle<RootChanged> {
-        crate::WidgetEventHandle::new(&self.changed_event)
+    fn event(&self) -> crate::WidgetEventPortHandle<RootChanged> {
+        crate::WidgetEventPortHandle::new(&self.changed_event)
     }
 }
 
 impl crate::TypedWidget<RootSubmitted> for RootChrome {
-    fn event(&self) -> crate::WidgetEventHandle<RootSubmitted> {
-        crate::WidgetEventHandle::new(&self.submitted_event)
+    fn event(&self) -> crate::WidgetEventPortHandle<RootSubmitted> {
+        crate::WidgetEventPortHandle::new(&self.submitted_event)
     }
 }
 
@@ -639,8 +639,8 @@ pub(super) fn record_root_overlay(display_list: &mut crate::render::DisplayList,
 pub(super) fn root_handle(
     id: RootId,
     widget: TypedWidgetHandle<RootChrome>,
-    changed: crate::WidgetEventHandle<RootChanged>,
-    submitted: crate::WidgetEventHandle<RootSubmitted>,
+    changed: crate::WidgetEventPortHandle<RootChanged>,
+    submitted: crate::WidgetEventPortHandle<RootSubmitted>,
 ) -> RootHandle {
     RootHandle { id, widget, changed, submitted }
 }

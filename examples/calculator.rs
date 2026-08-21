@@ -65,7 +65,7 @@ enum Action {
 
 struct CalcButton {
     action: Action,
-    submitted: WidgetEventHandle<ButtonSubmitted>,
+    submitted: WidgetEventPortHandle<ButtonSubmitted>,
     widget: Option<Node>,
 }
 

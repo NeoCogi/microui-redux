@@ -81,7 +81,7 @@ not to generic nodes: plain nodes occupy one cell, while `GridItem::spanned(node
 supplies an explicit parent-child span that can later be changed through
 `TypedWidgetHandle<Grid>::try_update` without replacing the child. Every concrete widget is
 accessed through `TypedWidgetHandle<W>`. Widgets implement `TypedWidget<E>` for native event
-payloads, and the typed handle projects the corresponding weak `WidgetEventHandle<E>` without
+payloads, and the typed handle projects the corresponding weak `WidgetEventPortHandle<E>` without
 exposing or owning the erased node. Disclosure headers remain real addressable leaf children, while
 the concrete `Disclosure` widget owns expansion state and the weak body-topology capability.
 

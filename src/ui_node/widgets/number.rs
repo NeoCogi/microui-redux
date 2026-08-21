@@ -137,7 +137,7 @@ impl Number {
     }
 
     /// Returns the native event endpoint emitted after every user-originated value change.
-    pub fn changed(&self) -> crate::WidgetEventHandle<NumberChanged> {
+    pub fn changed(&self) -> crate::WidgetEventPortHandle<NumberChanged> {
         <Self as crate::TypedWidget<NumberChanged>>::event(self)
     }
 
@@ -200,14 +200,14 @@ impl TypedWidgetHandle<Number> {
     }
 
     /// Returns the number input's native value-change endpoint.
-    pub fn changed(&self) -> WidgetEventHandle<NumberChanged> {
+    pub fn changed(&self) -> WidgetEventPortHandle<NumberChanged> {
         self.widget_event()
     }
 }
 
 impl crate::TypedWidget<NumberChanged> for Number {
-    fn event(&self) -> crate::WidgetEventHandle<NumberChanged> {
-        crate::WidgetEventHandle::new(&self.changed_event)
+    fn event(&self) -> crate::WidgetEventPortHandle<NumberChanged> {
+        crate::WidgetEventPortHandle::new(&self.changed_event)
     }
 }
 

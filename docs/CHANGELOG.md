@@ -28,7 +28,7 @@ removing the remaining application-level frame polling from `demo-full`.
     - [x] `ContextFrame::render_ui` is paint-only and rejects missing, stale, or dimension-mismatched commits before backend acquisition.
     - [x] `EventContext<'_>` lends safe Context-owned mutation access only after retained widget borrows end and before the next layout commit.
 - [x] Added context-owned typed application events.
-    - [x] Widgets expose weak `WidgetEventHandle<E>` endpoints for their native event types.
+    - [x] Widgets expose weak `WidgetEventPortHandle<E>` endpoints for their native event types.
     - [x] `Context<B, State>::subscribe` and `subscribe_with` dispatch into application state after retained widget borrows end.
     - [x] `subscribe_context` and `subscribe_context_with` opt handlers into the same typed dispatch with short-lived root mutation access.
     - [x] Application-owned components publish typed lifecycle events through the same generic dispatcher without control-specific dispatcher branches.

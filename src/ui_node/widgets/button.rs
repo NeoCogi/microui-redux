@@ -168,7 +168,7 @@ impl Button {
     }
 
     /// Returns the native event endpoint emitted once for every user submission.
-    pub fn submitted(&self) -> crate::WidgetEventHandle<ButtonSubmitted> {
+    pub fn submitted(&self) -> crate::WidgetEventPortHandle<ButtonSubmitted> {
         <Self as crate::TypedWidget<ButtonSubmitted>>::event(self)
     }
 
@@ -246,7 +246,7 @@ impl Button {
 
 impl crate::TypedWidgetHandle<Button> {
     /// Returns the button's native submission endpoint.
-    pub fn submitted(&self) -> crate::WidgetEventHandle<ButtonSubmitted> {
+    pub fn submitted(&self) -> crate::WidgetEventPortHandle<ButtonSubmitted> {
         self.widget_event()
     }
 }
@@ -269,8 +269,8 @@ impl Widget for Button {
 }
 
 impl crate::TypedWidget<ButtonSubmitted> for Button {
-    fn event(&self) -> crate::WidgetEventHandle<ButtonSubmitted> {
-        crate::WidgetEventHandle::new(&self.submitted_event)
+    fn event(&self) -> crate::WidgetEventPortHandle<ButtonSubmitted> {
+        crate::WidgetEventPortHandle::new(&self.submitted_event)
     }
 }
 

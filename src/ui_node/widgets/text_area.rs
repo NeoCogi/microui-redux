@@ -255,12 +255,12 @@ impl TypedWidgetHandle<TextArea> {
     }
 
     /// Returns the text area's native value-change endpoint.
-    pub fn changed(&self) -> WidgetEventHandle<TextAreaChanged> {
+    pub fn changed(&self) -> WidgetEventPortHandle<TextAreaChanged> {
         self.widget_event()
     }
 
     /// Returns the text area's native submission endpoint.
-    pub fn submitted(&self) -> WidgetEventHandle<TextAreaSubmitted> {
+    pub fn submitted(&self) -> WidgetEventPortHandle<TextAreaSubmitted> {
         self.widget_event()
     }
 }
@@ -284,12 +284,12 @@ impl TextArea {
     }
 
     /// Returns the native event endpoint emitted after every user-originated text change.
-    pub fn changed(&self) -> crate::WidgetEventHandle<TextAreaChanged> {
+    pub fn changed(&self) -> crate::WidgetEventPortHandle<TextAreaChanged> {
         <Self as crate::TypedWidget<TextAreaChanged>>::event(self)
     }
 
     /// Returns the native event endpoint emitted whenever the user submits the current text.
-    pub fn submitted(&self) -> crate::WidgetEventHandle<TextAreaSubmitted> {
+    pub fn submitted(&self) -> crate::WidgetEventPortHandle<TextAreaSubmitted> {
         <Self as crate::TypedWidget<TextAreaSubmitted>>::event(self)
     }
 
@@ -366,14 +366,14 @@ impl TextArea {
 }
 
 impl crate::TypedWidget<TextAreaChanged> for TextArea {
-    fn event(&self) -> crate::WidgetEventHandle<TextAreaChanged> {
-        crate::WidgetEventHandle::new(&self.changed_event)
+    fn event(&self) -> crate::WidgetEventPortHandle<TextAreaChanged> {
+        crate::WidgetEventPortHandle::new(&self.changed_event)
     }
 }
 
 impl crate::TypedWidget<TextAreaSubmitted> for TextArea {
-    fn event(&self) -> crate::WidgetEventHandle<TextAreaSubmitted> {
-        crate::WidgetEventHandle::new(&self.submitted_event)
+    fn event(&self) -> crate::WidgetEventPortHandle<TextAreaSubmitted> {
+        crate::WidgetEventPortHandle::new(&self.submitted_event)
     }
 }
 

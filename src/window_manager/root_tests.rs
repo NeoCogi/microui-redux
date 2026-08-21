@@ -82,7 +82,7 @@ fn increment_event_counter<E>(count: &mut usize, _: &E) {
     *count += 1;
 }
 
-fn event_counter<E: crate::WidgetEvent>(event: crate::WidgetEventHandle<E>) -> crate::event::EventDispatcher<usize> {
+fn event_counter<E: crate::WidgetEvent>(event: crate::WidgetEventPortHandle<E>) -> crate::event::EventDispatcher<usize> {
     let mut dispatcher = crate::event::EventDispatcher::new();
     dispatcher.subscribe(event, increment_event_counter::<E>).unwrap();
     dispatcher
@@ -760,7 +760,7 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
         .unwrap_or("non-string panic payload")
 }
 
-fn button_content(label: &str) -> (crate::WidgetEventHandle<ButtonSubmitted>, Node) {
+fn button_content(label: &str) -> (crate::WidgetEventPortHandle<ButtonSubmitted>, Node) {
     let (widget, node) = Button::create(ButtonParameters::new(label));
     (widget.submitted(), node)
 }
