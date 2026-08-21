@@ -139,6 +139,17 @@ impl ScrollArea {
         Self::set_axis_offset(&self.vertical, offset.y);
     }
 
+    /// Requests the largest vertical offset while preserving the horizontal offset.
+    ///
+    /// The content and viewport heights may change before the next placement, so this records an
+    /// unbounded request rather than using the currently committed maximum. Placement clamps it to
+    /// the maximum derived from the newly measured content.
+    pub fn scroll_to_end(&mut self) {
+        if self.scrolling_enabled {
+            Self::set_axis_offset(&self.vertical, i32::MAX);
+        }
+    }
+
     /// Returns whether layout may activate the scrollbar children.
     pub fn scrolling_enabled(&self) -> bool {
         self.scrolling_enabled
@@ -817,6 +828,37 @@ mod tests {
         );
         assert_eq!((geometry.offset.x, geometry.offset.y), (30, 40));
         assert_eq!((geometry.max_offset.x, geometry.max_offset.y), (30, 40));
+    }
+
+    #[test]
+    fn scroll_to_end_uses_the_next_vertical_range_and_preserves_horizontal_offset() {
+        let wide_line = "0123456789".repeat(12);
+        let (text, child) = TextBlock::create(TextBlockParameters::new(&wide_line));
+        let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child));
+        let style = Style {
+            padding: 0,
+            scrollbar_size: 10,
+            ..Style::default()
+        };
+        let surface = Recti::new(0, 0, 100, 80);
+        let mut runtime = UiRuntime::new();
+
+        runtime.begin_update();
+        runtime.layout_tree_root(&mut root, &style, test_atlas(), surface, UNCLIPPED_RECT);
+        text.set_text(std::iter::repeat_n(wide_line, 20).collect::<Vec<_>>().join("\n")).unwrap();
+        scroll
+            .try_update(|state| {
+                state.set_offset(Vec2i::new(7, 0));
+                state.scroll_to_end();
+            })
+            .unwrap();
+
+        runtime.begin_update();
+        runtime.layout_tree_root(&mut root, &style, test_atlas(), surface, UNCLIPPED_RECT);
+        let geometry = scroll.try_read(|state| state.geometry).unwrap();
+        assert_eq!(geometry.offset.x, 7);
+        assert!(geometry.max_offset.y > 0);
+        assert_eq!(geometry.offset.y, geometry.max_offset.y);
     }
 
     #[test]

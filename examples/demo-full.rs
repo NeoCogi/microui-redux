@@ -1062,7 +1062,7 @@ struct DemoRuntimes {
     tree_labels: [Node; 2],
     background_labels: [Node; 3],
     submit_button: Node,
-    log_text: Node,
+    log_scroll: Node,
     typography_heading: Node,
     typography_body: Node,
     typography_button: Node,
@@ -1091,7 +1091,7 @@ struct State {
     style_color_slider_changed: [WidgetEventPortHandle<SliderChanged>; 56],
     style_value_slider_states: [TypedWidgetHandle<Slider>; 5],
     style_value_slider_changed: [WidgetEventPortHandle<SliderChanged>; 5],
-    logbuf: Rc<RefCell<String>>,
+    logbuf: String,
     submit_buf_state: TypedWidgetHandle<Textbox>,
     submit_buf_submitted: WidgetEventPortHandle<TextboxSubmitted>,
     combo_typed_state: TypedWidgetHandle<Combo>,
@@ -1112,6 +1112,7 @@ struct State {
 
     submit_button_submitted: WidgetEventPortHandle<ButtonSubmitted>,
     log_text_state: TypedWidgetHandle<TextBlock>,
+    log_scroll_state: TypedWidgetHandle<ScrollArea>,
     test_button_submitted: [WidgetEventPortHandle<ButtonSubmitted>; 6],
     tree_button_submitted: [WidgetEventPortHandle<ButtonSubmitted>; 6],
     popup_button_submitted: [WidgetEventPortHandle<ButtonSubmitted>; 2],
@@ -1309,6 +1310,11 @@ impl State {
         let (submit_buf_state, submit_buf) = stateful_leaf::<TextboxBuilder>(TextboxParameters::new("").font(FontRole::Mono.into()));
         let submit_buf_submitted = submit_buf_state.submitted();
         let (log_text_state, log_text) = stateful_leaf::<TextBlockBuilder>(TextBlockParameters::new("").font(FontRole::Mono.into()));
+        let (_, log_scroll_content) = Linear::create(LinearParameters::vertical([log_text]));
+        let (log_scroll_state, log_scroll) = ScrollArea::create(ScrollAreaParameters::new(
+            ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL,
+            log_scroll_content,
+        ));
         let typography_heading = retained_leaf::<TextBlockBuilder>(TextBlockParameters::new("NORMAL.ttf at 18px").font(FontRole::Heading.into()));
         let typography_body = retained_leaf::<TextBlockBuilder>(
             TextBlockParameters::with_wrap(
@@ -1484,7 +1490,7 @@ impl State {
             tree_labels: [static_label("Hello"), static_label("world")],
             background_labels: [static_label("Red:"), static_label("Green:"), static_label("Blue:")],
             submit_button,
-            log_text,
+            log_scroll,
             typography_heading,
             typography_body,
             typography_button,
@@ -1519,7 +1525,7 @@ impl State {
             style_color_slider_changed,
             style_value_slider_states,
             style_value_slider_changed,
-            logbuf: Rc::new(RefCell::new(String::new())),
+            logbuf: String::new(),
             submit_buf_state,
             submit_buf_submitted,
             combo_typed_state,
@@ -1537,6 +1543,7 @@ impl State {
             last_frame: Instant::now(),
             submit_button_submitted,
             log_text_state,
+            log_scroll_state,
             test_button_submitted,
             tree_button_submitted,
             popup_button_submitted,
@@ -1787,13 +1794,14 @@ impl State {
     }
 
     fn write_log(&mut self, text: &str) {
-        let mut logbuf = self.logbuf.borrow_mut();
-        if !logbuf.is_empty() {
-            logbuf.push('\n');
+        if !self.logbuf.is_empty() {
+            self.logbuf.push('\n');
         }
-        for c in text.chars() {
-            logbuf.push(c);
-        }
+        self.logbuf.push_str(text);
+        self.log_text_state.set_text(self.logbuf.clone()).expect("log text state unavailable");
+        self.log_scroll_state
+            .try_update(ScrollArea::scroll_to_end)
+            .expect("log scroll area unavailable");
     }
 
     /// Adds one disclosure section using the new state-owned container path.
@@ -1824,7 +1832,7 @@ impl State {
             tree_labels,
             background_labels,
             submit_button,
-            log_text,
+            log_scroll,
             typography_heading,
             typography_body,
             typography_button,
@@ -1898,10 +1906,7 @@ impl State {
             &roots.log,
             DemoNodes::build(|tree| {
                 let submit_row = [TrackSize::Flex(1.0), TrackSize::Fixed(69)];
-                tree.with_track(TrackSize::Flex(1.0))
-                    .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
-                        tree.widget(log_text);
-                    });
+                tree.with_track(TrackSize::Flex(1.0)).widget(log_scroll);
                 tree.row(&submit_row, LinearCrossSize::Content, |tree| {
                     tree.widget(submit_buf);
                     tree.widget(submit_button);
@@ -2198,13 +2203,6 @@ impl State {
         ctx.set_style(&self.style);
     }
 
-    fn log_window(&mut self, _ctx: &mut Context<SelectedBackend, Self>) {
-        let text = self.logbuf.borrow().clone();
-        self.log_text_state
-            .try_update_with(text, |log_text, text| log_text.set_text(text))
-            .expect("log text state unavailable");
-    }
-
     fn typography_window(&mut self, _ctx: &mut Context<SelectedBackend, Self>) {}
 
     fn triangle_window(&mut self, _ctx: &mut Context<SelectedBackend, Self>) {}
@@ -2254,7 +2252,6 @@ impl State {
         drop(triangle);
 
         self.style_window(ctx);
-        self.log_window(ctx);
         self.typography_window(ctx);
         self.update_fps_label();
         self.triangle_window(ctx);
