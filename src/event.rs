@@ -74,9 +74,9 @@ pub trait TypedWidget<E: WidgetEvent>: Widget {
 /// The queue exists only in `Connected`, so "disconnected" and "connected but empty" remain
 /// distinct without a boolean whose value must agree with a separate collection.
 pub(crate) enum WidgetEventPort<E: WidgetEvent> {
-    /// No listener exists; emitted events are discarded.
+    /// No subscription exists; emitted events are discarded.
     Disconnected,
-    /// Exactly one listener exists and owns the right to drain this FIFO.
+    /// Exactly one subscription exists and owns the right to drain this FIFO.
     Connected { pending: Vec<E> },
 }
 
@@ -89,7 +89,7 @@ impl<E: WidgetEvent> WidgetEventPort<E> {
         Self::Disconnected
     }
 
-    /// Appends an event when a listener is connected, otherwise discards it.
+    /// Appends an event when a subscription is connected, otherwise discards it.
     ///
     /// The widget calls this only after committing the semantic or lifecycle state described by
     /// `event`. Delivery is deferred; this method never invokes application code.
@@ -113,7 +113,7 @@ impl<E: WidgetEvent> WidgetEventPort<E> {
     /// Transitions a connected port to the disconnected state and drops queued payloads.
     ///
     /// Calling this for an already disconnected port is harmless. In normal operation it is called
-    /// by the exclusive listener's [`Drop`] implementation.
+    /// by the exclusive subscription's [`Drop`] implementation.
     fn disconnect(&mut self) {
         *self = Self::Disconnected;
     }
@@ -131,7 +131,7 @@ impl<E: WidgetEvent> WidgetEventPort<E> {
     }
 }
 
-/// The non-owning reference used by both public handles and exclusive listeners.
+/// The non-owning reference used by both public handles and subscriptions.
 type WeakWidgetEventPort<E> = Weak<RefCell<WidgetEventPort<E>>>;
 
 /// Weak, typed capability identifying one event source owned by retained UI.
@@ -165,18 +165,6 @@ impl<E: WidgetEvent> WidgetEventHandle<E> {
     /// compatibility.
     pub fn is_alive(&self) -> bool {
         self.port.strong_count() != 0
-    }
-
-    /// Consumes this handle and connects the port's exclusive queue listener.
-    ///
-    /// Consuming one cloned handle does not invalidate other clones; they continue to report port
-    /// liveness but cannot establish a second listener while this one exists.
-    pub(crate) fn listen(self) -> Result<WidgetEventListener<E>, SubscribeError> {
-        let Some(port) = self.port.upgrade() else {
-            return Err(SubscribeError::WidgetExpired);
-        };
-        port.borrow_mut().connect()?;
-        Ok(WidgetEventListener { port: Rc::downgrade(&port) })
     }
 }
 
@@ -217,7 +205,7 @@ pub enum SubscribeError {
     /// The retained producer that owns the event port has already been removed or was unavailable
     /// when its typed handle projected the event capability.
     WidgetExpired,
-    /// The event port already has its exclusive listener.
+    /// The event port already has its exclusive subscription.
     ///
     /// In normal application code this means the port is already subscribed through its owning
     /// context.
@@ -234,41 +222,6 @@ impl fmt::Display for SubscribeError {
 }
 
 impl std::error::Error for SubscribeError {}
-
-/// Exclusive weak queue reader retained by one dispatcher subscription.
-///
-/// Creation and destruction of this value are the connection lifetime of a port. It remains weak
-/// so the subscription side cannot keep a removed producer alive. There is intentionally no
-/// `Clone` implementation: duplicating a listener would violate the single-consumer queue contract.
-pub(crate) struct WidgetEventListener<E: WidgetEvent> {
-    port: WeakWidgetEventPort<E>,
-}
-
-impl<E: WidgetEvent> WidgetEventListener<E> {
-    /// Takes all events currently pending on a live port in FIFO order.
-    ///
-    /// A dead or disconnected port produces an empty queue. The listener itself remains usable as
-    /// a liveness record until its owner prunes or drops it.
-    pub(crate) fn drain(&self) -> Vec<E> {
-        self.port.upgrade().map(|port| port.borrow_mut().drain()).unwrap_or_default()
-    }
-
-    /// Returns whether the widget still strongly owns the port.
-    fn is_alive(&self) -> bool {
-        self.port.strong_count() != 0
-    }
-}
-
-impl<E: WidgetEvent> Drop for WidgetEventListener<E> {
-    /// Disconnects a still-live port and clears its queue.
-    ///
-    /// No action is necessary if widget removal already destroyed the port.
-    fn drop(&mut self) {
-        if let Some(port) = self.port.upgrade() {
-            port.borrow_mut().disconnect();
-        }
-    }
-}
 
 /// Typed invocation contract between one event payload and the dispatch target.
 ///
@@ -349,14 +302,27 @@ trait EventDispatch<Target> {
     fn dispatch(&self, target: &mut Target, context: &mut crate::EventContext<'_>) -> usize;
 }
 
-/// Concrete binding between one typed port listener and one typed target handler.
+/// Concrete binding between one typed event port and one typed target handler.
 ///
 /// `Handler` is either the method pointer supplied to `subscribe` or the explicit
 /// [`BoundEventHandler`] created by `subscribe_with`. The [`EventDispatch`] implementation relates
 /// the handler to its target type; the target value itself is borrowed only when dispatch runs.
+/// The weak port reference makes this subscription the complete connection lifetime without
+/// retaining a removed producer.
 struct Subscription<E: WidgetEvent, Handler> {
-    listener: WidgetEventListener<E>,
+    port: WeakWidgetEventPort<E>,
     handler: Handler,
+}
+
+impl<E: WidgetEvent, Handler> Subscription<E, Handler> {
+    /// Connects a live port and creates its sole subscription.
+    fn new(event: WidgetEventHandle<E>, handler: Handler) -> Result<Self, SubscribeError> {
+        let Some(port) = event.port.upgrade() else {
+            return Err(SubscribeError::WidgetExpired);
+        };
+        port.borrow_mut().connect()?;
+        Ok(Self { port: Rc::downgrade(&port), handler })
+    }
 }
 
 impl<Target, E, Handler> EventDispatch<Target> for Subscription<E, Handler>
@@ -364,9 +330,9 @@ where
     E: WidgetEvent,
     Handler: EventHandler<Target, E>,
 {
-    /// Delegates widget lifetime observation to the weak listener.
+    /// Reports whether the producer still strongly owns the subscribed port.
     fn is_alive(&self) -> bool {
-        self.listener.is_alive()
+        self.port.strong_count() != 0
     }
 
     /// Detaches one complete batch, then invokes the concrete handler in port FIFO order.
@@ -374,7 +340,7 @@ where
     /// Detaching before the first invocation is essential: handler code may cause widgets to emit
     /// without colliding with a live mutable borrow of this port.
     fn dispatch(&self, target: &mut Target, context: &mut crate::EventContext<'_>) -> usize {
-        let events = self.listener.drain();
+        let events = self.port.upgrade().map(|port| port.borrow_mut().drain()).unwrap_or_default();
         let count = events.len();
         for event in events {
             // The port borrow ended when drain returned, so a context-aware handler may safely
@@ -382,6 +348,17 @@ where
             self.handler.handle(target, context, &event);
         }
         count
+    }
+}
+
+impl<E: WidgetEvent, Handler> Drop for Subscription<E, Handler> {
+    /// Disconnects a still-live port and clears its queue.
+    ///
+    /// No action is necessary if producer removal already destroyed the port.
+    fn drop(&mut self) {
+        if let Some(port) = self.port.upgrade() {
+            port.borrow_mut().disconnect();
+        }
     }
 }
 
@@ -452,7 +429,7 @@ impl<Target: 'static> EventDispatcher<Target> {
     /// The fallible connection is completed before `Vec::push`; a failed subscription therefore
     /// leaves the dispatcher unchanged.
     fn add<E: WidgetEvent, Handler: EventHandler<Target, E> + 'static>(&mut self, event: WidgetEventHandle<E>, handler: Handler) -> Result<(), SubscribeError> {
-        self.subscriptions.push(Box::new(Subscription { listener: event.listen()?, handler }));
+        self.subscriptions.push(Box::new(Subscription::new(event, handler)?));
         Ok(())
     }
 
@@ -598,7 +575,7 @@ mod tests {
     }
 
     #[test]
-    fn ports_discard_events_without_a_listener() {
+    fn ports_discard_events_without_a_subscription() {
         let owner = Rc::new(RefCell::new(WidgetEventPort::new()));
         owner.borrow_mut().emit(1);
 

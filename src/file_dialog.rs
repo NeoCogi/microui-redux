@@ -743,6 +743,7 @@ mod tests {
     struct Model {
         dialog: FileDialog,
         completions: Vec<FileDialogStatus>,
+        behind_submissions: usize,
     }
 
     impl Model {
@@ -757,13 +758,24 @@ mod tests {
         fn open_from_button(&mut self, context: &mut EventContext<'_>, _event: &ButtonSubmitted) {
             self.dialog.open_from_event(context, FileDialogRequest::default());
         }
+
+        fn behind_submitted(&mut self, _event: &ButtonSubmitted) {
+            self.behind_submissions += 1;
+        }
     }
 
     fn context_and_model() -> (Context<NoopRenderer, Model>, Model) {
         let mut context = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions());
         let dialog = FileDialog::new(&mut context, Model::dialog_mut);
         context.subscribe(dialog.completed(), Model::completed).unwrap();
-        (context, Model { dialog, completions: Vec::new() })
+        (
+            context,
+            Model {
+                dialog,
+                completions: Vec::new(),
+                behind_submissions: 0,
+            },
+        )
     }
 
     fn unique_temp_dir(name: &str) -> std::path::PathBuf {
@@ -977,7 +989,7 @@ mod tests {
     fn open_dialog_blocks_pointer_input_to_underlying_windows() {
         let (mut context, mut model) = context_and_model();
         let (button, button_node) = Button::create(ButtonParameters::new("behind"));
-        let submitted = button.submitted().listen().unwrap();
+        context.subscribe(button.submitted(), Model::behind_submitted).unwrap();
         let window = context.create_window("window", rect(0, 0, 100, 80), button_node);
         context
             .set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
@@ -988,7 +1000,7 @@ mod tests {
         context.mousedown(10, 10, MouseButton::LEFT);
         context.mouseup(10, 10, MouseButton::LEFT);
         context.update_ui_state(dimensions(), &mut model);
-        assert!(submitted.drain().is_empty());
+        assert_eq!(model.behind_submissions, 0);
         assert!(model.dialog.is_open());
         assert!(context.debug_root_zindex(model.dialog.root.id()).unwrap() > context.debug_root_zindex(window.id()).unwrap());
     }

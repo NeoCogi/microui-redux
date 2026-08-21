@@ -131,10 +131,15 @@ fn combo_run_toggles_open_state() {
 
 #[test]
 fn combo_submission_carries_update_anchor_while_paint_remains_observational() {
+    fn record(events: &mut Vec<ComboSubmitted>, event: &ComboSubmitted) {
+        events.push(*event);
+    }
+
     let atlas = make_test_atlas();
     let style = Style::default();
     let mut combo = ComboBuilder::create_widget(ComboParameters::new());
-    let submitted = combo.submitted().listen().unwrap();
+    let mut dispatcher = crate::event::EventDispatcher::new();
+    dispatcher.subscribe(combo.submitted(), record).unwrap();
     let update_rect = rect(30, 40, 100, 20);
     let mut update = WidgetUpdateCtx::new_with_interaction(
         update_rect,
@@ -153,7 +158,8 @@ fn combo_submission_carries_update_anchor_while_paint_remains_observational() {
 
     // The submission owns the screen-space edge that its context-aware handler will consume.
     combo.update(&mut update, None);
-    let events = submitted.drain();
+    let mut events = Vec::new();
+    assert!(dispatcher.dispatch(&mut events));
     assert_eq!(events.len(), 1);
     let anchor = events[0].anchor;
     assert_eq!((anchor.x, anchor.y, anchor.width, anchor.height), (30, 60, 100, 1));
@@ -166,7 +172,7 @@ fn combo_submission_carries_update_anchor_while_paint_remains_observational() {
     let mut paint = WidgetPaintCtx::new_with_content_geometry(paint_rect, &mut display_list, paint_rect, &style, &atlas, false, false, false, false);
     combo.paint(&mut paint);
     assert_eq!(combo.is_open(), open);
-    assert!(submitted.drain().is_empty());
+    assert!(!dispatcher.dispatch(&mut events));
 }
 
 #[test]

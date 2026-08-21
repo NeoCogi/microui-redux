@@ -31,10 +31,9 @@ Context<B, State>
        └── owns Vec<Box<dyn EventDispatch<State>>>
                   └── owns Subscription<State, E, Handler>
                              ├── owns Handler
-                             └── owns WidgetEventListener<E>
-                                        └── Weak ──────────────┐
-                                                               │
-WidgetEventHandle<E> ───────────────────── Weak ───────────────┘
+                             └── owns Weak port reference ─────┐
+                                                              │
+WidgetEventHandle<E> ──────────────────── Weak ────────────────┘
 
 dispatch boundary ── lends &mut EventContext<'_> ──> opted-in Handler
 
@@ -63,7 +62,7 @@ runtime-checked, short mutable accesses. It also intentionally makes this mechan
 exactly two stable states:
 
 ```text
-                        listen / connect
+                       subscribe / connect
      ┌─────────────────────────────────────────────────┐
      │                                                 v
 ┌──────────────┐                               ┌────────────────────┐
@@ -71,7 +70,7 @@ exactly two stable states:
 │              │                               │ pending: FIFO      │
 └──────────────┘                               └────────────────────┘
      │      ^                                      │          │
-     │      │ listener drop / dispatcher drop      │ emit(E)  │ drain
+     │      │ subscription / dispatcher drop       │ emit(E)  │ drain
      │      └──────────────────────────────────────┘          │
      │                                                        │
      └── emit(E): discard                         FIFO <- E   └── FIFO -> handler
@@ -81,21 +80,22 @@ Connecting installs an empty queue. A second connection fails with
 [`SubscribeError::AlreadySubscribed`]. Emission while connected appends the owned payload to
 that queue; emission while disconnected is intentionally discarded, so subscribing never
 replays historical retained activity. Draining moves the complete queue out and leaves the port
-connected with a new empty queue. Dropping the exclusive listener disconnects the port and
+connected with a new empty queue. Dropping the exclusive subscription disconnects the port and
 clears anything still pending.
 
-### Exclusive-listener policy
+### Exclusive-subscription policy
 
-The one-listener rule is an architectural policy, not a Rust ownership restriction. A multicast
-design could retain one queue reader and invoke several handlers with the same borrowed `&E`, as
-C# events invoke a delegate list. This module instead binds each port to one application-state
-method. When one event has several consequences, that method composes those effects explicitly.
+The one-subscription rule is an architectural policy, not a Rust ownership restriction. A
+multicast design could retain one queue reader and invoke several handlers with the same borrowed
+`&E`, as C# events invoke a delegate list. This module instead binds each port to one
+application-state method. When one event has several consequences, that method composes those
+effects explicitly.
 
 This policy provides:
 
-- exactly one queue drainer, with no competing-consumer interpretation;
+- exactly one subscription drains the queue, with no competing-consumer interpretation;
 - one explicit place in application state that defines the consequences of a port's event;
-- simple connection lifetime: dropping the listener disconnects the entire port, with no
+- simple connection lifetime: dropping the subscription disconnects the entire port, with no
   per-handler unsubscribe or handler-list mutation during dispatch;
 - direct movement of owned payloads from one producer queue to one handler, without multicast
   storage, payload cloning, or shared payload wrappers; and
@@ -103,8 +103,8 @@ This policy provides:
 
 Cloning a [`WidgetEventHandle`] therefore clones only the weak capability identifying the port;
 it does not create another subscriber slot. Supporting multicast later would require grouping an
-ordered handler list behind the port's single queue reader. Merely allowing several listeners to
-connect would be incorrect because the first listener to drain the queue would consume the events
+ordered handler list inside the port's single subscription. Merely allowing several subscriptions
+to connect would be incorrect because the first one to drain the queue would consume the events
 before the others observed them.
 
 ## Subscription
@@ -121,7 +121,7 @@ WidgetEventHandle<E>
 EventDispatcher<State>::add
      │
      ├── upgrade the handle's Weak port reference
-     ├── connect the port and create its exclusive listener
+     ├── connect and retain the Weak port reference
      ├── retain the concrete method or bound-method handler
      └── erase Subscription<State, E, Handler>
                         as Box<dyn EventDispatch<State>>
@@ -199,8 +199,8 @@ Subscription<State, TextboxChanged, fn(...)> ───────────�
                              E remains concrete ─────────> EventHandler::handle
 ```
 
-Payloads are never converted to `Any`, cloned for a subscriber, or wrapped in `Rc`. A port has
-one listener, so its owned `E` values move directly from the widget's queue into one concrete
+Payloads are never converted to `Any`, cloned for a subscriber, or wrapped in `Rc`. A port has one
+subscription, so its owned `E` values move directly from the widget's queue into one concrete
 handler.
 
 ## Dispatch boundary
@@ -275,15 +275,15 @@ widget removed
      └── port dropped
             ├── queued events dropped
             ├── handles become expired
-            └── listener becomes dead -> subscription pruned on dispatch
+            └── subscription's Weak expires -> subscription pruned on dispatch
 
 context/dispatcher dropped
      └── subscriptions dropped
-            └── listeners disconnect live ports and clear their queues
+            └── live ports disconnected and their queues cleared
 ```
 
 Subscribing through an expired handle returns [`SubscribeError::WidgetExpired`]. A live port
-permits only one listener and returns [`SubscribeError::AlreadySubscribed`] for a second. There
+permits only one subscription and returns [`SubscribeError::AlreadySubscribed`] for a second. There
 is no public unsubscribe operation: a context subscription normally lasts until either the
 widget or context is dropped.
 
