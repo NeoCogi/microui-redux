@@ -32,7 +32,7 @@ use std::cell::Cell;
 
 use microui_redux::render::{FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex};
 use microui_redux::retained::*;
-use microui_redux::prelude::{Dimensioni, FileDialogRequest, FileDialogStatus, Recti};
+use microui_redux::prelude::{Dimensioni, FileDialog, FileDialogRequest, FileDialogStatus, Recti};
 use microui_redux::{
     color, rect, AtlasHandle, AtlasSource, Constraints, Context, Disclosure, DisclosureParameters, FontEntry, Grid, GridParameters, Linear, LinearParameters,
     RootMutationError, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SourceFormat, Style, TextureId,
@@ -97,47 +97,37 @@ fn context() -> Context<TestBackend> {
     context_with_state()
 }
 
-#[derive(Default)]
 struct FileDialogModel {
-    /// Live session retained until its matching event reaches application state.
-    session: Option<FileDialogSession>,
-    /// Terminal result observed only through the Context-owned typed source.
+    dialog: FileDialog,
+    /// Terminal result observed only through the component-owned typed source.
     completion: Option<FileDialogStatus>,
 }
 
 impl FileDialogModel {
-    /// Applies the completion belonging to this downstream model's live session.
-    fn file_dialog_completed(&mut self, event: &FileDialogCompleted) {
-        // Ignore another concurrent operation's event without inspecting either session status.
-        let Some(session) = self.session.as_ref() else {
-            return;
-        };
-        if !event.is_for(session) {
-            return;
-        }
+    fn dialog_mut(state: &mut Self) -> &mut FileDialog {
+        &mut state.dialog
+    }
 
-        // Retain the terminal payload and release the completed session in the callback itself.
+    fn file_dialog_completed(&mut self, event: &FileDialogCompleted) {
         self.completion = Some(event.status().clone());
-        self.session = None;
     }
 }
 
 #[test]
 fn downstream_file_dialog_completion_is_subscriber_driven_without_widget_access() {
     let mut context = context_with_state::<FileDialogModel>();
-    let completed = context.file_dialog_completed();
+    let mut dialog = FileDialog::new(&mut context, FileDialogModel::dialog_mut);
+    let completed = dialog.completed();
     context.subscribe(completed, FileDialogModel::file_dialog_completed).unwrap();
-    let mut model = FileDialogModel {
-        session: Some(context.open_file_dialog(FileDialogRequest::default())),
-        ..FileDialogModel::default()
-    };
+    dialog.open(&mut context, FileDialogRequest::default());
+    let mut model = FileDialogModel { dialog, completion: None };
 
     // Explicit cancellation queues one event; the retained update delivers it without frame polling.
-    assert!(context.cancel_file_dialog(model.session.as_ref().unwrap()));
+    assert!(model.dialog.cancel(&mut context));
     assert!(model.completion.is_none());
     context.update_ui_state(Dimensioni::new(320, 240), &mut model);
     assert_eq!(model.completion, Some(FileDialogStatus::Cancelled));
-    assert!(model.session.is_none());
+    assert!(!model.dialog.is_open());
 }
 
 #[test]

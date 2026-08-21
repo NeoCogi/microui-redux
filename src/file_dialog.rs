@@ -27,33 +27,30 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 //
-//! Context-owned retained file picker with typed completion delivery.
+//! Application-owned retained file picker with typed completion delivery.
 //!
-//! Opening a dialog constructs its retained shell once. Context advances navigation, selection,
-//! and completion after each queued input event. Applications subscribe once through
-//! [`crate::Context::file_dialog_completed`], retain a [`FileDialogSession`] while the operation is
-//! pending, and receive a [`FileDialogCompleted`] event in the update transaction that accepts or
-//! cancels it. [`FileDialogSession::status`] remains available for synchronous inspection and
-//! returns [`None`] while pending, but application frame code does not need to poll it.
+//! [`FileDialog`] is a library component, not a window-manager service. An application constructs
+//! and stores one alongside its own state. The component registers an ordinary hidden dialog root
+//! and binds its controls to the application's normal [`crate::Context`] dispatcher. Opening resets
+//! and shows that root; acceptance or cancellation hides it and emits [`FileDialogCompleted`] from
+//! the component-owned source.
 //!
 //! Paths cross the public API as UTF-8 [`String`] values. On platforms that permit non-UTF-8 paths,
 //! directory entries are converted lossily. Accepting a typed name is lexical: the dialog does not
 //! require the resulting path to exist or to identify a regular file.
 
-use std::{
-    cell::RefCell,
-    path::Path,
-    rc::{Rc, Weak},
-};
+use std::{cell::RefCell, path::Path, rc::Rc};
 
 use crate::{
     Button, ButtonParameters, ButtonSubmitted, IconId, Linear, LinearItem, LinearParameters, ListItem, ListItemParameters, ListItemSubmitted, Node, Recti,
-    RootHandle, RootSubmitted, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Textbox, TextboxParameters, TextboxSubmitted, ThemeIcons, TypedWidgetHandle,
-    WidgetEventHandle, WidgetOption, WindowOption,
+    Context, EventContext, RootHandle, RootSubmitted, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Textbox, TextboxParameters, TextboxSubmitted,
+    ThemeIcons, TypedWidgetHandle, WidgetEventHandle, WidgetOption, WindowOption,
 };
-use crate::event::{WidgetEventListener, WidgetEventPort};
+use crate::event::WidgetEventPort;
 use crate::ui_node::RuntimeNodeId;
-use crate::window_manager::WindowManager;
+
+const DEFAULT_FILE_DIALOG_TITLE: &str = "Open File";
+const DEFAULT_FILE_DIALOG_RECT: Recti = Recti { x: 50, y: 50, width: 720, height: 520 };
 
 /// One-shot configuration used to open a file dialog.
 ///
@@ -120,9 +117,9 @@ impl Default for FileDialogRequest {
             .to_string_lossy()
             .into_owned();
         Self {
-            title: "Open File".to_owned(),
+            title: DEFAULT_FILE_DIALOG_TITLE.to_owned(),
             initial_directory,
-            rect: Recti::new(50, 50, 720, 520),
+            rect: DEFAULT_FILE_DIALOG_RECT,
         }
     }
 }
@@ -141,10 +138,10 @@ pub struct FileDialogResult {
     pub file_path: String,
 }
 
-/// Terminal outcome of a file-dialog session.
+/// Terminal outcome of one file-dialog activation.
 ///
-/// A pending session has no status yet: [`FileDialogSession::status`] returns [`None`]. Completion
-/// events always carry one of these outcomes, so handlers do not need an impossible pending arm.
+/// Completion events always carry one of these outcomes; pending state is represented by
+/// [`FileDialog::is_open`] rather than an impossible event variant.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FileDialogStatus {
     /// The user accepted a non-empty file selection.
@@ -153,37 +150,19 @@ pub enum FileDialogStatus {
     Cancelled,
 }
 
-/// One terminal transition emitted by the Context-owned file-dialog service.
+/// One terminal transition emitted by an application-owned [`FileDialog`].
 ///
-/// Subscribe to [`crate::Context::file_dialog_completed`] once during application setup. A Context
-/// uses one shared typed event source for all of its file-dialog sessions, so [`Self::is_for`]
-/// identifies which retained session completed. [`Self::status`] returns its terminal outcome.
+/// Each dialog owns a distinct source returned by [`FileDialog::completed`], so the source identity
+/// itself identifies the component that completed.
 #[derive(Clone, Debug)]
 pub struct FileDialogCompleted {
-    /// Opaque identity of the session whose retained controller reached a terminal state.
-    session: FileDialogSessionId,
-    /// Weak identity of the exact status allocation owned by the application session.
-    session_status: Weak<RefCell<Option<FileDialogStatus>>>,
-    /// Owned terminal snapshot produced before the dialog controller and root are removed.
+    /// Owned terminal snapshot produced before the dialog returns to hidden idle state.
     status: FileDialogStatus,
 }
 
 impl FileDialogCompleted {
-    /// Creates the completion payload emitted by the Context-owned service.
-    fn new(session: FileDialogSessionId, session_status: Weak<RefCell<Option<FileDialogStatus>>>, status: FileDialogStatus) -> Self {
-        // FileDialogStatus has no pending variant, so constructing an event establishes the terminal
-        // outcome invariant without a runtime assertion or a fallible internal constructor.
-        Self { session, session_status, status }
-    }
-
-    /// Returns whether this event completed the supplied session.
-    ///
-    /// Both the Context-local id and the session's private allocation identity are checked, so a
-    /// session created by another Context cannot match even when both counters produced the same id.
-    pub fn is_for(&self, session: &FileDialogSession) -> bool {
-        // Weak pointer comparison preserves exact identity without extending application ownership
-        // or keeping an otherwise abandoned session alive until the event queue is drained.
-        self.session == session.id && Weak::ptr_eq(&self.session_status, &Rc::downgrade(&session.status))
+    fn new(status: FileDialogStatus) -> Self {
+        Self { status }
     }
 
     /// Returns the terminal completion snapshot carried by this event.
@@ -195,83 +174,22 @@ impl FileDialogCompleted {
 
 impl crate::WidgetEvent for FileDialogCompleted {}
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-struct FileDialogSessionId(usize);
-
-/// Read-only application capability for one Context-owned file dialog.
-///
-/// The session is deliberately not cloneable. Dropping it while pending abandons the dialog;
-/// Context removes the retained root at the next service settlement boundary—inside the current
-/// update when dropped by a handler, or during the next UI update otherwise.
-#[must_use = "retain the session until completion or cancel it explicitly"]
-pub struct FileDialogSession {
-    id: FileDialogSessionId,
-    /// Shared terminal snapshot; `None` is the complete representation of a pending operation.
-    status: Rc<RefCell<Option<FileDialogStatus>>>,
-}
-
-impl FileDialogSession {
-    /// Returns a repeatable owned snapshot of the terminal status, or [`None`] while pending.
-    ///
-    /// Terminal snapshots remain available after Context has removed the dialog root. Retained
-    /// applications should normally subscribe to [`crate::Context::file_dialog_completed`] instead
-    /// of inspecting this method from every frame.
-    pub fn status(&self) -> Option<FileDialogStatus> {
-        // Clone only the optional terminal snapshot; accepted paths are cloned when callers opt into
-        // this compatibility observation API.
-        self.status.borrow().clone()
-    }
-}
-
-/// Stable typed completion source owned for the lifetime of one Context.
-///
-/// Controllers are short-lived and are removed as soon as they complete. Keeping this source in
-/// WindowManager lets the queued terminal event survive that removal until application dispatch.
-pub(crate) struct FileDialogEvents {
-    /// Strong owner of the single-subscriber completion queue.
-    completed: Rc<RefCell<WidgetEventPort<FileDialogCompleted>>>,
-}
-
-impl FileDialogEvents {
-    /// Creates the disconnected completion source for a new Context.
-    pub(crate) fn new() -> Self {
-        // The queue allocates event storage only after an application subscribes and completion is
-        // emitted, following the same lazy behavior as widget-owned event ports.
-        Self {
-            completed: Rc::new(RefCell::new(WidgetEventPort::new())),
-        }
-    }
-
-    /// Returns a weak typed handle suitable for the ordinary Context dispatcher.
-    fn completed(&self) -> WidgetEventHandle<FileDialogCompleted> {
-        // The handle does not retain WindowManager; Context remains the sole source owner.
-        WidgetEventHandle::new(&self.completed)
-    }
-
-    /// Queues one terminal event for delivery at the next safe application-dispatch boundary.
-    fn emit(&self, event: FileDialogCompleted) {
-        // Emission only appends to the connected queue and never invokes application code while a
-        // file-dialog controller or WindowManager collection is borrowed.
-        self.completed.borrow_mut().emit(event);
-    }
-}
-
 struct DialogRows {
     nodes: Vec<Node>,
     ids: Vec<RuntimeNodeId>,
 }
 
-enum ControllerDisposition {
-    /// The retained controller remains active after processing its queued semantic actions.
-    Pending,
-    /// The controller should be removed, optionally after publishing an observed terminal state.
-    Remove(Option<FileDialogStatus>),
-}
+type FileDialogAccessor<State> = for<'a> fn(&'a mut State) -> &'a mut FileDialog;
 
-pub(crate) struct FileDialogController {
-    id: FileDialogSessionId,
-    /// Non-owning access to the session's `None`-while-pending terminal snapshot.
-    status: Weak<RefCell<Option<FileDialogStatus>>>,
+/// Reusable retained file-picker component owned by application state.
+///
+/// Construct it once with [`FileDialog::new`], store the returned value at the location selected by
+/// the supplied accessor, and subscribe to [`FileDialog::completed`] with the application's normal
+/// `Context` dispatcher. The window manager sees only the ordinary hidden dialog root created by
+/// this component.
+pub struct FileDialog {
+    active: bool,
+    completed: Rc<RefCell<WidgetEventPort<FileDialogCompleted>>>,
     root: RootHandle,
     current_working_directory: String,
     folders: Vec<String>,
@@ -285,19 +203,10 @@ pub(crate) struct FileDialogController {
     file_scroll: TypedWidgetHandle<ScrollArea>,
     folder_item_port: Rc<RefCell<WidgetEventPort<ListItemSubmitted>>>,
     file_item_port: Rc<RefCell<WidgetEventPort<ListItemSubmitted>>>,
-    folder_item_events: WidgetEventListener<ListItemSubmitted>,
-    file_item_events: WidgetEventListener<ListItemSubmitted>,
     folder_item_ids: Vec<RuntimeNodeId>,
     file_item_ids: Vec<RuntimeNodeId>,
     path_box: TypedWidgetHandle<Textbox>,
-    path_box_submitted: WidgetEventListener<TextboxSubmitted>,
     file_name_box: TypedWidgetHandle<Textbox>,
-    up_button: WidgetEventListener<ButtonSubmitted>,
-    home_button: WidgetEventListener<ButtonSubmitted>,
-    go_button: WidgetEventListener<ButtonSubmitted>,
-    ok_button: WidgetEventListener<ButtonSubmitted>,
-    cancel_button: WidgetEventListener<ButtonSubmitted>,
-    root_submitted: WidgetEventListener<RootSubmitted>,
     #[cfg_attr(not(test), allow(dead_code))]
     up_button_id: RuntimeNodeId,
     #[cfg_attr(not(test), allow(dead_code))]
@@ -306,41 +215,32 @@ pub(crate) struct FileDialogController {
     cancel_button_id: RuntimeNodeId,
 }
 
-impl Drop for FileDialogController {
-    fn drop(&mut self) {
-        // A surviving session must not remain pending after its Context-owned controller disappears.
-        // Abandoned sessions have already dropped this allocation, so their weak pointer will fail.
-        let Some(status) = self.status.upgrade() else {
-            return;
-        };
-        let mut status = status.borrow_mut();
-        if status.is_none() {
-            *status = Some(FileDialogStatus::Cancelled);
-        }
-    }
-}
-
-impl FileDialogController {
-    fn new(ctx: &mut WindowManager, id: FileDialogSessionId, status: Weak<RefCell<Option<FileDialogStatus>>>, request: FileDialogRequest) -> Self {
-        let current_working_directory = request.initial_directory;
-        let (folders, files) = Self::read_directory(Path::new(&current_working_directory));
+impl FileDialog {
+    /// Builds one hidden retained file picker and binds its controls to application state.
+    ///
+    /// The accessor is stored with the component's subscriptions and is not invoked during
+    /// construction. Once the returned value is placed in application state, the accessor must
+    /// resolve that same `FileDialog` for the remainder of the component's lifetime.
+    pub fn new<B: crate::render::RendererBackend, State: 'static>(
+        ctx: &mut Context<B, State>,
+        accessor: for<'a> fn(&'a mut State) -> &'a mut FileDialog,
+    ) -> Self {
+        // Start with an empty inactive model. The first activation supplies directory data, title, and
+        // geometry immediately before this already-retained modal root becomes visible.
+        let current_working_directory = String::new();
+        let folders = Vec::new();
+        let files = Vec::new();
         let icons = ctx.style().icons;
         let folder_item_port = Rc::new(RefCell::new(WidgetEventPort::new()));
         let file_item_port = Rc::new(RefCell::new(WidgetEventPort::new()));
-        let folder_item_events = WidgetEventHandle::new(&folder_item_port).listen().unwrap();
-        let file_item_events = WidgetEventHandle::new(&file_item_port).listen().unwrap();
         let folder_rows = Self::make_folder_rows(&current_working_directory, &folders, icons.closed_folder, &folder_item_port);
         let file_rows = Self::make_file_rows(&files, icons.file, &file_item_port);
 
         let (up_handle, up_node) = Button::create(ButtonParameters::new("Up"));
-        let up_button = up_handle.submitted().listen().unwrap();
         let up_button_id = up_node.id();
         let (home_handle, home_node) = Button::create(ButtonParameters::new("Home"));
-        let home_button = home_handle.submitted().listen().unwrap();
         let (path_box, path_node) = Textbox::create(TextboxParameters::new(current_working_directory.clone()));
-        let path_box_submitted = path_box.submitted().listen().unwrap();
         let (go_handle, go_node) = Button::create(ButtonParameters::new("Go"));
-        let go_button = go_handle.submitted().listen().unwrap();
 
         let folder_item_ids = folder_rows.ids;
         let file_item_ids = file_rows.ids;
@@ -359,10 +259,8 @@ impl FileDialogController {
 
         let (file_name_box, file_name_node) = Textbox::create(TextboxParameters::new(""));
         let (cancel_handle, cancel_node) = Button::create(ButtonParameters::new("Cancel"));
-        let cancel_button = cancel_handle.submitted().listen().unwrap();
         let cancel_button_id = cancel_node.id();
         let (ok_handle, ok_node) = Button::create(ButtonParameters::new("Open"));
-        let ok_button = ok_handle.submitted().listen().unwrap();
         let ok_button_id = ok_node.id();
 
         let (_, toolbar) = Linear::create(LinearParameters::horizontal([
@@ -389,16 +287,34 @@ impl FileDialogController {
             LinearItem::content(actions),
         ]));
 
-        let root = ctx.create_dialog(&request.title, request.rect, shell);
+        let root = ctx.create_dialog(DEFAULT_FILE_DIALOG_TITLE, DEFAULT_FILE_DIALOG_RECT, shell);
         ctx.set_root_options(root.id(), WindowOption::FRAME)
             .expect("new file-dialog root must accept options");
-        ctx.set_root_visible(root.id(), true).expect("new file-dialog root must become visible");
 
-        let root_submitted = root.submitted().listen().unwrap();
+        // These sources are new and private to this component, so connection failure would indicate
+        // an internal construction error rather than an application-level subscription conflict.
+        ctx.subscribe_with(up_handle.submitted(), accessor, Self::dispatch_up::<State>)
+            .expect("new file-dialog Up event must be unsubscribed");
+        ctx.subscribe_with(home_handle.submitted(), accessor, Self::dispatch_home::<State>)
+            .expect("new file-dialog Home event must be unsubscribed");
+        ctx.subscribe_with(path_box.submitted(), accessor, Self::dispatch_path::<State>)
+            .expect("new file-dialog path event must be unsubscribed");
+        ctx.subscribe_with(go_handle.submitted(), accessor, Self::dispatch_go::<State>)
+            .expect("new file-dialog Go event must be unsubscribed");
+        ctx.subscribe_with(WidgetEventHandle::new(&folder_item_port), accessor, Self::dispatch_folder::<State>)
+            .expect("new file-dialog folder event must be unsubscribed");
+        ctx.subscribe_with(WidgetEventHandle::new(&file_item_port), accessor, Self::dispatch_file::<State>)
+            .expect("new file-dialog file event must be unsubscribed");
+        ctx.subscribe_context_with(ok_handle.submitted(), accessor, Self::dispatch_accept::<State>)
+            .expect("new file-dialog Open event must be unsubscribed");
+        ctx.subscribe_context_with(cancel_handle.submitted(), accessor, Self::dispatch_cancel::<State>)
+            .expect("new file-dialog Cancel event must be unsubscribed");
+        ctx.subscribe_context_with(root.submitted(), accessor, Self::dispatch_root_cancel::<State>)
+            .expect("new file-dialog root event must be unsubscribed");
 
         Self {
-            id,
-            status,
+            active: false,
+            completed: Rc::new(RefCell::new(WidgetEventPort::new())),
             root,
             current_working_directory,
             folders,
@@ -410,19 +326,10 @@ impl FileDialogController {
             file_scroll,
             folder_item_port,
             file_item_port,
-            folder_item_events,
-            file_item_events,
             folder_item_ids,
             file_item_ids,
             path_box,
-            path_box_submitted,
             file_name_box,
-            up_button,
-            home_button,
-            go_button,
-            ok_button,
-            cancel_button,
-            root_submitted,
             up_button_id,
             ok_button_id,
             cancel_button_id,
@@ -521,6 +428,107 @@ impl FileDialogController {
         self.file_item_ids = file_ids;
     }
 
+    /// Returns the completion source owned by this component.
+    pub fn completed(&self) -> WidgetEventHandle<FileDialogCompleted> {
+        WidgetEventHandle::new(&self.completed)
+    }
+
+    /// Returns the ordinary retained dialog root used by this component.
+    ///
+    /// Its state may be inspected like any other root. Keep lifecycle changes routed through
+    /// [`Self::open`], [`Self::open_from_event`], [`Self::cancel`], or
+    /// [`Self::cancel_from_event`] so component activity and modal visibility stay synchronized.
+    pub fn root(&self) -> &RootHandle {
+        &self.root
+    }
+
+    /// Returns whether this component currently owns the active modal dialog.
+    pub const fn is_open(&self) -> bool {
+        self.active
+    }
+
+    /// Resets and shows this file picker from ordinary application code.
+    ///
+    /// Completion is emitted through [`Self::completed`] during a later retained event dispatch.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the dialog is already open or its application-owned root was destroyed.
+    pub fn open<B: crate::render::RendererBackend, State: 'static>(&mut self, ctx: &mut Context<B, State>, request: FileDialogRequest) {
+        let icons = ctx.style().icons;
+        let (title, rect) = self.prepare_open(request, icons);
+        ctx.set_root_name(self.root.id(), title)
+            .expect("application-owned file-dialog root must remain registered");
+        ctx.set_root_rect(self.root.id(), rect)
+            .expect("application-owned file-dialog root must remain registered");
+        ctx.set_root_visible(self.root.id(), true)
+            .expect("application-owned file-dialog root must remain registered");
+    }
+
+    /// Resets and shows this file picker from a context-aware application event handler.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the dialog is already open or its application-owned root was destroyed.
+    pub fn open_from_event(&mut self, ctx: &mut EventContext<'_>, request: FileDialogRequest) {
+        let icons = ctx.style().icons;
+        let (title, rect) = self.prepare_open(request, icons);
+        ctx.set_root_name(self.root.id(), title)
+            .expect("application-owned file-dialog root must remain registered");
+        ctx.set_root_rect(self.root.id(), rect)
+            .expect("application-owned file-dialog root must remain registered");
+        ctx.set_root_visible(self.root.id(), true)
+            .expect("application-owned file-dialog root must remain registered");
+    }
+
+    /// Cancels an open picker from ordinary application code.
+    ///
+    /// Returns `false` when it is already idle. A successful cancellation queues exactly one
+    /// [`FileDialogCompleted`] event for the next application dispatch boundary.
+    pub fn cancel<B: crate::render::RendererBackend, State: 'static>(&mut self, ctx: &mut Context<B, State>) -> bool {
+        if !self.active {
+            return false;
+        }
+        ctx.set_root_visible(self.root.id(), false)
+            .expect("application-owned file-dialog root must remain registered");
+        self.emit_completion(FileDialogStatus::Cancelled);
+        true
+    }
+
+    /// Cancels an open picker from a context-aware application event handler.
+    pub fn cancel_from_event(&mut self, ctx: &mut EventContext<'_>) -> bool {
+        if !self.active {
+            return false;
+        }
+        self.finish(ctx, FileDialogStatus::Cancelled);
+        true
+    }
+
+    /// Resets activation-specific model and widget state before the root is shown.
+    fn prepare_open(&mut self, request: FileDialogRequest, icons: ThemeIcons) -> (String, Recti) {
+        assert!(!self.active, "file dialog is already open");
+        assert!(self.root.widget().is_alive(), "application-owned file-dialog root was destroyed");
+
+        let FileDialogRequest { title, initial_directory, rect } = request;
+        self.icons = icons;
+        self.current_working_directory = initial_directory;
+        self.path_box
+            .try_update_with(self.current_working_directory.clone(), |state, path| state.set_text(path))
+            .expect("file-dialog path box must remain mounted");
+        self.file_name_box
+            .try_update(Textbox::clear)
+            .expect("file-dialog filename box must remain mounted");
+        self.folder_scroll
+            .try_update(|state| state.set_offset(crate::Vec2i::default()))
+            .expect("file-dialog folder scroll area must remain mounted");
+        self.file_scroll
+            .try_update(|state| state.set_offset(crate::Vec2i::default()))
+            .expect("file-dialog file scroll area must remain mounted");
+        self.refresh_entries();
+        self.active = true;
+        (title, rect)
+    }
+
     fn navigate_to(&mut self, directory: String) -> bool {
         if directory.is_empty() || directory == self.current_working_directory {
             return false;
@@ -581,7 +589,10 @@ impl FileDialogController {
         }
     }
 
-    fn up_submitted(&mut self) {
+    /// Navigates to the current directory's parent after an Up-button submission.
+    fn up_submitted(&mut self, _event: &ButtonSubmitted) {
+        // Resolve the parent from committed controller state; filesystem refresh remains atomic with
+        // the navigation update performed by `navigate_and_refresh`.
         let parent = Path::new(&self.current_working_directory)
             .parent()
             .map(|path| path.to_string_lossy().into_owned());
@@ -590,7 +601,9 @@ impl FileDialogController {
         }
     }
 
-    fn home_submitted(&mut self) {
+    /// Navigates to the platform home directory after a Home-button submission.
+    fn home_submitted(&mut self, _event: &ButtonSubmitted) {
+        // Ignore an unavailable or invalid home directory and leave the current listing unchanged.
         if let Some(home) = Self::home_dir()
             && Path::new(&home).is_dir()
         {
@@ -598,20 +611,27 @@ impl FileDialogController {
         }
     }
 
+    /// Resolves and navigates to a directory submitted from the path textbox.
     fn path_submitted(&mut self, event: &TextboxSubmitted) {
+        // The payload is an owned semantic snapshot, so no textbox borrow is held during navigation.
         if let Some(path) = self.resolve_directory_path(&event.text) {
             self.navigate_and_refresh(path);
         }
     }
 
-    fn go_submitted(&mut self) {
+    /// Resolves the current path textbox contents after a Go-button submission.
+    fn go_submitted(&mut self, _event: &ButtonSubmitted) {
+        // Go has no text payload; read the retained path box only after widget traversal has ended.
         let input = self.path_box.try_read(|state| state.text().to_owned()).unwrap_or_default();
         if let Some(path) = self.resolve_directory_path(&input) {
             self.navigate_and_refresh(path);
         }
     }
 
-    fn folder_submitted(&mut self, event: ListItemSubmitted) {
+    /// Navigates to the folder named by one submitted dynamic row.
+    fn folder_submitted(&mut self, event: &ListItemSubmitted) {
+        // Match the display label back to the controller's authoritative directory snapshot before
+        // replacing rows; the dispatcher detached the complete event batch before this call.
         let directory = self
             .folders
             .iter()
@@ -622,105 +642,81 @@ impl FileDialogController {
         }
     }
 
-    fn file_submitted(&mut self, event: ListItemSubmitted) {
+    /// Copies a submitted file-row label into the filename textbox.
+    fn file_submitted(&mut self, event: &ListItemSubmitted) {
+        // Clone the owned label only when transferring it into the retained textbox mutation.
         self.file_name_box
-            .try_update_with(event.label, |state, name| state.set_text(name))
+            .try_update_with(event.label.clone(), |state, name| state.set_text(name))
             .expect("file-dialog filename box must remain mounted");
     }
 
-    fn complete(&mut self, completion: FileDialogStatus) {
-        // Ignore a repeated terminal action. Only the first transition can be observed or emitted.
-        if let Some(status) = self.status.upgrade()
-            && status.borrow().is_none()
-        {
-            // Store the owned snapshot in the session before process() reports controller removal.
-            *status.borrow_mut() = Some(completion);
-        }
+    fn emit_completion(&mut self, completion: FileDialogStatus) {
+        debug_assert!(self.active);
+        self.active = false;
+        self.completed.borrow_mut().emit(FileDialogCompleted::new(completion));
     }
 
-    fn accept_submitted(&mut self) {
-        // An empty filename deliberately leaves the controller pending.
+    fn finish(&mut self, ctx: &mut EventContext<'_>, completion: FileDialogStatus) {
+        ctx.set_root_visible(self.root.id(), false)
+            .expect("application-owned file-dialog root must remain registered");
+        self.emit_completion(completion);
+    }
+
+    fn accept_submitted(&mut self, ctx: &mut EventContext<'_>, _event: &ButtonSubmitted) {
+        if !self.active {
+            return;
+        }
         if let Some(completion) = self.accepted_status() {
-            self.complete(completion);
+            self.finish(ctx, completion);
         }
     }
 
-    fn cancel_submitted(&mut self) {
-        // Button cancellation and title cancellation share the same terminal status.
-        self.complete(FileDialogStatus::Cancelled);
+    fn cancel_submitted(&mut self, ctx: &mut EventContext<'_>, _event: &ButtonSubmitted) {
+        if self.active {
+            self.finish(ctx, FileDialogStatus::Cancelled);
+        }
     }
 
-    fn root_cancelled(&mut self) {
-        // RootSubmitted reports the retained title-close action after RootChrome has committed it.
-        self.complete(FileDialogStatus::Cancelled);
+    fn root_cancelled(&mut self, ctx: &mut EventContext<'_>, _event: &RootSubmitted) {
+        if self.active {
+            self.finish(ctx, FileDialogStatus::Cancelled);
+        }
     }
 
-    fn process(&mut self) -> ControllerDisposition {
-        let Some(status) = self.status.upgrade() else {
-            // Dropping the only session abandons the operation. There is no live session to match,
-            // so remove its retained UI without publishing an application completion.
-            return ControllerDisposition::Remove(None);
-        };
-        if let Some(completion) = status.borrow().clone() {
-            // Preserve a terminal state installed before this pass and publish it exactly once when
-            // WindowManager removes this controller below.
-            return ControllerDisposition::Remove(Some(completion));
-        }
-        if !self.root.widget().is_alive() {
-            // Unexpected external root removal is still an observable cancellation for a live
-            // session and follows the same typed completion path.
-            *status.borrow_mut() = Some(FileDialogStatus::Cancelled);
-            return ControllerDisposition::Remove(Some(FileDialogStatus::Cancelled));
-        }
-
-        enum Action {
-            Up,
-            Home,
-            Path(TextboxSubmitted),
-            Go,
-            Folder(ListItemSubmitted),
-            File(ListItemSubmitted),
-            Accept,
-            Cancel,
-            Root,
-        }
-
-        // Detach every pending native event before an action mutates the controller or replaces
-        // dynamic row widgets and their listeners.
-        let mut actions = Vec::new();
-        actions.extend(self.up_button.drain().into_iter().map(|_| Action::Up));
-        actions.extend(self.home_button.drain().into_iter().map(|_| Action::Home));
-        actions.extend(self.path_box_submitted.drain().into_iter().map(Action::Path));
-        actions.extend(self.go_button.drain().into_iter().map(|_| Action::Go));
-        actions.extend(self.folder_item_events.drain().into_iter().map(Action::Folder));
-        actions.extend(self.file_item_events.drain().into_iter().map(Action::File));
-        actions.extend(self.ok_button.drain().into_iter().map(|_| Action::Accept));
-        actions.extend(self.cancel_button.drain().into_iter().map(|_| Action::Cancel));
-        actions.extend(self.root_submitted.drain().into_iter().map(|_| Action::Root));
-
-        for action in actions {
-            match action {
-                Action::Up => self.up_submitted(),
-                Action::Home => self.home_submitted(),
-                Action::Path(event) => self.path_submitted(&event),
-                Action::Go => self.go_submitted(),
-                Action::Folder(directory) => self.folder_submitted(directory),
-                Action::File(event) => self.file_submitted(event),
-                Action::Accept => self.accept_submitted(),
-                Action::Cancel => self.cancel_submitted(),
-                Action::Root => self.root_cancelled(),
-            }
-        }
-        if let Some(completion) = status.borrow().clone() {
-            // Clone the terminal snapshot once for the event; accepted paths stay owned by both the
-            // compatibility session snapshot and the queued typed payload.
-            return ControllerDisposition::Remove(Some(completion));
-        }
-        ControllerDisposition::Pending
+    fn dispatch_up<State>(state: &mut State, accessor: &FileDialogAccessor<State>, event: &ButtonSubmitted) {
+        accessor(state).up_submitted(event);
     }
 
-    fn belongs_to(&self, session: &FileDialogSession) -> bool {
-        self.id == session.id && self.status.upgrade().is_some_and(|status| Rc::ptr_eq(&status, &session.status))
+    fn dispatch_home<State>(state: &mut State, accessor: &FileDialogAccessor<State>, event: &ButtonSubmitted) {
+        accessor(state).home_submitted(event);
+    }
+
+    fn dispatch_path<State>(state: &mut State, accessor: &FileDialogAccessor<State>, event: &TextboxSubmitted) {
+        accessor(state).path_submitted(event);
+    }
+
+    fn dispatch_go<State>(state: &mut State, accessor: &FileDialogAccessor<State>, event: &ButtonSubmitted) {
+        accessor(state).go_submitted(event);
+    }
+
+    fn dispatch_folder<State>(state: &mut State, accessor: &FileDialogAccessor<State>, event: &ListItemSubmitted) {
+        accessor(state).folder_submitted(event);
+    }
+
+    fn dispatch_file<State>(state: &mut State, accessor: &FileDialogAccessor<State>, event: &ListItemSubmitted) {
+        accessor(state).file_submitted(event);
+    }
+
+    fn dispatch_accept<State>(state: &mut State, accessor: &FileDialogAccessor<State>, ctx: &mut EventContext<'_>, event: &ButtonSubmitted) {
+        accessor(state).accept_submitted(ctx, event);
+    }
+
+    fn dispatch_cancel<State>(state: &mut State, accessor: &FileDialogAccessor<State>, ctx: &mut EventContext<'_>, event: &ButtonSubmitted) {
+        accessor(state).cancel_submitted(ctx, event);
+    }
+
+    fn dispatch_root_cancel<State>(state: &mut State, accessor: &FileDialogAccessor<State>, ctx: &mut EventContext<'_>, event: &RootSubmitted) {
+        accessor(state).root_cancelled(ctx, event);
     }
 }
 
@@ -729,165 +725,71 @@ fn replace_column_rows(handle: &TypedWidgetHandle<Linear>, nodes: Vec<Node>) -> 
     handle.try_update_with(nodes, |state, nodes| state.replace(nodes))?
 }
 
-impl WindowManager {
-    /// Returns the Context-lifetime completion source shared by all file-dialog sessions.
-    pub(crate) fn file_dialog_completed(&self) -> WidgetEventHandle<FileDialogCompleted> {
-        // The specialized service owns its port; the generic dispatcher receives only a weak typed
-        // handle and remains unaware of file-dialog behavior.
-        self.file_dialog_events.completed()
-    }
-
-    pub(crate) fn open_file_dialog(&mut self, request: FileDialogRequest) -> FileDialogSession {
-        // Allocate a Context-local identity before constructing the retained controller tree.
-        let id = FileDialogSessionId(self.next_file_dialog_id);
-        self.next_file_dialog_id = self.next_file_dialog_id.checked_add(1).expect("file-dialog session id counter overflowed");
-        // `None` denotes pending without adding an impossible pending variant to completion events.
-        // The application session owns this snapshot; the controller keeps only a weak reference so
-        // dropping the session abandons and removes the retained operation.
-        let status = Rc::new(RefCell::new(None));
-        let controller = FileDialogController::new(self, id, Rc::downgrade(&status), request);
-        self.file_dialogs.push(controller);
-        FileDialogSession { id, status }
-    }
-
-    pub(crate) fn cancel_file_dialog(&mut self, session: &FileDialogSession) -> bool {
-        // Match both opaque identity and status allocation so foreign Context sessions are rejected.
-        let Some(index) = self.file_dialogs.iter().position(|dialog| dialog.belongs_to(session)) else {
-            return false;
-        };
-        if session.status.borrow().is_some() {
-            return false;
-        }
-        // Commit the session snapshot before publishing the terminal event and removing its UI.
-        *session.status.borrow_mut() = Some(FileDialogStatus::Cancelled);
-        self.remove_file_dialog(index, Some(FileDialogStatus::Cancelled));
-        true
-    }
-
-    pub(crate) fn process_file_dialogs(&mut self) {
-        // Use an index loop because terminal controllers are removed in place while pending ones
-        // preserve their relative order.
-        let mut index = 0;
-        while index < self.file_dialogs.len() {
-            match self.file_dialogs[index].process() {
-                ControllerDisposition::Pending => index += 1,
-                ControllerDisposition::Remove(completion) => self.remove_file_dialog(index, completion),
-            }
-        }
-    }
-
-    /// Removes one terminal controller and publishes its optional completion exactly once.
-    fn remove_file_dialog(&mut self, index: usize, completion: Option<FileDialogStatus>) {
-        // Detach the controller first so no collection borrow is live while the service event is
-        // queued or the retained root registry is mutated.
-        let dialog = self.file_dialogs.remove(index);
-        if let Some(status) = completion {
-            // The event source belongs to WindowManager rather than this short-lived controller, so
-            // removing the controller cannot invalidate the queued payload or its subscription.
-            self.file_dialog_events.emit(FileDialogCompleted::new(dialog.id, dialog.status.clone(), status));
-        }
-        // Root destruction releases the complete retained dialog tree and restores modal routing.
-        let removed = self.destroy_root(dialog.root.id());
-        debug_assert!(removed, "pending file-dialog controller must own a registered root");
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{AllocationMeasurement, NoopRenderer, test_atlas};
-    use crate::{Button, ButtonParameters, ButtonSubmitted, Context, Dimensioni, EventContext, MouseButton, WindowOption, rect};
+    use crate::test_support::{NoopRenderer, test_atlas};
+    use crate::{Button, ButtonParameters, ButtonSubmitted, Context, Dimensioni, MouseButton, WindowOption, rect};
     use std::{
         fs,
-        time::{Instant, SystemTime, UNIX_EPOCH},
+        panic::{AssertUnwindSafe, catch_unwind},
+        time::{SystemTime, UNIX_EPOCH},
     };
+
+    fn dimensions() -> Dimensioni {
+        Dimensioni::new(900, 700)
+    }
+
+    struct Model {
+        dialog: FileDialog,
+        completions: Vec<FileDialogStatus>,
+    }
+
+    impl Model {
+        fn dialog_mut(state: &mut Self) -> &mut FileDialog {
+            &mut state.dialog
+        }
+
+        fn completed(&mut self, event: &FileDialogCompleted) {
+            self.completions.push(event.status().clone());
+        }
+
+        fn open_from_button(&mut self, context: &mut EventContext<'_>, _event: &ButtonSubmitted) {
+            self.dialog.open_from_event(context, FileDialogRequest::default());
+        }
+    }
+
+    fn context_and_model() -> (Context<NoopRenderer, Model>, Model) {
+        let mut context = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions());
+        let dialog = FileDialog::new(&mut context, Model::dialog_mut);
+        context.subscribe(dialog.completed(), Model::completed).unwrap();
+        (context, Model { dialog, completions: Vec::new() })
+    }
 
     fn unique_temp_dir(name: &str) -> std::path::PathBuf {
         let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
         std::env::temp_dir().join(format!("microui-redux-{name}-{}-{nanos}", std::process::id()))
     }
 
-    fn context() -> Context<NoopRenderer> {
-        Context::new_test(NoopRenderer { atlas: test_atlas() }, Dimensioni::new(900, 700))
-    }
-
-    fn controller<'a, State: 'static>(ctx: &'a Context<NoopRenderer, State>, session: &FileDialogSession) -> &'a FileDialogController {
-        // Locate the Context-owned controller by the session's exact identity rather than assuming
-        // only one dialog exists in tests that exercise shared completion delivery.
-        ctx.window_manager
-            .file_dialogs
-            .iter()
-            .find(|dialog| dialog.belongs_to(session))
-            .expect("pending session must have a controller")
-    }
-
-    #[derive(Default)]
-    struct CompletionModel {
-        /// Live operation retained until its matching terminal event is delivered.
-        session: Option<FileDialogSession>,
-        /// Total completion payloads delivered by the shared service source.
-        deliveries: usize,
-        /// Terminal snapshots recorded exclusively by the subscribed callback.
-        completions: Vec<FileDialogStatus>,
-    }
-
-    impl CompletionModel {
-        /// Records the event for the live session and releases the completed capability.
-        fn completed(&mut self, event: &FileDialogCompleted) {
-            // Count every service delivery before application-level session filtering. This catches
-            // accidental duplicate terminal emission even after the first event clears the session.
-            self.deliveries += 1;
-
-            // A Context shares one source across every file dialog, so ignore events for any other
-            // operation the application may be coordinating independently.
-            let Some(session) = self.session.as_ref() else {
-                return;
-            };
-            if !event.is_for(session) {
-                return;
-            }
-
-            // Copy the terminal snapshot into test state, then drop the now-finished session. No
-            // frame callback or FileDialogSession::status polling participates in this flow.
-            self.completions.push(event.status().clone());
-            self.session = None;
-        }
-    }
-
-    fn completion_context() -> (Context<NoopRenderer, CompletionModel>, CompletionModel) {
-        // Subscribe once to the Context-owned source before any individual operation is opened.
-        let dimensions = Dimensioni::new(900, 700);
-        let mut context = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions);
-        let completed = context.file_dialog_completed();
-        context.subscribe(completed, CompletionModel::completed).unwrap();
-        (context, CompletionModel::default())
-    }
-
-    fn click_node_with_state(context: &mut Context<NoopRenderer, CompletionModel>, model: &mut CompletionModel, root: crate::RootId, node: RuntimeNodeId) {
-        // Route move and press in one retained transaction; completion must reach the subscriber
-        // before update_ui_state returns.
+    fn click_node(context: &mut Context<NoopRenderer, Model>, model: &mut Model, root: crate::RootId, node: RuntimeNodeId, batched: bool) {
         let rect = context.debug_root_node_rect(root, node).expect("node rect should be laid out");
         let x = rect.x + rect.width / 2;
         let y = rect.y + rect.height / 2;
         context.mousemove(x, y);
+        if !batched {
+            context.update_ui_state(dimensions(), model);
+        }
         context.mousedown(x, y, MouseButton::LEFT);
-        context.update_ui_state(Dimensioni::new(900, 700), model);
+        context.update_ui_state(dimensions(), model);
     }
 
-    fn click_node(ctx: &mut Context<NoopRenderer>, root: crate::RootId, node: RuntimeNodeId, batched: bool) {
-        let rect = ctx.debug_root_node_rect(root, node).expect("node rect should be laid out");
-        let x = rect.x + rect.width / 2;
-        let y = rect.y + rect.height / 2;
-        ctx.mousemove(x, y);
-        if !batched {
-            ctx.update_and_render_ui();
-        }
-        ctx.mousedown(x, y, MouseButton::LEFT);
-        ctx.update_and_render_ui();
+    fn release_pointer(context: &mut Context<NoopRenderer, Model>, model: &mut Model) {
+        context.mouseup(0, 0, MouseButton::LEFT);
+        context.update_ui_state(dimensions(), model);
     }
 
     #[test]
-    fn request_builders_and_pending_snapshot_are_public_contract() {
+    fn request_builders_and_application_owned_open_are_public_contract() {
         let dir = unique_temp_dir("request");
         fs::create_dir_all(&dir).unwrap();
         let request = FileDialogRequest::new()
@@ -899,104 +801,50 @@ mod tests {
         let request_rect = request.rect();
         assert_eq!((request_rect.x, request_rect.y, request_rect.width, request_rect.height), (10, 20, 400, 300));
 
-        let mut ctx = context();
-        let session = ctx.open_file_dialog(request);
-        assert_eq!(session.status(), None);
-        assert_eq!(session.status(), None);
+        let (mut context, mut model) = context_and_model();
+        let root = model.dialog.root().id();
+        model.dialog.open(&mut context, request);
+        assert!(model.dialog.is_open());
+        assert_eq!(model.dialog.root().widget().try_read(|root| root.name().to_owned()).as_deref(), Some("Choose"));
+        let root_rect = model.dialog.root().widget().try_read(crate::RootChrome::rect).unwrap();
+        assert_eq!((root_rect.x, root_rect.y, root_rect.width, root_rect.height), (10, 20, 400, 300));
+        assert_eq!(context.debug_modal_root(), Some(root));
+        assert!(model.dialog.cancel(&mut context));
+        context.update_ui_state(dimensions(), &mut model);
+        assert_eq!(model.completions, [FileDialogStatus::Cancelled]);
         fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
-    fn context_aware_handler_opens_file_dialog_in_the_input_transaction() {
-        #[derive(Default)]
-        struct Model {
-            session: Option<FileDialogSession>,
-        }
+    fn context_aware_application_handler_opens_the_component() {
+        let (mut context, mut model) = context_and_model();
+        let (button, node) = Button::create(ButtonParameters::new("open"));
+        let button_id = node.id();
+        let window = context.create_window("window", rect(0, 0, 100, 80), node);
+        context.subscribe_context(button.submitted(), Model::open_from_button).unwrap();
+        context.update_ui_state(dimensions(), &mut model);
 
-        impl Model {
-            fn open(&mut self, context: &mut EventContext<'_>, _: &ButtonSubmitted) {
-                // Create the retained dialog directly at the safe typed-event boundary. No frame
-                // callback or application command flag participates in its lifetime.
-                self.session = Some(context.open_file_dialog(FileDialogRequest::default()));
-            }
-        }
-
-        let dimensions = Dimensioni::new(900, 700);
-        let mut context: Context<NoopRenderer, Model> = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions);
-        let (button, button_node) = Button::create(ButtonParameters::new("open dialog"));
-        let button_id = button_node.id();
-        let window = context.create_window("window", rect(0, 0, 140, 90), button_node);
-        context
-            .set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
-            .unwrap();
-        context.subscribe_context(button.submitted(), Model::open).unwrap();
-        let mut model = Model::default();
-        context.update_ui_state(dimensions, &mut model);
-        let button_rect = context.debug_root_node_rect(window.id(), button_id).unwrap();
-
-        context.mousedown(button_rect.x + 1, button_rect.y + 1, MouseButton::LEFT);
-        context.update_ui_state(dimensions, &mut model);
-
-        let session = model.session.as_ref().expect("handler must retain the returned completion session");
-        let dialog = context
-            .window_manager
-            .file_dialogs
-            .iter()
-            .find(|dialog| dialog.belongs_to(session))
-            .map(|dialog| dialog.root.id())
-            .expect("same-transaction dialog construction must retain its controller");
-        assert_eq!(session.status(), None);
-        assert_eq!(context.debug_modal_root(), Some(dialog));
+        click_node(&mut context, &mut model, window.id(), button_id, true);
+        assert!(model.dialog.is_open());
+        assert_eq!(context.debug_modal_root(), Some(model.dialog.root().id()));
     }
 
     #[test]
-    fn context_aware_handler_abandoning_new_session_removes_dialog_before_return() {
-        struct Model;
-
-        impl Model {
-            fn open_and_abandon(&mut self, context: &mut EventContext<'_>, _: &ButtonSubmitted) {
-                // The returned capability is the operation's only observer. Dropping it inside the
-                // dispatch transaction must remove the modal before another queued event can route.
-                drop(context.open_file_dialog(FileDialogRequest::default()));
-            }
-        }
-
-        let dimensions = Dimensioni::new(900, 700);
-        let mut context: Context<NoopRenderer, Model> = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions);
-        let (button, button_node) = Button::create(ButtonParameters::new("open and abandon"));
-        let button_id = button_node.id();
-        let window = context.create_window("window", rect(0, 0, 160, 90), button_node);
-        context
-            .set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    fn accepted_dialog_dispatches_completion_in_the_input_transaction() {
+        let (mut context, mut model) = context_and_model();
+        model
+            .dialog
+            .open(&mut context, FileDialogRequest::new().with_initial_directory("/retained-test"));
+        context.update_ui_state(dimensions(), &mut model);
+        model
+            .dialog
+            .file_name_box
+            .try_update_with("picked.txt", |state, name| state.set_text(name))
             .unwrap();
-        context.subscribe_context(button.submitted(), Model::open_and_abandon).unwrap();
-        let mut model = Model;
-        context.update_ui_state(dimensions, &mut model);
-        let button_rect = context.debug_root_node_rect(window.id(), button_id).unwrap();
+        let root = model.dialog.root.id();
+        let open = model.dialog.ok_button_id;
 
-        context.mousedown(button_rect.x + 1, button_rect.y + 1, MouseButton::LEFT);
-        context.update_ui_state(dimensions, &mut model);
-
-        assert!(context.window_manager.file_dialogs.is_empty());
-        assert_eq!(context.debug_modal_root(), None);
-        assert!(window.widget().is_alive());
-    }
-
-    #[test]
-    fn accepted_file_dialog_dispatches_completion_without_frame_polling() {
-        let (mut context, mut model) = completion_context();
-        let request = FileDialogRequest::new().with_initial_directory("/retained-test");
-        model.session = Some(context.open_file_dialog(request));
-        context.update_ui_state(Dimensioni::new(900, 700), &mut model);
-
-        // Enter a filename through retained state, then activate the ordinary dialog button.
-        let session = model.session.as_ref().unwrap();
-        let dialog = controller(&context, session);
-        let root = dialog.root.id();
-        let open = dialog.ok_button_id;
-        dialog.file_name_box.try_update_with("picked.txt", |state, name| state.set_text(name)).unwrap();
-        click_node_with_state(&mut context, &mut model, root, open);
-
+        click_node(&mut context, &mut model, root, open, true);
         assert_eq!(
             model.completions,
             [FileDialogStatus::Accepted(FileDialogResult {
@@ -1004,109 +852,165 @@ mod tests {
                 file_path: "/retained-test/picked.txt".to_owned(),
             })]
         );
-        assert_eq!(model.deliveries, 1);
-        assert!(model.session.is_none());
-        assert!(context.window_manager.file_dialogs.is_empty());
+        assert!(!model.dialog.is_open());
+        assert_eq!(model.dialog.root.widget().try_read(crate::RootChrome::is_visible), Some(false));
     }
 
     #[test]
-    fn cancelled_file_dialog_dispatches_completion_without_frame_polling() {
-        let (mut context, mut model) = completion_context();
-        model.session = Some(context.open_file_dialog(FileDialogRequest::default()));
-        context.update_ui_state(Dimensioni::new(900, 700), &mut model);
-
-        // Activate the retained Cancel button and observe its event in this same update transaction.
-        let session = model.session.as_ref().unwrap();
-        let dialog = controller(&context, session);
-        let root = dialog.root.id();
-        let cancel = dialog.cancel_button_id;
-        click_node_with_state(&mut context, &mut model, root, cancel);
-
-        assert_eq!(model.completions, [FileDialogStatus::Cancelled]);
-        assert_eq!(model.deliveries, 1);
-        assert!(model.session.is_none());
-        assert!(context.window_manager.file_dialogs.is_empty());
-    }
-
-    #[test]
-    fn explicit_file_dialog_cancel_dispatches_completion_on_the_next_update() {
-        let (mut context, mut model) = completion_context();
-        model.session = Some(context.open_file_dialog(FileDialogRequest::default()));
-
-        // Explicit cancellation occurs outside retained input routing but queues the identical typed
-        // terminal event for the next safe Context-owned dispatch boundary.
-        assert!(context.cancel_file_dialog(model.session.as_ref().unwrap()));
+    fn explicit_cancel_queues_one_completion_for_the_next_update() {
+        let (mut context, mut model) = context_and_model();
+        model.dialog.open(&mut context, FileDialogRequest::default());
+        assert!(model.dialog.cancel(&mut context));
+        assert!(!model.dialog.cancel(&mut context));
         assert!(model.completions.is_empty());
-        context.update_ui_state(Dimensioni::new(900, 700), &mut model);
-        // A later synchronization pass must not replay the already-delivered terminal transition.
-        context.update_ui_state(Dimensioni::new(900, 700), &mut model);
 
+        context.update_ui_state(dimensions(), &mut model);
         assert_eq!(model.completions, [FileDialogStatus::Cancelled]);
-        assert_eq!(model.deliveries, 1);
-        assert!(model.session.is_none());
-        assert!(context.window_manager.file_dialogs.is_empty());
     }
 
     #[test]
-    fn completion_does_not_match_same_numbered_session_from_another_context() {
-        let mut owner: Context<NoopRenderer> = context();
-        let mut foreign: Context<NoopRenderer> = context();
-        let owner_session = owner.open_file_dialog(FileDialogRequest::default());
-        let foreign_session = foreign.open_file_dialog(FileDialogRequest::default());
+    fn sequential_opens_reuse_controls_and_reset_request_state() {
+        let first_dir = unique_temp_dir("first");
+        let second_dir = unique_temp_dir("second");
+        fs::create_dir_all(&first_dir).unwrap();
+        fs::create_dir_all(&second_dir).unwrap();
+        let (mut context, mut model) = context_and_model();
+        let root = model.dialog.root.id();
+        let open = model.dialog.ok_button_id;
+        let path = model.dialog.path_box.clone();
+        let filename = model.dialog.file_name_box.clone();
+        let scroll = model.dialog.file_scroll.clone();
 
-        // Both fresh Contexts allocate local session id 1; private allocation identity must still
-        // prevent a completion from being mistaken for the foreign operation.
-        let event = FileDialogCompleted::new(owner_session.id, Rc::downgrade(&owner_session.status), FileDialogStatus::Cancelled);
-        assert!(event.is_for(&owner_session));
-        assert!(!event.is_for(&foreign_session));
+        model.dialog.open(
+            &mut context,
+            FileDialogRequest::new().with_title("First").with_initial_directory(first_dir.to_string_lossy()),
+        );
+        filename.try_update_with("stale.txt", |state, text| state.set_text(text)).unwrap();
+        scroll.try_update(|state| state.set_offset(crate::vec2(0, 20))).unwrap();
+        assert!(model.dialog.cancel(&mut context));
+        context.update_ui_state(dimensions(), &mut model);
+
+        model.dialog.open(
+            &mut context,
+            FileDialogRequest::new()
+                .with_title("Second")
+                .with_initial_directory(second_dir.to_string_lossy()),
+        );
+        assert_eq!(model.dialog.root.id(), root);
+        assert_eq!(model.dialog.ok_button_id, open);
+        assert_eq!(
+            path.try_read(|state| state.text().to_owned()).as_deref(),
+            Some(second_dir.to_string_lossy().as_ref())
+        );
+        assert_eq!(filename.try_read(|state| state.text().to_owned()).as_deref(), Some(""));
+        let offset = scroll.try_read(|state| state.offset()).unwrap();
+        assert_eq!((offset.x, offset.y), (0, 0));
+        assert_eq!(model.dialog.root.widget().try_read(|root| root.name().to_owned()).as_deref(), Some("Second"));
+
+        fs::remove_dir_all(first_dir).unwrap();
+        fs::remove_dir_all(second_dir).unwrap();
     }
 
     #[test]
-    fn pending_file_dialog_blocks_pointer_input_to_underlying_windows() {
-        let mut ctx = context();
+    fn overlapping_open_panics_without_closing_the_active_component() {
+        let (mut context, mut model) = context_and_model();
+        model.dialog.open(&mut context, FileDialogRequest::default());
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            model.dialog.open(&mut context, FileDialogRequest::default());
+        }));
+        assert!(result.is_err());
+        assert!(model.dialog.is_open());
+        assert_eq!(context.debug_modal_root(), Some(model.dialog.root.id()));
+    }
+
+    #[test]
+    fn two_application_owned_dialogs_are_independent() {
+        struct DualModel {
+            first: FileDialog,
+            second: FileDialog,
+            first_completions: usize,
+            second_completions: usize,
+        }
+
+        impl DualModel {
+            fn first_mut(state: &mut Self) -> &mut FileDialog {
+                &mut state.first
+            }
+
+            fn second_mut(state: &mut Self) -> &mut FileDialog {
+                &mut state.second
+            }
+
+            fn first_completed(&mut self, _event: &FileDialogCompleted) {
+                self.first_completions += 1;
+            }
+
+            fn second_completed(&mut self, _event: &FileDialogCompleted) {
+                self.second_completions += 1;
+            }
+        }
+
+        let mut context = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions());
+        let first = FileDialog::new(&mut context, DualModel::first_mut);
+        let second = FileDialog::new(&mut context, DualModel::second_mut);
+        context.subscribe(first.completed(), DualModel::first_completed).unwrap();
+        context.subscribe(second.completed(), DualModel::second_completed).unwrap();
+        let mut model = DualModel {
+            first,
+            second,
+            first_completions: 0,
+            second_completions: 0,
+        };
+
+        model.first.open(&mut context, FileDialogRequest::new().with_title("First"));
+        model.second.open(&mut context, FileDialogRequest::new().with_title("Second"));
+        assert_ne!(model.first.root.id(), model.second.root.id());
+        assert_eq!(context.debug_modal_root(), Some(model.second.root.id()));
+        assert!(model.second.cancel(&mut context));
+        context.update_ui_state(dimensions(), &mut model);
+        assert_eq!((model.first_completions, model.second_completions), (0, 1));
+        assert!(model.first.is_open());
+        assert_eq!(context.debug_modal_root(), Some(model.first.root.id()));
+    }
+
+    #[test]
+    fn open_dialog_blocks_pointer_input_to_underlying_windows() {
+        let (mut context, mut model) = context_and_model();
         let (button, button_node) = Button::create(ButtonParameters::new("behind"));
         let submitted = button.submitted().listen().unwrap();
-        let window = ctx.create_window("window", rect(0, 0, 100, 80), button_node);
-        ctx.set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        let window = context.create_window("window", rect(0, 0, 100, 80), button_node);
+        context
+            .set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
             .unwrap();
-        let session = ctx.open_file_dialog(FileDialogRequest::default());
-        let dialog = controller(&ctx, &session).root.id();
-        ctx.update_and_render_ui();
+        model.dialog.open(&mut context, FileDialogRequest::default());
+        context.update_ui_state(dimensions(), &mut model);
 
-        assert_eq!(ctx.debug_modal_root(), Some(dialog));
-        ctx.mousedown(10, 10, MouseButton::LEFT);
-        ctx.mouseup(10, 10, MouseButton::LEFT);
-        ctx.update_and_render_ui();
-
+        context.mousedown(10, 10, MouseButton::LEFT);
+        context.mouseup(10, 10, MouseButton::LEFT);
+        context.update_ui_state(dimensions(), &mut model);
         assert!(submitted.drain().is_empty());
-        assert_eq!(session.status(), None);
-        assert!(ctx.debug_root_zindex(dialog).unwrap() > ctx.debug_root_zindex(window.id()).unwrap());
+        assert!(model.dialog.is_open());
+        assert!(context.debug_root_zindex(model.dialog.root.id()).unwrap() > context.debug_root_zindex(window.id()).unwrap());
     }
 
     #[test]
     fn action_buttons_keep_standard_height_and_browser_absorbs_resize() {
-        let mut ctx = context();
-        let session = ctx.open_file_dialog(FileDialogRequest::default());
-        ctx.update_and_render_ui();
-        let (root, up, cancel, open) = {
-            let dialog = controller(&ctx, &session);
-            (dialog.root.id(), dialog.up_button_id, dialog.cancel_button_id, dialog.ok_button_id)
-        };
-        let toolbar_before = ctx.debug_root_node_rect(root, up).unwrap();
-        let cancel_before = ctx.debug_root_node_rect(root, cancel).unwrap();
-        let open_before = ctx.debug_root_node_rect(root, open).unwrap();
+        let (mut context, mut model) = context_and_model();
+        model.dialog.open(&mut context, FileDialogRequest::default());
+        context.update_ui_state(dimensions(), &mut model);
+        let root = model.dialog.root.id();
+        let toolbar_before = context.debug_root_node_rect(root, model.dialog.up_button_id).unwrap();
+        let cancel_before = context.debug_root_node_rect(root, model.dialog.cancel_button_id).unwrap();
+        let open_before = context.debug_root_node_rect(root, model.dialog.ok_button_id).unwrap();
         assert_eq!(cancel_before.height, toolbar_before.height);
         assert_eq!(open_before.height, toolbar_before.height);
 
-        let body_before = ctx.debug_root_body(root).unwrap();
-        let trailing_gap = body_before.y + body_before.height - (open_before.y + open_before.height);
-        assert!(trailing_gap >= 0 && trailing_gap < toolbar_before.height);
-        let mut resized = controller(&ctx, &session).root.widget().try_read(crate::RootChrome::rect).unwrap();
+        let mut resized = model.dialog.root.widget().try_read(crate::RootChrome::rect).unwrap();
         resized.height += 80;
-        ctx.set_root_rect(root, resized).unwrap();
-        ctx.update_and_render_ui();
-        let toolbar_after = ctx.debug_root_node_rect(root, up).unwrap();
-        let open_after = ctx.debug_root_node_rect(root, open).unwrap();
+        context.set_root_rect(root, resized).unwrap();
+        context.update_ui_state(dimensions(), &mut model);
+        let toolbar_after = context.debug_root_node_rect(root, model.dialog.up_button_id).unwrap();
+        let open_after = context.debug_root_node_rect(root, model.dialog.ok_button_id).unwrap();
         assert_eq!(
             (toolbar_after.x, toolbar_after.y, toolbar_after.width, toolbar_after.height),
             (toolbar_before.x, toolbar_before.y, toolbar_before.width, toolbar_before.height)
@@ -1120,47 +1024,34 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let file_path = dir.join("picked.txt");
         fs::write(&file_path, b"picked").unwrap();
-        let mut ctx = context();
-        let session = ctx.open_file_dialog(FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
-        ctx.update_and_render_ui();
-        let (root, file_node) = {
-            let dialog = controller(&ctx, &session);
-            (dialog.root.id(), dialog.file_item_ids[0])
-        };
-        click_node(&mut ctx, root, file_node, batched);
+        let (mut context, mut model) = context_and_model();
+        model
+            .dialog
+            .open(&mut context, FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
+        context.update_ui_state(dimensions(), &mut model);
+        let root = model.dialog.root.id();
+        let file_node = model.dialog.file_item_ids[0];
+        click_node(&mut context, &mut model, root, file_node, batched);
         assert_eq!(
-            controller(&ctx, &session).file_name_box.try_read(|state| state.text().to_owned()).as_deref(),
+            model.dialog.file_name_box.try_read(|state| state.text().to_owned()).as_deref(),
             Some("picked.txt")
         );
-        ctx.mouseup(0, 0, MouseButton::LEFT);
-        ctx.update_and_render_ui();
-        let open = controller(&ctx, &session).ok_button_id;
-        let open_rect = ctx.debug_root_node_rect(root, open).unwrap();
-        click_node(&mut ctx, root, open, batched);
-        let expected = Some(FileDialogStatus::Accepted(FileDialogResult {
-            file_name: "picked.txt".to_owned(),
-            file_path: file_path.to_string_lossy().into_owned(),
-        }));
+        release_pointer(&mut context, &mut model);
+        let open = model.dialog.ok_button_id;
+        click_node(&mut context, &mut model, root, open, batched);
         assert_eq!(
-            session.status(),
-            expected,
-            "open rect=({}, {}, {}, {}), filename={:?}",
-            open_rect.x,
-            open_rect.y,
-            open_rect.width,
-            open_rect.height,
-            ctx.window_manager
-                .file_dialogs
-                .first()
-                .and_then(|dialog| dialog.file_name_box.try_read(|state| state.text().to_owned()))
+            model.completions,
+            [FileDialogStatus::Accepted(FileDialogResult {
+                file_name: "picked.txt".to_owned(),
+                file_path: file_path.to_string_lossy().into_owned(),
+            })]
         );
-        assert_eq!(session.status(), expected);
-        assert!(ctx.window_manager.file_dialogs.is_empty());
+        assert!(!model.dialog.is_open());
         fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
-    fn selecting_file_then_open_accepts_and_removes_root() {
+    fn selecting_file_then_open_accepts_and_hides_root() {
         selection_flow(false);
     }
 
@@ -1170,42 +1061,36 @@ mod tests {
     }
 
     #[test]
-    fn empty_accept_stays_pending_and_cancel_button_terminates() {
-        let mut ctx = context();
-        let session = ctx.open_file_dialog(FileDialogRequest::default());
-        ctx.update_and_render_ui();
-        let (root, open, cancel, root_widget) = {
-            let dialog = controller(&ctx, &session);
-            (dialog.root.id(), dialog.ok_button_id, dialog.cancel_button_id, dialog.root.widget().clone())
-        };
-        click_node(&mut ctx, root, open, false);
-        assert_eq!(session.status(), None);
-        assert!(root_widget.is_alive());
+    fn empty_accept_stays_open_and_cancel_button_completes() {
+        let (mut context, mut model) = context_and_model();
+        model.dialog.open(&mut context, FileDialogRequest::default());
+        context.update_ui_state(dimensions(), &mut model);
+        let root = model.dialog.root.id();
+        let open = model.dialog.ok_button_id;
+        let cancel = model.dialog.cancel_button_id;
+        click_node(&mut context, &mut model, root, open, false);
+        assert!(model.dialog.is_open());
+        assert!(model.completions.is_empty());
 
-        ctx.mouseup(0, 0, MouseButton::LEFT);
-        ctx.update_and_render_ui();
-        click_node(&mut ctx, root, cancel, false);
-        assert_eq!(session.status(), Some(FileDialogStatus::Cancelled));
-        assert!(!root_widget.is_alive());
+        release_pointer(&mut context, &mut model);
+        click_node(&mut context, &mut model, root, cancel, false);
+        assert_eq!(model.completions, [FileDialogStatus::Cancelled]);
+        assert!(!model.dialog.is_open());
     }
 
     #[test]
-    fn title_close_cancels_and_removes_the_dialog_root() {
-        let mut ctx = context();
-        let session = ctx.open_file_dialog(FileDialogRequest::default());
-        ctx.update_and_render_ui();
-        let (root, root_widget) = {
-            let dialog = controller(&ctx, &session);
-            (dialog.root.id(), dialog.root.widget().clone())
-        };
-        let close = ctx.debug_root_chrome(root).unwrap().1.expect("dialog should have a close button");
-        let x = close.x + close.width / 2;
-        let y = close.y + close.height / 2;
-        ctx.mousemove(x, y);
-        ctx.mousedown(x, y, MouseButton::LEFT);
-        ctx.update_and_render_ui();
-        assert_eq!(session.status(), Some(FileDialogStatus::Cancelled));
-        assert!(!root_widget.is_alive());
+    fn title_close_cancels_and_hides_the_dialog_root() {
+        let (mut context, mut model) = context_and_model();
+        model.dialog.open(&mut context, FileDialogRequest::default());
+        context.update_ui_state(dimensions(), &mut model);
+        let root = model.dialog.root.id();
+        let close = context.debug_root_chrome(root).unwrap().1.expect("dialog should have a close button");
+        context.mousemove(close.x + close.width / 2, close.y + close.height / 2);
+        context.mousedown(close.x + close.width / 2, close.y + close.height / 2, MouseButton::LEFT);
+        context.update_ui_state(dimensions(), &mut model);
+        assert_eq!(model.completions, [FileDialogStatus::Cancelled]);
+        assert!(!model.dialog.is_open());
+        assert_eq!(model.dialog.root.widget().try_read(crate::RootChrome::is_visible), Some(false));
     }
 
     #[test]
@@ -1214,102 +1099,56 @@ mod tests {
         let child = dir.join("child");
         fs::create_dir_all(&child).unwrap();
         fs::write(child.join("inside.txt"), b"inside").unwrap();
-        let mut ctx = context();
-        let session = ctx.open_file_dialog(FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
-        ctx.update_and_render_ui();
-        let (root, child_node, folder_scroll, path_box) = {
-            let dialog = controller(&ctx, &session);
-            let index = dialog
-                .folders
-                .iter()
-                .position(|folder| Path::new(folder) == child)
-                .expect("child directory should be listed");
-            (
-                dialog.root.id(),
-                dialog.folder_item_ids[index],
-                dialog.folder_scroll.clone(),
-                dialog.path_box.clone(),
-            )
-        };
-        click_node(&mut ctx, root, child_node, false);
-        let dialog = controller(&ctx, &session);
-        assert_eq!(Path::new(&dialog.current_working_directory), child);
-        assert_eq!(dialog.files, ["inside.txt"]);
+        let (mut context, mut model) = context_and_model();
+        model
+            .dialog
+            .open(&mut context, FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
+        context.update_ui_state(dimensions(), &mut model);
+        let index = model
+            .dialog
+            .folders
+            .iter()
+            .position(|folder| Path::new(folder) == child)
+            .expect("child directory should be listed");
+        let root = model.dialog.root.id();
+        let child_node = model.dialog.folder_item_ids[index];
+        let folder_scroll = model.dialog.folder_scroll.clone();
+        let path_box = model.dialog.path_box.clone();
+        click_node(&mut context, &mut model, root, child_node, false);
+        assert_eq!(Path::new(&model.dialog.current_working_directory), child);
+        assert_eq!(model.dialog.files, ["inside.txt"]);
         assert!(folder_scroll.is_alive());
         assert!(path_box.is_alive());
         fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
-    fn explicit_cancel_is_context_checked_and_terminal_status_is_stable() {
-        let mut owner = context();
-        let mut foreign = context();
-        let session = owner.open_file_dialog(FileDialogRequest::default());
-        let root_widget = controller(&owner, &session).root.widget().clone();
-        assert!(!foreign.cancel_file_dialog(&session));
-        assert!(owner.cancel_file_dialog(&session));
-        assert!(!owner.cancel_file_dialog(&session));
-        assert_eq!(session.status(), Some(FileDialogStatus::Cancelled));
-        assert_eq!(session.status(), Some(FileDialogStatus::Cancelled));
-        assert!(!root_widget.is_alive());
-    }
-
-    #[test]
-    fn dropping_pending_session_removes_root_on_next_update() {
-        let mut ctx = context();
-        let session = ctx.open_file_dialog(FileDialogRequest::default());
-        let root_widget = controller(&ctx, &session).root.widget().clone();
-        drop(session);
-        assert!(root_widget.is_alive());
-        ctx.update_ui(Dimensioni::new(900, 700));
-        assert!(!root_widget.is_alive());
-        assert!(ctx.window_manager.file_dialogs.is_empty());
-    }
-
-    #[test]
-    fn dropping_context_cancels_a_still_observed_session() {
-        let session = {
-            let mut ctx = context();
-            ctx.open_file_dialog(FileDialogRequest::default())
-        };
-        assert_eq!(session.status(), Some(FileDialogStatus::Cancelled));
-    }
-
-    #[test]
-    fn refresh_replaces_only_model_data_and_preserves_then_clamps_scroll() {
+    fn refresh_preserves_handles_and_clamps_scroll() {
         let dir = unique_temp_dir("refresh");
         fs::create_dir_all(&dir).unwrap();
         for index in 0..60 {
             fs::write(dir.join(format!("file-{index:02}.txt")), b"row").unwrap();
         }
-        let mut ctx = context();
-        let session = ctx.open_file_dialog(FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
-        ctx.update_ui(Dimensioni::new(900, 700));
-        let (path, folder_scroll, file_scroll, root, shell_count) = {
-            let dialog = controller(&ctx, &session);
-            (
-                dialog.path_box.clone(),
-                dialog.folder_scroll.clone(),
-                dialog.file_scroll.clone(),
-                dialog.root.id(),
-                ctx.debug_root_node_count(dialog.root.id()).unwrap(),
-            )
-        };
+        let (mut context, mut model) = context_and_model();
+        model
+            .dialog
+            .open(&mut context, FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
+        context.update_ui_state(dimensions(), &mut model);
+        let path = model.dialog.path_box.clone();
+        let folder_scroll = model.dialog.folder_scroll.clone();
+        let file_scroll = model.dialog.file_scroll.clone();
         file_scroll.try_update(|state| state.set_offset(crate::vec2(0, 40))).unwrap();
         fs::write(dir.join("new-file.txt"), b"row").unwrap();
-        ctx.window_manager.file_dialogs[0].refresh_entries();
-        assert!(path.is_alive());
-        assert!(folder_scroll.is_alive());
-        assert!(file_scroll.is_alive());
-        ctx.update_ui(Dimensioni::new(900, 700));
+        model.dialog.refresh_entries();
+        context.update_ui_state(dimensions(), &mut model);
+        assert!(path.is_alive() && folder_scroll.is_alive() && file_scroll.is_alive());
         assert_eq!(file_scroll.try_read(|state| state.offset().y), Some(40));
-        assert_eq!(ctx.debug_root_node_count(root), Some(shell_count + 1));
 
         for entry in fs::read_dir(&dir).unwrap() {
             fs::remove_file(entry.unwrap().path()).unwrap();
         }
-        ctx.window_manager.file_dialogs[0].refresh_entries();
-        ctx.update_ui(Dimensioni::new(900, 700));
+        model.dialog.refresh_entries();
+        context.update_ui_state(dimensions(), &mut model);
         assert_eq!(file_scroll.try_read(|state| state.offset().y), Some(0));
         fs::remove_dir_all(dir).unwrap();
     }
@@ -1319,146 +1158,11 @@ mod tests {
         let (column, owner) = Linear::create(LinearParameters::vertical(std::iter::empty::<Node>()));
         let rejected = column
             .try_read(|_| {
-                let replacements = vec![FileDialogController::static_item("one"), FileDialogController::static_item("two")];
+                let replacements = vec![FileDialog::static_item("one"), FileDialog::static_item("two")];
                 replace_column_rows(&column, replacements).expect_err("active read must reject mutation")
             })
             .unwrap();
         assert_eq!(rejected.len(), 2);
         drop(owner);
-    }
-
-    #[test]
-    fn idle_processing_allocates_no_nodes_or_state_and_changes_no_topology() {
-        let mut ctx = context();
-        let session = ctx.open_file_dialog(FileDialogRequest::default());
-        ctx.update_ui(Dimensioni::new(900, 700));
-        let root = controller(&ctx, &session).root.id();
-        let node_count = ctx.debug_root_node_count(root).unwrap();
-        let measurement = AllocationMeasurement::begin();
-        ctx.window_manager.process_file_dialogs();
-        let allocations = measurement.finish();
-        assert_eq!(allocations.events, 0);
-        assert_eq!(ctx.debug_root_node_count(root), Some(node_count));
-        assert_eq!(session.status(), None);
-    }
-
-    #[test]
-    #[ignore = "manual serial release-mode P5.1 retained file-dialog baseline"]
-    fn ui_node_p5_baseline_file_dialog() {
-        let dir = unique_temp_dir("p5-baseline");
-        fs::create_dir_all(&dir).unwrap();
-        for index in 0..300 {
-            fs::write(dir.join(format!("file-{index}.txt")), b"baseline").unwrap();
-        }
-        for index in 0..4 {
-            fs::create_dir(dir.join(format!("folder-{index}"))).unwrap();
-        }
-
-        let mut ctx = context();
-        let session = ctx.open_file_dialog(FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
-        ctx.update_and_render_ui();
-        ctx.update_and_render_ui();
-
-        let (root, node_count, persistent_scroll, persistent_path) = {
-            let dialog = controller(&ctx, &session);
-            (
-                dialog.root.id(),
-                ctx.debug_root_node_count(dialog.root.id()).unwrap(),
-                dialog.file_scroll.clone(),
-                dialog.path_box.clone(),
-            )
-        };
-
-        // The controller itself must perform no hidden state allocation or topology work while
-        // pending and idle. The full UI row below separately records layout and paint allocations.
-        let controller_measurement = AllocationMeasurement::begin();
-        ctx.window_manager.process_file_dialogs();
-        let controller_allocations = controller_measurement.finish();
-        assert_eq!(controller_allocations.events, 0);
-        assert_eq!(ctx.debug_root_node_count(root), Some(node_count));
-
-        let idle_measurement = AllocationMeasurement::begin();
-        let idle_started = Instant::now();
-        ctx.update_and_render_ui();
-        let idle_elapsed = idle_started.elapsed();
-        let idle_allocations = idle_measurement.finish();
-        let idle_metrics = ctx.debug_root_runtime_metrics(root).unwrap();
-        assert_eq!(idle_metrics.tree_layouts, 1);
-        assert_eq!(idle_metrics.updates, 0);
-        assert!(idle_metrics.paints <= node_count as u64);
-        assert_eq!(ctx.debug_root_node_count(root), Some(node_count));
-
-        ctx.mousemove(100, 100);
-        let event_measurement = AllocationMeasurement::begin();
-        let event_started = Instant::now();
-        ctx.update_and_render_ui();
-        let event_elapsed = event_started.elapsed();
-        let event_allocations = event_measurement.finish();
-        let event_metrics = ctx.debug_root_runtime_metrics(root).unwrap();
-        assert_eq!(event_metrics.tree_layouts, 2);
-        assert_eq!(event_metrics.updates, event_metrics.paints);
-        assert_eq!(ctx.debug_root_node_count(root), Some(node_count));
-
-        fs::write(dir.join("new-file.txt"), b"refresh").unwrap();
-        let refresh_measurement = AllocationMeasurement::begin();
-        let refresh_started = Instant::now();
-        ctx.window_manager.file_dialogs[0].refresh_entries();
-        ctx.update_and_render_ui();
-        let refresh_elapsed = refresh_started.elapsed();
-        let refresh_allocations = refresh_measurement.finish();
-        let refresh_metrics = ctx.debug_root_runtime_metrics(root).unwrap();
-        let refresh_node_count = ctx.debug_root_node_count(root).unwrap();
-
-        assert_eq!(refresh_node_count, node_count + 1);
-        assert_eq!(refresh_metrics.tree_layouts, 1);
-        assert_eq!(refresh_metrics.updates, 0);
-        assert!(refresh_metrics.paints <= refresh_node_count as u64);
-        assert!(persistent_scroll.is_alive());
-        assert!(persistent_path.is_alive());
-        assert_eq!(controller(&ctx, &session).root.id(), root, "refresh must retain the root");
-        assert_eq!(session.status(), None);
-
-        println!("| scenario | total retained nodes | allocs | bytes | root rebuilds | tree layouts | measures | layouts | updates | paints | ns/operation |");
-        println!("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
-        println!(
-            "| file dialog idle | {} | {} | {} | 0 | {} | {} | {} | {} | {} | {} |",
-            node_count,
-            idle_allocations.events,
-            idle_allocations.bytes,
-            idle_metrics.tree_layouts,
-            idle_metrics.measures,
-            idle_metrics.layouts,
-            idle_metrics.updates,
-            idle_metrics.paints,
-            idle_elapsed.as_nanos(),
-        );
-        println!(
-            "| file dialog mouse move | {} | {} | {} | 0 | {} | {} | {} | {} | {} | {} |",
-            node_count,
-            event_allocations.events,
-            event_allocations.bytes,
-            event_metrics.tree_layouts,
-            event_metrics.measures,
-            event_metrics.layouts,
-            event_metrics.updates,
-            event_metrics.paints,
-            event_elapsed.as_nanos(),
-        );
-        println!(
-            "| file dialog refresh | {} | {} | {} | 0 | {} | {} | {} | {} | {} | {} |",
-            refresh_node_count,
-            refresh_allocations.events,
-            refresh_allocations.bytes,
-            refresh_metrics.tree_layouts,
-            refresh_metrics.measures,
-            refresh_metrics.layouts,
-            refresh_metrics.updates,
-            refresh_metrics.paints,
-            refresh_elapsed.as_nanos(),
-        );
-
-        drop(ctx);
-        drop(session);
-        fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -1,34 +1,31 @@
-# Typed events and retained services
+# Typed events and application-owned components
 
-Context-owned dispatch for typed retained UI events.
+Strongly typed dispatch for retained widgets, application state, and reusable components.
 
-This module connects native events produced by retained widgets and semantic events produced by
-Context-owned services to methods on one application state value. Its central rule is
-deliberately narrow:
+This module connects events produced by retained widgets and application-owned components to
+methods on one application state value. Its central rule remains deliberately narrow:
 
-> One [`crate::Context`] owns one [`EventDispatcher`] for one application state type, while each
-> retained producer owns and queues the payloads for its own event ports.
+> One dispatcher owns subscriptions for exactly one concrete target type, while each retained
+> producer owns and queues the payloads for its own event ports.
 
 There is no public event bus, application-wide message enum, global queue, multicast list,
-payload downcast, or independent dispatcher lifetime. The public surface consists of event payload
-types, weak [`WidgetEventHandle`] values, state-only [`crate::Context::subscribe`] methods, and
-opt-in context-aware [`crate::Context::subscribe_context`] methods. Everything that actually
-dispatches events or mutates retained roots is owned by the context.
+payload downcast, or public standalone dispatcher lifetime. The public surface consists of event
+payload types, weak [`WidgetEventHandle`] values, state-only [`crate::Context::subscribe`] methods,
+and opt-in context-aware [`crate::Context::subscribe_context`] methods. Context owns the
+application dispatcher.
 
 ## Ownership
 
-The context owns both sides of an update transaction: its retained root forest and services
-contain the event producers, and its dispatcher contains the handlers that consume them. Neither
-a handle nor a subscription keeps a removed producer alive.
+Context owns the retained root forest and the application dispatcher containing its state handlers.
+Application state may own reusable components and their semantic event sources. Neither a handle
+nor a subscription keeps a removed producer alive.
 
 ```text
 Context<B, State>
 │
 ├── owns retained root forest
-│      └── owns concrete Widget
-│             └── owns Rc<RefCell<WidgetEventPort<E>>>
-├── owns retained services
-│      └── owns Rc<RefCell<WidgetEventPort<E>>>
+│      ├── owns concrete application Widget
+│      │      └── owns Rc<RefCell<WidgetEventPort<E>>>
 │
 └── owns EventDispatcher<State>
        └── owns Vec<Box<dyn EventDispatch<State>>>
@@ -40,6 +37,12 @@ Context<B, State>
 WidgetEventHandle<E> ───────────────────── Weak ───────────────┘
 
 dispatch boundary ── lends &mut EventContext<'_> ──> opted-in Handler
+
+Application State
+└── owns FileDialog
+       ├── holds weak handles into its ordinary Context-owned dialog root
+       ├── owns shared dynamic-row event ports
+       └── owns WidgetEventPort<FileDialogCompleted>
 ```
 
 The only strong event-port owner is its retained producer. Consequently:
@@ -47,7 +50,7 @@ The only strong event-port owner is its retained producer. Consequently:
 - cloning a handle does not extend producer lifetime;
 - registering a handler does not extend producer lifetime;
 - removing a widget immediately destroys its port and queued payloads;
-- a Context-owned service source remains alive for the Context lifetime; and
+- an application-owned component source remains alive for the component lifetime; and
 - the next dispatch prunes the now-dead subscription.
 
 `Rc<RefCell<_>>` makes the port shareable inside the retained UI thread while preserving
@@ -218,7 +221,6 @@ Context input FIFO
              ├── normalize and route input
              ├── update every eligible retained root
              │       └── widgets append native payloads to their own ports
-             ├── finish framework-controller work
              ├── dispatch application handlers with &mut State
              │       └── opted-in handlers also receive &mut EventContext<'_>
              └── commit layout before routing the next raw input event
@@ -290,12 +292,31 @@ is what releases the port's `RefCell` borrow and permits a handler to emit anoth
 It also means that if a handler panics, the unprocessed remainder of that detached batch is
 dropped during unwinding; newly emitted events still in live ports remain queued.
 
-## Framework listeners
+## Application-owned component binding
 
-[`WidgetEventListener`] is also used by context-owned framework controllers such as the file
-dialog. Such a controller drains its native controls directly because it already lives inside
-the context transaction and does not dispatch into application `State`. The same one-listener,
-weak-lifetime, and queue-clearing rules apply.
+A reusable component can bind its private control sources to methods on the ordinary application
+target by storing an accessor function with each subscription. `FileDialog::new` uses this pattern:
+the application supplies `fn(&mut State) -> &mut FileDialog`, and the component registers its button,
+textbox, list-item, and root sources through `Context::subscribe_with` or
+`Context::subscribe_context_with`. Dispatch borrows the application state, follows the accessor to
+the component, and invokes its behavior at the same safe boundary as every other application
+handler.
+
+The window manager does not dispatch, construct, settle, or otherwise recognize a file dialog. It
+only owns the ordinary retained modal root created by the component:
+
+```text
+retained FileDialog controls
+        │
+        v
+EventDispatcher<ApplicationState>
+        │
+        v
+application-owned FileDialog
+        │
+        v
+FileDialogCompleted source ──> EventDispatcher<ApplicationState>
+```
 
 ## Cost model and non-goals
 
@@ -305,11 +326,14 @@ amortized O(1), moves the payload once, and performs no dynamic dispatch. Draini
 queue buffer into the dispatch batch; when that batch is dropped, its capacity is released
 rather than retained by the port.
 
-Each subscription adds one vector entry and one boxed concrete [`Subscription`]. Context-aware
-handlers add no queue, controller, or retained owner; their adapter contains only the supplied
-function pointer and optional bound value. The handler is statically dispatched inside that
-subscription; only [`EventDispatch`] is dynamically dispatched. Dispatcher dispatch first scans
-the `S` subscriptions to prune dead widgets, then
+Each subscription adds one vector entry and one boxed concrete [`Subscription`]. Constructing an
+application-owned `FileDialog` adds one ordinary hidden root and one subscription for each stable
+internal source; contexts that do not construct one pay none of those costs. Dynamic folder and file
+rows share stable ports, so refreshing or reopening does not rebuild subscriptions. Context-aware
+handlers add no queue or retained owner; their adapter contains only the supplied function pointer
+and optional bound value. The handler is statically dispatched inside that subscription; only
+[`EventDispatch`] is dynamically dispatched. The dispatcher first scans its `S` subscriptions to
+prune dead widgets, then
 visits every subscription once per cascade sweep and invokes handlers once per delivered event.
 With `D` delivered events and `R` sweeps, the work is O(`D + S * R`). Ordinary non-cascading
 delivery uses one productive sweep followed by one empty sweep.
@@ -319,12 +343,12 @@ threads. The cascade limit guards handler feedback during dispatch but is not ba
 widget that produces a very large batch before dispatch begins. These are intentional non-goals
 of a synchronous, context-local retained UI event mechanism.
 
-## Event-time root and service coordination
+## Event-time root and component coordination
 
 Handlers that only mutate application or widget state continue to use `Context::subscribe` and
 `Context::subscribe_with`. A handler that must create, show, hide, move, resize, raise, or destroy a
-Context-owned root—or open or cancel a retained file dialog—uses `subscribe_context` or
-`subscribe_context_with` and receives a short-lived `EventContext<'_>`:
+Context-owned root uses `subscribe_context` or `subscribe_context_with` and receives a short-lived
+`EventContext<'_>`:
 
 ```rust,ignore
 impl Model {
@@ -360,38 +384,44 @@ does no coordination, and application state performs no per-frame popup polling.
 handler updates the demo window's position and size diagnostics and enforces its minimum size; only
 the FPS label remains frame-produced data.
 
-The retained file-dialog service uses the same generic dispatch mechanism. Opening occurs directly
-inside a context-aware handler. `WindowManager` owns one typed completion source for the Context
-lifetime, so removing a completed dialog controller and root cannot discard the queued terminal
-event. The returned `FileDialogSession` is a must-use ownership capability: dropping a pending
-session abandons the operation, and a session dropped by an event handler is removed before layout
-or the next queued input can route through its modal root. Applications subscribe once and match
-completion to the exact live session:
+`FileDialog` remains a reusable crate component while its instance and behavior live application-side.
+The application constructs it with an accessor into its model, stores the returned value there, and
+subscribes to that instance's completion source. Opening can occur directly inside a context-aware
+application handler: it resets request-specific state and shows the existing ordinary dialog root.
+Acceptance or cancellation hides the root again while preserving the component, ports, and static
+widgets. Multiple component instances are independent and participate in the generic modal stack.
 
 ```rust,ignore
 impl Model {
-    fn file_dialog_completed(&mut self, event: &FileDialogCompleted) {
-        let Some(session) = self.dialog_session.as_ref() else {
-            return;
-        };
-        if !event.is_for(session) {
-            return;
-        }
+    fn file_dialog_mut(state: &mut Self) -> &mut FileDialog {
+        &mut state.file_dialog
+    }
 
+    fn show_file_dialog(
+        &mut self,
+        event_context: &mut EventContext<'_>,
+        _: &ButtonSubmitted,
+    ) {
+        if !self.file_dialog.is_open() {
+            self.file_dialog
+                .open_from_event(event_context, FileDialogRequest::default());
+        }
+    }
+
+    fn file_dialog_completed(&mut self, event: &FileDialogCompleted) {
         match event.status() {
             FileDialogStatus::Accepted(result) => self.open_file(&result.file_path),
             FileDialogStatus::Cancelled => self.note_cancellation(),
         }
-        self.dialog_session = None;
     }
 }
 
-let completed = ctx.file_dialog_completed();
+let file_dialog = FileDialog::new(&mut ctx, Model::file_dialog_mut);
+let completed = file_dialog.completed();
 ctx.subscribe(completed, Model::file_dialog_completed)?;
+let mut model = Model { file_dialog };
 ```
 
-Accepted, in-dialog cancelled, title-closed, and explicitly cancelled sessions each publish one
-terminal `FileDialogCompleted` event at a safe dispatch boundary. `FileDialogSession::status`
-remains a synchronous compatibility snapshot: it returns `None` while pending and
-`Some(FileDialogStatus)` after completion. Retained application flow and `demo-full` do not inspect
-it from frame processing.
+Accepted, in-dialog cancelled, title-closed, and explicitly cancelled activations each publish one
+terminal `FileDialogCompleted` event at a safe dispatch boundary. `FileDialog::is_open` reports the
+component's current activation without any frame-time polling requirement.

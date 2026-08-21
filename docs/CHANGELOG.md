@@ -30,21 +30,22 @@ removing the remaining application-level frame polling from `demo-full`.
 - [x] Added context-owned typed application events.
     - [x] Widgets expose weak `WidgetEventHandle<E>` endpoints for their native event types.
     - [x] `Context<B, State>::subscribe` and `subscribe_with` dispatch into application state after retained widget borrows end.
-    - [x] `subscribe_context` and `subscribe_context_with` opt handlers into the same typed dispatch with short-lived root and service mutation access.
-    - [x] Context-owned services publish typed lifecycle events through the same generic dispatcher without control-specific dispatcher branches.
+    - [x] `subscribe_context` and `subscribe_context_with` opt handlers into the same typed dispatch with short-lived root mutation access.
+    - [x] Application-owned components publish typed lifecycle events through the same generic dispatcher without control-specific dispatcher branches.
+    - [x] The crate-provided `FileDialog` is owned by application state, binds its internal controls through an application-state accessor, and registers only an ordinary hidden modal root with the window manager.
     - [x] Removed the public standalone event `Session`; applications without model callbacks continue to use `Context<B>` without rebuilding retained roots.
 - [x] Extracted backend-independent retained root management.
     - [x] Windows, dialogs, and popups remain context-owned until explicit destruction.
     - [x] `RootHandle` exposes typed chrome state and events without extending root lifetime.
     - [x] Modal routing, popup dismissal, focus, capture, root movement, and resizing share one retained window manager.
 - [x] Removed frame-polled transient-root and file-dialog coordination from the full demo.
-    - [x] Popup and file-dialog opening mutate Context-owned state directly from the typed event that requested them; application command flags were removed.
+    - [x] Popup and file-dialog opening mutate retained state directly from the typed event that requested them; application command flags were removed.
     - [x] `ComboSubmitted` carries same-transaction opening geometry; the demo's existing shared state reconciles `RootSubmitted::PopupDismissed` back into `Combo`, so source-root interaction or replacement by another popup closes its semantic state without geometry APIs or frame polling.
     - [x] Demo window position, size, and minimum-size reconciliation consume `RootChanged` rather than polling `RootChrome` from frame processing.
-    - [x] File-dialog acceptance and cancellation publish exactly one `FileDialogCompleted` event through a Context-lifetime source; application frame code no longer polls session status.
-    - [x] Abandoned file-dialog sessions are settled after application dispatch and before layout or the next queued input; `FileDialogSession` warns when its ownership capability is ignored.
-    - [x] `FileDialogStatus` represents terminal outcomes only; `FileDialogSession::status()` uses `None` for pending while completion handlers exhaustively match accepted or cancelled outcomes.
-    - [x] The general layer remains unaware of combos and file-dialog behavior: `EventContext` exposes existing root/service operations, while specialized payloads stay with their owners.
+    - [x] File-dialog acceptance and cancellation publish exactly one `FileDialogCompleted` event through the component-owned source; application frame code does not poll for results.
+    - [x] Sequential activations reuse the application's retained component and root, while multiple application-owned `FileDialog` instances remain independent.
+    - [x] `FileDialogStatus` represents terminal outcomes only; `FileDialog::is_open()` represents active state while completion handlers exhaustively match accepted or cancelled outcomes.
+    - [x] The general layer remains unaware of combos and file-dialog behavior: `EventContext` exposes generic root operations, while specialized state and payloads stay with their application-owned components.
 - [x] Unified rendering behind recorded painter operations and typed backend frames.
     - [x] `Painter` records backend-neutral work into the framework-owned display list.
     - [x] `RendererBackend::Frame<'a>` gives each backend one exclusive submission frame.

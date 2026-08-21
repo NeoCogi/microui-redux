@@ -110,7 +110,9 @@
 //! Event-driven applications construct `Context::<B, State>::new(backend)`, register each
 //! native widget endpoint through [`Context::subscribe`] or [`Context::subscribe_with`], and call
 //! [`Context::update_ui_state`]. The context owns the only application event dispatcher for its
-//! complete root forest. Each event port owns its pending payloads and accepts one state method.
+//! complete root forest. Application-owned library components such as [`FileDialog`] bind their
+//! controls to that same dispatcher through an accessor into application state. Each event port
+//! owns its pending payloads and accepts one state method.
 //!
 //! # Text encoding and glyph coverage
 //!
@@ -161,7 +163,7 @@
 //! measurement results.
 //! Retained application logic uses typed weak widget handles returned beside mounted nodes.
 //! The [`retained`] module and repository examples document the 0.8 alpha retained-authoring API.
-//! This release is versioned `0.8.0-alpha.3` and adds retained event-time root and service
+//! This release is versioned `0.8.0-alpha.3` and adds retained event-time root and component
 //! coordination to that redesign.
 //!
 //! # Rendering pipeline
@@ -205,7 +207,7 @@ mod window_manager;
 /// low-level renderer details or manual container drawing helpers through default imports.
 pub mod retained {
     pub use crate::event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventHandle};
-    pub use crate::file_dialog::{FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
+    pub use crate::file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};
     pub use crate::render::{CustomRenderArgs, CustomRenderHandle};
     pub use crate::ui_node::{
         AvailableSpace, ChildParticipation, Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, Disclosure, DisclosureParameters,
@@ -227,7 +229,7 @@ pub mod prelude {
         AtlasHandle, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry, FontId,
         IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON,
     };
-    pub use crate::file_dialog::{FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
+    pub use crate::file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};
     pub use crate::image::{ImageSource, load_image_bytes};
     pub use crate::input::{KeyCode, KeyMode, MouseButton};
     pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame, TextureId};
@@ -261,7 +263,7 @@ pub use atlas::{
 pub use context::{Context, ContextFrame, EventContext};
 pub use window_manager::{RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted, WindowOption};
 pub use event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventHandle};
-pub use file_dialog::{FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogSession, FileDialogStatus};
+pub use file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};
 pub use image::{ImageSource, load_image_bytes};
 pub use input::{KeyCode, KeyMode, MouseButton};
 pub use math::{expand_rect, rect, vec2};

@@ -2,7 +2,7 @@
 
 ## Key concepts
 
-- **Context**: owns the high-level `Renderer`, the only ordered input queue, retained root windows, typed application subscriptions, and retained service event sources. `Context<B>` applications call `update_ui(dimensions)`, while `Context<B, State>` applications call `update_ui_state(dimensions, state)` to dispatch typed events. Both commit layout before `frame(FrameInfo).render_ui()?` paints and submits once; neither rebuilds roots or polls transient UI commands per frame.
+- **Context**: owns the high-level `Renderer`, the only ordered input queue, retained root windows, and typed application subscriptions. `Context<B>` applications call `update_ui(dimensions)`, while `Context<B, State>` applications call `update_ui_state(dimensions, state)` to dispatch typed events. Both commit layout before `frame(FrameInfo).render_ui()?` paints and submits once; neither rebuilds roots or polls transient UI commands per frame.
 - **Container**: the generic retained branch owner. It stores one erased concrete `ContainerWidget` and one authoritative opaque `Children` collection. The concrete widget owns semantic state, configuration, event ports, and layout policy; only the generic container owns children strongly.
 - **Layout engine + flows**: parent container widgets measure and assign child rectangles through scoped child-aware APIs and `ContainerLayoutCtx`. Linear, Grid, and Disclosure expose their layout configuration and topology through `TypedWidgetHandle<W>`; ScrollArea accepts one arbitrary content node and owns only viewport state.
 - **Widget**: the common update/paint contract. A leaf additionally implements `LeafWidget` for intrinsic measurement; a branch implements `ContainerWidget` for child-aware measurement and placement. Concrete widgets combine semantic values, interaction state, native event ports, and runtime phases; `*Parameters` are only one-shot initialization.
@@ -64,11 +64,13 @@ ctx.update_ui_state(dimensions, &mut model);
 ctx.frame(info).render_ui()?;
 ```
 
-An event-driven context is constructed as `Context::<Backend, Model>::new(backend)`. It owns
-the sole event dispatcher for its complete root forest and Context-owned retained services. Each
-subscribed source queues its own typed payloads, and the context drains those queues into `Model`
-after retained widget borrows have ended. A port accepts one state method; compose additional
-effects inside that method.
+An event-driven context is constructed as `Context::<Backend, Model>::new(backend)`. It owns the
+sole application dispatcher for its complete root forest. Each application-subscribed source queues
+its own typed payloads, and the context drains those queues into `Model` after retained widget
+borrows have ended. Library components can participate without entering the window manager:
+applications own `FileDialog` values in `Model`, while the component binds its controls through an
+accessor into that same model and creates an ordinary hidden modal root. A port still accepts exactly
+one state method; compose additional effects inside that method.
 
 Retained trees are the supported public authoring path. Each non-cloneable `Node` owns one concrete
 leaf or one generic `Container`. A container owns its opaque children and one concrete branch

@@ -115,12 +115,6 @@ pub(crate) struct WindowManager {
     modal_stack: Vec<RootId>,
     /// Next root id counter.
     next_root_id: usize,
-    /// Context-owned file-dialog controllers advanced after retained input updates.
-    pub(crate) file_dialogs: Vec<crate::file_dialog::FileDialogController>,
-    /// Stable file-dialog completion source that outlives each individual controller.
-    pub(crate) file_dialog_events: crate::file_dialog::FileDialogEvents,
-    /// Next file-dialog session id counter.
-    pub(crate) next_file_dialog_id: usize,
     /// Ordered input state owned and consumed directly by this window manager.
     input: Input,
     /// Dimensions of the most recent complete update/layout commit.
@@ -136,9 +130,6 @@ impl WindowManager {
             roots: Vec::default(),
             modal_stack: Vec::new(),
             next_root_id: 1,
-            file_dialogs: Vec::new(),
-            file_dialog_events: crate::file_dialog::FileDialogEvents::new(),
-            next_file_dialog_id: 1,
             input: Input::default(),
             ui_commit: None,
         }

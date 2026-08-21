@@ -47,8 +47,8 @@ const MAX_EVENT_DISPATCHES: usize = 1_000_000;
 /// An event is an owned snapshot of the semantic or lifecycle fact its producer is reporting. For
 /// example, a textbox change contains the text as it existed when the change occurred rather than a
 /// reference into the mutable widget. This lets the port hold the payload until a safe context
-/// dispatch boundary. Context-owned retained services use the same contract for
-/// lifecycle events such as [`crate::FileDialogCompleted`]; no service-specific behavior enters the
+/// dispatch boundary. Application-owned retained components use the same contract for lifecycle
+/// events such as [`crate::FileDialogCompleted`]; no component-specific behavior enters the
 /// dispatcher.
 ///
 /// The `'static` bound is required because subscriptions of different concrete event types coexist
@@ -220,7 +220,7 @@ pub enum SubscribeError {
     /// The event port already has its exclusive listener.
     ///
     /// In normal application code this means the port is already subscribed through its owning
-    /// context. Framework controllers and Context-owned services use the same exclusivity rule.
+    /// context.
     AlreadySubscribed,
 }
 
@@ -235,7 +235,7 @@ impl fmt::Display for SubscribeError {
 
 impl std::error::Error for SubscribeError {}
 
-/// Exclusive weak queue reader retained by either a state subscription or framework controller.
+/// Exclusive weak queue reader retained by one dispatcher subscription.
 ///
 /// Creation and destruction of this value are the connection lifetime of a port. It remains weak
 /// so the subscription side cannot keep a removed producer alive. There is intentionally no
@@ -385,19 +385,21 @@ where
     }
 }
 
-/// The sole typed event dispatcher owned by one UI context.
+/// A strongly typed event dispatcher for one mutable target type.
 ///
 /// Vector position is subscription order and therefore the deterministic cross-port sweep order.
 /// Each boxed element retains concrete payload and handler types behind [`EventDispatch`]. This
-/// type is crate-private because its lifetime must not diverge from the context that owns the
-/// corresponding retained widget forest and Context-owned service sources.
+/// type is crate-private because Context owns the application-state dispatcher for the lifetime of
+/// the corresponding retained forest.
 pub(crate) struct EventDispatcher<Target> {
     subscriptions: Vec<Box<dyn EventDispatch<Target>>>,
 }
 
 impl<Target: 'static> EventDispatcher<Target> {
-    /// Creates the empty dispatcher embedded in a new context.
+    /// Creates an empty dispatcher before its retained event sources are subscribed.
     pub(crate) fn new() -> Self {
+        // Subscription storage remains unallocated until the owning Context connects its first
+        // typed event source.
         Self { subscriptions: Vec::new() }
     }
 
@@ -458,8 +460,8 @@ impl<Target: 'static> EventDispatcher<Target> {
     ///
     /// Dead widget subscriptions are removed first. The remaining subscriptions are swept in
     /// vector order until one complete sweep delivers nothing. The return value is `true` when at
-    /// least one event was delivered; the context uses that result at its initial synchronization
-    /// boundary to decide whether target-handler effects require another layout commit.
+    /// least one event was delivered; callers can use that result to decide whether target-handler
+    /// effects require lifecycle reconciliation or another layout commit.
     ///
     /// The cumulative count is checked after every drained port batch. Arithmetic overflow and a
     /// transaction exceeding [`MAX_EVENT_DISPATCHES`] both panic because either indicates a broken

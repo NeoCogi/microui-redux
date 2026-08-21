@@ -132,9 +132,14 @@ impl RootChrome {
         }
     }
 
-    /// Returns the immutable registered name.
+    /// Returns the current displayed root name.
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Replaces the displayed title without emitting an application-facing root event.
+    pub(super) fn set_name_silent(&mut self, name: String) {
+        self.name = name;
     }
 
     /// Returns the current chrome options.

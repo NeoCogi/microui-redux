@@ -223,6 +223,11 @@ impl WindowManager {
         self.register_root(WindowKind::Popup, name, Recti::default(), content, Self::default_popup_options(), false)
     }
 
+    /// Replaces a retained root title without emitting a root-change event.
+    pub fn set_root_name(&mut self, root: RootId, name: String) -> Result<(), RootMutationError> {
+        self.update_root_widget(root, |state| state.set_name_silent(name))
+    }
+
     /// Replaces a root rectangle silently while retaining any compatible captured chrome mode.
     pub fn set_root_rect(&mut self, root: RootId, rect: Recti) -> Result<(), RootMutationError> {
         self.update_root_widget(root, |state| state.set_rect_silent(rect))
@@ -449,8 +454,6 @@ impl WindowManager {
         self.ui_commit = None;
         let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
 
-        // This pre-layout pass removes abandoned sessions even when no input was queued.
-        self.process_file_dialogs();
         for entry in &mut self.roots {
             entry.tree.begin_update();
         }
@@ -458,10 +461,6 @@ impl WindowManager {
         // Subscriber invocations may already be waiting without a raw input event. If they mutate
         // retained state, commit that state before routing the first queued event.
         if after_event(self, dispatch_state) {
-            // A context-aware handler may open a dialog without retaining its session, or an
-            // ordinary handler may drop a previously pending session. Settle those ownership
-            // changes before the abandoned modal can participate in layout or consume input.
-            self.process_file_dialogs();
             self.layout(viewport, atlas);
         }
 
@@ -470,19 +469,11 @@ impl WindowManager {
             let Some(event) = event else { break };
             let input = self.input.snapshot();
             self.update_for_event(atlas, &event, input);
-            // Dialog controls are ordinary retained widgets. Consume their committed actions only
-            // after the complete cross-root update and before the matching layout commit.
-            self.process_file_dialogs();
             self.reconcile_closed_modal();
             // Application subscribers run only after the complete cross-root update has released
             // retained borrows. Their state/topology changes are therefore safe and become visible
             // to the layout immediately below, before routing the next raw input event.
-            if after_event(self, dispatch_state) {
-                // Dispatch can itself create or abandon a file-dialog session. Reconcile the
-                // service a second time so an unobserved modal never survives into the next queued
-                // input event. Skip the sweep when no application event was delivered.
-                self.process_file_dialogs();
-            }
+            after_event(self, dispatch_state);
             self.layout(viewport, atlas);
         }
         self.ui_commit = Some(dimensions);

@@ -1106,7 +1106,7 @@ struct State {
     combo_popup_root: RootHandle,
     popup_root: RootHandle,
 
-    dialog_session: Option<FileDialogSession>,
+    file_dialog: FileDialog,
     fps: f32,
     last_frame: Instant,
 
@@ -1508,6 +1508,9 @@ impl State {
             suzanne_widget: SuzanneWidgetBuilder::create_widget(SuzanneWidgetParameters { data: suzanne_data.clone() }),
             background_swatch,
         };
+        // The file picker is a library component owned by this application state. Its root and
+        // controls use the same generic Context APIs and dispatcher as the rest of the demo.
+        let file_dialog = FileDialog::new(ctx, Self::file_dialog_mut);
         let mut state = Self {
             bg: [90.0, 95.0, 100.0],
             bg_slider_states,
@@ -1529,7 +1532,7 @@ impl State {
             demo_root,
             combo_popup_root,
             popup_root,
-            dialog_session: None,
+            file_dialog,
             fps: 0.0,
             last_frame: Instant::now(),
             submit_button_submitted,
@@ -1606,9 +1609,8 @@ impl State {
         ]) {
             context.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
         }
-        // Subscribe once to the Context-owned service source. Every later dialog session reports
-        // completion through this handler, so frame processing never inspects session status.
-        let file_dialog_completed = context.file_dialog_completed();
+        // Subscribe to this application-owned component's stable completion source once.
+        let file_dialog_completed = self.file_dialog.completed();
         context.subscribe(file_dialog_completed, Self::file_dialog_completed).unwrap();
     }
 
@@ -1666,10 +1668,8 @@ impl State {
                     .expect("test popup root must exist");
             }
             4 => self.write_log("Pressed button 4"),
-            5 if self.dialog_session.is_none() => {
-                // File-dialog construction uses the same safe context capability. Its terminal
-                // result returns through the typed subscription installed once during setup.
-                self.dialog_session = Some(context.open_file_dialog(FileDialogRequest::default()));
+            5 if !self.file_dialog.is_open() => {
+                self.file_dialog.open_from_event(context, FileDialogRequest::default());
                 self.write_log("Open dialog!");
             }
             5 => {}
@@ -2226,18 +2226,11 @@ impl State {
             .expect("window fps state unavailable");
     }
 
-    fn file_dialog_completed(&mut self, event: &FileDialogCompleted) {
-        // The Context exposes one completion source for every session. Match exact ownership before
-        // applying this terminal result to the currently retained demo operation.
-        let Some(session) = self.dialog_session.as_ref() else {
-            return;
-        };
-        if !event.is_for(session) {
-            return;
-        }
+    fn file_dialog_mut(state: &mut Self) -> &mut FileDialog {
+        &mut state.file_dialog
+    }
 
-        // Completion is delivered once at the retained event boundary. Update application state
-        // immediately and release the terminal session; no frame-time reconciliation is necessary.
+    fn file_dialog_completed(&mut self, event: &FileDialogCompleted) {
         match event.status() {
             FileDialogStatus::Accepted(result) => {
                 self.write_log(format!("Selected file: {}", result.file_name).as_str());
@@ -2246,7 +2239,6 @@ impl State {
                 self.write_log("File dialog canceled");
             }
         }
-        self.dialog_session = None;
     }
 
     fn process_frame(&mut self, ctx: &mut Context<SelectedBackend, Self>) {

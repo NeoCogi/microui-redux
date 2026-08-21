@@ -34,7 +34,6 @@
 //! input, layout, modal, style, and display-list operation is delegated to [`WindowManager`].
 
 use crate::window_manager::{RootHandle, RootId, RootMutationError, WindowManager, WindowOption};
-use crate::file_dialog::{FileDialogCompleted, FileDialogRequest, FileDialogSession};
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, FrameInfo, RenderError, Renderer, RendererBackend};
 use crate::{Dimensioni, ImageSource, KeyCode, KeyMode, MouseButton, Node, Recti, Style, TextureId};
 
@@ -48,8 +47,7 @@ use crate::{Dimensioni, ImageSource, KeyCode, KeyMode, MouseButton, Node, Recti,
 ///
 /// State-only handlers registered with [`Context::subscribe`] remain the simpler default. Use
 /// [`Context::subscribe_context`] when a handler must create, show, hide, move, resize, raise, or
-/// destroy a retained root, or when it must open or cancel a file dialog in direct response to a
-/// typed retained UI event.
+/// destroy a retained root in direct response to a typed retained UI event.
 pub struct EventContext<'a> {
     /// Exclusive access to the context-owned root and input transaction domain.
     window_manager: &'a mut WindowManager,
@@ -88,6 +86,11 @@ impl<'a> EventContext<'a> {
     pub fn create_popup(&mut self, name: &str, content: Node) -> RootHandle {
         // Register the persistent tree through the ordinary popup root path.
         self.window_manager.create_popup(name, content)
+    }
+
+    /// Replaces a retained root title before the next layout commit.
+    pub fn set_root_name(&mut self, root: RootId, name: impl Into<String>) -> Result<(), RootMutationError> {
+        self.window_manager.set_root_name(root, name.into())
     }
 
     /// Replaces a retained root rectangle before the next layout commit.
@@ -130,22 +133,9 @@ impl<'a> EventContext<'a> {
         self.window_manager.destroy_root(root)
     }
 
-    /// Opens a retained file dialog and returns its must-use completion session.
-    ///
-    /// The session reports `None` while pending and a terminal [`crate::FileDialogStatus`] after
-    /// acceptance or cancellation. Dropping it while pending abandons the Context-owned operation.
-    pub fn open_file_dialog(&mut self, request: FileDialogRequest) -> FileDialogSession {
-        // FileDialogController construction remains specialized inside the file-dialog module; this
-        // façade merely exposes the existing Context-owned operation at the safe event boundary.
-        self.window_manager.open_file_dialog(request)
-    }
-
-    /// Cancels a pending file-dialog session owned by this context.
-    ///
-    /// Returns `false` when the session is terminal or belongs to another context.
-    pub fn cancel_file_dialog(&mut self, session: &FileDialogSession) -> bool {
-        // Delegate ownership verification and retained-root removal to WindowManager.
-        self.window_manager.cancel_file_dialog(session)
+    /// Returns the resolved UI style currently used by the owning context.
+    pub fn style(&self) -> &Style {
+        self.window_manager.style()
     }
 }
 
@@ -290,7 +280,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// dispatch boundary, they are drained in subscription order. Dispatch repeats until all
     /// subscribed ports are empty, including events emitted by application-state methods.
     /// Context-aware subscribers receive [`EventContext`] only at these boundaries; their root and
-    /// file-dialog mutations complete before the layout commit for the current raw input event.
+    /// root mutations complete before the layout commit for the current raw input event.
     ///
     /// Context-owned input, style, and root mutations invalidate a prior commit automatically.
     /// Mutations made through weak typed widget handles cannot notify Context; callers
@@ -339,9 +329,9 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// Subscribes a state method that also needs safe context-owned UI mutation access.
     ///
     /// The supplied [`EventContext`] exists only for one dispatch call after retained widget borrows
-    /// have ended. Root or file-dialog mutations performed through it are committed by the layout
-    /// immediately following that dispatch boundary. Use [`Context::subscribe`] when the handler
-    /// only mutates application or widget state.
+    /// have ended. Root mutations performed through it are committed by the layout immediately
+    /// following that dispatch boundary. Use [`Context::subscribe`] when the handler only mutates
+    /// application or widget state.
     pub fn subscribe_context<E: crate::WidgetEvent>(
         &mut self,
         event: crate::WidgetEventHandle<E>,
@@ -394,6 +384,11 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// popup remains visible but is kept below the dialog and receives no input.
     pub fn create_popup(&mut self, name: &str, content: Node) -> RootHandle {
         self.window_manager.create_popup(name, content)
+    }
+
+    /// Replaces a retained root title silently.
+    pub fn set_root_name(&mut self, root: RootId, name: impl Into<String>) -> Result<(), RootMutationError> {
+        self.window_manager.set_root_name(root, name.into())
     }
 
     /// Replaces a root rectangle silently while retaining any compatible captured chrome mode.
@@ -489,65 +484,6 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// atlas font and substitutes underscore metrics for missing characters.
     pub fn text(&mut self, text: &str) {
         self.window_manager.text(text);
-    }
-}
-
-// Context-owned file-dialog façade.
-
-impl<B: RendererBackend, State: 'static> Context<B, State> {
-    /// Returns the typed completion source shared by this Context's file-dialog sessions.
-    ///
-    /// Subscribe once during application setup, then use [`FileDialogCompleted::is_for`] to match
-    /// an event to a retained [`FileDialogSession`]. The source is Context-owned and remains alive
-    /// when an individual terminal dialog controller and root are removed.
-    ///
-    /// ```no_run
-    /// use microui_redux::prelude::*;
-    ///
-    /// struct Model {
-    ///     dialog: Option<FileDialogSession>,
-    /// }
-    ///
-    /// impl Model {
-    ///     fn dialog_completed(&mut self, event: &FileDialogCompleted) {
-    ///         let Some(session) = self.dialog.as_ref() else { return };
-    ///         if !event.is_for(session) {
-    ///             return;
-    ///         }
-    ///         match event.status() {
-    ///             FileDialogStatus::Accepted(result) => println!("{}", result.file_path),
-    ///             FileDialogStatus::Cancelled => println!("cancelled"),
-    ///         }
-    ///         self.dialog = None;
-    ///     }
-    /// }
-    ///
-    /// fn subscribe<B: RendererBackend>(context: &mut Context<B, Model>) {
-    ///     let completed = context.file_dialog_completed();
-    ///     context.subscribe(completed, Model::dialog_completed).unwrap();
-    /// }
-    /// ```
-    pub fn file_dialog_completed(&self) -> crate::WidgetEventHandle<FileDialogCompleted> {
-        // Project only a weak typed capability; WindowManager remains the sole event-source owner.
-        self.window_manager.file_dialog_completed()
-    }
-
-    /// Opens a retained file dialog and returns its unique session capability.
-    ///
-    /// Completion is delivered through [`Context::file_dialog_completed`] during a retained update
-    /// transaction. The must-use session keeps the operation observable and can also be cancelled
-    /// directly; its synchronous status is `None` until a terminal outcome is available.
-    pub fn open_file_dialog(&mut self, request: FileDialogRequest) -> FileDialogSession {
-        // Construct the specialized retained tree in the non-generic WindowManager service.
-        self.window_manager.open_file_dialog(request)
-    }
-
-    /// Cancels a pending session owned by this Context.
-    ///
-    /// Returns `false` when the session is terminal or belongs to another Context.
-    pub fn cancel_file_dialog(&mut self, session: &FileDialogSession) -> bool {
-        // Successful cancellation queues the same typed completion event as an in-dialog cancel.
-        self.window_manager.cancel_file_dialog(session)
     }
 }
 
