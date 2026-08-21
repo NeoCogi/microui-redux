@@ -116,7 +116,7 @@ typed retained source
      │ changed() / submitted() / completed() / ...
      v
 WidgetEventPortHandle<E>
-     │ Context::subscribe(handle, State::method)
+     │ Context::subscribe(port, State::method)
      v
 EventDispatcher<State>::add
      │

@@ -309,12 +309,8 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     ///
     /// A retained event port accepts one subscription and returns
     /// [`crate::SubscribeError::AlreadySubscribed`] for another.
-    pub fn subscribe<E: crate::WidgetEvent>(
-        &mut self,
-        event: crate::WidgetEventPortHandle<E>,
-        method: fn(&mut State, &E),
-    ) -> Result<(), crate::SubscribeError> {
-        self.event_dispatcher.subscribe(event, method)
+    pub fn subscribe<E: crate::WidgetEvent>(&mut self, port: crate::WidgetEventPortHandle<E>, method: fn(&mut State, &E)) -> Result<(), crate::SubscribeError> {
+        self.event_dispatcher.subscribe(port, method)
     }
 
     /// Subscribes the context's application state with one bound application value.
@@ -323,11 +319,11 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// [`crate::SubscribeError::AlreadySubscribed`] for another.
     pub fn subscribe_with<E: crate::WidgetEvent, BoundContext: 'static>(
         &mut self,
-        event: crate::WidgetEventPortHandle<E>,
+        port: crate::WidgetEventPortHandle<E>,
         context: BoundContext,
         method: fn(&mut State, &BoundContext, &E),
     ) -> Result<(), crate::SubscribeError> {
-        self.event_dispatcher.subscribe_with(event, context, method)
+        self.event_dispatcher.subscribe_with(port, context, method)
     }
 
     /// Subscribes a state method that also needs safe context-owned UI mutation access.
@@ -338,12 +334,12 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// application or widget state.
     pub fn subscribe_context<E: crate::WidgetEvent>(
         &mut self,
-        event: crate::WidgetEventPortHandle<E>,
+        port: crate::WidgetEventPortHandle<E>,
         method: for<'a> fn(&mut State, &mut EventContext<'a>, &E),
     ) -> Result<(), crate::SubscribeError> {
         // Store the typed function pointer in the same context-owned dispatcher as state-only
         // subscriptions; only its invocation adapter differs.
-        self.event_dispatcher.subscribe_context(event, method)
+        self.event_dispatcher.subscribe_context(port, method)
     }
 
     /// Subscribes a context-aware state method with one immutable bound application value.
@@ -352,12 +348,12 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// matching the established [`Context::subscribe_with`] argument order.
     pub fn subscribe_context_with<E: crate::WidgetEvent, BoundContext: 'static>(
         &mut self,
-        event: crate::WidgetEventPortHandle<E>,
+        port: crate::WidgetEventPortHandle<E>,
         context: BoundContext,
         method: for<'a> fn(&mut State, &BoundContext, &mut EventContext<'a>, &E),
     ) -> Result<(), crate::SubscribeError> {
         // The dispatcher owns the bound value and preserves ordinary subscription ordering.
-        self.event_dispatcher.subscribe_context_with(event, context, method)
+        self.event_dispatcher.subscribe_context_with(port, context, method)
     }
 }
 

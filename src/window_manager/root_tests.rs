@@ -82,9 +82,9 @@ fn increment_event_counter<E>(count: &mut usize, _: &E) {
     *count += 1;
 }
 
-fn event_counter<E: crate::WidgetEvent>(event: crate::WidgetEventPortHandle<E>) -> crate::event::EventDispatcher<usize> {
+fn event_counter<E: crate::WidgetEvent>(port: crate::WidgetEventPortHandle<E>) -> crate::event::EventDispatcher<usize> {
     let mut dispatcher = crate::event::EventDispatcher::new();
-    dispatcher.subscribe(event, increment_event_counter::<E>).unwrap();
+    dispatcher.subscribe(port, increment_event_counter::<E>).unwrap();
     dispatcher
 }
 
