@@ -210,7 +210,7 @@ impl WindowManager {
 }
 
 #[cfg(test)]
-mod p5_baseline;
+mod retained_runtime_baseline;
 
 #[cfg(test)]
 mod root_tests;

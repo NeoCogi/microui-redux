@@ -72,7 +72,7 @@ pub(crate) struct UiRuntime {
     root_transform: Transform,
     /// Independent state machine for raw-input targeting and transient interaction ownership.
     input_router: InputRouter,
-    /// Structural phase counters used by P0/P5 characterization.
+    /// Structural phase counters used by retained runtime regression baselines.
     #[cfg(test)]
     metrics: Cell<RuntimeMetrics>,
 }

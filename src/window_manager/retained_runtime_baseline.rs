@@ -28,7 +28,17 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-//! Release-mode allocation, phase, and retained-structure baseline for P5.1.
+//! Manual release-mode allocation, phase, and retained-structure baseline.
+//!
+//! Run this ignored test serially so allocation instrumentation and elapsed-time reporting are not
+//! contaminated by another test thread:
+//!
+//! ```text
+//! cargo test --release retained_runtime_baseline -- --ignored --nocapture --test-threads=1
+//! ```
+//!
+//! Allocation, topology, and phase counts are regression assertions. Elapsed timings are printed
+//! for comparison only and deliberately have no platform-dependent pass threshold.
 
 use crate::render::FrameInfo;
 use crate::test_support::{AllocationCount, AllocationMeasurement, NoopRenderer, test_atlas};
@@ -186,8 +196,8 @@ fn print_scenario(result: &ScenarioResult) {
 }
 
 #[test]
-#[ignore = "manual serial release-mode P5.1 retained UI baseline"]
-fn ui_node_p5_baseline_runtime() {
+#[ignore = "manual serial release-mode retained UI runtime baseline"]
+fn retained_runtime_baseline() {
     let one = measure_scenario("one widget", 1, || TextBlock::create(TextBlockParameters::new("one")).1);
     let hundred = measure_scenario("100-node tree", 100, || {
         let children = (0..99).map(|index| TextBlock::create(TextBlockParameters::new(format!("node-{index}"))).1);
