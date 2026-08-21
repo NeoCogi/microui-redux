@@ -47,6 +47,7 @@ use crate::{
     ThemeIcons, TypedWidgetHandle, WidgetEventPortHandle, WidgetOption, WindowOption,
 };
 use crate::event::WidgetEventPort;
+#[cfg(test)]
 use crate::ui_node::RuntimeNodeId;
 
 const DEFAULT_FILE_DIALOG_TITLE: &str = "Open File";
@@ -176,7 +177,17 @@ impl crate::WidgetEvent for FileDialogCompleted {}
 
 struct DialogRows {
     nodes: Vec<Node>,
+    #[cfg(test)]
     ids: Vec<RuntimeNodeId>,
+}
+
+#[cfg(test)]
+struct FileDialogTestFields {
+    folder_item_ids: Vec<RuntimeNodeId>,
+    file_item_ids: Vec<RuntimeNodeId>,
+    up_button_id: RuntimeNodeId,
+    ok_button_id: RuntimeNodeId,
+    cancel_button_id: RuntimeNodeId,
 }
 
 type FileDialogAccessor<State> = for<'a> fn(&'a mut State) -> &'a mut FileDialog;
@@ -203,16 +214,10 @@ pub struct FileDialog {
     file_scroll: TypedWidgetHandle<ScrollArea>,
     folder_item_port: Rc<RefCell<WidgetEventPort<ListItemSubmitted>>>,
     file_item_port: Rc<RefCell<WidgetEventPort<ListItemSubmitted>>>,
-    folder_item_ids: Vec<RuntimeNodeId>,
-    file_item_ids: Vec<RuntimeNodeId>,
     path_box: TypedWidgetHandle<Textbox>,
     file_name_box: TypedWidgetHandle<Textbox>,
-    #[cfg_attr(not(test), allow(dead_code))]
-    up_button_id: RuntimeNodeId,
-    #[cfg_attr(not(test), allow(dead_code))]
-    ok_button_id: RuntimeNodeId,
-    #[cfg_attr(not(test), allow(dead_code))]
-    cancel_button_id: RuntimeNodeId,
+    #[cfg(test)]
+    test: FileDialogTestFields,
 }
 
 impl FileDialog {
@@ -237,13 +242,10 @@ impl FileDialog {
         let file_rows = Self::make_file_rows(&files, icons.file, &file_item_port);
 
         let (up_handle, up_node) = Button::create(ButtonParameters::new("Up"));
-        let up_button_id = up_node.id();
         let (home_handle, home_node) = Button::create(ButtonParameters::new("Home"));
         let (path_box, path_node) = Textbox::create(TextboxParameters::new(current_working_directory.clone()));
         let (go_handle, go_node) = Button::create(ButtonParameters::new("Go"));
 
-        let folder_item_ids = folder_rows.ids;
-        let file_item_ids = file_rows.ids;
         let (folder_column, folder_content) = Linear::create(LinearParameters::vertical(
             std::iter::once(Self::static_item("Folders")).chain(folder_rows.nodes),
         ));
@@ -259,9 +261,16 @@ impl FileDialog {
 
         let (file_name_box, file_name_node) = Textbox::create(TextboxParameters::new(""));
         let (cancel_handle, cancel_node) = Button::create(ButtonParameters::new("Cancel"));
-        let cancel_button_id = cancel_node.id();
         let (ok_handle, ok_node) = Button::create(ButtonParameters::new("Open"));
-        let ok_button_id = ok_node.id();
+
+        #[cfg(test)]
+        let test = FileDialogTestFields {
+            folder_item_ids: folder_rows.ids,
+            file_item_ids: file_rows.ids,
+            up_button_id: up_node.id(),
+            ok_button_id: ok_node.id(),
+            cancel_button_id: cancel_node.id(),
+        };
 
         let (_, toolbar) = Linear::create(LinearParameters::horizontal([
             LinearItem::fixed(up_node, 56),
@@ -326,13 +335,10 @@ impl FileDialog {
             file_scroll,
             folder_item_port,
             file_item_port,
-            folder_item_ids,
-            file_item_ids,
             path_box,
             file_name_box,
-            up_button_id,
-            ok_button_id,
-            cancel_button_id,
+            #[cfg(test)]
+            test,
         }
     }
 
@@ -375,43 +381,59 @@ impl FileDialog {
         if folders.is_empty() {
             return DialogRows {
                 nodes: vec![Self::static_item("No folders")],
+                #[cfg(test)]
                 ids: Vec::new(),
             };
         }
         let mut nodes = Vec::with_capacity(folders.len());
+        #[cfg(test)]
         let mut ids = Vec::with_capacity(folders.len());
         for folder in folders {
             let label = Self::folder_label(cwd, folder);
             let (_, node) = ListItem::create_with_event_port(ListItemParameters::with_icon(label, folder_icon), Rc::clone(submitted_event));
+            #[cfg(test)]
             ids.push(node.id());
             nodes.push(node);
         }
-        DialogRows { nodes, ids }
+        DialogRows {
+            nodes,
+            #[cfg(test)]
+            ids,
+        }
     }
 
     fn make_file_rows(files: &[String], file_icon: IconId, submitted_event: &Rc<RefCell<WidgetEventPort<ListItemSubmitted>>>) -> DialogRows {
         if files.is_empty() {
             return DialogRows {
                 nodes: vec![Self::static_item("No files")],
+                #[cfg(test)]
                 ids: Vec::new(),
             };
         }
         let mut nodes = Vec::with_capacity(files.len());
+        #[cfg(test)]
         let mut ids = Vec::with_capacity(files.len());
         for file in files {
             let (_, node) = ListItem::create_with_event_port(ListItemParameters::with_icon(file, file_icon), Rc::clone(submitted_event));
+            #[cfg(test)]
             ids.push(node.id());
             nodes.push(node);
         }
-        DialogRows { nodes, ids }
+        DialogRows {
+            nodes,
+            #[cfg(test)]
+            ids,
+        }
     }
 
     fn refresh_entries(&mut self) {
         let (folders, files) = Self::read_directory(Path::new(&self.current_working_directory));
         let folder_rows = Self::make_folder_rows(&self.current_working_directory, &folders, self.icons.closed_folder, &self.folder_item_port);
         let file_rows = Self::make_file_rows(&files, self.icons.file, &self.file_item_port);
-        let folder_ids = folder_rows.ids;
-        let file_ids = file_rows.ids;
+        #[cfg(test)]
+        let folder_item_ids = folder_rows.ids;
+        #[cfg(test)]
+        let file_item_ids = file_rows.ids;
         if let Err(rejected) = replace_column_rows(
             &self.folder_column,
             std::iter::once(Self::static_item("Folders")).chain(folder_rows.nodes).collect(),
@@ -424,8 +446,11 @@ impl FileDialog {
 
         self.folders = folders;
         self.files = files;
-        self.folder_item_ids = folder_ids;
-        self.file_item_ids = file_ids;
+        #[cfg(test)]
+        {
+            self.test.folder_item_ids = folder_item_ids;
+            self.test.file_item_ids = file_item_ids;
+        }
     }
 
     /// Returns the completion source owned by this component.
@@ -854,7 +879,7 @@ mod tests {
             .try_update_with("picked.txt", |state, name| state.set_text(name))
             .unwrap();
         let root = model.dialog.root.id();
-        let open = model.dialog.ok_button_id;
+        let open = model.dialog.test.ok_button_id;
 
         click_node(&mut context, &mut model, root, open, true);
         assert_eq!(
@@ -888,7 +913,7 @@ mod tests {
         fs::create_dir_all(&second_dir).unwrap();
         let (mut context, mut model) = context_and_model();
         let root = model.dialog.root.id();
-        let open = model.dialog.ok_button_id;
+        let open = model.dialog.test.ok_button_id;
         let path = model.dialog.path_box.clone();
         let filename = model.dialog.file_name_box.clone();
         let scroll = model.dialog.file_scroll.clone();
@@ -909,7 +934,7 @@ mod tests {
                 .with_initial_directory(second_dir.to_string_lossy()),
         );
         assert_eq!(model.dialog.root.id(), root);
-        assert_eq!(model.dialog.ok_button_id, open);
+        assert_eq!(model.dialog.test.ok_button_id, open);
         assert_eq!(
             path.try_read(|state| state.text().to_owned()).as_deref(),
             Some(second_dir.to_string_lossy().as_ref())
@@ -1011,9 +1036,9 @@ mod tests {
         model.dialog.open(&mut context, FileDialogRequest::default());
         context.update_ui_state(dimensions(), &mut model);
         let root = model.dialog.root.id();
-        let toolbar_before = context.debug_root_node_rect(root, model.dialog.up_button_id).unwrap();
-        let cancel_before = context.debug_root_node_rect(root, model.dialog.cancel_button_id).unwrap();
-        let open_before = context.debug_root_node_rect(root, model.dialog.ok_button_id).unwrap();
+        let toolbar_before = context.debug_root_node_rect(root, model.dialog.test.up_button_id).unwrap();
+        let cancel_before = context.debug_root_node_rect(root, model.dialog.test.cancel_button_id).unwrap();
+        let open_before = context.debug_root_node_rect(root, model.dialog.test.ok_button_id).unwrap();
         assert_eq!(cancel_before.height, toolbar_before.height);
         assert_eq!(open_before.height, toolbar_before.height);
 
@@ -1021,8 +1046,8 @@ mod tests {
         resized.height += 80;
         context.set_root_rect(root, resized).unwrap();
         context.update_ui_state(dimensions(), &mut model);
-        let toolbar_after = context.debug_root_node_rect(root, model.dialog.up_button_id).unwrap();
-        let open_after = context.debug_root_node_rect(root, model.dialog.ok_button_id).unwrap();
+        let toolbar_after = context.debug_root_node_rect(root, model.dialog.test.up_button_id).unwrap();
+        let open_after = context.debug_root_node_rect(root, model.dialog.test.ok_button_id).unwrap();
         assert_eq!(
             (toolbar_after.x, toolbar_after.y, toolbar_after.width, toolbar_after.height),
             (toolbar_before.x, toolbar_before.y, toolbar_before.width, toolbar_before.height)
@@ -1042,14 +1067,14 @@ mod tests {
             .open(&mut context, FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
         context.update_ui_state(dimensions(), &mut model);
         let root = model.dialog.root.id();
-        let file_node = model.dialog.file_item_ids[0];
+        let file_node = model.dialog.test.file_item_ids[0];
         click_node(&mut context, &mut model, root, file_node, batched);
         assert_eq!(
             model.dialog.file_name_box.try_read(|state| state.text().to_owned()).as_deref(),
             Some("picked.txt")
         );
         release_pointer(&mut context, &mut model);
-        let open = model.dialog.ok_button_id;
+        let open = model.dialog.test.ok_button_id;
         click_node(&mut context, &mut model, root, open, batched);
         assert_eq!(
             model.completions,
@@ -1078,8 +1103,8 @@ mod tests {
         model.dialog.open(&mut context, FileDialogRequest::default());
         context.update_ui_state(dimensions(), &mut model);
         let root = model.dialog.root.id();
-        let open = model.dialog.ok_button_id;
-        let cancel = model.dialog.cancel_button_id;
+        let open = model.dialog.test.ok_button_id;
+        let cancel = model.dialog.test.cancel_button_id;
         click_node(&mut context, &mut model, root, open, false);
         assert!(model.dialog.is_open());
         assert!(model.completions.is_empty());
@@ -1123,7 +1148,7 @@ mod tests {
             .position(|folder| Path::new(folder) == child)
             .expect("child directory should be listed");
         let root = model.dialog.root.id();
-        let child_node = model.dialog.folder_item_ids[index];
+        let child_node = model.dialog.test.folder_item_ids[index];
         let folder_scroll = model.dialog.folder_scroll.clone();
         let path_box = model.dialog.path_box.clone();
         click_node(&mut context, &mut model, root, child_node, false);
