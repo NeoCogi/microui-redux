@@ -717,15 +717,15 @@ mod tests {
         let snapshot = input.snapshot();
         runtime.begin_input_event(true, &event);
         let (owner, result) = runtime
-            .route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &event)
+            .route_input_event_to_node_ref(&mut root, &style, &event)
             .expect("the scrollbar must receive its pointer press");
         runtime.update_pointer_capture(owner, result, &event, snapshot.mouse_buttons);
         runtime.update_tree_root(&mut root, &style, test_atlas(), snapshot);
-        assert_eq!(runtime.capture, Some(owner));
+        assert_eq!(runtime.debug_capture_target(), Some(owner));
 
         scroll.try_update(|state| state.set_scrolling_enabled(false)).unwrap();
         runtime.layout_tree_root(&mut root, &style, test_atlas(), outer, UNCLIPPED_RECT);
-        assert_eq!(runtime.capture, None);
+        assert_eq!(runtime.debug_capture_target(), None);
     }
 
     #[test]

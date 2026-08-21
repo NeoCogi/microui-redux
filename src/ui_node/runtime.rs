@@ -28,7 +28,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-//! Authoritative retained-tree runtime state and lifecycle orchestration.
+//! Authoritative retained-tree phase orchestration around an independent raw-input router.
 
 use super::*;
 
@@ -39,6 +39,7 @@ mod update;
 
 #[cfg(test)]
 pub(crate) use input_router::RouteResult;
+use input_router::InputRouter;
 
 use crate::input::InputSnapshot;
 use crate::math::RectExt;
@@ -59,29 +60,18 @@ pub(crate) struct RuntimeMetrics {
     pub(crate) routed_input_routes: u64,
 }
 
+/// Coordinates retained measurement, layout, update, and paint for one root tree.
+///
+/// Raw-input state is intentionally delegated to [`InputRouter`]. `UiRuntime` supplies the router
+/// with the authoritative tree and committed transform at explicit routing boundaries, then runs
+/// the complete update traversal that consumes the router's one staged node-local event.
 pub(crate) struct UiRuntime {
     /// Aggregate root content size in root body coordinates.
     root_content_size: Dimensioni,
     /// Transform from root body coordinates into screen coordinates.
     root_transform: Transform,
-    /// Focused node.
-    pub(crate) focus: Option<RuntimeNodeId>,
-    /// Hovered node.
-    pub(crate) hover: Option<RuntimeNodeId>,
-    /// Pointer-capturing node.
-    pub(crate) capture: Option<RuntimeNodeId>,
-    /// Whether drag/release events from an externally invalidated capture must be discarded.
-    discard_invalidated_capture_events: bool,
-    /// Whether this runtime accepts pointer routing for the current event.
-    pub(super) pointer_input_enabled: bool,
-    /// Whether the current update was initiated by a pointer event.
-    pointer_event_active: bool,
-    /// Whether the current event releases pointer buttons.
-    pointer_release_active: bool,
-    /// Node receiving the current click transition.
-    clicked: Option<RuntimeNodeId>,
-    /// The current event and its sole routed recipient.
-    routed_event: Option<(RuntimeNodeId, UiInputEvent)>,
+    /// Independent state machine for raw-input targeting and transient interaction ownership.
+    input_router: InputRouter,
     /// Structural phase counters used by P0/P5 characterization.
     #[cfg(test)]
     metrics: Cell<RuntimeMetrics>,
@@ -92,15 +82,7 @@ impl Default for UiRuntime {
         Self {
             root_content_size: Dimensioni::default(),
             root_transform: Transform::root(UNCLIPPED_RECT),
-            focus: None,
-            hover: None,
-            capture: None,
-            discard_invalidated_capture_events: false,
-            pointer_input_enabled: false,
-            pointer_event_active: false,
-            pointer_release_active: false,
-            clicked: None,
-            routed_event: None,
+            input_router: InputRouter::default(),
             #[cfg(test)]
             metrics: Cell::new(RuntimeMetrics::default()),
         }
@@ -115,44 +97,23 @@ impl UiRuntime {
 
     /// Clears update-cycle metrics before the initial synchronization layout.
     pub(crate) fn begin_update(&mut self) {
-        // These values describe one event transaction and must never leak into the next update.
-        // Capture itself intentionally survives because UiRuntime owns it across events.
-        self.routed_event = None;
-        self.clicked = None;
-        self.pointer_event_active = false;
-        self.pointer_release_active = false;
+        // InputRouter independently clears event-local delivery while preserving focus/capture;
+        // UiRuntime resets only traversal metrics owned by the remaining runtime phases.
+        self.input_router.begin_update();
         #[cfg(test)]
         self.metrics.set(RuntimeMetrics::default());
     }
 
-    /// Starts exactly one full-tree update for one normalized input event.
+    /// Starts input routing for one normalized raw event in this retained tree.
     pub(crate) fn begin_input_event(&mut self, pointer_input_enabled: bool, event: &UiInputEvent) {
-        // Routing must have consumed the prior event before a new normalized event can establish
-        // its transaction flags. There is no deferred widget capture-loss callback to flush.
-        debug_assert!(self.routed_event.is_none(), "the previous routed event was not consumed by update");
-        self.pointer_input_enabled = pointer_input_enabled;
-        self.pointer_event_active = event.is_pointer();
-        self.pointer_release_active = event.is_pointer_release();
-        self.clicked = None;
-        if self.pointer_event_active {
-            // Pointer routing recomputes hover from current committed geometry for every event.
-            self.hover = None;
-        }
-        if matches!(event, UiInputEvent::MouseDown { .. }) {
-            // A press starts a new focus claim; the selected recipient assigns focus during routing.
-            self.focus = None;
-        }
+        // WindowManager has already decided whether this root is pointer-eligible. The router owns
+        // all remaining per-node policy and stages at most one event for the update traversal.
+        self.input_router.begin_input_event(pointer_input_enabled, event);
     }
 
     /// Clears focus, hover, capture, and queued input while preserving retained node state.
     pub(crate) fn clear_transient_targets(&mut self) {
-        // Local widget modes reconcile from the next WidgetUpdateCtx::active snapshot, so clearing
-        // runtime identities requires no mutable callback into a retained node.
-        self.focus = None;
-        self.hover = None;
-        self.routed_event = None;
-        self.clicked = None;
-        self.invalidate_pointer_capture();
+        self.input_router.clear_transient_targets();
     }
 
     /// Measures one persistent root node for auto-size without introducing a parallel projection.
@@ -174,7 +135,7 @@ impl UiRuntime {
         // Cache only derived geometry; the persistent Node remains the authoritative tree.
         self.root_content_size = root.state.layout.content_size;
         // Layout may hide or remove the current transient target, so validate identities now.
-        self.sanitize_transient_targets(std::slice::from_mut(root));
+        self.input_router.sanitize_transient_targets(std::slice::from_mut(root), self.root_transform);
     }
 
     /// Updates one persistent root node and its eligible descendants.
@@ -183,38 +144,12 @@ impl UiRuntime {
         self.update_node_ref(root, self.root_transform, style, atlas, input);
         // Topology may change during update; remove identities whose retained path no longer
         // participates before the next event is routed.
-        self.sanitize_transient_targets(std::slice::from_mut(root));
+        self.input_router.sanitize_transient_targets(std::slice::from_mut(root), self.root_transform);
     }
 
     /// Paints one persistent root node and its eligible descendants.
     pub(crate) fn paint_tree_root(&mut self, root: &mut Node, display_list: &mut DisplayList, style: &Style, atlas: crate::AtlasHandle) {
         self.paint_node_ref(root, self.root_transform, display_list, style, atlas);
-    }
-
-    /// Records one routed event for a node-local widget update.
-    pub(crate) fn push_routed_event(&mut self, node: RuntimeNodeId, event: UiInputEvent) {
-        // The dispatcher preselects one recipient. Multiple queued recipients would reintroduce
-        // handler-dependent hit testing, so enforce the single-recipient invariant here.
-        debug_assert!(self.routed_event.is_none(), "one input event was routed to more than one recipient");
-        self.routed_event = Some((node, event));
-    }
-
-    /// Assigns focus and the one-event clicked marker to a routed pointer-down recipient.
-    pub(crate) fn claim_pointer_focus(&mut self, node: RuntimeNodeId, button: MouseButton) {
-        self.focus = Some(node);
-        if button.intersects(MouseButton::LEFT) {
-            self.clicked = Some(node);
-        }
-    }
-
-    /// Takes the current routed event if this node is its sole recipient.
-    pub(crate) fn take_routed_event(&mut self, node: RuntimeNodeId) -> Option<UiInputEvent> {
-        // Leave the event intact while unrelated nodes update; only its selected identity may take it.
-        if self.routed_event.as_ref().is_some_and(|(recipient, _)| *recipient == node) {
-            self.routed_event.take().map(|(_, event)| event)
-        } else {
-            None
-        }
     }
 
     /// Returns the aggregate root content size from the most recent layout.
@@ -226,9 +161,13 @@ impl UiRuntime {
     /// Returns structural phase counters since the most recent explicit update began.
     #[cfg(test)]
     pub(crate) fn debug_metrics(&self) -> RuntimeMetrics {
-        self.metrics.get()
+        // Preserve the aggregate diagnostic while each subsystem owns and resets its own counter.
+        let mut metrics = self.metrics.get();
+        metrics.routed_input_routes = self.input_router.debug_routed_input_routes();
+        metrics
     }
 
+    /// Applies one mutation to the retained traversal counters without exposing interior mutability.
     #[cfg(test)]
     fn bump_metric(&self, update: impl FnOnce(&mut RuntimeMetrics)) {
         let mut metrics = self.metrics.get();
@@ -238,12 +177,101 @@ impl UiRuntime {
 
     /// Returns whether this runtime accepts pointer hit routing for the current event.
     pub(crate) fn accepts_pointer_input(&self) -> bool {
-        self.pointer_input_enabled
+        self.input_router.accepts_pointer_input()
     }
 
-    /// Returns the current root-body transform.
-    pub(crate) fn root_transform(&self) -> Transform {
-        self.root_transform
+    /// Returns whether this retained tree currently owns pointer capture.
+    pub(crate) fn has_pointer_capture(&self) -> bool {
+        self.input_router.has_capture()
+    }
+
+    /// Routes drag/release continuation to the current capture owner, when one remains valid.
+    pub(crate) fn route_captured_pointer_input_event(
+        &mut self,
+        roots: &mut [Node],
+        style: &Style,
+        mouse_buttons: MouseButton,
+        event: &UiInputEvent,
+    ) -> Option<bool> {
+        // Supply committed layout state explicitly; InputRouter owns no measurement or transform.
+        self.input_router
+            .route_captured_pointer_input_event(roots, self.root_transform, style, mouse_buttons, event)
+    }
+
+    /// Routes keyboard or text input directly to the current valid focus owner.
+    pub(crate) fn route_focus_input_event(&mut self, roots: &mut [Node], style: &Style, event: &UiInputEvent) -> bool {
+        self.input_router.route_focus_input_event(roots, self.root_transform, style, event)
+    }
+
+    /// Routes a pointer event through root chrome or the deepest topmost application node.
+    pub(crate) fn route_root_input_event_to_node_ref(
+        &mut self,
+        node: &mut Node,
+        style: &Style,
+        event: &UiInputEvent,
+        root_chrome_hit: bool,
+    ) -> Option<(RuntimeNodeId, input_router::RouteResult)> {
+        self.input_router
+            .route_root_input_event_to_node_ref(node, self.root_transform, style, event, root_chrome_hit)
+    }
+
+    /// Commits pointer-capture ownership after the selected target has classified an event.
+    pub(crate) fn update_pointer_capture(&mut self, owner: RuntimeNodeId, result: input_router::RouteResult, event: &UiInputEvent, mouse_buttons: MouseButton) {
+        self.input_router.update_pointer_capture(owner, result, event, mouse_buttons);
+    }
+
+    /// Routes one ordinary pointer hit for focused retained-runtime tests.
+    #[cfg(test)]
+    pub(crate) fn route_input_event_to_node_ref(&mut self, node: &mut Node, style: &Style, event: &UiInputEvent) -> Option<(RuntimeNodeId, RouteResult)> {
+        self.input_router.route_input_event_to_node_ref(node, self.root_transform, style, event)
+    }
+
+    /// Records a synthetic routed event for invalidation tests.
+    #[cfg(test)]
+    pub(crate) fn push_routed_event(&mut self, node: RuntimeNodeId, event: UiInputEvent) {
+        self.input_router.push_routed_event(node, event);
+    }
+
+    /// Attempts to consume a synthetic routed event from one identity in tests.
+    #[cfg(test)]
+    pub(crate) fn take_routed_event(&mut self, node: RuntimeNodeId) -> Option<UiInputEvent> {
+        self.input_router.take_routed_event(node)
+    }
+
+    /// Returns the router's focused identity for integration tests.
+    #[cfg(test)]
+    pub(crate) fn debug_focus_target(&self) -> Option<RuntimeNodeId> {
+        self.input_router.debug_focus_target()
+    }
+
+    /// Returns the router's hovered identity for integration tests.
+    #[cfg(test)]
+    pub(crate) fn debug_hover_target(&self) -> Option<RuntimeNodeId> {
+        self.input_router.debug_hover_target()
+    }
+
+    /// Returns the router's capture identity for integration tests.
+    #[cfg(test)]
+    pub(crate) fn debug_capture_target(&self) -> Option<RuntimeNodeId> {
+        self.input_router.debug_capture_target()
+    }
+
+    /// Installs explicit router targets for topology-invalidation tests.
+    #[cfg(test)]
+    pub(crate) fn debug_set_transient_targets(&mut self, focus: Option<RuntimeNodeId>, hover: Option<RuntimeNodeId>, capture: Option<RuntimeNodeId>) {
+        self.input_router.debug_set_transient_targets(focus, hover, capture);
+    }
+
+    /// Installs one capture owner for gesture-transition tests.
+    #[cfg(test)]
+    pub(crate) fn debug_set_capture_target(&mut self, capture: Option<RuntimeNodeId>) {
+        self.input_router.debug_set_capture_target(capture);
+    }
+
+    /// Reports whether routing is suppressing a revoked gesture's remaining events in tests.
+    #[cfg(test)]
+    pub(crate) fn debug_discards_invalidated_capture_events(&self) -> bool {
+        self.input_router.debug_discards_invalidated_capture_events()
     }
 
     /// Returns the current full rectangle for a retained node.
@@ -267,6 +295,7 @@ fn contains_active_node_in(roots: &[Node], id: RuntimeNodeId, root_transform: Tr
     roots.iter().any(|root| contains_active_node(root, id, root_transform))
 }
 
+/// Searches one retained branch while enforcing every layout participation and clip gate.
 fn contains_active_node(node: &Node, id: RuntimeNodeId, parent_transform: Transform) -> bool {
     // A disabled or hidden child filters its complete subtree from router-owned identities.
     // Roots use the default active value, so the same predicate is valid at every depth.
@@ -288,6 +317,7 @@ fn contains_active_node(node: &Node, id: RuntimeNodeId, parent_transform: Transf
     })
 }
 
+/// Returns whether this node kind can expose retained descendants to any runtime phase.
 fn node_children_visible(node: &Node) -> bool {
     // Only Container can own children; participation is checked separately by the caller.
     node.is_container()
@@ -298,11 +328,12 @@ fn node_is_visible(node: &Node) -> bool {
     node.state.participation.is_visible()
 }
 
-/// Returns whether parent layout allows the dispatcher to enter this node's subtree.
+/// Returns whether parent layout allows the input router to enter this node's subtree.
 fn node_accepts_input(node: &Node) -> bool {
     node.state.participation.accepts_input()
 }
 
+/// Resolves whether the node's current widget options request shared frame geometry.
 fn node_is_framed(node: &Node) -> bool {
     // Dynamic widget options are authoritative because surfaces can enable/disable behavior.
     node.data.with_widget(|widget| widget.effective_widget_opt().intersects(WidgetOption::FRAME))

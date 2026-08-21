@@ -38,6 +38,7 @@ removing the remaining application-level frame polling from `demo-full`.
     - [x] Windows, dialogs, and popups remain context-owned until explicit destruction.
     - [x] `RootHandle` exposes typed chrome state and events without extending root lifetime.
     - [x] Modal routing, popup dismissal, focus, capture, root movement, and resizing share one retained window manager.
+    - [x] Each retained `UiRuntime` delegates node targeting, focus, hover, and capture state to an independent `InputRouter` while retaining authoritative layout and traversal ownership.
 - [x] Removed frame-polled transient-root and file-dialog coordination from the full demo.
     - [x] Popup and file-dialog opening mutate retained state directly from the typed event that requested them; application command flags were removed.
     - [x] `ComboSubmitted` carries same-transaction opening geometry; the demo's existing shared state reconciles `RootSubmitted::PopupDismissed` back into `Combo`, so source-root interaction or replacement by another popup closes its semantic state without geometry APIs or frame polling.

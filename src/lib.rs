@@ -111,10 +111,11 @@
 //! native widget endpoint through [`Context::subscribe`] or [`Context::subscribe_with`], and call
 //! [`Context::update_ui_state`]. The context owns the only application widget-event dispatcher for
 //! its complete root forest. This semantic dispatcher is distinct from retained raw-input routing:
-//! widgets first receive targeted pointer, keyboard, or text input, then emit typed events for the
-//! application dispatcher. Application-owned library components such as [`FileDialog`] bind their
-//! controls to that same dispatcher through an accessor into application state. Each event port
-//! owns its pending payloads and accepts one state method.
+//! each retained runtime owns an input router that targets pointer, keyboard, or text input to one
+//! node, and that widget may then emit a typed event for the application dispatcher.
+//! Application-owned library components such as [`FileDialog`] bind their controls to that same
+//! dispatcher through an accessor into application state. Each event port owns its pending
+//! payloads and accepts one state method.
 //!
 //! # Text encoding and glyph coverage
 //!

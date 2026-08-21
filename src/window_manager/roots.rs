@@ -72,7 +72,7 @@ impl WidgetTree {
     }
 
     fn has_capture(&self) -> bool {
-        self.runtime.capture.is_some()
+        self.runtime.has_pointer_capture()
     }
 
     fn begin_input_event(&mut self, pointer_input_enabled: bool, event: &UiInputEvent) {
@@ -89,11 +89,7 @@ impl WidgetTree {
     }
 
     fn route_pointer(&mut self, style: &Style, event: &UiInputEvent, root_chrome_hit: bool, mouse_buttons: MouseButton) {
-        let transform = self.runtime.root_transform();
-        if let Some((owner, result)) = self
-            .runtime
-            .route_root_input_event_to_node_ref(&mut self.root, transform, style, event, root_chrome_hit)
-        {
+        if let Some((owner, result)) = self.runtime.route_root_input_event_to_node_ref(&mut self.root, style, event, root_chrome_hit) {
             self.runtime.update_pointer_capture(owner, result, event, mouse_buttons);
         }
     }

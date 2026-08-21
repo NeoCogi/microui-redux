@@ -595,11 +595,7 @@ fn consumed_event_conservatively_invalidates_recipient_and_ancestors() {
         delta: Vec2i::new(1, 0),
     };
     runtime.begin_input_event(true, &event);
-    assert!(
-        runtime
-            .route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &event)
-            .is_some()
-    );
+    assert!(runtime.route_input_event_to_node_ref(&mut root, &style, &event).is_some());
     runtime.update_tree_root(&mut root, &style, atlas.clone(), empty_input());
     layout_root(&mut runtime, &mut root, &style, atlas);
 
@@ -649,7 +645,7 @@ fn overlapping_pointer_routing_visits_siblings_in_reverse_z_order() {
         button: MouseButton::LEFT,
     };
     runtime.begin_input_event(true, &event);
-    let routed = runtime.route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &event);
+    let routed = runtime.route_input_event_to_node_ref(&mut root, &style, &event);
     assert_eq!(routed.map(|(_, result)| result), Some(RouteResult::Captured));
     runtime.update_tree_root(&mut root, &style, atlas, empty_input());
 
@@ -681,9 +677,7 @@ fn pointer_target_selection_uses_reverse_sibling_paint_order() {
         delta: Vec2i::default(),
     };
     runtime.begin_input_event(true, &event);
-    let target = runtime
-        .route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &event)
-        .map(|(owner, _)| owner);
+    let target = runtime.route_input_event_to_node_ref(&mut root, &style, &event).map(|(owner, _)| owner);
     assert_eq!(target, Some(second_id_value));
     assert_ne!(target, Some(first_id_value));
 }
@@ -710,9 +704,7 @@ fn no_interact_node_is_transparent_to_pointer_target_selection() {
     };
     runtime.begin_input_event(true, &event);
     assert_eq!(
-        runtime
-            .route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &event)
-            .map(|(owner, _)| owner),
+        runtime.route_input_event_to_node_ref(&mut root, &style, &event).map(|(owner, _)| owner),
         Some(first_id)
     );
 }
@@ -743,10 +735,18 @@ fn composite_header_is_targeted_as_a_real_child_surface() {
         delta: Vec2i::default(),
     };
     runtime.begin_input_event(true, &event);
-    let routed = runtime.route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &event);
-    assert!(routed.is_some(), "the dispatcher must route to the explicit header child");
-    assert_ne!(runtime.hover, Some(disclosure_id), "the structural disclosure must not impersonate its header");
-    assert_ne!(runtime.hover, Some(lower_id), "the covered sibling must remain occluded by the header child");
+    let routed = runtime.route_input_event_to_node_ref(&mut root, &style, &event);
+    assert!(routed.is_some(), "the input router must target the explicit header child");
+    assert_ne!(
+        runtime.debug_hover_target(),
+        Some(disclosure_id),
+        "the structural disclosure must not impersonate its header"
+    );
+    assert_ne!(
+        runtime.debug_hover_target(),
+        Some(lower_id),
+        "the covered sibling must remain occluded by the header child"
+    );
     runtime.update_tree_root(&mut root, &style, atlas, empty_input());
     assert_eq!(lower_counts.routed_events.get(), 0, "a covered sibling must not receive the bubbled event");
 }
@@ -773,7 +773,7 @@ fn ignored_topmost_pointer_target_never_exposes_a_covered_sibling() {
         delta: Vec2i::new(0, 1),
     };
     runtime.begin_input_event(true, &event);
-    let routed = runtime.route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &event);
+    let routed = runtime.route_input_event_to_node_ref(&mut root, &style, &event);
     assert_eq!(routed.map(|(_, result)| result), Some(RouteResult::Ignored));
     runtime.update_tree_root(&mut root, &style, atlas.clone(), empty_input());
     layout_root(&mut runtime, &mut root, &style, atlas);
@@ -792,7 +792,7 @@ fn ignored_topmost_pointer_target_never_exposes_a_covered_sibling() {
 }
 
 #[test]
-fn widget_focus_policy_is_authoritative_after_dispatch_cleanup() {
+fn widget_focus_policy_is_authoritative_after_routing_cleanup() {
     let mut root = Node::widget(HoldFocusProbe { opt: WidgetOption::NONE });
     let id = root.id();
     let mut runtime = UiRuntime::new();
@@ -807,11 +807,11 @@ fn widget_focus_policy_is_authoritative_after_dispatch_cleanup() {
     let (down, down_state) = next_input(&mut input);
     runtime.begin_input_event(true, &down);
     let (owner, result) = runtime
-        .route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &down)
+        .route_input_event_to_node_ref(&mut root, &style, &down)
         .expect("pointer-down must route to the focus probe");
     runtime.update_pointer_capture(owner, result, &down, down_state.mouse_buttons);
     runtime.update_tree_root(&mut root, &style, atlas.clone(), down_state);
-    assert_eq!(runtime.focus, Some(id));
+    assert_eq!(runtime.debug_focus_target(), Some(id));
 
     input.mouseup(20, 30, MouseButton::LEFT);
     let (release, release_state) = next_input(&mut input);
@@ -822,8 +822,12 @@ fn widget_focus_policy_is_authoritative_after_dispatch_cleanup() {
     );
     runtime.update_tree_root(&mut root, &style, atlas, release_state);
 
-    assert_eq!(runtime.capture, None);
-    assert_eq!(runtime.focus, Some(id), "the Widget override, not a routing helper argument, must retain focus");
+    assert_eq!(runtime.debug_capture_target(), None);
+    assert_eq!(
+        runtime.debug_focus_target(),
+        Some(id),
+        "the Widget override, not a routing helper argument, must retain focus"
+    );
 }
 
 #[test]
@@ -843,11 +847,11 @@ fn captured_container_receives_direct_drag_while_capture_is_active() {
     let (down, down_state) = next_input(&mut input);
     runtime.begin_input_event(true, &down);
     let (owner, result) = runtime
-        .route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &down)
+        .route_input_event_to_node_ref(&mut root, &style, &down)
         .expect("container pointer-down must route");
     runtime.update_pointer_capture(owner, result, &down, down_state.mouse_buttons);
-    assert_eq!(runtime.capture, Some(id));
-    assert_eq!(runtime.hover, Some(id));
+    assert_eq!(runtime.debug_capture_target(), Some(id));
+    assert_eq!(runtime.debug_hover_target(), Some(id));
     runtime.update_tree_root(&mut root, &style, atlas.clone(), down_state);
     assert_eq!(state.try_read(|state| state.active), Some(true));
 
@@ -858,10 +862,14 @@ fn captured_container_receives_direct_drag_while_capture_is_active() {
         runtime.route_captured_pointer_input_event(std::slice::from_mut(&mut root), &style, drag_state.mouse_buttons, &drag,),
         Some(true)
     );
-    assert_eq!(runtime.hover, None, "capture delivery outside the owner's pure surface must not imply hover");
+    assert_eq!(
+        runtime.debug_hover_target(),
+        None,
+        "capture delivery outside the owner's pure surface must not imply hover"
+    );
 
     runtime.update_tree_root(&mut root, &style, atlas, drag_state);
-    assert_eq!(runtime.capture, Some(id));
+    assert_eq!(runtime.debug_capture_target(), Some(id));
     assert_eq!(state.try_read(|state| state.active), Some(true));
     assert_eq!(state.try_read(|state| state.saw_capture_during_drag), Some(true));
     assert_eq!(state.try_read(|state| state.drags), Some(1));
@@ -879,7 +887,7 @@ fn routing_time_release_exposes_inactive_state_during_that_event_update() {
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
-    runtime.capture = Some(id);
+    runtime.debug_set_capture_target(Some(id));
 
     let mut release_input = Input::default();
     release_input.mousedown(20, 30, MouseButton::LEFT);
@@ -891,7 +899,7 @@ fn routing_time_release_exposes_inactive_state_during_that_event_update() {
         runtime.route_captured_pointer_input_event(std::slice::from_mut(&mut root), &style, release_state.mouse_buttons, &release,),
         Some(true)
     );
-    assert_eq!(runtime.capture, None);
+    assert_eq!(runtime.debug_capture_target(), None);
     assert_eq!(
         state.try_read(|state| state.active),
         Some(true),
@@ -914,7 +922,7 @@ fn a_new_press_after_release_starts_a_distinct_capture_event() {
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
-    runtime.capture = Some(id);
+    runtime.debug_set_capture_target(Some(id));
 
     let mut release_input = Input::default();
     release_input.mousedown(20, 30, MouseButton::LEFT);
@@ -927,7 +935,7 @@ fn a_new_press_after_release_starts_a_distinct_capture_event() {
         Some(true)
     );
     runtime.update_tree_root(&mut root, &style, atlas.clone(), release_state);
-    assert_eq!(runtime.capture, None);
+    assert_eq!(runtime.debug_capture_target(), None);
     assert_eq!(state.try_read(|state| state.active), Some(false));
 
     let mut down_input = Input::default();
@@ -935,13 +943,13 @@ fn a_new_press_after_release_starts_a_distinct_capture_event() {
     let (down, down_state) = next_input(&mut down_input);
     runtime.begin_input_event(true, &down);
     let (owner, result) = runtime
-        .route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &down)
+        .route_input_event_to_node_ref(&mut root, &style, &down)
         .expect("same target must reacquire capture");
     runtime.update_pointer_capture(owner, result, &down, down_state.mouse_buttons);
-    assert_eq!(runtime.capture, Some(id));
+    assert_eq!(runtime.debug_capture_target(), Some(id));
 
     runtime.update_tree_root(&mut root, &style, atlas, down_state);
-    assert_eq!(runtime.capture, Some(id));
+    assert_eq!(runtime.debug_capture_target(), Some(id));
     assert_eq!(state.try_read(|state| state.active), Some(true));
 }
 
@@ -959,9 +967,7 @@ fn ancestor_gate_clears_targets_and_next_active_update_reconciles_local_mode() {
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, test_atlas());
-    runtime.focus = Some(captured_id);
-    runtime.hover = Some(captured_id);
-    runtime.capture = Some(captured_id);
+    runtime.debug_set_transient_targets(Some(captured_id), Some(captured_id), Some(captured_id));
     runtime.push_routed_event(
         captured_id,
         UiInputEvent::MouseMove {
@@ -972,7 +978,10 @@ fn ancestor_gate_clears_targets_and_next_active_update_reconciles_local_mode() {
 
     gate_state.try_update(|state| state.visible = false).unwrap();
     layout_root(&mut runtime, &mut root, &style, test_atlas());
-    assert_eq!((runtime.focus, runtime.hover, runtime.capture), (None, None, None));
+    assert_eq!(
+        (runtime.debug_focus_target(), runtime.debug_hover_target(), runtime.debug_capture_target()),
+        (None, None, None)
+    );
     assert!(runtime.take_routed_event(captured_id).is_none());
     assert_eq!(
         capture_state.try_read(|state| state.active),
@@ -982,7 +991,7 @@ fn ancestor_gate_clears_targets_and_next_active_update_reconciles_local_mode() {
 
     gate_state.try_update(|state| state.visible = true).unwrap();
     layout_root(&mut runtime, &mut root, &style, test_atlas());
-    assert_eq!(runtime.capture, None, "expansion must not restore old capture");
+    assert_eq!(runtime.debug_capture_target(), None, "expansion must not restore old capture");
     runtime.update_tree_root(&mut root, &style, test_atlas(), empty_input());
     assert_eq!(
         capture_state.try_read(|state| state.active),
@@ -1008,9 +1017,7 @@ fn removed_target_does_not_notify_or_transfer_state_to_same_index_replacement() 
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, test_atlas());
-    runtime.focus = Some(removed_id);
-    runtime.hover = Some(removed_id);
-    runtime.capture = Some(removed_id);
+    runtime.debug_set_transient_targets(Some(removed_id), Some(removed_id), Some(removed_id));
     runtime.push_routed_event(
         removed_id,
         UiInputEvent::MouseMove {
@@ -1022,7 +1029,10 @@ fn removed_target_does_not_notify_or_transfer_state_to_same_index_replacement() 
     assert_eq!(parent_state.try_update(|state| state.children.try_replace([replacement]).is_ok()), Some(true));
     layout_root(&mut runtime, &mut root, &style, test_atlas());
 
-    assert_eq!((runtime.focus, runtime.hover, runtime.capture), (None, None, None));
+    assert_eq!(
+        (runtime.debug_focus_target(), runtime.debug_hover_target(), runtime.debug_capture_target()),
+        (None, None, None)
+    );
     assert!(runtime.take_routed_event(removed_id).is_none());
     assert!(runtime.take_routed_event(replacement_id).is_none());
     assert!(!removed_state.is_alive(), "removed runtimes are dropped instead of receiving a callback");
@@ -1040,7 +1050,7 @@ fn removed_target_does_not_notify_or_transfer_state_to_same_index_replacement() 
         Some(false),
         "the stale drag must be swallowed while awaiting its release"
     );
-    assert!(runtime.discard_invalidated_capture_events);
+    assert!(runtime.debug_discards_invalidated_capture_events());
 
     let mut release_input = Input::default();
     release_input.mouseup(20, 30, MouseButton::LEFT);
@@ -1053,7 +1063,7 @@ fn removed_target_does_not_notify_or_transfer_state_to_same_index_replacement() 
         Some(false),
         "the stale release must be swallowed instead of falling back to replacement hit routing"
     );
-    assert!(!runtime.discard_invalidated_capture_events);
+    assert!(!runtime.debug_discards_invalidated_capture_events());
     assert!(runtime.take_routed_event(replacement_id).is_none());
 }
 
@@ -1078,9 +1088,7 @@ fn cross_subtree_removal_during_update_sanitizes_before_later_delivery() {
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
-    runtime.focus = Some(captured_id);
-    runtime.hover = Some(captured_id);
-    runtime.capture = Some(captured_id);
+    runtime.debug_set_transient_targets(Some(captured_id), Some(captured_id), Some(captured_id));
     runtime.push_routed_event(
         captured_id,
         UiInputEvent::MouseMove {
@@ -1091,7 +1099,10 @@ fn cross_subtree_removal_during_update_sanitizes_before_later_delivery() {
 
     runtime.update_tree_root(&mut root, &style, atlas, empty_input());
 
-    assert_eq!((runtime.focus, runtime.hover, runtime.capture), (None, None, None));
+    assert_eq!(
+        (runtime.debug_focus_target(), runtime.debug_hover_target(), runtime.debug_capture_target()),
+        (None, None, None)
+    );
     assert!(runtime.take_routed_event(captured_id).is_none());
     assert_eq!(
         captured_state.try_read(|state| state.active),

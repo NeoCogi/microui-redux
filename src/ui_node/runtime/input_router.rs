@@ -32,6 +32,60 @@
 
 use super::*;
 
+/// Per-tree state machine that turns normalized raw input into one node-local delivery.
+///
+/// `WindowManager` chooses which retained root may receive an input event. `InputRouter` then owns
+/// every decision inside that root: hit testing, ancestor bubbling, focus, hover, pointer capture,
+/// and staging the sole [`UiInputEvent`] consumed by the subsequent widget update traversal. It
+/// never invokes application subscribers or handles semantic [`crate::WidgetEvent`] payloads;
+/// those belong to the context-owned [`crate::event::WidgetEventDispatcher`].
+///
+/// The router stores node identities rather than widget borrows. This lets routing finish before
+/// `UiRuntime` begins its full mutable update traversal and lets layout or topology changes validate
+/// stale targets without re-entering widget code.
+pub(super) struct InputRouter {
+    /// Node that receives keyboard and text input until focus policy releases it.
+    focus: Option<RuntimeNodeId>,
+    /// Deepest topmost node under the pointer for the current committed geometry.
+    hover: Option<RuntimeNodeId>,
+    /// Node that owns drag continuation and the matching pointer release.
+    capture: Option<RuntimeNodeId>,
+    /// Whether drag/release events from a revoked capture must be swallowed.
+    discard_invalidated_capture_events: bool,
+    /// Whether this root is eligible for pointer routing during the current raw event.
+    pointer_input_enabled: bool,
+    /// Whether the current raw event is a pointer event and therefore refreshes hover.
+    pointer_event_active: bool,
+    /// Whether the current raw event releases a pointer button.
+    pointer_release_active: bool,
+    /// Node receiving the one-update `clicked` transition from the current pointer press.
+    clicked: Option<RuntimeNodeId>,
+    /// Sole localized raw event waiting for its selected node's update.
+    routed_event: Option<(RuntimeNodeId, UiInputEvent)>,
+    /// Number of already-selected node surfaces examined by routing in the current test cycle.
+    #[cfg(test)]
+    routed_input_routes: u64,
+}
+
+impl Default for InputRouter {
+    /// Creates an idle router with no transient targets or pending delivery.
+    fn default() -> Self {
+        Self {
+            focus: None,
+            hover: None,
+            capture: None,
+            discard_invalidated_capture_events: false,
+            pointer_input_enabled: false,
+            pointer_event_active: false,
+            pointer_release_active: false,
+            clicked: None,
+            routed_event: None,
+            #[cfg(test)]
+            routed_input_routes: 0,
+        }
+    }
+}
+
 /// Router-internal result of delivering one input event to an already-selected node.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(crate) enum RouteResult {
@@ -50,10 +104,170 @@ impl RouteResult {
     }
 }
 
-impl UiRuntime {
+impl InputRouter {
+    /// Clears event-local state before a new explicit UI update begins.
+    ///
+    /// Focus and capture intentionally survive this boundary because they describe interaction
+    /// spanning several raw events. A routed event and click marker belong to exactly one update
+    /// transaction and must never leak into a later call.
+    pub(super) fn begin_update(&mut self) {
+        self.routed_event = None;
+        self.clicked = None;
+        self.pointer_event_active = false;
+        self.pointer_release_active = false;
+        #[cfg(test)]
+        {
+            self.routed_input_routes = 0;
+        }
+    }
+
+    /// Establishes routing policy and event-local flags for one normalized raw input event.
+    pub(super) fn begin_input_event(&mut self, pointer_input_enabled: bool, event: &UiInputEvent) {
+        // The previous event must have been consumed during the full-tree update before another
+        // normalized event can become authoritative for this root.
+        debug_assert!(self.routed_event.is_none(), "the previous routed event was not consumed by update");
+        self.pointer_input_enabled = pointer_input_enabled;
+        self.pointer_event_active = event.is_pointer();
+        self.pointer_release_active = event.is_pointer_release();
+        self.clicked = None;
+        if self.pointer_event_active {
+            // Pointer routing recomputes hover from current committed geometry for every event.
+            self.hover = None;
+        }
+        if matches!(event, UiInputEvent::MouseDown { .. }) {
+            // A press starts a new focus claim; the routed recipient assigns focus if accepted.
+            self.focus = None;
+        }
+    }
+
+    /// Clears every transient target while preserving no reference to a retained node.
+    pub(super) fn clear_transient_targets(&mut self) {
+        // Widgets reconcile their private interaction modes from the next inactive update
+        // snapshot. Clearing router identities therefore needs no out-of-band widget callback.
+        self.focus = None;
+        self.hover = None;
+        self.routed_event = None;
+        self.clicked = None;
+        self.invalidate_pointer_capture();
+    }
+
+    /// Returns whether this tree currently owns pointer capture.
+    pub(super) const fn has_capture(&self) -> bool {
+        self.capture.is_some()
+    }
+
+    /// Returns whether the cross-root policy admits pointer routing for the current event.
+    pub(super) const fn accepts_pointer_input(&self) -> bool {
+        self.pointer_input_enabled
+    }
+
+    /// Records one routed event for consumption by exactly one node during widget update.
+    pub(super) fn push_routed_event(&mut self, node: RuntimeNodeId, event: UiInputEvent) {
+        // Multiple recipients would make delivery depend on update order and would violate the
+        // target-first rule that prevents ignored hits from exposing covered siblings.
+        debug_assert!(self.routed_event.is_none(), "one input event was routed to more than one recipient");
+        self.routed_event = Some((node, event));
+    }
+
+    /// Assigns focus and the one-event clicked marker to an accepted pointer-down recipient.
+    fn claim_pointer_focus(&mut self, node: RuntimeNodeId, button: MouseButton) {
+        self.focus = Some(node);
+        if button.intersects(MouseButton::LEFT) {
+            self.clicked = Some(node);
+        }
+    }
+
+    /// Takes the pending raw event only when `node` is its preselected recipient.
+    pub(super) fn take_routed_event(&mut self, node: RuntimeNodeId) -> Option<UiInputEvent> {
+        // Leave the event intact while unrelated nodes update; traversal order cannot redirect it.
+        if self.routed_event.as_ref().is_some_and(|(recipient, _)| *recipient == node) {
+            self.routed_event.take().map(|(_, event)| event)
+        } else {
+            None
+        }
+    }
+
+    /// Commits the interaction snapshot exposed to one node during the full-tree update.
+    pub(super) fn commit_interaction_snapshot(
+        &mut self,
+        id: RuntimeNodeId,
+        prior_hovered: bool,
+        input: InputSnapshot,
+        opt: WidgetOption,
+        focus_policy: FocusPolicy,
+    ) -> (bool, bool, bool, bool) {
+        // A disabled surface must observe a completely inactive snapshot even if its identity was
+        // selected before a state change disabled it.
+        if opt.intersects(WidgetOption::NO_INTERACT) {
+            return (false, false, false, false);
+        }
+
+        // Pointer events recompute hover during routing; keyboard-only updates preserve it.
+        let hovered = if self.pointer_event_active { self.hover == Some(id) } else { prior_hovered };
+
+        if self.focus == Some(id) {
+            // Momentary and drag focus release with the final button; hold-focus widgets retain it.
+            let released_without_hold_focus = self.pointer_release_active && input.mouse_buttons.is_empty() && focus_policy.releases_on_mouse_up();
+            if released_without_hold_focus {
+                self.focus = None;
+            }
+        }
+
+        // Active derives from router-owned capture rather than a widget-local drag flag. This lets
+        // capture invalidation reconcile every widget through the ordinary update traversal.
+        let focused = self.focus == Some(id);
+        let active = self.capture == Some(id) && input.mouse_buttons.intersects(MouseButton::LEFT);
+        let clicked = self.clicked == Some(id);
+        (hovered, focused, clicked, active)
+    }
+
+    /// Returns the current test-only count of selected node surfaces visited by routing.
+    #[cfg(test)]
+    pub(super) const fn debug_routed_input_routes(&self) -> u64 {
+        self.routed_input_routes
+    }
+
+    /// Returns the focused identity for retained routing tests.
+    #[cfg(test)]
+    pub(super) const fn debug_focus_target(&self) -> Option<RuntimeNodeId> {
+        self.focus
+    }
+
+    /// Returns the hovered identity for retained routing tests.
+    #[cfg(test)]
+    pub(super) const fn debug_hover_target(&self) -> Option<RuntimeNodeId> {
+        self.hover
+    }
+
+    /// Returns the pointer-capture identity for retained routing tests.
+    #[cfg(test)]
+    pub(super) const fn debug_capture_target(&self) -> Option<RuntimeNodeId> {
+        self.capture
+    }
+
+    /// Installs explicit transient identities for tests that exercise invalidation boundaries.
+    #[cfg(test)]
+    pub(super) fn debug_set_transient_targets(&mut self, focus: Option<RuntimeNodeId>, hover: Option<RuntimeNodeId>, capture: Option<RuntimeNodeId>) {
+        self.focus = focus;
+        self.hover = hover;
+        self.capture = capture;
+    }
+
+    /// Replaces only pointer capture for tests that begin from an active gesture.
+    #[cfg(test)]
+    pub(super) fn debug_set_capture_target(&mut self, capture: Option<RuntimeNodeId>) {
+        self.capture = capture;
+    }
+
+    /// Reports whether a revoked gesture is still swallowing its drag/release tail in tests.
+    #[cfg(test)]
+    pub(super) const fn debug_discards_invalidated_capture_events(&self) -> bool {
+        self.discard_invalidated_capture_events
+    }
+
     /// Returns whether generic widget options admit one event kind.
     fn options_accept_event(opt: WidgetOption, event: &UiInputEvent) -> bool {
-        // This is stateless dispatcher policy, so it is an associated function rather than a
+        // This is stateless router policy, so it is an associated function rather than a
         // method borrowing runtime state. Wheel input requires an explicit grab and a delta that
         // can represent movement; every other event kind is governed by target geometry, focus,
         // capture, and the NO_INTERACT check in route_widget_input.
@@ -127,28 +341,30 @@ impl UiRuntime {
     /// Sanitization runs at layout/update boundaries and before direct target delivery, when no
     /// container state borrow is active. A replacement node cannot inherit a stale target because
     /// every owning node has a fresh ID.
-    pub(super) fn sanitize_transient_targets(&mut self, roots: &mut [Node]) {
-        self.focus = self.focus.filter(|id| contains_active_node_in(roots, *id, self.root_transform));
-        self.hover = self.hover.filter(|id| contains_active_node_in(roots, *id, self.root_transform));
+    pub(super) fn sanitize_transient_targets(&mut self, roots: &mut [Node], root_transform: Transform) {
+        // The transform remains owned by UiRuntime's committed layout. Passing it in keeps the
+        // router independent of measurement, placement, and paint state.
+        self.focus = self.focus.filter(|id| contains_active_node_in(roots, *id, root_transform));
+        self.hover = self.hover.filter(|id| contains_active_node_in(roots, *id, root_transform));
         if self
             .routed_event
             .as_ref()
-            .is_some_and(|(id, _)| !contains_active_node_in(roots, *id, self.root_transform))
+            .is_some_and(|(id, _)| !contains_active_node_in(roots, *id, root_transform))
         {
             self.routed_event = None;
         }
 
-        let capture_valid = self.capture.is_none_or(|id| contains_active_node_in(roots, id, self.root_transform));
+        let capture_valid = self.capture.is_none_or(|id| contains_active_node_in(roots, id, root_transform));
         if !capture_valid {
             self.invalidate_pointer_capture();
         }
 
-        debug_assert!(self.focus.is_none_or(|id| contains_active_node_in(roots, id, self.root_transform)));
-        debug_assert!(self.hover.is_none_or(|id| contains_active_node_in(roots, id, self.root_transform)));
+        debug_assert!(self.focus.is_none_or(|id| contains_active_node_in(roots, id, root_transform)));
+        debug_assert!(self.hover.is_none_or(|id| contains_active_node_in(roots, id, root_transform)));
         debug_assert!(
             self.routed_event
                 .as_ref()
-                .is_none_or(|(id, _)| contains_active_node_in(roots, *id, self.root_transform))
+                .is_none_or(|(id, _)| contains_active_node_in(roots, *id, root_transform))
         );
         debug_assert!(self.capture.is_none() || capture_valid);
     }
@@ -174,20 +390,21 @@ impl UiRuntime {
     }
 
     /// Routes one keyboard/text event to the focused node.
-    pub(crate) fn route_focus_input_event(&mut self, roots: &mut [Node], style: &Style, event: &UiInputEvent) -> bool {
-        self.sanitize_transient_targets(roots);
-        self.route_focus_input_event_to_target(roots, style, event)
+    pub(super) fn route_focus_input_event(&mut self, roots: &mut [Node], root_transform: Transform, style: &Style, event: &UiInputEvent) -> bool {
+        self.sanitize_transient_targets(roots, root_transform);
+        self.route_focus_input_event_to_target(roots, root_transform, style, event)
     }
 
     /// Routes one pointer event to the capturing node, if there is one.
-    pub(crate) fn route_captured_pointer_input_event(
+    pub(super) fn route_captured_pointer_input_event(
         &mut self,
         roots: &mut [Node],
+        root_transform: Transform,
         style: &Style,
         mouse_buttons: MouseButton,
         event: &UiInputEvent,
     ) -> Option<bool> {
-        self.sanitize_transient_targets(roots);
+        self.sanitize_transient_targets(roots, root_transform);
 
         if self.capture.is_none() && self.discard_invalidated_capture_events {
             match event {
@@ -207,22 +424,22 @@ impl UiRuntime {
         let capture = self.capture?;
         // Direct delivery will recompute hover from the captured node's clipped allocation.
         self.hover = None;
-        let result = self.route_input_event_to_target(roots, capture, style, event);
+        let result = self.route_input_event_to_target(roots, capture, root_transform, style, event);
         self.update_pointer_capture(capture, result, event, mouse_buttons);
         Some(result.is_consumed())
     }
 
     /// Routes keyboard/text input to the focused node only.
-    fn route_focus_input_event_to_target(&mut self, roots: &mut [Node], style: &Style, event: &UiInputEvent) -> bool {
-        let Some(focus) = self.focus.filter(|id| contains_active_node_in(roots, *id, self.root_transform)) else {
+    fn route_focus_input_event_to_target(&mut self, roots: &mut [Node], root_transform: Transform, style: &Style, event: &UiInputEvent) -> bool {
+        let Some(focus) = self.focus.filter(|id| contains_active_node_in(roots, *id, root_transform)) else {
             return false;
         };
         // Focus input bypasses pointer targeting and goes directly to the retained focus owner.
-        self.route_input_event_to_target(roots, focus, style, event).is_consumed()
+        self.route_input_event_to_target(roots, focus, root_transform, style, event).is_consumed()
     }
 
     /// Applies runtime pointer-capture ownership from one routed event result.
-    pub(crate) fn update_pointer_capture(&mut self, owner: RuntimeNodeId, result: RouteResult, event: &UiInputEvent, mouse_buttons: MouseButton) {
+    pub(super) fn update_pointer_capture(&mut self, owner: RuntimeNodeId, result: RouteResult, event: &UiInputEvent, mouse_buttons: MouseButton) {
         if event.is_pointer_release() && mouse_buttons.is_empty() {
             // Normal release is not an invalidation: its event was delivered to the old owner, and
             // the following update exposes inactive state without swallowing a future gesture.
@@ -238,7 +455,7 @@ impl UiRuntime {
 
     /// Routes one topmost ordinary hit and bubbles an ignored event only through its ancestors.
     #[cfg(test)]
-    pub(crate) fn route_input_event_to_node_ref(
+    pub(super) fn route_input_event_to_node_ref(
         &mut self,
         node: &mut Node,
         parent_transform: Transform,
@@ -258,7 +475,7 @@ impl UiRuntime {
     /// Ordinary retained containers remain child-first. A root is different because its title,
     /// close button, and resize grip are painted after the complete application tree and therefore
     /// occupy the top input layer where their rectangles overlap application content.
-    pub(crate) fn route_root_input_event_to_node_ref(
+    pub(super) fn route_root_input_event_to_node_ref(
         &mut self,
         node: &mut Node,
         parent_transform: Transform,
@@ -293,7 +510,7 @@ impl UiRuntime {
     /// Selects the deepest topmost node whose clipped allocation contains the pointer.
     fn hit_test_pointer_node_ref(&self, node: &Node, parent_transform: Transform, pos: Vec2i) -> Option<RuntimeNodeId> {
         // Layout eligibility filters the whole branch before any geometry or widget policy is
-        // considered. The dispatcher, not the layout, remains responsible for target selection.
+        // considered. The router, not layout, remains responsible for target selection.
         if !node_accepts_input(node) {
             return None;
         }
@@ -331,7 +548,7 @@ impl UiRuntime {
         parent_transform.clip.contains(&pos) && screen_rect.contains(&pos)
     }
 
-    /// Dispatches to one selected target, then bubbles an ignored result through ancestors only.
+    /// Routes to one selected target, then bubbles an ignored result through ancestors only.
     fn route_input_event_to_target_path_from(
         &mut self,
         current: &mut Node,
@@ -368,10 +585,17 @@ impl UiRuntime {
     }
 
     /// Routes directly to one target during a single transform-carrying tree traversal.
-    fn route_input_event_to_target(&mut self, roots: &mut [Node], target: RuntimeNodeId, style: &Style, event: &UiInputEvent) -> RouteResult {
+    fn route_input_event_to_target(
+        &mut self,
+        roots: &mut [Node],
+        target: RuntimeNodeId,
+        root_transform: Transform,
+        style: &Style,
+        event: &UiInputEvent,
+    ) -> RouteResult {
         // Roots are independent transform origins; stop as soon as the unique target is found.
         for root in roots {
-            if let Some(result) = self.route_input_event_to_target_from(root, target, self.root_transform, style, event) {
+            if let Some(result) = self.route_input_event_to_target_from(root, target, root_transform, style, event) {
                 return result;
             }
         }
@@ -406,7 +630,9 @@ impl UiRuntime {
     /// Routes an event to exactly one borrowed node without traversing descendants.
     fn route_input_event_to_node_only_ref(&mut self, node: &mut Node, parent_transform: Transform, style: &Style, event: &UiInputEvent) -> RouteResult {
         #[cfg(test)]
-        self.bump_metric(|metrics| metrics.routed_input_routes += 1);
+        {
+            self.routed_input_routes += 1;
+        }
         // Resolve the same frame/content geometry used by update and paint before localizing the
         // selected event for the concrete widget or container handler.
         let framed = node_is_framed(node);
@@ -442,8 +668,9 @@ impl UiRuntime {
             }
             NodeKind::Container(container) => {
                 // An overloaded container surface may add a state-dependent filter after target
-                // selection. Captured continuation skips that query because UiRuntime already owns
-                // this target; this also prevents stale surface-local modes from affecting routing.
+                // selection. Captured continuation skips that query because InputRouter already
+                // owns this target; this also prevents stale surface-local modes from affecting
+                // routing.
                 let opt = container.effective_widget_opt();
                 let captured_continuation = captured && matches!(&local_event, UiInputEvent::MouseDrag { .. } | UiInputEvent::MouseUp { .. });
                 let accepts_event = captured_continuation || container.accepts_event(&local_event);

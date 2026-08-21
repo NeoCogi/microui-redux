@@ -25,7 +25,10 @@ raw pointer / keyboard / text input
 WindowManager chooses the eligible root
         │
         v
-UiRuntime routes input to one retained node
+UiRuntime lends its tree and committed transform to InputRouter
+        │
+        v
+InputRouter routes input to one retained node
         │
         v
 Widget::update mutates widget state and may emit WidgetEvent
@@ -34,10 +37,15 @@ Widget::update mutates widget state and may emit WidgetEvent
 WidgetEventDispatcher invokes the subscribed application-state method
 ```
 
-Input routing owns geometry, clipping, focus, hover, capture, bubbling, and input-coordinate
-localization. Widget-event dispatch knows none of those concepts: it drains typed semantic payloads
-such as `ButtonSubmitted` only after retained traversal has released every widget borrow. Keeping
-the two names distinct makes that borrow-safe boundary explicit.
+Each retained `UiRuntime` owns one `InputRouter`, but routing state is no longer mixed into the
+runtime's measurement, layout, update, paint, or metrics state. `UiRuntime` explicitly lends the
+router its authoritative tree and committed root transform. The router owns hit testing, clipping,
+focus, hover, capture, bubbling, coordinate localization, and the sole raw event staged for the
+subsequent widget update.
+
+Widget-event dispatch knows none of those concepts: it drains typed semantic payloads such as
+`ButtonSubmitted` only after retained traversal has released every widget borrow. Keeping the two
+owners and names distinct makes that borrow-safe boundary explicit.
 
 ## Ownership
 

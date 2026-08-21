@@ -54,8 +54,8 @@
 //!
 //! [`WindowManager`] owns retained roots, ordered input, modal policy, layout state, and display-list
 //! recording. The generic [`crate::Context`] façade owns it alongside the renderer and application
-//! widget-event dispatcher. WindowManager and each retained [`UiRuntime`] route raw input; they do
-//! not invoke application widget-event subscribers.
+//! widget-event dispatcher. WindowManager chooses the eligible root, then the [`UiRuntime`]-owned
+//! input router chooses a node; neither invokes application widget-event subscribers.
 use bitflags::bitflags;
 
 use crate::input::Input;

@@ -56,7 +56,7 @@ impl UiRuntime {
         let (opt, focus_policy) = node_interaction_config(node);
         let id = node.id();
         let was_focused = node.state.focused;
-        let (hovered, focused, clicked, active) = self.commit_interaction_snapshot(id, node.state.hovered, input, opt, focus_policy);
+        let (hovered, focused, clicked, active) = self.input_router.commit_interaction_snapshot(id, node.state.hovered, input, opt, focus_policy);
         node.state.hovered = hovered;
         node.state.focused = focused;
         node.state.clicked = clicked;
@@ -65,9 +65,10 @@ impl UiRuntime {
         // Only the preselected recipient takes the routed event; all other nodes still receive their
         // normal eventless update in parent-first order.
         let event = self
+            .input_router
             .take_routed_event(id)
             .map(|event| super::widget_context::localize_event(Vec2i::new(content_rect.x, content_rect.y), event));
-        let accepts_pointer_input = self.accepts_pointer_input();
+        let accepts_pointer_input = self.input_router.accepts_pointer_input();
         let screen_content_rect = content_rect.translated(screen_origin);
         let screen_content_clip = content_clip.translated(screen_origin);
         let mut widget_ctx = crate::WidgetUpdateCtx::new_with_content_geometry(
@@ -108,38 +109,5 @@ impl UiRuntime {
                 }
             });
         }
-    }
-
-    /// Computes interaction state from node geometry and shared input.
-    fn commit_interaction_snapshot(
-        &mut self,
-        id: RuntimeNodeId,
-        prior_hovered: bool,
-        input: InputSnapshot,
-        opt: WidgetOption,
-        focus_policy: FocusPolicy,
-    ) -> (bool, bool, bool, bool) {
-        // Disabled interaction clears every local snapshot without changing geometry or state.
-        if opt.intersects(WidgetOption::NO_INTERACT) {
-            return (false, false, false, false);
-        }
-
-        // Pointer events recompute hover during routing; keyboard-only updates preserve it.
-        let hovered = if self.pointer_event_active { self.hover == Some(id) } else { prior_hovered };
-
-        if self.focus == Some(id) {
-            // Momentary and drag focus release with the final button; hold-focus widgets retain it.
-            let released_without_hold_focus = self.pointer_release_active && input.mouse_buttons.is_empty() && focus_policy.releases_on_mouse_up();
-            if released_without_hold_focus {
-                self.focus = None;
-            }
-        }
-
-        // Derive active interaction directly from router-owned capture. Widget-local drag
-        // modes reconcile against this snapshot instead of receiving a capture-loss callback.
-        let focused = self.focus == Some(id);
-        let active = self.capture == Some(id) && input.mouse_buttons.intersects(MouseButton::LEFT);
-        let clicked = self.clicked == Some(id);
-        (hovered, focused, clicked, active)
     }
 }
