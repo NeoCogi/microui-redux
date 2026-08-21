@@ -338,7 +338,7 @@ impl Widget for RetainedScrollbar {
                 }
             }
             Some(UiInputEvent::MouseDrag { delta, .. }) if ctx.active() => {
-                // Only the dispatcher-owned capture recipient is active. This continues beyond
+                // Only the router-owned capture recipient is active. This continues beyond
                 // the track rectangle without retaining a second widget-local capture flag.
                 // offset = clamp(previous_offset + drag_delta, 0, maximum_offset).
                 self.offset = self.offset.saturating_add(geometry.drag_delta(*delta)).clamp(0, self.max_offset());

@@ -650,7 +650,7 @@ fn overlapping_pointer_routing_visits_siblings_in_reverse_z_order() {
     };
     runtime.begin_input_event(true, &event);
     let routed = runtime.route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &event);
-    assert_eq!(routed.map(|(_, result)| result), Some(DispatchResult::Captured));
+    assert_eq!(routed.map(|(_, result)| result), Some(RouteResult::Captured));
     runtime.update_tree_root(&mut root, &style, atlas, empty_input());
 
     assert_eq!(first_counts.routed_events.get(), 0);
@@ -774,7 +774,7 @@ fn ignored_topmost_pointer_target_never_exposes_a_covered_sibling() {
     };
     runtime.begin_input_event(true, &event);
     let routed = runtime.route_input_event_to_node_ref(&mut root, runtime.root_transform(), &style, &event);
-    assert_eq!(routed.map(|(_, result)| result), Some(DispatchResult::Ignored));
+    assert_eq!(routed.map(|(_, result)| result), Some(RouteResult::Ignored));
     runtime.update_tree_root(&mut root, &style, atlas.clone(), empty_input());
     layout_root(&mut runtime, &mut root, &style, atlas);
 

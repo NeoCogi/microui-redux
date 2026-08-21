@@ -23,7 +23,7 @@ removing the remaining application-level frame polling from `demo-full`.
     - [x] `LeafWidget` defines intrinsic measurement and `ContainerWidget` defines child-aware layout.
     - [x] `Linear`, `Grid`, `Disclosure`, and `ScrollArea` expose retained mutation through typed handles.
 - [x] Made `Context` the retained transaction boundary.
-    - [x] Context owns the ordered input FIFO, complete root forest, renderer, and application event dispatcher.
+    - [x] Context owns the ordered input FIFO, complete root forest, renderer, and application widget-event dispatcher.
     - [x] `update_ui` and `update_ui_state` commit layout after every queued input event.
     - [x] `ContextFrame::render_ui` is paint-only and rejects missing, stale, or dimension-mismatched commits before backend acquisition.
     - [x] `EventContext<'_>` lends safe Context-owned mutation access only after retained widget borrows end and before the next layout commit.

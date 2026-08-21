@@ -425,14 +425,14 @@ mod tests {
         values.push(event.value);
     }
 
-    fn slider_dispatcher(slider: &Slider) -> crate::event::EventDispatcher<Vec<Real>> {
-        let mut dispatcher = crate::event::EventDispatcher::new();
+    fn slider_dispatcher(slider: &Slider) -> crate::event::WidgetEventDispatcher<Vec<Real>> {
+        let mut dispatcher = crate::event::WidgetEventDispatcher::new();
         dispatcher.subscribe(slider.changed(), record_slider_change).unwrap();
         dispatcher
     }
 
-    fn number_dispatcher(number: &Number) -> crate::event::EventDispatcher<Vec<Real>> {
-        let mut dispatcher = crate::event::EventDispatcher::new();
+    fn number_dispatcher(number: &Number) -> crate::event::WidgetEventDispatcher<Vec<Real>> {
+        let mut dispatcher = crate::event::WidgetEventDispatcher::new();
         dispatcher.subscribe(number.changed(), record_number_change).unwrap();
         dispatcher
     }

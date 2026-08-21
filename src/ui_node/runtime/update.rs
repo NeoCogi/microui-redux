@@ -135,7 +135,7 @@ impl UiRuntime {
             }
         }
 
-        // Derive active interaction directly from dispatcher-owned capture. Widget-local drag
+        // Derive active interaction directly from router-owned capture. Widget-local drag
         // modes reconcile against this snapshot instead of receiving a capture-loss callback.
         let focused = self.focus == Some(id);
         let active = self.capture == Some(id) && input.mouse_buttons.intersects(MouseButton::LEFT);

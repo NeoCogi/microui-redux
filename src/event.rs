@@ -38,7 +38,7 @@ use crate::Widget;
 /// Maximum number of native events handled in one dispatch transaction.
 ///
 /// The limit applies across all subscriptions and all cascade sweeps initiated by one call to
-/// [`EventDispatcher::dispatch_with_context`]. It is a correctness guard against mutually emitting handlers, not a
+/// [`WidgetEventDispatcher::dispatch_with_context`]. It is a correctness guard against mutually emitting handlers, not a
 /// normal flow-control mechanism.
 const MAX_EVENT_DISPATCHES: usize = 1_000_000;
 
@@ -52,7 +52,7 @@ const MAX_EVENT_DISPATCHES: usize = 1_000_000;
 /// dispatcher.
 ///
 /// The `'static` bound is required because subscriptions of different concrete event types coexist
-/// behind the dispatcher's `EventDispatch` boundary. It does not require event values to be `Clone`,
+/// behind the dispatcher's `WidgetEventDispatch` boundary. It does not require event values to be `Clone`,
 /// `Send`, or `Sync`.
 pub trait WidgetEvent: 'static {}
 
@@ -290,7 +290,7 @@ impl<Target, BoundContext, E: WidgetEvent> EventHandler<Target, E> for BoundCont
 ///
 /// `Target` remains common to the whole vector; the implementation retains each concrete event and
 /// handler type. This is the module's only dynamic dispatch boundary.
-trait EventDispatch<Target> {
+trait WidgetEventDispatch<Target> {
     /// Reports whether the concrete retained producer still owns the subscribed port.
     fn is_alive(&self) -> bool;
     /// Drains one port batch into `target` and returns the number of delivered payloads.
@@ -300,7 +300,7 @@ trait EventDispatch<Target> {
 /// Concrete binding between one typed event port and one typed target handler.
 ///
 /// `Handler` is either the method pointer supplied to `subscribe` or the explicit
-/// [`BoundEventHandler`] created by `subscribe_with`. The [`EventDispatch`] implementation relates
+/// [`BoundEventHandler`] created by `subscribe_with`. The [`WidgetEventDispatch`] implementation relates
 /// the handler to its target type; the target value itself is borrowed only when dispatch runs.
 /// The weak port reference makes this subscription the complete connection lifetime without
 /// retaining a removed producer.
@@ -320,7 +320,7 @@ impl<E: WidgetEvent, Handler> Subscription<E, Handler> {
     }
 }
 
-impl<Target, E, Handler> EventDispatch<Target> for Subscription<E, Handler>
+impl<Target, E, Handler> WidgetEventDispatch<Target> for Subscription<E, Handler>
 where
     E: WidgetEvent,
     Handler: EventHandler<Target, E>,
@@ -357,17 +357,18 @@ impl<E: WidgetEvent, Handler> Drop for Subscription<E, Handler> {
     }
 }
 
-/// A strongly typed event dispatcher for one mutable target type.
+/// A strongly typed semantic widget-event dispatcher for one mutable target type.
 ///
 /// Vector position is subscription order and therefore the deterministic cross-port sweep order.
-/// Each boxed element retains concrete payload and handler types behind [`EventDispatch`]. This
-/// type is crate-private because Context owns the application-state dispatcher for the lifetime of
-/// the corresponding retained forest.
-pub(crate) struct EventDispatcher<Target> {
-    subscriptions: Vec<Box<dyn EventDispatch<Target>>>,
+/// Each boxed element retains concrete payload and handler types behind [`WidgetEventDispatch`]. This
+/// type is crate-private because Context owns the application-state widget-event dispatcher for
+/// the lifetime of the corresponding retained forest. Raw pointer, keyboard, and text input are
+/// routed independently by the retained [`crate::UiRuntime`].
+pub(crate) struct WidgetEventDispatcher<Target> {
+    subscriptions: Vec<Box<dyn WidgetEventDispatch<Target>>>,
 }
 
-impl<Target: 'static> EventDispatcher<Target> {
+impl<Target: 'static> WidgetEventDispatcher<Target> {
     /// Creates an empty dispatcher before its retained event sources are subscribed.
     pub(crate) fn new() -> Self {
         // Subscription storage remains unallocated until the owning Context connects its first
@@ -508,7 +509,7 @@ mod tests {
     #[test]
     fn port_queues_native_events_until_the_dispatcher_dispatches() {
         let owner = Rc::new(RefCell::new(WidgetEventPort::new()));
-        let mut dispatcher = EventDispatcher::new();
+        let mut dispatcher = WidgetEventDispatcher::new();
         dispatcher.subscribe(WidgetEventPortHandle::new(&owner), State::record_and_cascade).unwrap();
 
         owner.borrow_mut().emit(3);
@@ -525,7 +526,7 @@ mod tests {
     #[test]
     fn bound_subscriber_receives_registration_context() {
         let owner = Rc::new(RefCell::new(WidgetEventPort::new()));
-        let mut dispatcher = EventDispatcher::new();
+        let mut dispatcher = WidgetEventDispatcher::new();
         dispatcher
             .subscribe_with(WidgetEventPortHandle::new(&owner), 40, State::record_with_offset)
             .unwrap();
@@ -540,7 +541,7 @@ mod tests {
     fn one_port_accepts_only_one_context_subscription() {
         let owner = Rc::new(RefCell::new(WidgetEventPort::new()));
         let port = WidgetEventPortHandle::new(&owner);
-        let mut dispatcher = EventDispatcher::new();
+        let mut dispatcher = WidgetEventDispatcher::new();
         dispatcher.subscribe(port.clone(), State::record_and_cascade).unwrap();
 
         assert_eq!(dispatcher.subscribe(port, State::record_and_cascade), Err(SubscribeError::AlreadySubscribed));
@@ -550,7 +551,7 @@ mod tests {
     fn dropping_the_context_dispatcher_disconnects_and_clears_its_ports() {
         let owner = Rc::new(RefCell::new(WidgetEventPort::new()));
         let port = WidgetEventPortHandle::new(&owner);
-        let mut dispatcher = EventDispatcher::new();
+        let mut dispatcher = WidgetEventDispatcher::new();
         dispatcher.subscribe(port.clone(), State::record_and_cascade).unwrap();
 
         owner.borrow_mut().emit(1);
@@ -558,14 +559,14 @@ mod tests {
         owner.borrow_mut().emit(2);
         assert!(matches!(&*owner.borrow(), WidgetEventPort::Disconnected));
 
-        let mut replacement = EventDispatcher::new();
+        let mut replacement = WidgetEventDispatcher::new();
         replacement.subscribe(port, State::record_and_cascade).unwrap();
     }
 
     #[test]
     fn expired_subscriptions_are_pruned_during_dispatch() {
         let owner = Rc::new(RefCell::new(WidgetEventPort::new()));
-        let mut dispatcher = EventDispatcher::new();
+        let mut dispatcher = WidgetEventDispatcher::new();
         dispatcher.subscribe(WidgetEventPortHandle::new(&owner), State::record_and_cascade).unwrap();
         drop(owner);
 
@@ -578,7 +579,7 @@ mod tests {
         let owner = Rc::new(RefCell::new(WidgetEventPort::new()));
         owner.borrow_mut().emit(1);
 
-        let mut dispatcher = EventDispatcher::new();
+        let mut dispatcher = WidgetEventDispatcher::new();
         dispatcher.subscribe(WidgetEventPortHandle::new(&owner), State::record_and_cascade).unwrap();
         assert!(!dispatcher.dispatch(&mut State::default()));
     }

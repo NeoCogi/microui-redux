@@ -1,22 +1,47 @@
 # Typed events and application-owned components
 
-Strongly typed dispatch for retained widgets, application state, and reusable components.
+Strongly typed semantic dispatch for retained widgets, application state, and reusable components.
 
 This module connects events produced by retained widgets and application-owned components to
 methods on one application state value. Its central rule remains deliberately narrow:
 
-> One dispatcher owns subscriptions for exactly one concrete target type, while each retained
-> producer owns and queues the payloads for its own event ports.
+> One widget-event dispatcher owns subscriptions for exactly one concrete target type, while each
+> retained producer owns and queues the payloads for its own event ports.
 
 There is no public event bus, application-wide message enum, global queue, multicast list,
 payload downcast, or public standalone dispatcher lifetime. The public surface consists of event
 payload types, weak [`WidgetEventPortHandle`] values, state-only [`crate::Context::subscribe`] methods,
 and opt-in context-aware [`crate::Context::subscribe_context`] methods. Context owns the
-application dispatcher.
+application widget-event dispatcher.
+
+## Input routing versus widget-event dispatch
+
+The retained input router and [`WidgetEventDispatcher`] occupy consecutive but separate stages:
+
+```text
+raw pointer / keyboard / text input
+        │
+        v
+WindowManager chooses the eligible root
+        │
+        v
+UiRuntime routes input to one retained node
+        │
+        v
+Widget::update mutates widget state and may emit WidgetEvent
+        │
+        v
+WidgetEventDispatcher invokes the subscribed application-state method
+```
+
+Input routing owns geometry, clipping, focus, hover, capture, bubbling, and input-coordinate
+localization. Widget-event dispatch knows none of those concepts: it drains typed semantic payloads
+such as `ButtonSubmitted` only after retained traversal has released every widget borrow. Keeping
+the two names distinct makes that borrow-safe boundary explicit.
 
 ## Ownership
 
-Context owns the retained root forest and the application dispatcher containing its state handlers.
+Context owns the retained root forest and the widget-event dispatcher containing its state handlers.
 Application state may own reusable components and their semantic event sources. Neither a handle
 nor a subscription keeps a removed producer alive.
 
@@ -27,8 +52,8 @@ Context<B, State>
 │      ├── owns concrete application Widget
 │      │      └── owns Rc<RefCell<WidgetEventPort<E>>>
 │
-└── owns EventDispatcher<State>
-       └── owns Vec<Box<dyn EventDispatch<State>>>
+└── owns WidgetEventDispatcher<State>
+       └── owns Vec<Box<dyn WidgetEventDispatch<State>>>
                   └── owns Subscription<State, E, Handler>
                              ├── owns Handler
                              └── owns Weak port reference ─────┐
@@ -118,13 +143,13 @@ typed retained source
 WidgetEventPortHandle<E>
      │ Context::subscribe(port, State::method)
      v
-EventDispatcher<State>::add
+WidgetEventDispatcher<State>::add
      │
      ├── upgrade the handle's Weak port reference
      ├── connect and retain the Weak port reference
      ├── retain the concrete method or bound-method handler
      └── erase Subscription<State, E, Handler>
-                        as Box<dyn EventDispatch<State>>
+                        as Box<dyn WidgetEventDispatch<State>>
 ```
 
 [`crate::Context::subscribe_with`] follows the same path but captures one application value in
@@ -193,7 +218,7 @@ The type erasure applies only to the subscriptions stored in the heterogeneous d
 
 ```text
 Subscription<State, ButtonSubmitted, fn(...)> ───────────────┐
-Subscription<State, SliderChanged, BoundEventHandler<...>> ──┼──> dyn EventDispatch<State>
+Subscription<State, SliderChanged, BoundEventHandler<...>> ──┼──> dyn WidgetEventDispatch<State>
 Subscription<State, TextboxChanged, fn(...)> ────────────────┘
 
                              E remains concrete ─────────> EventHandler::handle
@@ -309,13 +334,13 @@ only owns the ordinary retained modal root created by the component:
 retained FileDialog controls
         │
         v
-EventDispatcher<ApplicationState>
+WidgetEventDispatcher<ApplicationState>
         │
         v
 application-owned FileDialog
         │
         v
-FileDialogCompleted source ──> EventDispatcher<ApplicationState>
+FileDialogCompleted source ──> WidgetEventDispatcher<ApplicationState>
 ```
 
 ## Cost model and non-goals
@@ -332,7 +357,7 @@ internal source; contexts that do not construct one pay none of those costs. Dyn
 rows share stable ports, so refreshing or reopening does not rebuild subscriptions. Context-aware
 handlers add no queue or retained owner; their adapter contains only the supplied function pointer
 and optional bound value. The handler is statically dispatched inside that subscription; only
-[`EventDispatch`] is dynamically dispatched. The dispatcher first scans its `S` subscriptions to
+[`WidgetEventDispatch`] is dynamically dispatched. The dispatcher first scans its `S` subscriptions to
 prune dead widgets, then
 visits every subscription once per cascade sweep and invokes handlers once per delivered event.
 With `D` delivered events and `R` sweeps, the work is O(`D + S * R`). Ordinary non-cascading

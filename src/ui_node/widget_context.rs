@@ -165,7 +165,7 @@ pub struct WidgetUpdateCtx<'a> {
 }
 
 impl<'a> WidgetUpdateCtx<'a> {
-    /// Creates an update context from dispatcher-owned interaction state.
+    /// Creates an update context from router-owned interaction state.
     #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_with_interaction(

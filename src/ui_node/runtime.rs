@@ -32,13 +32,13 @@
 
 use super::*;
 
-mod input_dispatcher;
+mod input_router;
 mod layout_traversal;
 mod paint;
 mod update;
 
 #[cfg(test)]
-pub(crate) use input_dispatcher::DispatchResult;
+pub(crate) use input_router::RouteResult;
 
 use crate::input::InputSnapshot;
 use crate::math::RectExt;
@@ -56,7 +56,7 @@ pub(crate) struct RuntimeMetrics {
     pub(crate) layouts: u64,
     pub(crate) updates: u64,
     pub(crate) paints: u64,
-    pub(crate) routed_input_dispatches: u64,
+    pub(crate) routed_input_routes: u64,
 }
 
 pub(crate) struct UiRuntime {
@@ -268,7 +268,7 @@ fn contains_active_node_in(roots: &[Node], id: RuntimeNodeId, root_transform: Tr
 }
 
 fn contains_active_node(node: &Node, id: RuntimeNodeId, parent_transform: Transform) -> bool {
-    // A disabled or hidden child filters its complete subtree from dispatcher-owned identities.
+    // A disabled or hidden child filters its complete subtree from router-owned identities.
     // Roots use the default active value, so the same predicate is valid at every depth.
     if !node.state.participation.accepts_input() || !node.intersects_clip(parent_transform) {
         return false;

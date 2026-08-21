@@ -82,8 +82,8 @@ fn increment_event_counter<E>(count: &mut usize, _: &E) {
     *count += 1;
 }
 
-fn event_counter<E: crate::WidgetEvent>(port: crate::WidgetEventPortHandle<E>) -> crate::event::EventDispatcher<usize> {
-    let mut dispatcher = crate::event::EventDispatcher::new();
+fn event_counter<E: crate::WidgetEvent>(port: crate::WidgetEventPortHandle<E>) -> crate::event::WidgetEventDispatcher<usize> {
+    let mut dispatcher = crate::event::WidgetEventDispatcher::new();
     dispatcher.subscribe(port, increment_event_counter::<E>).unwrap();
     dispatcher
 }
@@ -1144,7 +1144,7 @@ fn showing_a_popup_atomically_hides_and_dismisses_the_previous_one() {
     let mut ctx = context();
     let first = ctx.create_popup("first", empty_content());
     let second = ctx.create_popup("second", empty_content());
-    let mut dispatcher = crate::event::EventDispatcher::new();
+    let mut dispatcher = crate::event::WidgetEventDispatcher::new();
     fn record(events: &mut Vec<RootSubmitted>, event: &RootSubmitted) {
         events.push(*event);
     }
@@ -1169,11 +1169,11 @@ fn outside_popup_press_hides_and_records_typed_submission() {
         .unwrap();
     ctx.set_root_visible(popup.id(), true).unwrap();
     ctx.set_root_rect(popup.id(), rect(20, 20, 80, 60)).unwrap();
-    let mut event_dispatcher = crate::event::EventDispatcher::new();
+    let mut widget_event_dispatcher = crate::event::WidgetEventDispatcher::new();
     fn record(events: &mut Vec<RootSubmitted>, event: &RootSubmitted) {
         events.push(*event);
     }
-    event_dispatcher.subscribe(popup.submitted(), record).unwrap();
+    widget_event_dispatcher.subscribe(popup.submitted(), record).unwrap();
     let mut submissions = Vec::new();
     ctx.update_and_render_ui();
 
@@ -1181,11 +1181,11 @@ fn outside_popup_press_hides_and_records_typed_submission() {
     ctx.update_and_render_ui();
 
     assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(false));
-    assert!(event_dispatcher.dispatch(&mut submissions));
+    assert!(widget_event_dispatcher.dispatch(&mut submissions));
     assert_eq!(submissions, [RootSubmitted::PopupDismissed]);
     ctx.set_root_visible(popup.id(), true).unwrap();
     ctx.set_root_visible(popup.id(), false).unwrap();
-    assert!(!event_dispatcher.dispatch(&mut submissions));
+    assert!(!widget_event_dispatcher.dispatch(&mut submissions));
 }
 
 #[test]
@@ -1568,7 +1568,7 @@ fn title_drag_and_close_record_typed_root_events() {
 
     let mut ctx = context();
     let root = ctx.create_window("window", rect(30, 30, 140, 100), empty_content());
-    let mut dispatcher = crate::event::EventDispatcher::new();
+    let mut dispatcher = crate::event::WidgetEventDispatcher::new();
     dispatcher.subscribe(root.changed(), record_changed).unwrap();
     dispatcher.subscribe(root.submitted(), record_submitted).unwrap();
     let mut events = Vec::new();

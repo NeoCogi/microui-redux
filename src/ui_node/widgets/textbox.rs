@@ -486,8 +486,8 @@ mod tests {
         events.push(RecordedEvent::Submitted(event.text.clone()));
     }
 
-    fn text_dispatcher(textbox: &Textbox) -> crate::event::EventDispatcher<Vec<RecordedEvent>> {
-        let mut dispatcher = crate::event::EventDispatcher::new();
+    fn text_dispatcher(textbox: &Textbox) -> crate::event::WidgetEventDispatcher<Vec<RecordedEvent>> {
+        let mut dispatcher = crate::event::WidgetEventDispatcher::new();
         dispatcher.subscribe(textbox.changed(), record_changed).unwrap();
         dispatcher.subscribe(textbox.submitted(), record_submitted).unwrap();
         dispatcher

@@ -30,8 +30,11 @@
 
 //! Generic application façade over the non-generic retained window manager.
 //!
-//! `Context` owns the backend renderer and typed application event dispatcher. Every retained root,
-//! input, layout, modal, style, and display-list operation is delegated to [`WindowManager`].
+//! `Context` owns the backend renderer and typed application widget-event dispatcher. Every
+//! retained root, input, layout, modal, style, and display-list operation is delegated to
+//! [`WindowManager`]. Raw input is routed separately inside each retained UI runtime; the
+//! context-owned dispatcher only drains semantic [`crate::WidgetEvent`] ports into application
+//! state.
 
 use crate::window_manager::{RootHandle, RootId, RootMutationError, WindowManager, WindowOption};
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, FrameInfo, RenderError, Renderer, RendererBackend};
@@ -178,8 +181,8 @@ pub struct Context<B: RendererBackend, State: 'static = ()> {
     renderer: Renderer<B>,
     /// Backend- and application-state-independent retained window manager.
     pub(crate) window_manager: WindowManager,
-    /// Sole application event dispatcher for this context and its retained widget forest.
-    event_dispatcher: crate::event::EventDispatcher<State>,
+    /// Sole semantic widget-event dispatcher for this context and its retained widget forest.
+    widget_event_dispatcher: crate::event::WidgetEventDispatcher<State>,
     /// Drawable size used by retained behavior tests that drive complete frames tersely.
     #[cfg(test)]
     test_dimensions: Dimensioni,
@@ -225,7 +228,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         Self {
             renderer,
             window_manager: WindowManager::new(style),
-            event_dispatcher: crate::event::EventDispatcher::new(),
+            widget_event_dispatcher: crate::event::WidgetEventDispatcher::new(),
             #[cfg(test)]
             test_dimensions: Dimensioni::new(1, 1),
         }
@@ -297,11 +300,11 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         // dispatch closure can then lend the manager back through EventContext without aliasing the
         // independently borrowed application dispatcher.
         let window_manager = &mut self.window_manager;
-        let event_dispatcher = &mut self.event_dispatcher;
+        let widget_event_dispatcher = &mut self.widget_event_dispatcher;
         window_manager.update_with(dimensions, &atlas, state, |window_manager, state| {
             // This closure runs only after complete retained traversals release widget borrows.
             let mut event_context = EventContext::new(window_manager);
-            event_dispatcher.dispatch_with_context(state, &mut event_context)
+            widget_event_dispatcher.dispatch_with_context(state, &mut event_context)
         });
     }
 
@@ -310,7 +313,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// A retained event port accepts one subscription and returns
     /// [`crate::SubscribeError::AlreadySubscribed`] for another.
     pub fn subscribe<E: crate::WidgetEvent>(&mut self, port: crate::WidgetEventPortHandle<E>, method: fn(&mut State, &E)) -> Result<(), crate::SubscribeError> {
-        self.event_dispatcher.subscribe(port, method)
+        self.widget_event_dispatcher.subscribe(port, method)
     }
 
     /// Subscribes the context's application state with one bound application value.
@@ -323,7 +326,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         context: BoundContext,
         method: fn(&mut State, &BoundContext, &E),
     ) -> Result<(), crate::SubscribeError> {
-        self.event_dispatcher.subscribe_with(port, context, method)
+        self.widget_event_dispatcher.subscribe_with(port, context, method)
     }
 
     /// Subscribes a state method that also needs safe context-owned UI mutation access.
@@ -339,7 +342,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     ) -> Result<(), crate::SubscribeError> {
         // Store the typed function pointer in the same context-owned dispatcher as state-only
         // subscriptions; only its invocation adapter differs.
-        self.event_dispatcher.subscribe_context(port, method)
+        self.widget_event_dispatcher.subscribe_context(port, method)
     }
 
     /// Subscribes a context-aware state method with one immutable bound application value.
@@ -353,7 +356,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         method: for<'a> fn(&mut State, &BoundContext, &mut EventContext<'a>, &E),
     ) -> Result<(), crate::SubscribeError> {
         // The dispatcher owns the bound value and preserves ordinary subscription ordering.
-        self.event_dispatcher.subscribe_context_with(port, context, method)
+        self.widget_event_dispatcher.subscribe_context_with(port, context, method)
     }
 }
 

@@ -28,23 +28,23 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-//! Input target selection, dispatch, and transient focus, hover, and capture lifecycle.
+//! Input target selection, routing, and transient focus, hover, and capture lifecycle.
 
 use super::*;
 
-/// Dispatcher-internal result of delivering one event to an already-selected node.
+/// Router-internal result of delivering one input event to an already-selected node.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub(crate) enum DispatchResult {
+pub(crate) enum RouteResult {
     /// The selected node declined the event, allowing ancestor-only bubbling.
     Ignored,
     /// The selected node consumed the event without acquiring pointer capture.
     Consumed,
-    /// The selected node consumed the event and requests dispatcher-owned pointer capture.
+    /// The selected node consumed the event and requests router-owned pointer capture.
     Captured,
 }
 
-impl DispatchResult {
-    /// Returns whether dispatch and ancestor bubbling should stop.
+impl RouteResult {
+    /// Returns whether routing and ancestor bubbling should stop.
     pub(crate) fn is_consumed(self) -> bool {
         matches!(self, Self::Consumed | Self::Captured)
     }
@@ -56,15 +56,15 @@ impl UiRuntime {
         // This is stateless dispatcher policy, so it is an associated function rather than a
         // method borrowing runtime state. Wheel input requires an explicit grab and a delta that
         // can represent movement; every other event kind is governed by target geometry, focus,
-        // capture, and the NO_INTERACT check in dispatch_widget_input.
+        // capture, and the NO_INTERACT check in route_widget_input.
         match event {
             UiInputEvent::Scroll { delta, .. } => opt.intersects(WidgetOption::GRAB_SCROLL) && (delta.x != 0 || delta.y != 0),
             _ => true,
         }
     }
 
-    /// Delivers one already-targeted event through common dispatcher interaction rules.
-    fn dispatch_widget_input(
+    /// Delivers one already-targeted event through common router interaction rules.
+    fn route_widget_input(
         &mut self,
         state: &NodeRuntime,
         rect: Recti,
@@ -72,25 +72,25 @@ impl UiRuntime {
         opt: WidgetOption,
         accepts_event: bool,
         event: &UiInputEvent,
-    ) -> DispatchResult {
+    ) -> RouteResult {
         let id = state.id();
         let captured = self.capture == Some(id);
         // Target selection may reach a geometrically matching node whose dynamic options or
         // surface policy declines this event. Such a node remains available for ancestor-only
         // bubbling.
         if opt.intersects(WidgetOption::NO_INTERACT) || !Self::options_accept_event(opt, event) || !accepts_event {
-            return DispatchResult::Ignored;
+            return RouteResult::Ignored;
         }
 
         if event.is_focus_input() {
             // Keyboard/text events have no meaningful rectangle. Deliver them only to the
-            // dispatcher-owned focus identity selected by an earlier pointer or programmatic
+            // router-owned focus identity selected by an earlier pointer or programmatic
             // transition.
             if self.focus != Some(id) {
-                return DispatchResult::Ignored;
+                return RouteResult::Ignored;
             }
             self.push_routed_event(id, event.clone());
-            return DispatchResult::Consumed;
+            return RouteResult::Consumed;
         }
 
         // Capture lets drag/release escape the original rectangle; all other pointer events still
@@ -101,24 +101,24 @@ impl UiRuntime {
                 // Press establishes focus/click state and asks routing to acquire pointer capture.
                 self.claim_pointer_focus(id, *button);
                 self.push_routed_event(id, event.clone());
-                DispatchResult::Captured
+                RouteResult::Captured
             }
             UiInputEvent::MouseDrag { .. } if captured || event_hits_rect => {
                 // An uncaptured drag can be consumed under the pointer but does not create capture.
                 self.push_routed_event(id, event.clone());
-                if captured { DispatchResult::Captured } else { DispatchResult::Consumed }
+                if captured { RouteResult::Captured } else { RouteResult::Consumed }
             }
             UiInputEvent::MouseUp { .. } if captured || event_hits_rect => {
                 // Routing releases capture after the recipient observes this event during update.
                 self.push_routed_event(id, event.clone());
-                DispatchResult::Consumed
+                RouteResult::Consumed
             }
             UiInputEvent::MouseMove { .. } | UiInputEvent::Scroll { .. } if event_hits_rect => {
                 // Hover and wheel delivery are hit-based and never acquire capture.
                 self.push_routed_event(id, event.clone());
-                DispatchResult::Consumed
+                RouteResult::Consumed
             }
-            _ => DispatchResult::Ignored,
+            _ => RouteResult::Ignored,
         }
     }
 
@@ -222,12 +222,12 @@ impl UiRuntime {
     }
 
     /// Applies runtime pointer-capture ownership from one routed event result.
-    pub(crate) fn update_pointer_capture(&mut self, owner: RuntimeNodeId, result: DispatchResult, event: &UiInputEvent, mouse_buttons: MouseButton) {
+    pub(crate) fn update_pointer_capture(&mut self, owner: RuntimeNodeId, result: RouteResult, event: &UiInputEvent, mouse_buttons: MouseButton) {
         if event.is_pointer_release() && mouse_buttons.is_empty() {
             // Normal release is not an invalidation: its event was delivered to the old owner, and
             // the following update exposes inactive state without swallowing a future gesture.
             self.capture = None;
-        } else if result == DispatchResult::Captured {
+        } else if result == RouteResult::Captured {
             self.acquire_pointer_capture(owner);
         } else if self.capture == Some(owner) && mouse_buttons.is_empty() {
             // Defensive cleanup covers a consumed event that leaves no held buttons even when it
@@ -244,7 +244,7 @@ impl UiRuntime {
         parent_transform: Transform,
         style: &Style,
         event: &UiInputEvent,
-    ) -> Option<(RuntimeNodeId, DispatchResult)> {
+    ) -> Option<(RuntimeNodeId, RouteResult)> {
         let pos = event.position()?;
         // Select exactly one target before any handler runs so ignored events cannot reveal a
         // covered sibling.
@@ -265,7 +265,7 @@ impl UiRuntime {
         style: &Style,
         event: &UiInputEvent,
         root_chrome_hit: bool,
-    ) -> Option<(RuntimeNodeId, DispatchResult)> {
+    ) -> Option<(RuntimeNodeId, RouteResult)> {
         let pos = event.position()?;
         // The window manager owns post-tree chrome geometry. When it reports a chrome hit, the
         // root wins before descendants; otherwise ordinary targeting starts inside the root body.
@@ -315,7 +315,7 @@ impl UiRuntime {
         self.pointer_hits_node(node, parent_transform, pos).then(|| node.id())
     }
 
-    /// Tests one node's own allocation using only dispatcher-owned geometry and options.
+    /// Tests one node's own allocation using only router-owned geometry and options.
     fn pointer_hits_node(&self, node: &Node, parent_transform: Transform, pos: Vec2i) -> bool {
         // NO_INTERACT makes only this node's own surface transparent; eligible descendants were
         // already considered by the caller.
@@ -339,7 +339,7 @@ impl UiRuntime {
         parent_transform: Transform,
         style: &Style,
         event: &UiInputEvent,
-    ) -> Option<(RuntimeNodeId, DispatchResult)> {
+    ) -> Option<(RuntimeNodeId, RouteResult)> {
         if current.id() == target {
             // The target was already selected geometrically; its result only controls handling.
             let result = self.route_input_event_to_node_only_ref(current, parent_transform, style, event);
@@ -368,14 +368,14 @@ impl UiRuntime {
     }
 
     /// Routes directly to one target during a single transform-carrying tree traversal.
-    fn route_input_event_to_target(&mut self, roots: &mut [Node], target: RuntimeNodeId, style: &Style, event: &UiInputEvent) -> DispatchResult {
+    fn route_input_event_to_target(&mut self, roots: &mut [Node], target: RuntimeNodeId, style: &Style, event: &UiInputEvent) -> RouteResult {
         // Roots are independent transform origins; stop as soon as the unique target is found.
         for root in roots {
             if let Some(result) = self.route_input_event_to_target_from(root, target, self.root_transform, style, event) {
                 return result;
             }
         }
-        DispatchResult::Ignored
+        RouteResult::Ignored
     }
 
     /// Descends toward one target while carrying the exact parent transform for each level.
@@ -388,7 +388,7 @@ impl UiRuntime {
         parent_transform: Transform,
         style: &Style,
         event: &UiInputEvent,
-    ) -> Option<DispatchResult> {
+    ) -> Option<RouteResult> {
         if current.id() == target {
             // Direct focus/capture delivery stops at the target and never bubbles.
             return Some(self.route_input_event_to_node_only_ref(current, parent_transform, style, event));
@@ -404,9 +404,9 @@ impl UiRuntime {
     }
 
     /// Routes an event to exactly one borrowed node without traversing descendants.
-    fn route_input_event_to_node_only_ref(&mut self, node: &mut Node, parent_transform: Transform, style: &Style, event: &UiInputEvent) -> DispatchResult {
+    fn route_input_event_to_node_only_ref(&mut self, node: &mut Node, parent_transform: Transform, style: &Style, event: &UiInputEvent) -> RouteResult {
         #[cfg(test)]
-        self.bump_metric(|metrics| metrics.routed_input_dispatches += 1);
+        self.bump_metric(|metrics| metrics.routed_input_routes += 1);
         // Resolve the same frame/content geometry used by update and paint before localizing the
         // selected event for the concrete widget or container handler.
         let framed = node_is_framed(node);
@@ -430,15 +430,15 @@ impl UiRuntime {
 
         match &mut node.data {
             NodeKind::Widget(widget) => {
-                // Leaf event-kind policy is completely dispatcher-owned; no Widget query widens
+                // Leaf event-kind policy is completely router-owned; no Widget query widens
                 // the public trait or permits a handler to influence geometric target selection.
                 let opt = widget
                     .widget
                     .try_borrow()
-                    .expect("retained widget invariant violated during input dispatch")
+                    .expect("retained widget invariant violated during input routing")
                     .widget
                     .effective_widget_opt();
-                self.dispatch_widget_input(&node.state, local_rect, local_clip, opt, true, &local_event)
+                self.route_widget_input(&node.state, local_rect, local_clip, opt, true, &local_event)
             }
             NodeKind::Container(container) => {
                 // An overloaded container surface may add a state-dependent filter after target
@@ -447,7 +447,7 @@ impl UiRuntime {
                 let opt = container.effective_widget_opt();
                 let captured_continuation = captured && matches!(&local_event, UiInputEvent::MouseDrag { .. } | UiInputEvent::MouseUp { .. });
                 let accepts_event = captured_continuation || container.accepts_event(&local_event);
-                self.dispatch_widget_input(&node.state, content_rect, content_clip, opt, accepts_event, &local_event)
+                self.route_widget_input(&node.state, content_rect, content_clip, opt, accepts_event, &local_event)
             }
         }
     }
