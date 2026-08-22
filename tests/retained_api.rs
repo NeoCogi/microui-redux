@@ -149,6 +149,25 @@ fn every_builtin_container_returns_a_typed_handle_and_completed_node() {
     assert!(!disclosure.is_alive());
 }
 
+/// Verifies that downstream code can construct and control a scrollbar without ScrollArea access.
+#[test]
+fn standalone_scrollbar_exposes_public_range_value_and_event_contracts() {
+    // Construct one vertical bar with a non-zero range entirely through retained public exports.
+    let (scrollbar, node) = Scrollbar::create(ScrollbarParameters::new(ScrollbarAxis::Vertical).range(40, 120, 15));
+    assert!(scrollbar.is_alive());
+    assert_eq!(scrollbar.offset(), Some(15));
+    assert_eq!(scrollbar.try_read(Scrollbar::axis), Some(ScrollbarAxis::Vertical));
+    let _changed = scrollbar.changed();
+
+    // Programmatic range changes clamp the retained value but do not require a composite owner.
+    scrollbar.set_lengths(40, 20).unwrap();
+    assert_eq!(scrollbar.offset(), Some(0));
+
+    // The returned node remains the sole strong runtime owner of the standalone widget.
+    drop(node);
+    assert!(!scrollbar.is_alive());
+}
+
 struct ExternalContainer {
     measure_calls: Cell<usize>,
     layout_calls: Cell<usize>,
