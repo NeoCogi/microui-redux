@@ -60,8 +60,6 @@ pub(crate) mod frame;
 mod input;
 pub use input::UiInputEvent;
 pub mod layout;
-mod scrollbar;
-pub use scrollbar::{Scrollbar, ScrollbarAxis, ScrollbarChanged, ScrollbarParameters};
 pub use layout::{AvailableSpace, Constraints, TrackSize};
 pub(crate) mod text_layout;
 pub use text_layout::TextWrap;
@@ -72,6 +70,7 @@ pub use widget::{
 };
 pub(crate) use widget::WidgetStorage;
 pub mod widgets;
+pub use widgets::{Scrollbar, ScrollbarAxis, ScrollbarChanged, ScrollbarParameters};
 
 mod children;
 pub use children::Children;

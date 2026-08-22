@@ -50,10 +50,10 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Pure one-axis scrollbar geometry.
+//! Standalone retained one-axis scrollbar widget and its shared thumb geometry.
 //!
-//! Widgets and containers still own their layout, state, and input policy. This module only keeps
-//! the track/thumb mapping in one place so paint, dragging, and track clicks cannot disagree.
+//! The widget owns range state, input, events, and paint while its parent remains responsible for
+//! allocating the track. Shared geometry keeps paint, dragging, and track clicks consistent.
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
@@ -195,25 +195,6 @@ impl ScrollbarGeometry {
         // content_offset = centered_thumb * maximum_content_offset / thumb_travel.
         centered.saturating_mul(self.max_offset) / self.thumb_travel
     }
-}
-
-/// Returns the scrollbar track rectangle just outside the container body on the selected axis.
-pub(crate) fn scrollbar_base(axis: ScrollbarAxis, body: Recti, scrollbar_size: i32) -> Recti {
-    // Start with the body so the cross-axis origin and extent remain identical.
-    let mut base = body;
-    match axis {
-        ScrollbarAxis::Vertical => {
-            // vertical_track_x = body_x + body_width.
-            base.x = body.x.saturating_add(body.width);
-            base.width = scrollbar_size;
-        }
-        ScrollbarAxis::Horizontal => {
-            // horizontal_track_y = body_y + body_height.
-            base.y = body.y.saturating_add(body.height);
-            base.height = scrollbar_size;
-        }
-    }
-    base
 }
 
 /// Returns the largest scroll offset needed to reveal all content.

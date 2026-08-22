@@ -32,7 +32,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use bitflags::bitflags;
 
-use crate::ui_node::scrollbar::{Scrollbar, ScrollbarAxis, ScrollbarParameters, scrollbar_base};
+use crate::ui_node::widgets::{Scrollbar, ScrollbarAxis, ScrollbarParameters};
 use crate::{
     ChildParticipation, Container, ContainerWidget, ControlColor, Dimensioni, FocusPolicy, MeasureCtx, Recti, TypedWidgetHandle, UiInputEvent, Vec2i, Widget,
     WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
@@ -40,11 +40,30 @@ use crate::{
 
 use super::{Children, ContainerLayoutCtx, Node};
 
+/// Returns the child allocation for one scrollbar adjacent to the resolved content body.
+fn scrollbar_track(axis: ScrollbarAxis, body: Recti, scrollbar_size: i32) -> Recti {
+    // Start with the body so the track preserves its cross-axis origin and extent.
+    let mut track = body;
+    match axis {
+        ScrollbarAxis::Vertical => {
+            // vertical_track_x = body_x + body_width.
+            track.x = body.x.saturating_add(body.width);
+            track.width = scrollbar_size;
+        }
+        ScrollbarAxis::Horizontal => {
+            // horizontal_track_y = body_y + body_height.
+            track.y = body.y.saturating_add(body.height);
+            track.height = scrollbar_size;
+        }
+    }
+    track
+}
+
 bitflags! {
     #[derive(Copy, Clone)]
     /// Options fixed when a retained scroll area is constructed.
     pub struct ScrollAreaOption : u32 {
-        /// Gives the scroll area a Style-owned outer border.
+        /// Gives the scroll area a Style-owned outer border and inset content area.
         const FRAME = 1024;
         /// Enables scrolling and scrollbars initially.
         const ENABLE_SCROLL = 32;
@@ -68,7 +87,7 @@ impl ScrollAreaParameters {
     ///
     /// The content fills at least the complete viewport, while either desired extent may remain
     /// larger and create overflow. Use explicit tracks inside the content container to express fixed
-    /// or flexible descendants; ScrollArea adds neither spacing nor additional child sizing policy.
+    /// or flexible descendants; ScrollArea adds no additional child sizing policy.
     pub fn new(opt: ScrollAreaOption, content: Node) -> Self {
         Self { content, opt }
     }
@@ -91,6 +110,23 @@ struct ScrollAreaGeometry {
     horizontal: Option<Recti>,
     /// Non-interactive gap between two visible scrollbar children.
     corner: Option<Recti>,
+}
+
+/// Insets a non-negative rectangle without allowing either axis to underflow.
+fn inset_rect(rect: Recti, amount: i32) -> Recti {
+    let amount = amount.max(0);
+    // inset_x/y = min(requested_inset, non_negative_axis_extent).
+    let inset_x = amount.min(rect.width.max(0));
+    let inset_y = amount.min(rect.height.max(0));
+    // inset_extent = leading_inset + trailing_inset = amount * 2.
+    let inset_extent = amount.saturating_mul(2);
+    // content_origin = rectangle_origin + clamped_inset.
+    let x = rect.x.saturating_add(inset_x);
+    let y = rect.y.saturating_add(inset_y);
+    // content_extent = max(rectangle_extent - inset_extent, 0).
+    let width = rect.width.saturating_sub(inset_extent).max(0);
+    let height = rect.height.saturating_sub(inset_extent).max(0);
+    Recti::new(x, y, width, height)
 }
 
 /// Returns the nearest non-negative offset that reveals one interval inside a viewport.
@@ -403,19 +439,29 @@ impl ScrollArea {
 }
 
 impl ContainerWidget for ScrollArea {
-    /// Measures the content's intrinsic extent without adding viewport-owned spacing.
+    /// Measures content through the surface and includes Style-owned viewport padding.
     fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: crate::Constraints) -> Dimensioni {
-        // Forward the complete width constraint to content. ScrollArea is a geometry-neutral
-        // viewport: scrollbars are responsive affordances, and content owns any desired spacing.
-        ctx.measure_child(Self::SURFACE, crate::Constraints::new(constraints.width, crate::AvailableSpace::Unbounded))
-            .unwrap_or_default()
+        // Scrollbars are responsive affordances and do not inflate intrinsic composite size.
+        let padding = ctx.style().padding.max(0);
+        // inset = leading_padding + trailing_padding = padding * 2.
+        let inset = padding.saturating_mul(2);
+        let content_width = match constraints.width {
+            crate::AvailableSpace::Bounded(width) => crate::AvailableSpace::bounded(width.saturating_sub(inset)),
+            crate::AvailableSpace::Unbounded => crate::AvailableSpace::Unbounded,
+        };
+        let content = ctx
+            .measure_child(Self::SURFACE, crate::Constraints::new(content_width, crate::AvailableSpace::Unbounded))
+            .unwrap_or_default();
+        // preferred_extent = content_extent + leading_padding + trailing_padding.
+        Dimensioni::new(content.width.saturating_add(inset), content.height.saturating_add(inset))
     }
 
-    /// Places flush content and any required scrollbars inside the complete local surface.
+    /// Places Style-padded content and any required scrollbars inside the local surface.
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
         // All committed summary geometry is parent-local; child scrollbar geometry passed to each
         // widget is normalized to that child's own local track by configure_bar.
         let surface = Recti::new(0, 0, rect.width.max(0), rect.height.max(0));
+        let padding = ctx.style().padding.max(0);
         let bar_size = ctx.style().scrollbar_size.max(0);
         let enabled = self.scrolling_enabled;
         let requested = Vec2i::new(ScrollArea::axis_offset(&self.horizontal), ScrollArea::axis_offset(&self.vertical));
@@ -441,9 +487,9 @@ impl ContainerWidget for ScrollArea {
                 surface.width.saturating_sub(vertical_width).max(0),
                 surface.height.saturating_sub(horizontal_height).max(0),
             );
-            // Content consumes the complete body. A viewport must not inherit the global control
-            // padding because its arbitrary content is responsible for intentional spacing.
-            let view = body;
+            // Inset content by the global Style padding while keeping scrollbar tracks adjacent to
+            // the complete body.
+            let view = inset_rect(body, padding);
             let preferred = ctx
                 .measure_child(
                     children,
@@ -481,8 +527,8 @@ impl ContainerWidget for ScrollArea {
         let (body, view, extent) = resolved.expect("ScrollArea scrollbar presence must converge across four possible states");
         let vertical_width = if has_vertical { bar_size.min(surface.width) } else { 0 };
         let horizontal_height = if has_horizontal { bar_size.min(surface.height) } else { 0 };
-        let vertical_track = scrollbar_base(ScrollbarAxis::Vertical, body, vertical_width);
-        let horizontal_track = scrollbar_base(ScrollbarAxis::Horizontal, body, horizontal_height);
+        let vertical_track = scrollbar_track(ScrollbarAxis::Vertical, body, vertical_width);
+        let horizontal_track = scrollbar_track(ScrollbarAxis::Horizontal, body, horizontal_height);
         let vertical_visible = has_vertical && vertical_track.width > 0 && vertical_track.height > 0;
         let horizontal_visible = has_horizontal && horizontal_track.width > 0 && horizontal_track.height > 0;
 
@@ -835,11 +881,10 @@ mod tests {
         assert_eq!(runtime.debug_capture_target(), None);
     }
 
-    /// Verifies that global control padding does not inset content and perpendicular overflow converges.
+    /// Verifies Style padding and perpendicular scrollbar overflow converge together.
     #[test]
-    fn style_padding_does_not_inset_content_and_mutually_induced_bars_converge() {
-        // Nonzero global padding belongs to controls rendered inside the viewport, not to the
-        // viewport itself, so an eighty-pixel child still receives the complete body.
+    fn padding_and_mutually_induced_bars_converge_from_logical_content_extent() {
+        // Ten pixels of padding on both sides leaves an eighty-pixel viewport for the child.
         let surface = Recti::new(0, 0, 100, 100);
         let fits = laid_out_geometry(
             Dimensioni::new(80, 80),
@@ -852,7 +897,7 @@ mod tests {
             Vec2i::default(),
         );
         assert_eq!((fits.surface.width, fits.surface.height), (100, 100));
-        assert_eq!((fits.viewport.width, fits.viewport.height), (100, 100));
+        assert_eq!((fits.viewport.width, fits.viewport.height), (80, 80));
         assert!(fits.vertical.is_none() && fits.horizontal.is_none());
 
         // Vertical overflow removes horizontal space and therefore induces the perpendicular bar;
@@ -996,7 +1041,10 @@ mod tests {
         assert_eq!((allocation_before.x, allocation_before.y), (0, 0));
         assert_eq!(
             (screen_before.x, screen_before.y),
-            (outer.x + style.frame_border_width, outer.y + style.frame_border_width)
+            (
+                outer.x + style.frame_border_width + style.padding,
+                outer.y + style.frame_border_width + style.padding
+            )
         );
 
         scroll.try_update(|state| state.set_offset(Vec2i::new(0, 12))).unwrap();
