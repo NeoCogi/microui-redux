@@ -272,6 +272,38 @@ impl Node {
         Self::from_kind(NodeKind::Container(container))
     }
 
+    /// Installs a cascading style override before this node is mounted.
+    ///
+    /// On a leaf the override affects only that widget. On a container the style is also inherited
+    /// by every descendant until another descendant supplies its own override.
+    pub fn with_style_override(mut self, style_override: Style) -> Self {
+        self.set_style_override(style_override);
+        self
+    }
+
+    /// Replaces this unmounted node's cascading style override.
+    ///
+    /// Once ownership has moved into a retained tree, use the node's [`TypedWidgetHandle`] to
+    /// change the override.
+    pub fn set_style_override(&mut self, style_override: Style) {
+        self.data.set_style_override(Some(style_override));
+    }
+
+    /// Clears this unmounted node's override so it inherits its parent style again.
+    pub fn clear_style_override(&mut self) {
+        self.data.set_style_override(None);
+    }
+
+    /// Returns this node's local style override, if one is installed.
+    pub fn style_override(&self) -> Option<Style> {
+        self.data.style_override()
+    }
+
+    /// Resolves this node's local override against the inherited style.
+    pub(crate) fn resolve_style(&self, inherited: &Style) -> Style {
+        self.data.resolve_style(inherited)
+    }
+
     fn from_kind(kind: NodeKind) -> Self {
         // Identity is allocated once at the final owning boundary and survives every subsequent move
         // of the non-Clone Node through unmounted construction and retained insertion.
@@ -321,6 +353,8 @@ impl Node {
 
     /// Measures and reports whether the retained result satisfied this exact query.
     pub(crate) fn measure_with_cache_status(&mut self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> (Dimensioni, bool) {
+        let style = self.resolve_style(style);
+        let style = &style;
         let style_key = MeasurementStyleKey::new(style);
         if let Some(cached) = self.state.measurement.lookup(constraints, style_key, atlas) {
             return (cached, true);
@@ -463,6 +497,31 @@ pub(crate) enum NodeKind {
 }
 
 impl NodeKind {
+    pub(crate) fn style_override(&self) -> Option<Style> {
+        match self {
+            Self::Widget(node) => node.widget.try_borrow().unwrap_or_else(|_| widget_borrow_conflict()).style_override(),
+            Self::Container(container) => container.style_override(),
+        }
+    }
+
+    pub(crate) fn set_style_override(&mut self, style_override: Option<Style>) {
+        match self {
+            Self::Widget(node) => node
+                .widget
+                .try_borrow_mut()
+                .unwrap_or_else(|_| widget_borrow_conflict())
+                .set_style_override(style_override),
+            Self::Container(container) => container.set_style_override(style_override),
+        }
+    }
+
+    pub(crate) fn resolve_style(&self, inherited: &Style) -> Style {
+        match self {
+            Self::Widget(node) => node.widget.try_borrow().unwrap_or_else(|_| widget_borrow_conflict()).resolve_style(inherited),
+            Self::Container(container) => container.resolve_style(inherited),
+        }
+    }
+
     /// Runs a read-only operation against the common widget phase object.
     pub(crate) fn with_widget<R>(&self, f: impl FnOnce(&dyn Widget) -> R) -> R {
         match self {

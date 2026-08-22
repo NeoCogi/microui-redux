@@ -9,6 +9,7 @@
 - **Node**: the non-cloneable owner of one concrete leaf or container runtime. Leaf storage is erased to `Rc<RefCell<dyn LeafWidget>>`; container storage erases to `Rc<RefCell<dyn ContainerWidget>>`. Applications and coordinating widgets may retain a weak `TypedWidgetHandle<W>` without affecting node lifetime. A `Node` receives private process-unique identity when constructed and transfers exactly once into a root or opaque `Children` collection; attached nodes cannot be detached or reparented.
 - **Rendering**: widgets obtain a local `Painter` from `WidgetPaintCtx`; retained traversal owns the internal display list, and `Renderer` executes it through one exclusively borrowed `RendererBackend::Frame`. The portable target supports drawables up to 8192x8192 and geometry up to four maximum drawable spans beyond the viewport; see the [render subsystem guide](RENDER.md#supported-coordinate-domain) for the complete coordinate contract and integration API.
 - **Typography**: atlases can bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while text-bearing `*Parameters` select a per-widget font with `.font(...)`.
+- **Style overrides**: every retained node can supply a `Style` in place of its inherited style. A container passes that style to its descendants until another node replaces it. The same effective value drives measurement, placement, input localization, update, and paint.
 
 The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained concepts such as `Node`, `Children`, `Container`, `Linear`, `Disclosure`, typed widget handles, and `Context`. Low-level rendering lives under `microui_redux::render`, and atlas construction lives under `microui_redux::atlas::builder`.
 
@@ -24,6 +25,33 @@ Applications call `Context::create_window(...)`, `Context::create_dialog(...)`, 
 `TypedWidgetHandle<W>` values, commit contexts without application callbacks through
 `Context::update_ui(...)` or subscriber-driven contexts through `Context::update_ui_state(...)`,
 and paint with `Context::frame(FrameInfo).render_ui()?`.
+
+Local styles can be installed while building a node or changed later through its typed widget
+handle:
+
+```rust
+let mut section_style = *ctx.style();
+section_style.spacing = 8;
+section_style.padding = 6;
+
+let (submit, submit_node) = Button::create(ButtonParameters::new("Submit"));
+let (_, section) = Linear::create(LinearParameters::vertical([
+    LinearItem::content(submit_node),
+]));
+let section = section.with_style_override(section_style);
+
+// The button inherits section_style. After mounting, it can replace that style through its handle.
+let mut submit_style = section_style;
+submit_style.colors[ControlColor::Button as usize] = color(55, 90, 160, 255);
+submit.try_set_style_override(submit_style);
+submit.try_clear_style_override();
+```
+
+An override is a complete `Style`, so derive it from `*Context::style()` or from the intended
+container style when only a few fields need to differ. As with other layout-affecting handle
+mutations, call `Context::update_ui` before painting. Custom widgets can inspect the effective
+value through `MeasureCtx::style`, `ContainerLayoutCtx::style`, `WidgetUpdateCtx::style`, and
+`WidgetPaintCtx::style`.
 
 Root creation consumes one persistent application `Node` and returns a non-owning `RootHandle`.
 Roots cannot be replaced while retaining their identity: mutate descendants through a container

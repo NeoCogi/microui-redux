@@ -44,6 +44,8 @@ impl UiRuntime {
     ) {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.paints += 1);
+        let style = node.resolve_style(style);
+        let style = &style;
         // Resolve the same outer/content geometry used for input and update before recording paint.
         let framed = node_is_framed(node);
         let screen_rect = parent_transform.resolve(node.state.layout.allocation);

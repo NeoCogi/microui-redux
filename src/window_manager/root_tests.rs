@@ -1710,6 +1710,20 @@ fn chrome_geometry_exposes_one_body_and_auto_size_tracks_content() {
 }
 
 #[test]
+fn root_container_style_override_drives_window_chrome_geometry() {
+    let mut ctx = context();
+    let root = ctx.create_window("styled", rect(10, 10, 180, 120), empty_content());
+    let mut style = *ctx.style();
+    style.title_height = 41;
+    root.widget().try_set_style_override(style).unwrap();
+
+    ctx.update_ui(Dimensioni::new(320, 240));
+
+    let title = ctx.debug_root_chrome(root.id()).unwrap().0.unwrap();
+    assert_eq!(title.height, 41);
+}
+
+#[test]
 fn auto_height_preserves_popup_width_and_stretches_column_items() {
     let mut item_ids = Vec::new();
     let items = ["Apple", "Banana", "Cherry", "Date"]

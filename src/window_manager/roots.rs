@@ -646,9 +646,14 @@ impl WindowManager {
                 continue;
             }
             entry.tree.paint(&mut self.display_list, &self.style, atlas.clone());
+            let root_style = entry
+                .root_widget
+                .try_style_override()
+                .expect("registered root style unavailable during overlay paint")
+                .unwrap_or(self.style);
             entry
                 .root_widget
-                .try_read(|state| record_root_overlay(&mut self.display_list, viewport, state, &self.style, atlas))
+                .try_read(|state| record_root_overlay(&mut self.display_list, viewport, state, &root_style, atlas))
                 .expect("registered root state unavailable during overlay paint");
         }
     }
@@ -768,9 +773,10 @@ impl WindowManager {
     #[cfg(test)]
     pub(crate) fn debug_root_body(&self, root: RootId, atlas: &crate::AtlasHandle) -> Option<Recti> {
         let entry = self.roots.iter().find(|entry| entry.id == root)?;
+        let style = entry.root_widget.try_style_override()?.unwrap_or(self.style);
         entry
             .root_widget
-            .try_read(|state| root_chrome_geometry(state.rect(), Dimensioni::default(), state.name(), state.options(), &self.style, atlas).body)
+            .try_read(|state| root_chrome_geometry(state.rect(), Dimensioni::default(), state.name(), state.options(), &style, atlas).body)
     }
 
     #[cfg(test)]
@@ -803,8 +809,9 @@ impl WindowManager {
     #[cfg(test)]
     pub(crate) fn debug_root_chrome(&self, root: RootId, atlas: &crate::AtlasHandle) -> Option<(Option<Recti>, Option<Recti>, Option<Recti>)> {
         let entry = self.roots.iter().find(|entry| entry.id == root)?;
+        let style = entry.root_widget.try_style_override()?.unwrap_or(self.style);
         entry.root_widget.try_read(|state| {
-            let geometry = root_chrome_geometry(state.rect(), Dimensioni::default(), state.name(), state.options(), &self.style, atlas);
+            let geometry = root_chrome_geometry(state.rect(), Dimensioni::default(), state.name(), state.options(), &style, atlas);
             (geometry.title, geometry.close, geometry.resize)
         })
     }

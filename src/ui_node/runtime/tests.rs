@@ -55,6 +55,45 @@ struct Probe {
     opt: WidgetOption,
 }
 
+#[derive(Default)]
+struct StyleObservations {
+    measure: Cell<(i32, i32)>,
+    update: Cell<(i32, i32)>,
+    paint: Cell<(i32, i32)>,
+}
+
+struct StyleProbe {
+    observations: Rc<StyleObservations>,
+    opt: WidgetOption,
+}
+
+impl StyleProbe {
+    fn observe(style: &Style) -> (i32, i32) {
+        (style.padding, style.spacing)
+    }
+}
+
+impl Widget for StyleProbe {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.opt
+    }
+
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
+        self.observations.update.set(Self::observe(ctx.style()));
+    }
+
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
+        self.observations.paint.set(Self::observe(ctx.style()));
+    }
+}
+
+impl crate::LeafWidget for StyleProbe {
+    fn measure(&self, style: &Style, _atlas: &crate::AtlasHandle, _constraints: Constraints) -> Dimensioni {
+        self.observations.measure.set(Self::observe(style));
+        Dimensioni::new(10, 10)
+    }
+}
+
 impl Probe {
     fn new(name: &'static str, log: Rc<RefCell<Vec<String>>>) -> (Self, Rc<ProbeCounts>) {
         let counts = Rc::new(ProbeCounts::default());
@@ -573,6 +612,57 @@ fn common_phases_are_parent_first_and_siblings_are_forward() {
     assert_eq!(log.borrow().as_slice(), expected.as_slice());
     assert_eq!((first_counts.updates.get(), first_counts.paints.get()), (1, 1));
     assert_eq!((second_counts.updates.get(), second_counts.paints.get()), (1, 1));
+}
+
+#[test]
+fn container_style_cascades_and_child_override_replaces_it_in_every_phase() {
+    let observations = Rc::new(StyleObservations::default());
+    let child = StyleProbe {
+        observations: observations.clone(),
+        opt: WidgetOption::NONE,
+    };
+    let (child, child_node) = Node::typed_widget(child);
+    let (container, _) = TraversalContainer::new([child_node], Rc::new(RefCell::new(Vec::new())));
+    let container_style = Style {
+        padding: 17,
+        spacing: 19,
+        ..Style::default()
+    };
+    let mut root = Node::container(container).with_style_override(container_style);
+
+    let style = Style {
+        padding: 3,
+        spacing: 5,
+        ..Style::default()
+    };
+    let atlas = test_atlas();
+    let mut runtime = UiRuntime::new();
+    runtime.begin_update();
+    layout_root(&mut runtime, &mut root, &style, atlas.clone());
+    runtime.update_tree_root(&mut root, &style, atlas.clone(), empty_input());
+    runtime.paint_tree_root(&mut root, &mut DisplayList::default(), &style, atlas.clone());
+
+    assert_eq!(observations.measure.get(), (17, 19));
+    assert_eq!(observations.update.get(), (17, 19));
+    assert_eq!(observations.paint.get(), (17, 19));
+
+    let child_style = Style {
+        padding: 29,
+        spacing: 31,
+        ..Style::default()
+    };
+    child.try_set_style_override(child_style).unwrap();
+    layout_root(&mut runtime, &mut root, &style, atlas.clone());
+    assert_eq!(observations.measure.get(), (29, 31));
+    assert_eq!(child.try_style_override().flatten().unwrap().spacing, 31);
+
+    child.try_clear_style_override().unwrap();
+    layout_root(&mut runtime, &mut root, &style, atlas);
+    assert_eq!(
+        observations.measure.get(),
+        (17, 19),
+        "clearing a child override must reveal its container style"
+    );
 }
 
 #[test]

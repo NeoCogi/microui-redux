@@ -275,8 +275,8 @@ impl<'a> WidgetUpdateCtx<'a> {
         self.key_codes
     }
 
-    /// Returns the active style for built-in update logic.
-    pub(crate) fn style(&self) -> &Style {
+    /// Returns this widget's resolved style for update logic.
+    pub fn style(&self) -> &Style {
         self.common.style
     }
 
@@ -376,8 +376,8 @@ impl<'a> WidgetPaintCtx<'a> {
         Painter::for_widget(&mut *self.display_list, screen_content_bounds, screen_clip)
     }
 
-    /// Returns the active style.
-    pub(crate) fn style(&self) -> &Style {
+    /// Returns this widget's resolved style.
+    pub fn style(&self) -> &Style {
         self.common.style
     }
 

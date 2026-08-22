@@ -71,16 +71,34 @@ pub use super::widget_context::{WidgetPaintCtx, WidgetUpdateCtx};
 /// traversal later consumes it and invalidates node-local caches on the recursive call stack.
 pub(crate) struct WidgetStorage<W: ?Sized> {
     measurement_dirty: bool,
+    style_override: Option<Style>,
     pub(crate) widget: W,
 }
 
 impl<W> WidgetStorage<W> {
     pub(crate) fn new(widget: W) -> Self {
-        Self { measurement_dirty: false, widget }
+        Self {
+            measurement_dirty: false,
+            style_override: None,
+            widget,
+        }
     }
 }
 
 impl<W: ?Sized> WidgetStorage<W> {
+    pub(crate) fn style_override(&self) -> Option<Style> {
+        self.style_override
+    }
+
+    pub(crate) fn set_style_override(&mut self, style_override: Option<Style>) {
+        self.style_override = style_override;
+        self.mark_measurement_dirty();
+    }
+
+    pub(crate) fn resolve_style(&self, inherited: &Style) -> Style {
+        self.style_override.unwrap_or(*inherited)
+    }
+
     pub(crate) fn mark_measurement_dirty(&mut self) {
         self.measurement_dirty = true;
     }
@@ -224,6 +242,35 @@ impl<W: Widget + 'static> TypedWidgetHandle<W> {
         let result = f(&mut widget.widget, input);
         widget.mark_measurement_dirty();
         Ok(result)
+    }
+
+    /// Returns this widget's local cascading style override.
+    ///
+    /// The outer [`Option`] reports whether the retained widget is alive and available; the inner
+    /// value is `None` when the widget currently inherits its complete parent style.
+    pub fn try_style_override(&self) -> Option<Option<Style>> {
+        let widget = self.widget.upgrade()?;
+        let widget = widget.try_borrow().ok()?;
+        Some(widget.style_override())
+    }
+
+    /// Installs a local style override when the retained widget is alive and available.
+    ///
+    /// Container overrides cascade to descendants. A descendant's own override replaces the
+    /// inherited style for that descendant and its subtree.
+    pub fn try_set_style_override(&self, style_override: Style) -> Option<()> {
+        let widget = self.widget.upgrade()?;
+        let mut widget = widget.try_borrow_mut().ok()?;
+        widget.set_style_override(Some(style_override));
+        Some(())
+    }
+
+    /// Clears the local override so this widget inherits its complete parent style again.
+    pub fn try_clear_style_override(&self) -> Option<()> {
+        let widget = self.widget.upgrade()?;
+        let mut widget = widget.try_borrow_mut().ok()?;
+        widget.set_style_override(None);
+        Some(())
     }
 
     /// Mutates derived or interaction state known not to affect preferred measurement.

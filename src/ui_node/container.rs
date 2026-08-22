@@ -222,6 +222,24 @@ impl Container {
         f(&mut widget.widget)
     }
 
+    pub(crate) fn style_override(&self) -> Option<Style> {
+        self.widget.try_borrow().unwrap_or_else(|_| typed_container_borrow_conflict()).style_override()
+    }
+
+    pub(crate) fn set_style_override(&mut self, style_override: Option<Style>) {
+        self.widget
+            .try_borrow_mut()
+            .unwrap_or_else(|_| typed_container_borrow_conflict())
+            .set_style_override(style_override);
+    }
+
+    pub(crate) fn resolve_style(&self, inherited: &Style) -> Style {
+        self.widget
+            .try_borrow()
+            .unwrap_or_else(|_| typed_container_borrow_conflict())
+            .resolve_style(inherited)
+    }
+
     pub(crate) fn is_measurement_dirty(&self) -> bool {
         self.widget
             .try_borrow()
