@@ -337,6 +337,13 @@ impl<'a> WidgetPaintCtx<'a> {
         self.common.content_rect
     }
 
+    /// Returns the traversal-derived effective clip in widget-local coordinates.
+    pub fn local_clip(&self) -> Recti {
+        // Translate the inherited screen clip through the widget's committed content origin without
+        // widening it. Scrolled content can therefore cull paint work in stable local coordinates.
+        self.common.local_clip()
+    }
+
     /// Returns whether the pointer is currently over this widget.
     pub fn hovered(&self) -> bool {
         self.common.hovered

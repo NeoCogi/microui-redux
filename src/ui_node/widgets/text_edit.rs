@@ -332,12 +332,6 @@ pub(crate) fn cursor_from_text_x(buf: &str, target_x: i32, font: FontId, atlas: 
     buf.len()
 }
 
-/// Clamps a scroll offset against the current maximum scroll range.
-pub(crate) fn clamp_scroll(value: i32, max_value: i32) -> i32 {
-    // scroll_offset = clamp(requested_offset, 0, maximum_offset).
-    if max_value <= 0 { 0 } else { value.clamp(0, max_value) }
-}
-
 #[cfg(test)]
 mod tests {
     //! Tests for UTF-8 safe text editing primitives.

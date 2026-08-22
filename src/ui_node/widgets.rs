@@ -88,7 +88,7 @@ pub use list_box::{ListBox, ListBoxBuilder, ListBoxParameters, ListBoxSubmitted}
 pub use list_item::{ListItem, ListItemBuilder, ListItemParameters, ListItemSubmitted};
 pub use number::{Number, NumberBuilder, NumberChanged, NumberParameters};
 pub use slider::{Slider, SliderBuilder, SliderChanged, SliderParameters};
-pub use text_area::{TextArea, TextAreaBuilder, TextAreaChanged, TextAreaParameters, TextAreaSubmitted};
+pub use text_area::{TextArea, TextAreaChanged, TextAreaParameters, TextAreaSubmitted};
 pub use text_block::{TextBlock, TextBlockBuilder, TextBlockParameters};
 pub use textbox::{Textbox, TextboxBuilder, TextboxChanged, TextboxParameters, TextboxSubmitted};
 

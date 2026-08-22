@@ -204,7 +204,13 @@ fn convenience_constructors_store_explicit_outer_frame_policy() {
     assert!(has_option(&button, WidgetOption::FRAME));
     assert!(has_option(&combo, WidgetOption::FRAME));
     assert!(has_option(&textbox, WidgetOption::FRAME));
-    assert!(has_option(&text_area, WidgetOption::FRAME));
+    assert!(!has_option(&text_area, WidgetOption::FRAME));
+    assert!(
+        _text_area_node
+            .data
+            .with_widget(|widget| widget.effective_widget_opt().intersects(WidgetOption::FRAME)),
+        "TextArea framing belongs to its returned ScrollArea node"
+    );
     assert!(has_option(&slider, WidgetOption::FRAME));
     assert!(has_option(&number, WidgetOption::FRAME));
     assert!(has_option(&swatch, WidgetOption::FRAME));

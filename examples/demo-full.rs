@@ -1301,12 +1301,13 @@ impl State {
         let bg_slider_states = bg_slider_pairs.each_ref().map(|(state, _)| state.clone());
         let bg_slider_changed = bg_slider_pairs.each_ref().map(|(handle, _)| handle.changed());
         let bg_sliders = bg_slider_pairs.map(|(_, runtime)| runtime);
-        let text_area = retained_leaf::<TextAreaBuilder>(
+        let text_area = TextArea::create(
             TextAreaParameters::new(
                 "This is a multi-line TextArea.\nYou can type, scroll, and resize the window.\n\nTry adding more lines to see the scrollbars.",
             )
             .wrap(TextWrap::Word),
-        );
+        )
+        .1;
         let (submit_buf_state, submit_buf) = stateful_leaf::<TextboxBuilder>(TextboxParameters::new("").font(FontRole::Mono.into()));
         let submit_buf_submitted = submit_buf_state.submitted();
         let (log_text_state, log_text) = stateful_leaf::<TextBlockBuilder>(TextBlockParameters::new("").font(FontRole::Mono.into()));
