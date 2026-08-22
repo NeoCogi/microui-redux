@@ -830,6 +830,7 @@ fn widget_focus_policy_is_authoritative_after_routing_cleanup() {
     );
 }
 
+/// Verifies that pointer-only capture and persistent keyboard focus can belong to sibling widgets.
 #[test]
 fn focus_preserving_pointer_target_captures_without_replacing_keyboard_focus() {
     // Overlap two children so reverse paint-order targeting selects the second child while the

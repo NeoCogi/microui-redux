@@ -733,6 +733,7 @@ mod tests {
         }
     }
 
+    /// Verifies independent changed and submitted snapshots from the editable content leaf.
     #[test]
     fn text_area_dispatches_independent_change_and_submission_events() {
         // Directly exercise the inner leaf because scrolling composition is orthogonal to event
@@ -755,6 +756,7 @@ mod tests {
         );
     }
 
+    /// Verifies the five-node composition and nested typed-handle lifetime.
     #[test]
     fn text_area_create_returns_nested_editor_handle_and_scroll_area_node() {
         // The outer node owns ScrollArea, its transform surface and two bars, plus exactly one
@@ -769,6 +771,7 @@ mod tests {
         assert!(!text_area.is_alive());
     }
 
+    /// Verifies that programmatic semantic and scroll mutations do not emit user events.
     #[test]
     fn programmatic_text_cursor_and_scroll_setters_are_silent() {
         // Subscribe through the nested editor while applying semantic and parent-scroll mutations.
@@ -783,6 +786,7 @@ mod tests {
         assert_eq!(text_area.scroll().map(|offset| (offset.x, offset.y)), Some((0, 0)));
     }
 
+    /// Verifies that a real scrollbar capture gesture preserves TextArea keyboard focus.
     #[test]
     fn scrollbar_press_preserves_text_area_keyboard_focus() {
         // Compose enough narrow lines to activate only the vertical scrollbar in a predictable
@@ -859,6 +863,7 @@ mod tests {
         assert_eq!(text_area.text().map(|text| text.len()), Some(document.len() + 1));
     }
 
+    /// Verifies ancestor-only wheel bubbling from editable content to its ScrollArea.
     #[test]
     fn wheel_input_bubbles_from_text_content_to_scroll_area() {
         // Build vertical overflow while leaving TextArea itself free of GRAB_SCROLL so the routed
@@ -896,6 +901,7 @@ mod tests {
         assert_eq!(text_area.scroll().map(|offset| (offset.x, offset.y)), Some((0, 12)));
     }
 
+    /// Verifies that a typed cursor mutation requests parent-owned caret reveal.
     #[test]
     fn programmatic_cursor_reveal_scrolls_the_composed_viewport() {
         // A narrow multiline document overflows vertically without requiring a horizontal bar.

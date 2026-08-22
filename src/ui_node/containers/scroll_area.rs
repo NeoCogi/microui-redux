@@ -720,6 +720,7 @@ mod tests {
         assert!(!scroll.is_alive());
     }
 
+    /// Verifies that intrinsic content smaller than the viewport still owns its blank interaction area.
     #[test]
     fn short_content_fills_the_complete_scroll_viewport() {
         // Retain the child identity so the committed screen allocation can verify both filled axes.
@@ -750,6 +751,7 @@ mod tests {
         );
     }
 
+    /// Verifies nearest-edge reveal behavior on both axes of an overflowing viewport.
     #[test]
     fn scroll_rect_into_view_reveals_nearest_content_edges() {
         // Overflow on both axes reserves two ten-pixel bars and leaves a 90-by-90 content viewport.
