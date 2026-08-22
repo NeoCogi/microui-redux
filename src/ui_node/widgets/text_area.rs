@@ -860,6 +860,43 @@ mod tests {
     }
 
     #[test]
+    fn wheel_input_bubbles_from_text_content_to_scroll_area() {
+        // Build vertical overflow while leaving TextArea itself free of GRAB_SCROLL so the routed
+        // wheel event must follow ancestor-only bubbling to its containing ScrollArea.
+        let document = (0..20).map(|index| format!("line {index}")).collect::<Vec<_>>().join("\n");
+        let (text_area, mut root) = TextArea::create(TextAreaParameters::new(document).scroll_options(ScrollAreaOption::ENABLE_SCROLL));
+        let style = Style {
+            padding: 0,
+            scrollbar_size: 10,
+            ..Style::default()
+        };
+        let viewport = Recti::new(0, 0, 100, 60);
+        let atlas = test_atlas();
+        let mut runtime = UiRuntime::new();
+        runtime.begin_update();
+        runtime.layout_tree_root(&mut root, &style, atlas.clone(), viewport, UNCLIPPED_RECT);
+
+        // Seed a pointer position over editable content, then route one wheel transition through the
+        // ordinary deepest-target and ancestor-bubbling path.
+        let mut input = Input::default();
+        input.mousemove(1, 1);
+        let _ = input.pop_event().expect("pointer seed must be queued");
+        input.scroll(0, 12);
+        let wheel = input.pop_event().expect("wheel input must be queued");
+        let wheel_state = input.snapshot();
+        runtime.begin_input_event(true, &wheel);
+        let (_, result) = runtime
+            .route_input_event_to_node_ref(&mut root, &style, &wheel)
+            .expect("wheel input over TextArea must find its composed target path");
+        assert!(result.is_consumed(), "ScrollArea must consume a wheel delta that changes its range");
+        runtime.update_tree_root(&mut root, &style, atlas.clone(), wheel_state);
+        runtime.layout_tree_root(&mut root, &style, atlas, viewport, UNCLIPPED_RECT);
+
+        // The nested semantic handle observes the offset owned and changed by ScrollArea.
+        assert_eq!(text_area.scroll().map(|offset| (offset.x, offset.y)), Some((0, 12)));
+    }
+
+    #[test]
     fn programmatic_cursor_reveal_scrolls_the_composed_viewport() {
         // A narrow multiline document overflows vertically without requiring a horizontal bar.
         let document = (0..20).map(|index| format!("line {index}"));
