@@ -790,11 +790,11 @@ mod tests {
     #[test]
     fn scrollbar_press_preserves_text_area_keyboard_focus() {
         // Compose enough narrow lines to activate only the vertical scrollbar in a predictable
-        // unframed, zero-padding viewport.
+        // unframed viewport. Nonzero global control padding must not become a TextArea margin.
         let document = (0..20).map(|index| format!("line {index}")).collect::<Vec<_>>().join("\n");
         let (text_area, mut root) = TextArea::create(TextAreaParameters::new(document.clone()).scroll_options(ScrollAreaOption::ENABLE_SCROLL));
         let style = Style {
-            padding: 0,
+            padding: 7,
             scrollbar_size: 10,
             ..Style::default()
         };
@@ -805,7 +805,8 @@ mod tests {
         runtime.begin_update();
         runtime.layout_tree_root(&mut root, &style, atlas.clone(), viewport, UNCLIPPED_RECT);
 
-        // Focus the text content near its first line and complete that captured press gesture.
+        // Focus at the viewport's first pixel. This reaches the flush editor despite the style's
+        // nonzero control padding, then completes that captured press gesture.
         input.mousedown(1, 1, MouseButton::LEFT);
         let editor_down = input.pop_event().unwrap();
         let editor_down_state = input.snapshot();
