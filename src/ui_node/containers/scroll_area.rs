@@ -66,9 +66,9 @@ impl WidgetParameters for ScrollAreaParameters {}
 impl ScrollAreaParameters {
     /// Creates a scroll area that owns one ordinary content node.
     ///
-    /// The content fills at least the viewport width, may remain wider when its desired width
-    /// overflows, and keeps its desired height. Use explicit tracks inside the content container to
-    /// express fixed or flexible descendants; ScrollArea adds no policy to the content node.
+    /// The content fills at least the complete viewport, while either desired extent may remain
+    /// larger and create overflow. Use explicit tracks inside the content container to express fixed
+    /// or flexible descendants; ScrollArea adds no additional child sizing policy.
     pub fn new(opt: ScrollAreaOption, content: Node) -> Self {
         Self { content, opt }
     }
@@ -83,6 +83,8 @@ struct ScrollAreaGeometry {
     offset: Vec2i,
     /// Largest committed offset on each axis.
     max_offset: Vec2i,
+    /// Content-local viewport extent used to resolve scroll-into-view requests.
+    viewport: Dimensioni,
     /// Parent-local allocation of the vertical scrollbar child.
     vertical: Option<Recti>,
     /// Parent-local allocation of the horizontal scrollbar child.
@@ -108,6 +110,33 @@ fn inset_rect(rect: Recti, amount: i32) -> Recti {
     Recti::new(x, y, width, height)
 }
 
+/// Returns the nearest non-negative offset that reveals one interval inside a viewport.
+fn offset_to_reveal_interval(offset: i32, viewport_len: i32, interval_start: i32, interval_len: i32) -> i32 {
+    // A zero-size viewport cannot reveal content. Preserve the existing request so a later layout
+    // with usable geometry remains authoritative.
+    if viewport_len <= 0 {
+        return offset.max(0);
+    }
+
+    // Normalize the requested interval before comparing it with the currently visible range.
+    let start = interval_start.max(0);
+    let end = start.saturating_add(interval_len.max(0));
+    let visible_start = offset.max(0);
+    let visible_end = visible_start.saturating_add(viewport_len);
+
+    if start < visible_start {
+        // Reveal content before the viewport by aligning its leading edge.
+        start
+    } else if end > visible_end {
+        // Reveal content after the viewport by aligning its trailing edge. Do not clamp against the
+        // last committed content range because an editor may have expanded before the next layout.
+        end.saturating_sub(viewport_len).max(0)
+    } else {
+        // Keep the current offset when the complete requested interval is already visible.
+        visible_start
+    }
+}
+
 /// Concrete application-facing widget for the three-child ScrollArea composite.
 pub struct ScrollArea {
     /// Weak typed widget capability for the horizontal scrollbar child.
@@ -125,11 +154,15 @@ pub struct ScrollArea {
 impl ScrollArea {
     /// Returns the offsets owned by the two scrollbar child widgets.
     pub fn offset(&self) -> Vec2i {
+        // The two standalone scrollbar children remain the single source of interactive offset
+        // state, so the parent derives its vector instead of retaining a duplicate value.
         Vec2i::new(Self::axis_offset(&self.horizontal), Self::axis_offset(&self.vertical))
     }
 
     /// Requests a non-negative offset; the next placement clamps it to current content geometry.
     pub fn set_offset(&mut self, offset: Vec2i) {
+        // Disabled scrolling owns a stable zero offset; enabled scrolling accepts requests that the
+        // next placement clamps against newly measured content ranges.
         let offset = if self.scrolling_enabled {
             Vec2i::new(offset.x.max(0), offset.y.max(0))
         } else {
@@ -145,18 +178,43 @@ impl ScrollArea {
     /// unbounded request rather than using the currently committed maximum. Placement clamps it to
     /// the maximum derived from the newly measured content.
     pub fn scroll_to_end(&mut self) {
+        // Record an intentionally unbounded request so content appended before the next placement
+        // determines the final vertical maximum.
         if self.scrolling_enabled {
             Self::set_axis_offset(&self.vertical, i32::MAX);
         }
     }
 
+    /// Requests the nearest offsets that reveal `rect` in content-local coordinates.
+    pub fn scroll_rect_into_view(&mut self, rect: Recti) {
+        // Ignore requests while scrolling is disabled; enabling later starts from the documented
+        // zero offset rather than reviving an editor's stale caret request.
+        if !self.scrolling_enabled {
+            return;
+        }
+
+        // Resolve both axes independently against the latest committed viewport. The scrollbar
+        // children retain requests above their old maximum until the next layout installs ranges
+        // derived from potentially changed content.
+        let offset = self.offset();
+        let viewport = self.geometry.viewport;
+        self.set_offset(Vec2i::new(
+            offset_to_reveal_interval(offset.x, viewport.width, rect.x, rect.width),
+            offset_to_reveal_interval(offset.y, viewport.height, rect.y, rect.height),
+        ));
+    }
+
     /// Returns whether layout may activate the scrollbar children.
     pub fn scrolling_enabled(&self) -> bool {
+        // Enablement belongs to the composite parent because it controls wheel routing and both
+        // structural scrollbar participation decisions.
         self.scrolling_enabled
     }
 
     /// Enables or disables scrolling and its two interactive children.
     pub fn set_scrolling_enabled(&mut self, enabled: bool) {
+        // Commit the policy before synchronizing child state so every following query observes one
+        // coherent enabled or disabled composite.
         self.scrolling_enabled = enabled;
         if !enabled {
             // Reset child-owned interaction synchronously so capture cannot survive deactivation.
@@ -164,6 +222,7 @@ impl ScrollArea {
             Self::reset_axis(&self.vertical);
             self.geometry.offset = Vec2i::default();
             self.geometry.max_offset = Vec2i::default();
+            self.geometry.viewport = Dimensioni::default();
             self.geometry.horizontal = None;
             self.geometry.vertical = None;
             self.geometry.corner = None;
@@ -284,12 +343,18 @@ struct ScrollSurface {
 }
 
 impl ContainerWidget for ScrollSurface {
+    /// Measures the ordinary content with bounded width and unbounded height.
     fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: crate::Constraints) -> Dimensioni {
+        // Forward the width contract so wrapping content resolves against its eventual viewport;
+        // height remains intrinsic so the owning ScrollArea can detect vertical overflow.
         ctx.measure_child(0, crate::Constraints::new(constraints.width, crate::AvailableSpace::Unbounded))
             .unwrap_or_default()
     }
 
+    /// Places content at least as large as the viewport and applies the scrollbar translation.
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
+        // Re-measure with the exact viewport width selected after scrollbar convergence so wrapped
+        // content and the final allocation use the same horizontal constraint.
         let preferred = ctx
             .measure_child(
                 children,
@@ -297,12 +362,12 @@ impl ContainerWidget for ScrollSurface {
                 crate::Constraints::new(crate::AvailableSpace::bounded(rect.width), crate::AvailableSpace::Unbounded),
             )
             .unwrap_or_default();
-        // Horizontal content fills the viewport so ordinary rows receive its usable width, but an
-        // intrinsically wider child remains wider and creates horizontal overflow. Vertical content
-        // keeps its desired height; stretching it to the viewport would hide whether scrolling is
-        // needed.
-        let content_rect = Recti::new(0, 0, rect.width.max(preferred.width).max(0), preferred.height.max(0));
+        // Fill both viewport axes so an interactive child owns blank trailing space. Desired extents
+        // still win when larger, preserving overflow and its associated scrollbar range.
+        let content_rect = Recti::new(0, 0, rect.width.max(preferred.width).max(0), rect.height.max(preferred.height).max(0));
         let _ = ctx.layout_child(children, 0, content_rect);
+        // Read clamped values only after range configuration and translate descendants without
+        // changing their stable content-local allocations.
         let offset = Vec2i::new(ScrollArea::axis_offset(&self.horizontal), ScrollArea::axis_offset(&self.vertical));
         ctx.set_children_viewport(rect, Vec2i::new(-offset.x, -offset.y));
         ctx.set_content_size(Dimensioni::new(content_rect.width, content_rect.height));
@@ -311,12 +376,17 @@ impl ContainerWidget for ScrollSurface {
 }
 
 impl Widget for ScrollSurface {
+    /// Marks the transform-only surface as transparent to direct pointer targeting.
     fn widget_opt(&self) -> &WidgetOption {
+        // Eligible content descendants remain targetable even though this structural surface has no
+        // independent interaction behavior.
         &WidgetOption::NO_INTERACT
     }
 
+    /// Performs no semantic update because ScrollArea and its children own all scrolling state.
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
 
+    /// Emits no paint operations because clipping and translation are traversal geometry.
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
 
@@ -405,9 +475,10 @@ impl ContainerWidget for ScrollArea {
                     crate::Constraints::new(crate::AvailableSpace::bounded(view.width), crate::AvailableSpace::Unbounded),
                 )
                 .unwrap_or_default();
-            // ScrollSurface fills available width but keeps desired height, matching the one exact
-            // content rectangle it will assign after bar selection.
-            let extent = Dimensioni::new(view.width.max(preferred.width).max(0), preferred.height.max(0));
+            // Fill the viewport on both axes while preserving larger desired extents. Comparing this
+            // filled extent with the view still detects overflow exactly when preferred content is
+            // larger, and it matches ScrollSurface's final allocation contract.
+            let extent = Dimensioni::new(view.width.max(preferred.width).max(0), view.height.max(preferred.height).max(0));
 
             let next_vertical = bars_usable && extent.height > view.height;
             let next_horizontal = bars_usable && extent.width > view.width;
@@ -499,6 +570,7 @@ impl ContainerWidget for ScrollArea {
             surface,
             offset,
             max_offset: maximum,
+            viewport: Dimensioni::new(view.width, view.height),
             vertical: vertical_visible.then_some(vertical_track),
             horizontal: horizontal_visible.then_some(horizontal_track),
             corner,
@@ -646,6 +718,64 @@ mod tests {
         drop(node);
         assert!(!child_state.is_alive());
         assert!(!scroll.is_alive());
+    }
+
+    #[test]
+    fn short_content_fills_the_complete_scroll_viewport() {
+        // Retain the child identity so the committed screen allocation can verify both filled axes.
+        let child = fixed_content(Dimensioni::new(20, 20));
+        let child_id = child.id();
+        let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child));
+        let style = Style {
+            padding: 0,
+            scrollbar_size: 10,
+            ..Style::default()
+        };
+        let viewport = Recti::new(0, 0, 100, 80);
+        let mut runtime = UiRuntime::new();
+
+        // A child smaller than the viewport produces no overflow but receives the complete
+        // interactive content allocation rather than a top-aligned intrinsic-height strip.
+        runtime.begin_update();
+        runtime.layout_tree_root(&mut root, &style, test_atlas(), viewport, UNCLIPPED_RECT);
+        let child_rect = runtime.debug_node_rect(std::slice::from_ref(&root), child_id).unwrap();
+        assert_eq!((child_rect.width, child_rect.height), (100, 80));
+        assert_eq!(
+            scroll.try_read(|state| (state.geometry.viewport.width, state.geometry.viewport.height)),
+            Some((100, 80))
+        );
+        assert_eq!(
+            scroll.try_read(|state| (state.geometry.max_offset.x, state.geometry.max_offset.y)),
+            Some((0, 0))
+        );
+    }
+
+    #[test]
+    fn scroll_rect_into_view_reveals_nearest_content_edges() {
+        // Overflow on both axes reserves two ten-pixel bars and leaves a 90-by-90 content viewport.
+        let child = fixed_content(Dimensioni::new(200, 300));
+        let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child));
+        let style = Style {
+            padding: 0,
+            scrollbar_size: 10,
+            ..Style::default()
+        };
+        let viewport = Recti::new(0, 0, 100, 100);
+        let mut runtime = UiRuntime::new();
+        runtime.begin_update();
+        runtime.layout_tree_root(&mut root, &style, test_atlas(), viewport, UNCLIPPED_RECT);
+
+        // Align the trailing edges of a lower-right target, then commit the requested offsets
+        // through ordinary placement and range clamping.
+        scroll.try_update(|state| state.scroll_rect_into_view(Recti::new(150, 250, 1, 10))).unwrap();
+        runtime.layout_tree_root(&mut root, &style, test_atlas(), viewport, UNCLIPPED_RECT);
+        assert_eq!(scroll.try_read(|state| (state.offset().x, state.offset().y)), Some((61, 170)));
+
+        // A target before the visible origin aligns its leading edges instead of overscrolling to
+        // zero or retaining the previous lower-right position.
+        scroll.try_update(|state| state.scroll_rect_into_view(Recti::new(10, 20, 5, 5))).unwrap();
+        runtime.layout_tree_root(&mut root, &style, test_atlas(), viewport, UNCLIPPED_RECT);
+        assert_eq!(scroll.try_read(|state| (state.offset().x, state.offset().y)), Some((10, 20)));
     }
 
     #[test]
