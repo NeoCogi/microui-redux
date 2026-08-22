@@ -215,8 +215,8 @@ pub mod retained {
     pub use crate::ui_node::{
         AvailableSpace, ChildParticipation, Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, Disclosure, DisclosureParameters,
         FocusPolicy, Grid, GridItem, GridParameters, GridSpan, LeafWidget, Linear, LinearCrossSize, LinearDirection, LinearItem, LinearParameters, MeasureCtx,
-        Node, ScrollArea, ScrollAreaOption, ScrollAreaParameters, TrackSize, UiInputEvent, Widget, TextWrap, TypedWidgetHandle, WidgetBuilder,
-        WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
+        Node, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Scrollbar, ScrollbarAxis, ScrollbarChanged, ScrollbarParameters, TrackSize, UiInputEvent,
+        Widget, TextWrap, TypedWidgetHandle, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
     };
     pub use crate::context::{Context, ContextFrame, EventContext};
     pub use crate::window_manager::{RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted, WindowOption};
@@ -240,8 +240,9 @@ pub mod prelude {
         ChildParticipation, Children, Container, ContainerLayoutCtx, ContainerWidget, Context, ContextFrame, EventContext, CustomRenderArgs, AvailableSpace,
         Constraints, CustomRenderHandle, Disclosure, DisclosureParameters, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, Linear, LinearCrossSize,
         LinearDirection, LinearItem, LinearParameters, Node, RootChanged, RootHandle, MeasureCtx, RootId, RootMutationError, RootChrome, RootSubmitted,
-        ScrollArea, ScrollAreaOption, ScrollAreaParameters, TrackSize, LeafWidget, TextWrap, UiInputEvent, TypedWidgetHandle, Widget, WidgetBuilder,
-        WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx, WindowOption,
+        ScrollArea, ScrollAreaOption, ScrollAreaParameters, Scrollbar, ScrollbarAxis, ScrollbarChanged, ScrollbarParameters, TrackSize, LeafWidget, TextWrap,
+        UiInputEvent, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
+        WindowOption,
     };
     pub use crate::math::{expand_rect, rect, vec2};
     pub use crate::theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, color};
@@ -275,8 +276,8 @@ pub use theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, co
 pub use ui_node::{
     AvailableSpace, ChildParticipation, Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, Disclosure, DisclosureParameters, FocusPolicy,
     Grid, GridItem, GridParameters, GridSpan, LeafWidget, Linear, LinearCrossSize, LinearDirection, LinearItem, LinearParameters, MeasureCtx, Node, ScrollArea,
-    ScrollAreaOption, ScrollAreaParameters, TextWrap, TrackSize, UiInputEvent, Widget, TypedWidgetHandle, WidgetBuilder, WidgetFillOption, WidgetOption,
-    WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
+    ScrollAreaOption, ScrollAreaParameters, Scrollbar, ScrollbarAxis, ScrollbarChanged, ScrollbarParameters, TextWrap, TrackSize, UiInputEvent, Widget,
+    TypedWidgetHandle, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 pub use widgets::{
     Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters, ColorSwatch,

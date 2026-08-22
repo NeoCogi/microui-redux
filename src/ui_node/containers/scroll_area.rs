@@ -32,7 +32,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use bitflags::bitflags;
 
-use crate::ui_node::scrollbar::{RetainedScrollbar, ScrollAxis, scrollbar_base};
+use crate::ui_node::scrollbar::{Scrollbar, ScrollbarAxis, ScrollbarParameters, scrollbar_base};
 use crate::{
     ChildParticipation, Container, ContainerWidget, ControlColor, Dimensioni, FocusPolicy, MeasureCtx, Recti, TypedWidgetHandle, UiInputEvent, Vec2i, Widget,
     WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
@@ -111,9 +111,9 @@ fn inset_rect(rect: Recti, amount: i32) -> Recti {
 /// Concrete application-facing widget for the three-child ScrollArea composite.
 pub struct ScrollArea {
     /// Weak typed widget capability for the horizontal scrollbar child.
-    horizontal: TypedWidgetHandle<RetainedScrollbar>,
+    horizontal: TypedWidgetHandle<Scrollbar>,
     /// Weak typed widget capability for the vertical scrollbar child.
-    vertical: TypedWidgetHandle<RetainedScrollbar>,
+    vertical: TypedWidgetHandle<Scrollbar>,
     /// Dynamic participation policy shared by surface and layout.
     scrolling_enabled: bool,
     /// Latest geometry summary; interactive state remains in the child widgets.
@@ -201,14 +201,14 @@ impl ScrollArea {
     }
 
     /// Reads one live structural scrollbar without taking ownership of its state.
-    fn axis_offset(handle: &TypedWidgetHandle<RetainedScrollbar>) -> i32 {
+    fn axis_offset(handle: &TypedWidgetHandle<Scrollbar>) -> i32 {
         handle
-            .try_read(RetainedScrollbar::offset)
+            .try_read(Scrollbar::offset)
             .expect("ScrollArea structural scrollbar must outlive its parent state")
     }
 
     /// Writes a requested offset through the scrollbar's weak typed widget capability.
-    fn set_axis_offset(handle: &TypedWidgetHandle<RetainedScrollbar>, offset: i32) {
+    fn set_axis_offset(handle: &TypedWidgetHandle<Scrollbar>, offset: i32) {
         handle
             .try_update_without_measurement(|state| state.set_offset(offset))
             .expect("ScrollArea structural scrollbar must be available outside traversal")
@@ -217,13 +217,13 @@ impl ScrollArea {
     /// Returns both committed ranges without copying geometry into interactive state.
     fn max_offset(&self) -> Vec2i {
         Vec2i::new(
-            self.horizontal.try_read(RetainedScrollbar::max_offset).unwrap_or(0),
-            self.vertical.try_read(RetainedScrollbar::max_offset).unwrap_or(0),
+            self.horizontal.try_read(Scrollbar::max_offset).unwrap_or(0),
+            self.vertical.try_read(Scrollbar::max_offset).unwrap_or(0),
         )
     }
 
     /// Clears one scrollbar's offset and committed geometry.
-    fn reset_axis(handle: &TypedWidgetHandle<RetainedScrollbar>) {
+    fn reset_axis(handle: &TypedWidgetHandle<Scrollbar>) {
         // Pointer capture is runtime-owned, so deactivation has no widget-local drag lease to
         // clear; hidden participation invalidates the corresponding runtime identity during layout.
         handle
@@ -278,9 +278,9 @@ impl Widget for ScrollArea {
 /// The transform boundary between the viewport and its ordinary content node.
 struct ScrollSurface {
     /// Scroll translation is read from the real horizontal child widget.
-    horizontal: TypedWidgetHandle<RetainedScrollbar>,
+    horizontal: TypedWidgetHandle<Scrollbar>,
     /// Scroll translation is read from the real vertical child widget.
-    vertical: TypedWidgetHandle<RetainedScrollbar>,
+    vertical: TypedWidgetHandle<Scrollbar>,
 }
 
 impl ContainerWidget for ScrollSurface {
@@ -329,22 +329,22 @@ impl ScrollArea {
     const VERTICAL: usize = 2;
 
     /// Configures one visible scrollbar using widget-local track coordinates.
-    fn configure_bar(handle: &TypedWidgetHandle<RetainedScrollbar>, track: Recti, view_len: i32, content_len: i32, min_thumb_len: i32, requested_offset: i32) {
-        // Apply the requested offset before configuring the new range; configure performs the final
-        // clamp and resets drag geometry using the current widget-local track.
+    fn configure_bar(handle: &TypedWidgetHandle<Scrollbar>, view_len: i32, content_len: i32, requested_offset: i32) {
+        // Apply the requested offset before installing the new range; set_lengths performs the final
+        // clamp while the scrollbar derives its track and minimum thumb from its own phase context.
         handle
             .try_update_without_measurement(|state| {
                 state.set_offset(requested_offset);
-                state.configure(Recti::new(0, 0, track.width, track.height), view_len, content_len, min_thumb_len);
+                state.set_lengths(view_len, content_len);
             })
             .expect("ScrollArea layout requires its retained scrollbar child");
     }
 
     /// Deactivates one hidden scrollbar without removing its strong child owner.
-    fn deactivate_bar(handle: &TypedWidgetHandle<RetainedScrollbar>) {
+    fn deactivate_bar(handle: &TypedWidgetHandle<Scrollbar>) {
         // Retain the child node and handle identity while clearing geometry, offset, and drag state.
         handle
-            .try_update_without_measurement(RetainedScrollbar::deactivate)
+            .try_update_without_measurement(Scrollbar::deactivate)
             .expect("ScrollArea layout requires its retained scrollbar child");
     }
 }
@@ -373,7 +373,6 @@ impl ContainerWidget for ScrollArea {
         let surface = Recti::new(0, 0, rect.width.max(0), rect.height.max(0));
         let padding = ctx.style().padding.max(0);
         let bar_size = ctx.style().scrollbar_size.max(0);
-        let min_thumb = ctx.style().thumb_size.max(0);
         let enabled = self.scrolling_enabled;
         let requested = Vec2i::new(ScrollArea::axis_offset(&self.horizontal), ScrollArea::axis_offset(&self.vertical));
         let bars_usable = enabled && bar_size > 0 && surface.width > 0 && surface.height > 0;
@@ -435,14 +434,14 @@ impl ContainerWidget for ScrollArea {
         let (body, view, extent) = resolved.expect("ScrollArea scrollbar presence must converge across four possible states");
         let vertical_width = if has_vertical { bar_size.min(surface.width) } else { 0 };
         let horizontal_height = if has_horizontal { bar_size.min(surface.height) } else { 0 };
-        let vertical_track = scrollbar_base(ScrollAxis::Vertical, body, vertical_width);
-        let horizontal_track = scrollbar_base(ScrollAxis::Horizontal, body, horizontal_height);
+        let vertical_track = scrollbar_base(ScrollbarAxis::Vertical, body, vertical_width);
+        let horizontal_track = scrollbar_base(ScrollbarAxis::Horizontal, body, horizontal_height);
         let vertical_visible = has_vertical && vertical_track.width > 0 && vertical_track.height > 0;
         let horizontal_visible = has_horizontal && horizontal_track.width > 0 && horizontal_track.height > 0;
 
         if vertical_visible {
             // The scrollbar remains a real independently targetable child when active.
-            Self::configure_bar(&self.vertical, vertical_track, view.height, extent.height, min_thumb, requested.y);
+            Self::configure_bar(&self.vertical, view.height, extent.height, requested.y);
             let _ = ctx.set_child_participation(children, Self::VERTICAL, ChildParticipation::Active);
             let _ = ctx.layout_child(
                 children,
@@ -461,7 +460,7 @@ impl ContainerWidget for ScrollArea {
         }
 
         if horizontal_visible {
-            Self::configure_bar(&self.horizontal, horizontal_track, view.width, extent.width, min_thumb, requested.x);
+            Self::configure_bar(&self.horizontal, view.width, extent.width, requested.x);
             let _ = ctx.set_child_participation(children, Self::HORIZONTAL, ChildParticipation::Active);
             let _ = ctx.layout_child(
                 children,
@@ -491,8 +490,8 @@ impl ContainerWidget for ScrollArea {
         let _ = ctx.layout_child(children, Self::SURFACE, child_rect);
 
         let maximum = Vec2i::new(
-            self.horizontal.try_read(RetainedScrollbar::max_offset).unwrap_or(0),
-            self.vertical.try_read(RetainedScrollbar::max_offset).unwrap_or(0),
+            self.horizontal.try_read(Scrollbar::max_offset).unwrap_or(0),
+            self.vertical.try_read(Scrollbar::max_offset).unwrap_or(0),
         );
         let corner = (vertical_visible && horizontal_visible)
             .then(|| Recti::new(body.x + body.width, body.y + body.height, vertical_track.width, horizontal_track.height));
@@ -532,8 +531,8 @@ impl ScrollArea {
             WidgetOption::NONE
         };
         // Build independently addressable scrollbar children and retain only weak typed handles.
-        let (horizontal, horizontal_node) = RetainedScrollbar::create(ScrollAxis::Horizontal);
-        let (vertical, vertical_node) = RetainedScrollbar::create(ScrollAxis::Vertical);
+        let (horizontal, horizontal_node) = Scrollbar::create(ScrollbarParameters::new(ScrollbarAxis::Horizontal));
+        let (vertical, vertical_node) = Scrollbar::create(ScrollbarParameters::new(ScrollbarAxis::Vertical));
         // The surface owns exactly one ordinary content node and keeps its sizing rule local.
         let content = Rc::new(RefCell::new([parameters.content].into_iter().collect()));
         let surface_widget = ScrollSurface {

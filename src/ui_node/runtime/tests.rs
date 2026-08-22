@@ -831,6 +831,45 @@ fn widget_focus_policy_is_authoritative_after_routing_cleanup() {
 }
 
 #[test]
+fn focus_preserving_pointer_target_captures_without_replacing_keyboard_focus() {
+    // Overlap two children so reverse paint-order targeting selects the second child while the
+    // first child remains a valid retained keyboard-focus owner.
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let first = Node::widget(HoldFocusProbe { opt: WidgetOption::NONE });
+    let first_id = first.id();
+    let (mut pointer_only, _) = Probe::new("pointer-only", log.clone());
+    pointer_only.opt = WidgetOption::PRESERVE_FOCUS;
+    let pointer_only = Node::widget(pointer_only);
+    let pointer_only_id = pointer_only.id();
+    let (container, _) = TraversalContainer::new([first, pointer_only], log);
+    let mut root = Node::container(container);
+    let mut runtime = UiRuntime::new();
+    let style = Style::default();
+    let atlas = test_atlas();
+
+    // Commit geometry before installing a valid existing focus identity and routing the press.
+    runtime.begin_update();
+    layout_root(&mut runtime, &mut root, &style, atlas.clone());
+    runtime.debug_set_transient_targets(Some(first_id), None, None);
+
+    let mut input = Input::default();
+    input.mousedown(20, 30, MouseButton::LEFT);
+    let (down, down_state) = next_input(&mut input);
+    runtime.begin_input_event(true, &down);
+    let (owner, result) = runtime
+        .route_input_event_to_node_ref(&mut root, &style, &down)
+        .expect("overlapping pointer-only child must receive the press");
+    runtime.update_pointer_capture(owner, result, &down, down_state.mouse_buttons);
+    runtime.update_tree_root(&mut root, &style, atlas, down_state);
+
+    // Pointer capture belongs to the clicked child, but text and keyboard input continue to route
+    // to the original hold-focus widget.
+    assert_eq!(owner, pointer_only_id);
+    assert_eq!(runtime.debug_capture_target(), Some(pointer_only_id));
+    assert_eq!(runtime.debug_focus_target(), Some(first_id));
+}
+
+#[test]
 fn captured_container_receives_direct_drag_while_capture_is_active() {
     let (container, state) = CaptureContainer::new();
     let mut root = Node::container(container);

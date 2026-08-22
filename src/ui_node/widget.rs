@@ -117,6 +117,8 @@ bitflags! {
         const FRAME = 512;
         /// Keeps keyboard focus after release until routing moves it or the node becomes unavailable.
         const HOLD_FOCUS = 256;
+        /// Allows pointer interaction and capture without replacing an existing keyboard focus owner.
+        const PRESERVE_FOCUS = 1024;
         /// Consumes scroll input while the widget is hovered.
         const GRAB_SCROLL = 32;
         /// Disables interaction with this widget's own surface; eligible descendants remain interactive.

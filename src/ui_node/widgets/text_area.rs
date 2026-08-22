@@ -56,7 +56,7 @@
 //! and mouse-driven cursor placement across multiple wrapped lines. Editing operates on Unicode
 //! scalar values rather than grapheme clusters; rendering uses the selected atlas's glyph coverage
 //! and missing-character fallback.
-use crate::ui_node::scrollbar::{ScrollAxis, ScrollbarGeometry, scrollbar_base, scrollbar_max_scroll};
+use crate::ui_node::scrollbar::{ScrollbarAxis, ScrollbarGeometry, scrollbar_base, scrollbar_max_scroll};
 use crate::ui_node::text_layout::{TextLine, build_text_lines};
 use crate::*;
 use std::{cell::RefCell, rc::Rc};
@@ -458,12 +458,12 @@ fn textarea_layout(content_rect: Recti, style: &Style, atlas: &AtlasHandle, stat
     let maxscroll_y = scrollbar_max_scroll(content_size.y, body.height);
     let maxscroll_x = scrollbar_max_scroll(content_size.x, body.width);
     let vscroll_base = if needs_v && maxscroll_y > 0 && body.height > 0 {
-        scrollbar_base(ScrollAxis::Vertical, body, scrollbar_size)
+        scrollbar_base(ScrollbarAxis::Vertical, body, scrollbar_size)
     } else {
         bounds
     };
     let hscroll_base = if needs_h && maxscroll_x > 0 && body.width > 0 {
-        scrollbar_base(ScrollAxis::Horizontal, body, scrollbar_size)
+        scrollbar_base(ScrollbarAxis::Horizontal, body, scrollbar_size)
     } else {
         bounds
     };
@@ -581,7 +581,7 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>, 
         }
         if state.interaction.dragging_y {
             let scrollbar = ScrollbarGeometry::new(
-                ScrollAxis::Vertical,
+                ScrollbarAxis::Vertical,
                 layout.vscroll_base,
                 layout.body.height,
                 layout.content_size.y,
@@ -599,7 +599,7 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>, 
         }
         if state.interaction.dragging_x {
             let scrollbar = ScrollbarGeometry::new(
-                ScrollAxis::Horizontal,
+                ScrollbarAxis::Horizontal,
                 layout.hscroll_base,
                 layout.body.width,
                 layout.content_size.x,
@@ -744,7 +744,7 @@ fn textarea_paint(ctx: &mut WidgetPaintCtx<'_>, state: &TextArea, font: FontId) 
     if layout.needs_v && layout.maxscroll_y > 0 && layout.body.height > 0 {
         ctx.draw_rect(layout.vscroll_base, ctx.style().colors[ControlColor::ScrollBase as usize]);
         let thumb = ScrollbarGeometry::new(
-            ScrollAxis::Vertical,
+            ScrollbarAxis::Vertical,
             layout.vscroll_base,
             layout.body.height,
             layout.content_size.y,
@@ -758,7 +758,7 @@ fn textarea_paint(ctx: &mut WidgetPaintCtx<'_>, state: &TextArea, font: FontId) 
     if layout.needs_h && layout.maxscroll_x > 0 && layout.body.width > 0 {
         ctx.draw_rect(layout.hscroll_base, ctx.style().colors[ControlColor::ScrollBase as usize]);
         let thumb = ScrollbarGeometry::new(
-            ScrollAxis::Horizontal,
+            ScrollbarAxis::Horizontal,
             layout.hscroll_base,
             layout.body.width,
             layout.content_size.x,

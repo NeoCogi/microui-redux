@@ -134,10 +134,8 @@ impl InputRouter {
             // Pointer routing recomputes hover from current committed geometry for every event.
             self.hover = None;
         }
-        if matches!(event, UiInputEvent::MouseDown { .. }) {
-            // A press starts a new focus claim; the routed recipient assigns focus if accepted.
-            self.focus = None;
-        }
+        // Do not clear focus before target selection. Ordinary pointer-down recipients replace the
+        // current focus below, while PRESERVE_FOCUS controls such as scrollbars leave it untouched.
     }
 
     /// Clears every transient target while preserving no reference to a retained node.
@@ -169,9 +167,15 @@ impl InputRouter {
         self.routed_event = Some((node, event));
     }
 
-    /// Assigns focus and the one-event clicked marker to an accepted pointer-down recipient.
-    fn claim_pointer_focus(&mut self, node: RuntimeNodeId, button: MouseButton) {
-        self.focus = Some(node);
+    /// Records an accepted pointer press and conditionally replaces the keyboard focus owner.
+    fn claim_pointer_press(&mut self, node: RuntimeNodeId, button: MouseButton, preserve_focus: bool) {
+        // Pointer capture is acquired separately from the route result, so a focus-preserving
+        // control can still own a complete drag gesture without receiving keyboard input.
+        if !preserve_focus {
+            self.focus = Some(node);
+        }
+        // The clicked transition describes pointer targeting rather than keyboard focus and must
+        // therefore still be committed for focus-preserving controls.
         if button.intersects(MouseButton::LEFT) {
             self.clicked = Some(node);
         }
@@ -312,8 +316,9 @@ impl InputRouter {
         let event_hits_rect = event.position().is_some_and(|pos| rect.contains(&pos) && clip.contains(&pos));
         match event {
             UiInputEvent::MouseDown { button, .. } if event_hits_rect => {
-                // Press establishes focus/click state and asks routing to acquire pointer capture.
-                self.claim_pointer_focus(id, *button);
+                // Record the click while allowing pointer-only controls to preserve the current
+                // keyboard owner. The Captured result independently establishes drag ownership.
+                self.claim_pointer_press(id, *button, opt.intersects(WidgetOption::PRESERVE_FOCUS));
                 self.push_routed_event(id, event.clone());
                 RouteResult::Captured
             }
