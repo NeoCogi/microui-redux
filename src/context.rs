@@ -124,6 +124,15 @@ impl<'a> EventContext<'a> {
         self.window_manager.set_root_visible(root, visible)
     }
 
+    /// Shows a popup at an exact screen-space anchor before the following layout commit.
+    ///
+    /// This atomic form is intended for composed controls such as menus and combos. It both applies
+    /// popup exclusivity and replaces the popup rectangle, so no pointer-relative intermediate
+    /// placement can be observed. Windows and dialogs return [`RootMutationError::NotPopup`].
+    pub fn show_popup_at(&mut self, root: RootId, anchor: Recti) -> Result<(), RootMutationError> {
+        self.window_manager.show_popup_at(root, anchor)
+    }
+
     /// Raises a registered root and reports whether it still exists.
     pub fn bring_root_to_front(&mut self, root: RootId) -> bool {
         // Let WindowManager preserve the active modal root above the requested ordinary root.
@@ -417,6 +426,14 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// This is distinct from [`Context::destroy_root`], which drops the complete retained owner.
     pub fn set_root_visible(&mut self, root: RootId, visible: bool) -> Result<(), RootMutationError> {
         self.window_manager.set_root_visible(root, visible)
+    }
+
+    /// Shows a popup at an exact screen-space anchor in one checked root mutation.
+    ///
+    /// Use this for a popup whose position belongs to the semantic event that opened it. Ordinary
+    /// pointer-relative popups may continue to use [`Self::set_root_visible`].
+    pub fn show_popup_at(&mut self, root: RootId, anchor: Recti) -> Result<(), RootMutationError> {
+        self.window_manager.show_popup_at(root, anchor)
     }
 
     /// Raises a registered root and reports whether it exists.

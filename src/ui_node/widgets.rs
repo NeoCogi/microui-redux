@@ -69,6 +69,7 @@ mod control;
 mod custom;
 mod list_box;
 mod list_item;
+mod menu;
 mod number;
 mod numeric_edit;
 mod scrollbar;
@@ -87,6 +88,7 @@ pub use combo::{Combo, ComboBuilder, ComboChanged, ComboParameters, ComboSubmitt
 pub use custom::{Custom, CustomBuilder, CustomParameters};
 pub use list_box::{ListBox, ListBoxBuilder, ListBoxParameters, ListBoxSubmitted};
 pub use list_item::{ListItem, ListItemBuilder, ListItemParameters, ListItemSubmitted};
+pub(crate) use menu::{MenuBar, MenuBarSubmitted, MenuPanel, MenuPanelSubmitted};
 pub use number::{Number, NumberBuilder, NumberChanged, NumberParameters};
 pub use scrollbar::{Scrollbar, ScrollbarAxis, ScrollbarChanged, ScrollbarParameters};
 pub use slider::{Slider, SliderBuilder, SliderChanged, SliderParameters};

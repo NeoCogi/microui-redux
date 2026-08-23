@@ -883,9 +883,10 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
         fn combo_submitted(&mut self, context: &mut EventContext<'_>, event: &ComboSubmitted) {
             // Compose the semantic Combo with an ordinary retained popup through the general root
             // API; neither EventContext nor WindowManager needs to know this root belongs to a combo.
-            context.set_root_visible(self.popup.id(), event.open).unwrap();
             if event.open {
-                context.set_root_rect(self.popup.id(), event.anchor).unwrap();
+                context.show_popup_at(self.popup.id(), event.anchor).unwrap();
+            } else {
+                context.set_root_visible(self.popup.id(), false).unwrap();
             }
             self.submitted_anchor = Some(event.anchor);
         }
@@ -1151,14 +1152,36 @@ fn showing_a_popup_atomically_hides_and_dismisses_the_previous_one() {
     dispatcher.subscribe(first.submitted(), record).unwrap();
     let mut submissions = Vec::new();
 
-    ctx.set_root_visible(first.id(), true).unwrap();
+    ctx.show_popup_at(first.id(), rect(12, 18, 90, 1)).unwrap();
     assert_eq!(first.widget().try_read(RootChrome::is_visible), Some(true));
-    ctx.set_root_visible(second.id(), true).unwrap();
+    ctx.show_popup_at(second.id(), rect(40, 55, 120, 1)).unwrap();
 
     assert_eq!(first.widget().try_read(RootChrome::is_visible), Some(false));
     assert_eq!(second.widget().try_read(RootChrome::is_visible), Some(true));
+    assert_eq!(
+        second.widget().try_read(|root| {
+            let anchor = root.rect();
+            (anchor.x, anchor.y, anchor.width, anchor.height)
+        }),
+        Some((40, 55, 120, 1))
+    );
     assert!(dispatcher.dispatch(&mut submissions));
     assert_eq!(submissions, [RootSubmitted::PopupDismissed]);
+}
+
+#[test]
+fn anchored_popup_operation_rejects_non_popup_roots_without_mutation() {
+    let mut ctx = context();
+    let window = ctx.create_window("window", rect(5, 7, 100, 80), empty_content());
+
+    assert_eq!(ctx.show_popup_at(window.id(), rect(20, 30, 40, 1)), Err(RootMutationError::NotPopup));
+    assert_eq!(
+        window.widget().try_read(|root| {
+            let bounds = root.rect();
+            (bounds.x, bounds.y, bounds.width, bounds.height, root.is_visible())
+        }),
+        Some((5, 7, 100, 80, true))
+    );
 }
 
 #[test]

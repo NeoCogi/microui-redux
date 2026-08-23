@@ -432,6 +432,17 @@ impl<'a> WidgetPaintCtx<'a> {
     /// Draws aligned control text with an explicit font.
     pub(crate) fn draw_control_text_with_font(&mut self, font: FontId, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
         let color = self.common.style.colors[colorid as usize];
+        self.draw_control_text_color_with_font(font, text, rect, color, opt);
+    }
+
+    /// Draws aligned control text with an explicit font and resolved color.
+    ///
+    /// Most built-in controls select one complete semantic palette role and should continue to use
+    /// [`Self::draw_control_text_with_font`]. Composite controls such as menu panels need to derive
+    /// a disabled-text color from that role while retaining the same padding, alignment, clipping,
+    /// and glyph-placement rules. Keeping that variation here prevents each composite from
+    /// duplicating the authoritative control-text geometry.
+    pub(crate) fn draw_control_text_color_with_font(&mut self, font: FontId, text: &str, rect: Recti, color: Color, opt: WidgetOption) {
         let pos = control_text_position_with_font(self.common.style, self.common.atlas, font, text, rect, opt);
         let mut painter = self.painter();
         painter.with_clip(rect, |painter| painter.text(font, text, pos, color));

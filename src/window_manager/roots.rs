@@ -263,42 +263,14 @@ impl WindowManager {
         let mouse = self.input.snapshot().mouse_pos;
         let kind = self.roots[target].kind;
         if visible && kind == WindowKind::Popup {
-            let mut other = None;
-            for (index, entry) in self.roots.iter().enumerate() {
-                if index == target || entry.kind != WindowKind::Popup {
-                    continue;
-                }
-                if entry.root_widget.try_read(RootChrome::is_visible).ok_or(RootMutationError::Borrowed)? {
-                    other = Some(index);
-                    break;
-                }
-            }
-            if let Some(other) = other {
-                let old = self.roots[other].root_widget.clone();
-                let new = self.roots[target].root_widget.clone();
-                let changed = old.try_update(|old_state| {
-                    new.try_update(|new_state| {
-                        // Replacing the active popup is a dismissal just like an outside press.
-                        // Publish the lifecycle event so the displaced popup's composed owner can
-                        // reconcile semantic state before the next input transaction.
-                        old_state.dismiss_popup();
-                        new_state.set_rect_silent(rect(mouse.x, mouse.y, 1, 1));
-                        new_state.set_visible_silent(true);
-                    })
-                    .is_some()
-                });
-                match changed {
-                    Some(true) => self.roots[other].clear_transient_targets(),
-                    Some(false) | None => return Err(RootMutationError::Borrowed),
-                }
-            } else {
-                self.update_root_widget(root, |state| {
-                    if !state.is_visible() {
-                        state.set_rect_silent(rect(mouse.x, mouse.y, 1, 1));
-                    }
-                    state.set_visible_silent(true);
-                })?;
-            }
+            // Preserve the established convenience behavior for generic popups: the first show is
+            // pointer-relative, while showing an already-visible popup retains its authoritative
+            // rectangle. Components with a semantic anchor use `show_popup_at` instead.
+            let popup_rect = self.roots[target]
+                .root_widget
+                .try_read(|state| if state.is_visible() { state.rect() } else { rect(mouse.x, mouse.y, 1, 1) })
+                .ok_or(RootMutationError::Borrowed)?;
+            return self.show_popup_at(root, popup_rect);
         } else {
             self.update_root_widget(root, |state| state.set_visible_silent(visible))?;
         }
@@ -316,6 +288,64 @@ impl WindowManager {
                 self.remove_modal(root);
             }
         }
+        self.invalidate_ui_commit();
+        Ok(())
+    }
+
+    /// Shows one popup at an exact screen-space anchor in a single root transaction.
+    ///
+    /// The supplied rectangle is installed before the next layout observes the popup. Showing it
+    /// dismisses any other visible popup and publishes that root's ordinary dismissal event. The
+    /// operation rejects windows and dialogs because applying popup exclusivity to either would be
+    /// an application error rather than a useful generic root mutation.
+    pub fn show_popup_at(&mut self, root: RootId, anchor: Recti) -> Result<(), RootMutationError> {
+        let target = self.root_index(root)?;
+        if self.roots[target].kind != WindowKind::Popup {
+            return Err(RootMutationError::NotPopup);
+        }
+
+        // Find the displaced popup before borrowing either concrete RootChrome mutably. Retained
+        // handles use checked RefCell access, so a conflicting application borrow returns a typed
+        // error without partially changing visibility, geometry, or semantic dismissal state.
+        let mut other = None;
+        for (index, entry) in self.roots.iter().enumerate() {
+            if index == target || entry.kind != WindowKind::Popup {
+                continue;
+            }
+            if entry.root_widget.try_read(RootChrome::is_visible).ok_or(RootMutationError::Borrowed)? {
+                other = Some(index);
+                break;
+            }
+        }
+
+        if let Some(other) = other {
+            let old = self.roots[other].root_widget.clone();
+            let new = self.roots[target].root_widget.clone();
+            let changed = old.try_update(|old_state| {
+                new.try_update(|new_state| {
+                    // Replacement is indistinguishable from an outside press to the displaced
+                    // component: close it semantically before making the new popup observable.
+                    old_state.dismiss_popup();
+                    new_state.set_rect_silent(anchor);
+                    new_state.set_visible_silent(true);
+                })
+                .is_some()
+            });
+            match changed {
+                Some(true) => self.roots[other].clear_transient_targets(),
+                Some(false) | None => return Err(RootMutationError::Borrowed),
+            }
+        } else {
+            self.update_root_widget(root, |state| {
+                state.set_rect_silent(anchor);
+                state.set_visible_silent(true);
+            })?;
+        }
+
+        // A popup is an ordinary non-modal root for z-order purposes. Preserve an active modal
+        // above it, invalidate once, and let the following layout auto-size from the anchor.
+        self.raise_root_index(target);
+        self.raise_active_modal();
         self.invalidate_ui_commit();
         Ok(())
     }
