@@ -207,7 +207,7 @@ state-only signature above remains unchanged:
 use microui_redux::prelude::*;
 
 struct Model {
-    popup: RootHandle,
+    popup: PopupHandle,
 }
 
 impl Model {
@@ -411,8 +411,9 @@ registry, per-control command enum, or second root lifetime model.
 The full demo composes `Combo` and its popup root entirely through typed events. `ComboSubmitted`
 carries the screen-space anchor from the update that routed the header click, so its context-aware
 handler calls `show_popup_at` to update popup visibility and placement atomically in the triggering
-input transaction. The demo state
-already owns both retained handles: `RootSubmitted::PopupDismissed` closes the combo's shared
+input transaction. The method accepts `PopupHandle`, so a window or dialog cannot accidentally
+enter popup placement policy and no runtime root-kind error is required. The demo state already
+owns both retained handles: `RootSubmitted::PopupDismissed` closes the combo's shared
 semantic state after an outside press or replacement by another popup. Starting a source-window
 move or resize is such an outside press, so the popup is closed before any `RootChanged` movement
 and requires no geometry-following mechanism. This coordination stays with the composed control

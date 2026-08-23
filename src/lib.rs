@@ -221,7 +221,7 @@ pub mod retained {
         Widget, TextWrap, TypedWidgetHandle, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
     };
     pub use crate::context::{Context, ContextFrame, EventContext};
-    pub use crate::window_manager::{RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted, WindowOption};
+    pub use crate::window_manager::{PopupHandle, RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted, WindowOption};
 }
 
 /// Common imports for retained UI applications.
@@ -242,10 +242,10 @@ pub mod prelude {
     pub use crate::retained::{
         ChildParticipation, Children, Container, ContainerLayoutCtx, ContainerWidget, Context, ContextFrame, EventContext, CustomRenderArgs, AvailableSpace,
         Constraints, CustomRenderHandle, Disclosure, DisclosureParameters, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, Linear, LinearCrossSize,
-        LinearDirection, LinearItem, LinearParameters, Node, RootChanged, RootHandle, MeasureCtx, RootId, RootMutationError, RootChrome, RootSubmitted,
-        ScrollArea, ScrollAreaOption, ScrollAreaParameters, Scrollbar, ScrollbarAxis, ScrollbarChanged, ScrollbarParameters, TrackSize, LeafWidget, TextWrap,
-        UiInputEvent, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
-        WindowOption,
+        LinearDirection, LinearItem, LinearParameters, Node, PopupHandle, RootChanged, RootHandle, MeasureCtx, RootId, RootMutationError, RootChrome,
+        RootSubmitted, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Scrollbar, ScrollbarAxis, ScrollbarChanged, ScrollbarParameters, TrackSize,
+        LeafWidget, TextWrap, UiInputEvent, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters,
+        WidgetUpdateCtx, WindowOption,
     };
     pub use crate::math::{expand_rect, rect, vec2};
     pub use crate::theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, color};
@@ -268,7 +268,7 @@ pub use atlas::{
     FontId, IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON,
 };
 pub use context::{Context, ContextFrame, EventContext};
-pub use window_manager::{RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted, WindowOption};
+pub use window_manager::{PopupHandle, RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted, WindowOption};
 pub use event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventPortHandle};
 pub use file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};
 pub use menu::{Menu, MenuGroup, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted, MenuPanel, WindowMenu};

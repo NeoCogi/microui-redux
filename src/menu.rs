@@ -37,7 +37,7 @@
 
 use crate::render::RendererBackend;
 use crate::ui_node::widgets::{MenuBar, MenuBarSubmitted, MenuSeparator};
-use crate::{Context, EventContext, Linear, LinearItem, LinearParameters, Node, Recti, RootHandle, RootSubmitted, SubscribeError, TypedWidgetHandle};
+use crate::{Context, EventContext, Linear, LinearItem, LinearParameters, Node, PopupHandle, Recti, RootHandle, RootSubmitted, SubscribeError, TypedWidgetHandle};
 pub use crate::ui_node::widgets::{MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted};
 
 /// Accessor retained by context subscriptions to locate one application-owned menu.
@@ -180,7 +180,7 @@ pub struct WindowMenu {
     /// Ordinary application window containing the persistent bar and caller content.
     window: RootHandle,
     /// One hidden retained popup root for each top-level menu.
-    popups: Vec<RootHandle>,
+    popups: Vec<PopupHandle>,
     /// Weak typed access used to reconcile the highlighted heading.
     bar: TypedWidgetHandle<MenuBar>,
     /// Currently visible top-level menu index.
@@ -241,7 +241,7 @@ impl WindowMenu {
         let window = context.create_window(name, rect, shell);
 
         // Register one independently retained popup per concrete top-level menu.
-        let popups: Vec<RootHandle> = menus
+        let popups: Vec<PopupHandle> = menus
             .into_iter()
             .map(|(label, popup)| context.create_popup(&format!("{name} {label} Menu"), popup))
             .collect();
@@ -275,12 +275,15 @@ impl WindowMenu {
     }
 
     /// Returns all concrete top-level popup roots in heading order.
-    pub fn popups(&self) -> &[RootHandle] {
+    pub fn popups(&self) -> &[PopupHandle] {
+        // Expose only typed popup capabilities so callers cannot lose the root-kind proof required
+        // by Context::show_popup_at.
         &self.popups
     }
 
     /// Returns one top-level popup root by heading index.
-    pub fn popup(&self, index: usize) -> Option<&RootHandle> {
+    pub fn popup(&self, index: usize) -> Option<&PopupHandle> {
+        // Preserve the typed capability when selecting one menu root by its stable heading order.
         self.popups.get(index)
     }
 
@@ -321,9 +324,7 @@ impl WindowMenu {
             self.finish_close();
             return;
         };
-        context
-            .show_popup_at(popup.id(), event.anchor)
-            .expect("window-menu popup must remain registered");
+        context.show_popup_at(popup, event.anchor).expect("window-menu popup must remain registered");
         self.active_menu = Some(event.index);
         self.bar
             .try_update(|bar| bar.set_open_menu(Some(event.index)))

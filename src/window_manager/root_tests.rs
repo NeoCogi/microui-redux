@@ -813,7 +813,7 @@ fn context_aware_handler_creates_and_mutates_every_root_kind_before_layout() {
     struct Model {
         window: Option<RootHandle>,
         dialog: Option<RootHandle>,
-        popup: Option<RootHandle>,
+        popup: Option<PopupHandle>,
     }
 
     impl Model {
@@ -875,7 +875,7 @@ fn context_aware_handler_creates_and_mutates_every_root_kind_before_layout() {
 fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     struct Model {
         combo: TypedWidgetHandle<Combo>,
-        popup: RootHandle,
+        popup: PopupHandle,
         submitted_anchor: Option<Recti>,
     }
 
@@ -884,7 +884,7 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
             // Compose the semantic Combo with an ordinary retained popup through the general root
             // API; neither EventContext nor WindowManager needs to know this root belongs to a combo.
             if event.open {
-                context.show_popup_at(self.popup.id(), event.anchor).unwrap();
+                context.show_popup_at(&self.popup, event.anchor).unwrap();
             } else {
                 context.set_root_visible(self.popup.id(), false).unwrap();
             }
@@ -1152,9 +1152,9 @@ fn showing_a_popup_atomically_hides_and_dismisses_the_previous_one() {
     dispatcher.subscribe(first.submitted(), record).unwrap();
     let mut submissions = Vec::new();
 
-    ctx.show_popup_at(first.id(), rect(12, 18, 90, 1)).unwrap();
+    ctx.show_popup_at(&first, rect(12, 18, 90, 1)).unwrap();
     assert_eq!(first.widget().try_read(RootChrome::is_visible), Some(true));
-    ctx.show_popup_at(second.id(), rect(40, 55, 120, 1)).unwrap();
+    ctx.show_popup_at(&second, rect(40, 55, 120, 1)).unwrap();
 
     assert_eq!(first.widget().try_read(RootChrome::is_visible), Some(false));
     assert_eq!(second.widget().try_read(RootChrome::is_visible), Some(true));
@@ -1170,18 +1170,16 @@ fn showing_a_popup_atomically_hides_and_dismisses_the_previous_one() {
 }
 
 #[test]
-fn anchored_popup_operation_rejects_non_popup_roots_without_mutation() {
+fn anchored_popup_operation_rejects_a_destroyed_typed_popup() {
     let mut ctx = context();
-    let window = ctx.create_window("window", rect(5, 7, 100, 80), empty_content());
+    let popup = ctx.create_popup("popup", empty_content());
+    let popup_id = popup.id();
+    assert!(ctx.destroy_root(popup_id));
 
-    assert_eq!(ctx.show_popup_at(window.id(), rect(20, 30, 40, 1)), Err(RootMutationError::NotPopup));
-    assert_eq!(
-        window.widget().try_read(|root| {
-            let bounds = root.rect();
-            (bounds.x, bounds.y, bounds.width, bounds.height, root.is_visible())
-        }),
-        Some((5, 7, 100, 80, true))
-    );
+    // PopupHandle makes ordinary windows and dialogs unrepresentable at this API boundary. The
+    // remaining identity failure is a once-valid weak popup capability whose root was destroyed.
+    assert_eq!(ctx.show_popup_at(&popup, rect(20, 30, 40, 1)), Err(RootMutationError::UnknownRoot));
+    assert!(!popup.widget().is_alive());
 }
 
 #[test]

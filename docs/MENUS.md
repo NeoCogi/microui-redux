@@ -135,5 +135,6 @@ specification or rebuild item nodes. Selecting a registered item closes the acti
 application handler runs. Outside presses and popup replacement use ordinary
 `RootSubmitted::PopupDismissed` policy and reconcile the bar automatically.
 
-Use `WindowMenu::window`, `WindowMenu::popups`, or `WindowMenu::popup` to inspect root handles.
+Use `WindowMenu::window` to inspect the ordinary `RootHandle`, or `WindowMenu::popups` and
+`WindowMenu::popup` to inspect the typed `PopupHandle` values.
 Use `WindowMenu::close` for programmatic closure so root and bar state remain synchronized.

@@ -36,7 +36,7 @@
 //! context-owned dispatcher only drains semantic [`crate::WidgetEvent`] ports into application
 //! state.
 
-use crate::window_manager::{RootHandle, RootId, RootMutationError, WindowManager, WindowOption};
+use crate::window_manager::{PopupHandle, RootHandle, RootId, RootMutationError, WindowManager, WindowOption};
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, FrameInfo, RenderError, Renderer, RendererBackend};
 use crate::{Dimensioni, ImageSource, KeyCode, KeyMode, MouseButton, Node, Recti, Style, TextureId};
 
@@ -86,8 +86,9 @@ impl<'a> EventContext<'a> {
     ///
     /// The operation is generic root construction; this capability has no knowledge of the button,
     /// combo, menu, or other application behavior that may later show the popup.
-    pub fn create_popup(&mut self, name: &str, content: Node) -> RootHandle {
-        // Register the persistent tree through the ordinary popup root path.
+    pub fn create_popup(&mut self, name: &str, content: Node) -> PopupHandle {
+        // Register the persistent tree through the popup-only construction path so later anchored
+        // placement is statically restricted to roots carrying popup policy.
         self.window_manager.create_popup(name, content)
     }
 
@@ -128,9 +129,11 @@ impl<'a> EventContext<'a> {
     ///
     /// This atomic form is intended for composed controls such as menus and combos. It both applies
     /// popup exclusivity and replaces the popup rectangle, so no pointer-relative intermediate
-    /// placement can be observed. Windows and dialogs return [`RootMutationError::NotPopup`].
-    pub fn show_popup_at(&mut self, root: RootId, anchor: Recti) -> Result<(), RootMutationError> {
-        self.window_manager.show_popup_at(root, anchor)
+    /// placement can be observed. The typed handle prevents passing a window or dialog root.
+    pub fn show_popup_at(&mut self, popup: &PopupHandle, anchor: Recti) -> Result<(), RootMutationError> {
+        // Delegate the complete transaction while retaining compile-time popup identity across the
+        // event façade boundary.
+        self.window_manager.show_popup_at(popup, anchor)
     }
 
     /// Raises a registered root and reports whether it still exists.
@@ -394,7 +397,9 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// submission before ordinary routing may continue beneath the popup boundary. Showing another
     /// popup also hides this one and records the same dismissal. While a dialog is active, a shown
     /// popup remains visible but is kept below the dialog and receives no input.
-    pub fn create_popup(&mut self, name: &str, content: Node) -> RootHandle {
+    pub fn create_popup(&mut self, name: &str, content: Node) -> PopupHandle {
+        // Return the typed weak capability created by WindowManager so callers cannot request
+        // anchored popup policy for an ordinary window or dialog identifier.
         self.window_manager.create_popup(name, content)
     }
 
@@ -431,9 +436,24 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// Shows a popup at an exact screen-space anchor in one checked root mutation.
     ///
     /// Use this for a popup whose position belongs to the semantic event that opened it. Ordinary
-    /// pointer-relative popups may continue to use [`Self::set_root_visible`].
-    pub fn show_popup_at(&mut self, root: RootId, anchor: Recti) -> Result<(), RootMutationError> {
-        self.window_manager.show_popup_at(root, anchor)
+    /// pointer-relative popups may continue to use [`Self::set_root_visible`]. The typed parameter
+    /// makes an ordinary [`RootHandle`] ineligible for popup-only placement policy:
+    ///
+    /// ```compile_fail
+    /// use microui_redux::prelude::*;
+    ///
+    /// fn cannot_anchor_window<B: RendererBackend, State: 'static>(
+    ///     context: &mut Context<B, State>,
+    ///     window: &RootHandle,
+    ///     anchor: Recti,
+    /// ) {
+    ///     context.show_popup_at(window, anchor);
+    /// }
+    /// ```
+    pub fn show_popup_at(&mut self, popup: &PopupHandle, anchor: Recti) -> Result<(), RootMutationError> {
+        // Keep popup identity typed through the public façade; the manager still checks whether the
+        // weak root remains registered and whether its widget state can be borrowed atomically.
+        self.window_manager.show_popup_at(popup, anchor)
     }
 
     /// Raises a registered root and reports whether it exists.

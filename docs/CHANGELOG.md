@@ -36,7 +36,7 @@ from `demo-full`.
     - [x] Removed the public standalone event `Session`; applications without model callbacks continue to use `Context<B>` without rebuilding retained roots.
 - [x] Extracted backend-independent retained root management.
     - [x] Windows, dialogs, and popups remain context-owned until explicit destruction.
-    - [x] `RootHandle` exposes typed chrome state and events without extending root lifetime.
+    - [x] `RootHandle` and the popup-specific `PopupHandle` expose typed chrome state and events without extending root lifetime.
     - [x] Modal routing, popup dismissal, focus, capture, root movement, and resizing share one retained window manager.
     - [x] Each retained `UiRuntime` delegates node targeting, focus, hover, and capture state to an independent `InputRouter` while retaining authoritative layout and traversal ownership.
 - [x] Removed frame-polled transient-root and file-dialog coordination from the full demo.
@@ -50,7 +50,7 @@ from `demo-full`.
 - [x] Added application-owned per-window menus.
     - [x] Concrete `MenuItem`, `MenuGroup`, `Menu`, `MenuPanel`, and `WindowMenu` types compose registered retained items without a command type, generic menu model, `Any`, or copied specifications.
     - [x] Each item owns its typed `MenuItemSubmitted` source and live enabled/check/radio state; top-level menus retain independent auto-sized popup trees.
-    - [x] `Context` and `EventContext` expose `show_popup_at` for atomic anchored placement, visibility, z-order, exclusivity, and displaced-popup dismissal.
+    - [x] `Context` and `EventContext` expose `show_popup_at` through `PopupHandle` for compile-time root-kind safety and atomic anchored placement, visibility, z-order, exclusivity, and displaced-popup dismissal.
     - [x] `demo-full` includes File, View, and Help menus that invoke the file dialog, log behavior, and live spacing style changes.
     - [x] Logical-key accelerators, navigation, mnemonics, and cascading submenus remain intentionally staged with the roadmap's key-navigation and popup-family work.
 - [x] Unified rendering behind recorded painter operations and typed backend frames.

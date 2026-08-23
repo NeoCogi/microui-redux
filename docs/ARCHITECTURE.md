@@ -58,13 +58,15 @@ mutations, call `Context::update_ui` before painting. Custom widgets can inspect
 value through `MeasureCtx::style`, `ContainerLayoutCtx::style`, `WidgetUpdateCtx::style`, and
 `WidgetPaintCtx::style`.
 
-Root creation consumes one persistent application `Node` and returns a non-owning `RootHandle`.
+Window and dialog creation consume one persistent application `Node` and return a non-owning
+`RootHandle`; popup creation returns the more specific non-owning `PopupHandle`.
 Roots cannot be replaced while retaining their identity: mutate descendants through a container
 state's weak topology capability, or destroy and recreate the root. Visibility is controlled with
 `set_root_visible`.
 A composed control with an exact screen-space popup anchor uses `show_popup_at`, which applies
 placement, popup exclusivity, dismissal of a displaced popup, z-order, and visibility in one checked
-window-manager transaction. Per-window application menus use this path so each already-retained
+window-manager transaction. Its `PopupHandle` parameter makes ordinary windows and dialogs
+ineligible at compile time. Per-window application menus use this path so each already-retained
 top-level popup is positioned directly below the heading observed by the opening event.
 A visible dialog is modal: it stays above every window and popup, receives all eligible pointer,
 keyboard, text, focus, and capture routing, and blocks interaction with other roots until hidden or
@@ -129,7 +131,8 @@ node, wrapping it in an unmounted `LinearItem` or `GridItem`, and inserting it i
 preserve that identity; applications cannot read or construct it.
 There is no public node ID or result lookup path. Weak typed widget handles expose event endpoints
 after node erasure, while root chrome exposes its rectangle, visibility, and active mode through
-`RootHandle::widget()` and its typed endpoints through `RootHandle::{changed, submitted}`.
+`RootHandle::widget()` or `PopupHandle::widget()` and their typed `changed` and `submitted`
+endpoints.
 
 Registered roots can be configured with `Context::set_root_options(...)` and `WindowOption` to
 control window chrome. Root overflow does not scroll implicitly; construct a `ScrollArea` with

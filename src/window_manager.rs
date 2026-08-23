@@ -65,7 +65,10 @@ use roots::WindowEntry;
 mod root_chrome;
 mod roots;
 
-pub use root_chrome::{RootChanged, RootHandle, RootMutationError, RootChrome, RootSubmitted};
+pub use root_chrome::{RootChanged, RootHandle, RootChrome, RootSubmitted};
+// PopupHandle and RootMutationError belong to registry capability and policy rather than the
+// private chrome widget. Re-export both from the window-manager boundary as stable public types.
+pub use roots::{PopupHandle, RootMutationError};
 
 bitflags! {
     #[derive(Copy, Clone)]

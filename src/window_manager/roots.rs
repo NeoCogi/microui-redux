@@ -31,16 +31,86 @@
 //! Root registry, cross-root policy, and persistent tree traversal.
 
 use super::*;
-use crate::{MouseButton, Node, RootHandle, RootMutationError, RootChrome, TypedWidgetHandle, UiInputEvent, Vec2i, rect};
+use crate::{MouseButton, Node, RootHandle, RootChrome, TypedWidgetHandle, UiInputEvent, Vec2i, rect};
 
 use super::root_chrome::{create_root_chrome, record_root_overlay, root_handle, RootChromeParameters};
 #[cfg(test)]
 use super::root_chrome::root_chrome_geometry;
 
+/// Failure reported when the root registry cannot complete a checked state mutation.
+///
+/// These errors describe registry identity, cross-root policy, and checked access to the retained
+/// root widget. They deliberately live beside the private `WindowEntry` registry records and the
+/// mutation implementations rather than in `root_chrome`: [`RootChrome`] owns local presentation
+/// state, while the registry alone knows whether an identifier is registered and which private
+/// `WindowKind` policy applies to it.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum RootMutationError {
+    /// The supplied [`RootId`] does not identify a root currently owned by the context.
+    ///
+    /// Destroying a root invalidates its identifier for all later checked mutations. Root
+    /// identifiers are never reused, so this result cannot accidentally address a newer root.
+    UnknownRoot,
+    /// The retained root widget is already borrowed by an active typed-access closure.
+    ///
+    /// Checked mutations return this error instead of panicking or partially applying a cross-root
+    /// transaction. The caller may retry after the conflicting access closure has returned.
+    Borrowed,
+}
+
+/// Cloneable non-owning capability for one retained popup root.
+///
+/// Only [`crate::Context::create_popup`] and [`crate::EventContext::create_popup`] construct this
+/// type. That construction boundary proves that the wrapped root was registered with popup policy,
+/// allowing anchored placement to accept a [`PopupHandle`] instead of accepting an arbitrary
+/// [`RootId`] and reporting a runtime root-kind error. Destroying the root still invalidates this
+/// weak capability, and later checked mutations report [`RootMutationError::UnknownRoot`].
+#[derive(Clone)]
+pub struct PopupHandle {
+    /// Generic root capability retained for shared lifecycle, chrome-state, and event access.
+    root: RootHandle,
+}
+
+impl PopupHandle {
+    /// Wraps a newly registered popup root in the capability required by popup-only operations.
+    fn new(root: RootHandle) -> Self {
+        // Keep construction private to the root registry so safe application code cannot turn an
+        // ordinary window or modal-dialog handle into a popup capability.
+        Self { root }
+    }
+
+    /// Returns the lifecycle identifier accepted by generic root operations.
+    pub fn id(&self) -> RootId {
+        // Forward the stable identity without exposing a constructor for this typed capability.
+        self.root.id()
+    }
+
+    /// Returns the weak typed handle for the popup's concrete root-chrome widget.
+    pub fn widget(&self) -> &TypedWidgetHandle<RootChrome> {
+        // Reuse RootHandle's non-owning chrome access; this does not extend the popup lifetime.
+        self.root.widget()
+    }
+
+    /// Returns the native event endpoint emitted after a user-driven move or resize.
+    pub fn changed(&self) -> crate::WidgetEventPortHandle<crate::RootChanged> {
+        // Preserve the same cloneable event capability exposed by an ordinary root handle.
+        self.root.changed()
+    }
+
+    /// Returns the native event endpoint emitted for close and popup-dismissal submissions.
+    pub fn submitted(&self) -> crate::WidgetEventPortHandle<crate::RootSubmitted> {
+        // Popup dismissal remains observable without exposing or duplicating the owned event port.
+        self.root.submitted()
+    }
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(super) enum WindowKind {
+    /// An ordinary independently interactive application window.
     Window,
+    /// A modal dialog that excludes input to every root below it.
     Modal,
+    /// A transient root governed by exclusive visibility and outside-press dismissal policy.
     Popup,
 }
 
@@ -215,8 +285,10 @@ impl WindowManager {
     /// submission before ordinary routing may continue beneath the popup boundary. Showing another
     /// popup also hides this one and records the same dismissal. While a dialog is active, a shown
     /// popup remains visible but is kept below the dialog and receives no input.
-    pub fn create_popup(&mut self, name: &str, content: Node) -> RootHandle {
-        self.register_root(WindowKind::Popup, name, Recti::default(), content, Self::default_popup_options(), false)
+    pub fn create_popup(&mut self, name: &str, content: Node) -> PopupHandle {
+        // Wrap the generic registry handle at the only construction point that installs popup
+        // policy. Callers can therefore prove popup identity by type instead of a runtime check.
+        PopupHandle::new(self.register_root(WindowKind::Popup, name, Recti::default(), content, Self::default_popup_options(), false))
     }
 
     /// Replaces a retained root title without emitting a root-change event.
@@ -270,7 +342,7 @@ impl WindowManager {
                 .root_widget
                 .try_read(|state| if state.is_visible() { state.rect() } else { rect(mouse.x, mouse.y, 1, 1) })
                 .ok_or(RootMutationError::Borrowed)?;
-            return self.show_popup_at(root, popup_rect);
+            return self.show_popup_index_at(target, popup_rect);
         } else {
             self.update_root_widget(root, |state| state.set_visible_silent(visible))?;
         }
@@ -292,17 +364,25 @@ impl WindowManager {
         Ok(())
     }
 
-    /// Shows one popup at an exact screen-space anchor in a single root transaction.
+    /// Shows one typed popup at an exact screen-space anchor in a single root transaction.
     ///
     /// The supplied rectangle is installed before the next layout observes the popup. Showing it
-    /// dismisses any other visible popup and publishes that root's ordinary dismissal event. The
-    /// operation rejects windows and dialogs because applying popup exclusivity to either would be
-    /// an application error rather than a useful generic root mutation.
-    pub fn show_popup_at(&mut self, root: RootId, anchor: Recti) -> Result<(), RootMutationError> {
-        let target = self.root_index(root)?;
-        if self.roots[target].kind != WindowKind::Popup {
-            return Err(RootMutationError::NotPopup);
-        }
+    /// dismisses any other visible popup and publishes that root's ordinary dismissal event.
+    /// Accepting [`PopupHandle`] makes windows and dialogs ineligible at compile time; a handle
+    /// whose root was destroyed is still reported as [`RootMutationError::UnknownRoot`].
+    pub fn show_popup_at(&mut self, popup: &PopupHandle, anchor: Recti) -> Result<(), RootMutationError> {
+        // Resolve the weak capability on every mutation because destroying a popup does not destroy
+        // application-held handles. Root IDs are never reused, so a successful lookup identifies
+        // the same popup originally wrapped by PopupHandle::new.
+        let target = self.root_index(popup.id())?;
+        self.show_popup_index_at(target, anchor)
+    }
+
+    /// Applies anchored popup policy to an already-resolved popup registry index.
+    fn show_popup_index_at(&mut self, target: usize, anchor: Recti) -> Result<(), RootMutationError> {
+        // Both callers establish popup identity before entering the shared transaction: the public
+        // path resolves an unforgeable PopupHandle, while set_root_visible branches on WindowKind.
+        debug_assert_eq!(self.roots[target].kind, WindowKind::Popup);
 
         // Find the displaced popup before borrowing either concrete RootChrome mutably. Retained
         // handles use checked RefCell access, so a conflicting application borrow returns a typed
@@ -336,6 +416,7 @@ impl WindowManager {
                 Some(false) | None => return Err(RootMutationError::Borrowed),
             }
         } else {
+            let root = self.roots[target].id;
             self.update_root_widget(root, |state| {
                 state.set_rect_silent(anchor);
                 state.set_visible_silent(true);

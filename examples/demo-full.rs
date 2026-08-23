@@ -1177,8 +1177,8 @@ struct State {
     style: Style,
 
     demo_root: RootHandle,
-    combo_popup_root: RootHandle,
-    popup_root: RootHandle,
+    combo_popup_root: PopupHandle,
+    popup_root: PopupHandle,
 
     /// Application-owned component coordinating the main window's concrete menus.
     window_menu: WindowMenu,
@@ -1792,7 +1792,7 @@ impl State {
             // The submission owns the geometry from the update that routed this click, so opening
             // needs neither a widget-state read nor a previous-frame anchor snapshot.
             context
-                .show_popup_at(self.combo_popup_root.id(), event.anchor)
+                .show_popup_at(&self.combo_popup_root, event.anchor)
                 .expect("combo popup root must exist");
         } else {
             context

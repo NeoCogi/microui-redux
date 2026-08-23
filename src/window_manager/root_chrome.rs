@@ -76,17 +76,6 @@ impl RootHandle {
     }
 }
 
-/// Failure reported by a checked root-state mutation.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum RootMutationError {
-    /// The identifier does not name a currently registered root.
-    UnknownRoot,
-    /// An operation that requires popup policy was given a window or dialog root.
-    NotPopup,
-    /// The root widget is already borrowed by an active typed-access closure.
-    Borrowed,
-}
-
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(super) enum RootInteraction {
     None,

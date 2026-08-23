@@ -182,13 +182,11 @@ fn downstream_window_menu_exposes_concrete_items_roots_and_live_state() {
     assert_eq!(save.is_enabled(), Some(true));
     assert_eq!(word_wrap.mark(), Some(MenuItemMark::Checked(false)));
 
-    // Both roots are ordinary Context-owned retained roots. Anchored placement accepts only the
-    // component's popup, leaving the semantic component closed until its bar requests activation.
-    let window_id = menu.window().id();
-    let popup_id = menu.popup(0).unwrap().id();
-    assert_eq!(context.show_popup_at(window_id, rect(40, 40, 100, 1)), Err(RootMutationError::NotPopup));
-    context.show_popup_at(popup_id, rect(40, 40, 100, 1)).unwrap();
-    context.set_root_visible(popup_id, false).unwrap();
+    // Both roots remain Context-owned, but anchored placement accepts only PopupHandle. A normal
+    // window handle cannot be supplied to this operation, so no runtime root-kind error is needed.
+    let popup = menu.popup(0).unwrap();
+    context.show_popup_at(popup, rect(40, 40, 100, 1)).unwrap();
+    context.set_root_visible(popup.id(), false).unwrap();
 
     let model = MenuModel {
         menu,
