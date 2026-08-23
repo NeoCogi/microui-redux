@@ -75,7 +75,7 @@ let specification = MenuBarSpec::new([
     MenuSpec::new(
         "File",
         [
-            MenuEntry::item("Open…", Command::Open).shortcut_hint("Ctrl+O"),
+            MenuEntry::item("Open...", Command::Open).shortcut_hint("Ctrl+O"),
             MenuEntry::item("Save", Command::Save).shortcut_hint("Ctrl+S").disabled(),
         ],
     ),

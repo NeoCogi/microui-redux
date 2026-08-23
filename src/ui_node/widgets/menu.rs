@@ -311,26 +311,39 @@ impl<C: Clone + 'static> MenuPanel<C> {
             .filter(|index| self.entries[*index].as_item().is_some_and(crate::MenuItemSpec::is_enabled))
     }
 
+    /// Measures the widest label and shortcut used by the active menu.
+    fn text_column_widths(&self, style: &Style, atlas: &AtlasHandle) -> (i32, i32) {
+        let font = style.resolve_font_choice(self.font);
+        // Both strings are drawn into one control-text rectangle: labels align left and shortcut
+        // hints align right. Their maxima determine the intrinsic width needed to keep a
+        // padding-sized gap between those two ends for every row.
+        self.entries
+            .iter()
+            .filter_map(crate::MenuEntry::as_item)
+            .fold((0, 0), |(label_width, shortcut_width), item| {
+                (
+                    label_width.max(atlas.get_text_size(font, item.label()).width.max(0)),
+                    shortcut_width.max(
+                        item.shortcut_hint()
+                            .map(|shortcut| atlas.get_text_size(font, shortcut).width.max(0))
+                            .unwrap_or(0),
+                    ),
+                )
+            })
+    }
+
     /// Computes the desired panel size from aligned marker, label, and shortcut columns.
     fn preferred_size(&self, style: &Style, atlas: &AtlasHandle) -> Dimensioni {
         let padding = style.padding.max(1);
-        let font = style.resolve_font_choice(self.font);
         let marker_width = atlas.get_icon_size(style.icons.check).width.max(0);
-        let mut label_width = 0;
-        let mut shortcut_width = 0;
+        let (label_width, shortcut_width) = self.text_column_widths(style, atlas);
         let mut height = 0i32;
 
         for entry in &self.entries {
-            let Some(item) = entry.as_item() else {
+            if entry.is_separator() {
                 height = height.saturating_add(Self::separator_height(style));
                 continue;
-            };
-            label_width = label_width.max(atlas.get_text_size(font, item.label()).width.max(0));
-            shortcut_width = shortcut_width.max(
-                item.shortcut_hint()
-                    .map(|shortcut| atlas.get_text_size(font, shortcut).width.max(0))
-                    .unwrap_or(0),
-            );
+            }
             height = height.saturating_add(menu_row_height(style, atlas, self.font));
         }
 
@@ -347,22 +360,17 @@ impl<C: Clone + 'static> MenuPanel<C> {
         Dimensioni::new(content_width.max(self.minimum_width), height)
     }
 
-    /// Splits one row into marker, label, and shortcut rectangles.
-    fn row_columns(row: Recti, style: &Style, atlas: &AtlasHandle) -> (Recti, Recti, Recti) {
+    /// Splits one row into its marker and shared control-text rectangles.
+    fn row_regions(row: Recti, style: &Style, atlas: &AtlasHandle) -> (Recti, Recti) {
         let padding = style.padding.max(1);
         let marker_width = atlas.get_icon_size(style.icons.check).width.max(0);
         let marker = Recti::new(row.x.saturating_add(padding), row.y, marker_width, row.height);
-        let shortcut_width = (row.width / 3).max(0);
-        let shortcut = Recti::new(
-            row.x.saturating_add(row.width).saturating_sub(padding).saturating_sub(shortcut_width),
-            row.y,
-            shortcut_width,
-            row.height,
-        );
-        let label_x = marker.x.saturating_add(marker.width).saturating_add(padding);
-        let label_right = shortcut.x.saturating_sub(padding);
-        let label = Recti::new(label_x, row.y, label_right.saturating_sub(label_x).max(0), row.height);
-        (marker, label, shortcut)
+        let text_x = marker.x.saturating_add(marker.width);
+        let text = Recti::new(text_x, row.y, row.x.saturating_add(row.width).saturating_sub(text_x).max(0), row.height);
+        // `draw_control_text_*` owns the padding inside `text`. Passing one shared control region is
+        // essential: allocating already-tight label/shortcut cells would apply that padding again
+        // and clip the trailing/leading glyphs respectively.
+        (marker, text)
     }
 
     /// Derives a subdued text color without adding a menu-specific palette slot.
@@ -466,17 +474,91 @@ impl<C: Clone + 'static> Widget for MenuPanel<C> {
                 ctx.draw_rect(row, ctx.style().colors[ControlColor::ButtonHover as usize]);
             }
 
-            let (marker, label, shortcut) = Self::row_columns(row, ctx.style(), ctx.atlas());
+            let (marker, text) = Self::row_regions(row, ctx.style(), ctx.atlas());
             Self::paint_marker(ctx, marker, item.marker(), item.is_enabled());
             let color = if item.is_enabled() {
                 ctx.style().colors[ControlColor::Text as usize]
             } else {
                 Self::disabled_text_color(ctx.style())
             };
-            ctx.draw_control_text_color_with_font(font, item.label(), label, color, WidgetOption::NONE);
+            // Label and hint deliberately share this rectangle. The common control-text primitive
+            // then owns left/right padding and clipping exactly once for both alignments.
+            ctx.draw_control_text_color_with_font(font, item.label(), text, color, WidgetOption::NONE);
             if let Some(hint) = item.shortcut_hint() {
-                ctx.draw_control_text_color_with_font(font, hint, shortcut, color, WidgetOption::ALIGN_RIGHT);
+                ctx.draw_control_text_color_with_font(font, hint, text, color, WidgetOption::ALIGN_RIGHT);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::test_atlas;
+    use crate::ui_node::text_layout::control_text_position_with_font;
+
+    /// Commands used only to give regression entries concrete semantic identity.
+    #[derive(Copy, Clone, Debug)]
+    enum Command {
+        /// Long unhinted row that exercises the label-only control-text region.
+        Comfortable,
+        /// Short row carrying the widest shortcut column in the test menu.
+        Open,
+    }
+
+    /// Verifies actual glyph bounds against the shared control-text clipping region.
+    fn assert_panel_text_fits(entries: Vec<crate::MenuEntry<Command>>, expected_shortcut_width: i32) {
+        let atlas = test_atlas();
+        let style = Style::default();
+        let (panel, panel_node, _) = MenuPanel::create();
+        panel
+            .try_update_with(entries, |panel, entries| panel.set_menu(entries, 0))
+            .expect("unmounted panel node must own its widget");
+
+        panel
+            .try_read(|panel| {
+                let font = style.resolve_font_choice(panel.font);
+                let desired = panel.preferred_size(&style, &atlas);
+                let (label_width, shortcut_width) = panel.text_column_widths(&style, &atlas);
+                let rows = panel.entry_rects(Recti::new(0, 0, desired.width, desired.height), &style, &atlas);
+                assert_eq!(shortcut_width, expected_shortcut_width);
+
+                for (entry, row) in panel.entries.iter().zip(rows) {
+                    let item = entry.as_item().expect("test entries are command rows");
+                    let (_, text) = MenuPanel::<Command>::row_regions(row, &style, &atlas);
+                    let label_size = atlas.get_text_size(font, item.label());
+                    let label_position = control_text_position_with_font(&style, &atlas, font, item.label(), text, WidgetOption::NONE);
+                    assert!(label_size.width <= label_width);
+                    assert!(label_position.x >= text.x);
+                    assert!(label_position.x.saturating_add(label_size.width) <= text.x.saturating_add(text.width));
+
+                    if let Some(hint) = item.shortcut_hint() {
+                        let shortcut_size = atlas.get_text_size(font, hint);
+                        let shortcut_position = control_text_position_with_font(&style, &atlas, font, hint, text, WidgetOption::ALIGN_RIGHT);
+                        assert!(label_position.x.saturating_add(label_size.width).saturating_add(style.padding) <= shortcut_position.x);
+                        assert!(shortcut_position.x.saturating_add(shortcut_size.width) <= text.x.saturating_add(text.width));
+                    }
+                }
+            })
+            .expect("unmounted panel node must own its widget");
+
+        // Keep the sole strong widget owner alive until every weak-handle assertion has completed.
+        drop(panel_node);
+    }
+
+    #[test]
+    fn shared_control_text_region_preserves_every_menu_glyph() {
+        let atlas = test_atlas();
+        let font = Style::default().resolve_font_choice(FontChoice::Role(FontRole::Body));
+        let shortcut_width = atlas.get_text_size(font, "Ctrl+O").width;
+
+        assert_panel_text_fits(
+            vec![
+                crate::MenuEntry::item("Comfortable Spacing", Command::Comfortable),
+                crate::MenuEntry::item("Open", Command::Open).shortcut_hint("Ctrl+O"),
+            ],
+            shortcut_width,
+        );
+        assert_panel_text_fits(vec![crate::MenuEntry::item("Comfortable Spacing", Command::Comfortable)], 0);
     }
 }

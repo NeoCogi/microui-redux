@@ -1077,7 +1077,7 @@ fn demo_menu_specification() -> MenuBarSpec<DemoMenuCommand> {
             "File",
             [
                 MenuEntry::item("New Session", DemoMenuCommand::NewSession).shortcut_hint("Ctrl+N"),
-                MenuEntry::item("Open…", DemoMenuCommand::OpenFile).shortcut_hint("Ctrl+O"),
+                MenuEntry::item("Open...", DemoMenuCommand::OpenFile).shortcut_hint("Ctrl+O"),
                 MenuEntry::item("Save Snapshot", DemoMenuCommand::SaveSnapshot)
                     .shortcut_hint("Ctrl+S")
                     .disabled(),
@@ -1828,7 +1828,7 @@ impl State {
                 // next activation.
                 self.window_menu.set_enabled(&DemoMenuCommand::OpenFile, false);
                 self.file_dialog.open_from_event(context, FileDialogRequest::default());
-                self.write_log("Opened the file dialog from File > Open…");
+                self.write_log("Opened the file dialog from File > Open...");
             }
             DemoMenuCommand::OpenFile => {}
             DemoMenuCommand::ClearLog => self.clear_log(),
