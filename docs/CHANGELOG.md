@@ -1,10 +1,6 @@
 # Version history and roadmap
 
 ## Roadmap to Version 0.9
-- [x] Per-window menus
-    - [x] Application-owned typed menu specifications and command delivery.
-    - [x] Popup-root panels with separator groups, disabled items, check/radio markers, and shortcut hints.
-    - [x] Atomic screen-space popup anchoring and generic outside/replacement dismissal.
 - [ ] Key navigation
 - [ ] Async/Multi-Threading?
 - [ ] Theming/Skinning
@@ -15,7 +11,8 @@
 `0.8.0-alpha.3` builds on the first public alpha of the breaking retained-API redesign relative to
 `0.7.0`. It is intended for integration testing and API feedback before the stable `0.8.0`
 release. This alpha completes event-time coordination for transient roots and file-dialog results,
-removing the remaining application-level frame polling from `demo-full`.
+adds application-owned per-window menus, and removes the remaining application-level frame polling
+from `demo-full`.
 
 - [x] Replaced retained tree building with unique owning `Node` values.
     - [x] Handle-bearing built-in leaf and container constructors return `(TypedWidgetHandle<W>, Node)`; stateless `Custom::create` returns a runtime for explicit `Node` mounting.
