@@ -32,7 +32,10 @@ use std::cell::Cell;
 
 use microui_redux::render::{FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex};
 use microui_redux::retained::*;
-use microui_redux::prelude::{Dimensioni, FileDialog, FileDialogRequest, FileDialogStatus, Recti};
+use microui_redux::prelude::{
+    Dimensioni, FileDialog, FileDialogRequest, FileDialogStatus, MenuBarSpec, MenuEntry, MenuInvoked, MenuItemMark, MenuSpec, Recti, TextBlock,
+    TextBlockParameters, WindowMenu,
+};
 use microui_redux::{
     color, rect, AtlasHandle, AtlasSource, Constraints, Context, Disclosure, DisclosureParameters, FontEntry, Grid, GridParameters, Linear, LinearParameters,
     RootMutationError, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SourceFormat, Style, TextureId,
@@ -128,6 +131,86 @@ fn downstream_file_dialog_completion_is_subscriber_driven_without_widget_access(
     context.update_ui_state(Dimensioni::new(320, 240), &mut model);
     assert_eq!(model.completion, Some(FileDialogStatus::Cancelled));
     assert!(!model.dialog.is_open());
+}
+
+/// Commands used to compile and exercise the downstream per-window menu contract.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum MenuCommand {
+    /// Enabled command used as a normal item.
+    Open,
+    /// Disabled command whose state is changed through the component API.
+    Save,
+    /// Checkable command used to verify marker mutation.
+    WordWrap,
+}
+
+/// Minimal downstream application state that owns one complete menu component.
+struct MenuModel {
+    /// Menu component found by its internal subscription accessor.
+    menu: WindowMenu<MenuCommand>,
+    /// Commands observed through the public typed application endpoint.
+    invoked: Vec<MenuCommand>,
+}
+
+impl MenuModel {
+    /// Returns the stable component location required by `WindowMenu::create`.
+    fn menu_mut(state: &mut Self) -> &mut WindowMenu<MenuCommand> {
+        &mut state.menu
+    }
+
+    /// Records public semantic delivery without accessing either internal widget.
+    fn menu_invoked(&mut self, event: &MenuInvoked<MenuCommand>) {
+        self.invoked.push(event.command);
+    }
+}
+
+#[test]
+fn downstream_window_menu_exposes_typed_specs_roots_and_live_state() {
+    let mut context = context_with_state::<MenuModel>();
+    let specification = MenuBarSpec::new([
+        MenuSpec::new(
+            "File",
+            [
+                MenuEntry::item("Open", MenuCommand::Open).shortcut_hint("Ctrl+O"),
+                MenuEntry::item("Save", MenuCommand::Save).disabled(),
+            ],
+        ),
+        MenuSpec::new(
+            "View",
+            [MenuEntry::item("Word Wrap", MenuCommand::WordWrap).checked(true), MenuEntry::separator()],
+        ),
+    ]);
+    let body = TextBlock::create(TextBlockParameters::new("body")).1;
+    let mut menu = WindowMenu::create(&mut context, MenuModel::menu_mut, "document", rect(20, 20, 240, 160), specification, body);
+    let invoked = menu.invoked();
+    context.subscribe(invoked, MenuModel::menu_invoked).unwrap();
+    // The deliberately minimal downstream atlas contains no chrome icons, so this compile-contract
+    // test removes title controls before committing the retained tree.
+    context
+        .set_root_options(menu.window().id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+
+    // Public state mutations update the authoritative semantic model before the first frame.
+    assert_eq!(menu.set_enabled(&MenuCommand::Save, true), 1);
+    assert_eq!(menu.set_checked(&MenuCommand::WordWrap, false), 1);
+    assert_eq!(menu.specification().menus().len(), 2);
+    assert_eq!(
+        menu.specification().menus()[1].entries()[0].as_item().unwrap().marker(),
+        MenuItemMark::Checked(false)
+    );
+
+    // Both roots are ordinary Context-owned retained roots. Anchored placement accepts only the
+    // component's popup, leaving the semantic component closed until its bar requests activation.
+    let window_id = menu.window().id();
+    let popup_id = menu.popup().id();
+    assert_eq!(context.show_popup_at(window_id, rect(40, 40, 100, 1)), Err(RootMutationError::NotPopup));
+    context.show_popup_at(popup_id, rect(40, 40, 100, 1)).unwrap();
+    context.set_root_visible(popup_id, false).unwrap();
+
+    let model = MenuModel { menu, invoked: Vec::new() };
+    assert!(model.menu.window().widget().is_alive());
+    assert!(model.menu.popup().widget().is_alive());
+    assert!(model.invoked.is_empty());
 }
 
 #[test]

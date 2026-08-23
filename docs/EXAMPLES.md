@@ -10,8 +10,10 @@
   typed custom-render callback.
 - [`texture-clipping-smoke`](../examples/texture-clipping-smoke.rs) exercises low-level texture
   upload and clipping behavior.
-- [`demo-full`](../examples/demo-full.rs) combines retained widgets, dialogs, custom drawing,
-  external textures, and custom backend rendering.
+- [`demo-full`](../examples/demo-full.rs) combines retained widgets, per-window File/View/Help
+  menus, dialogs, custom drawing, external textures, and custom backend rendering. Its menu shows
+  grouped and disabled commands, shortcut hints, a live checked item, radio choices, and typed
+  command dispatch into the file dialog, log, and style state.
 
 ## Full demo
 

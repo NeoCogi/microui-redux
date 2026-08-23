@@ -71,10 +71,14 @@ WidgetEventPortHandle<E> ──────────────── Weak �
 dispatch boundary ── lends &mut EventContext<'_> ──> opted-in Handler
 
 Application State
-└── owns FileDialog
-       ├── holds weak handles into its ordinary Context-owned dialog root
-       ├── owns shared dynamic-row event ports
-       └── owns WidgetEventPort<FileDialogCompleted>
+├── owns FileDialog
+│      ├── holds weak handles into its ordinary Context-owned dialog root
+│      ├── owns shared dynamic-row event ports
+│      └── owns WidgetEventPort<FileDialogCompleted>
+└── owns WindowMenu<Command>
+       ├── holds weak handles into its Context-owned window and popup roots
+       ├── owns the authoritative menu specification
+       └── owns WidgetEventPort<MenuInvoked<Command>>
 ```
 
 The only strong event-port owner is its retained producer. Consequently:
@@ -407,7 +411,8 @@ registry, per-control command enum, or second root lifetime model.
 
 The full demo composes `Combo` and its popup root entirely through typed events. `ComboSubmitted`
 carries the screen-space anchor from the update that routed the header click, so its context-aware
-handler updates popup visibility and placement in the triggering input transaction. The demo state
+handler calls `show_popup_at` to update popup visibility and placement atomically in the triggering
+input transaction. The demo state
 already owns both retained handles: `RootSubmitted::PopupDismissed` closes the combo's shared
 semantic state after an outside press or replacement by another popup. Starting a source-window
 move or resize is such an outside press, so the popup is closed before any `RootChanged` movement
@@ -423,6 +428,12 @@ subscribes to that instance's completion source. Opening can occur directly insi
 application handler: it resets request-specific state and shows the existing ordinary dialog root.
 Acceptance or cancellation hides the root again while preserving the component, ports, and static
 widgets. Multiple component instances are independent and participate in the generic modal stack.
+
+`WindowMenu<Command>` uses the same application-owned component binding for a different root
+composition. It mounts a persistent bar in one ordinary window, reuses a second popup root for the
+active menu panel, consumes generic popup-dismissal events internally, and publishes only the typed
+`MenuInvoked<Command>` result to application state. See the [menu guide](MENUS.md) for construction,
+state mutation, and current keyboard-navigation scope.
 
 ```rust,ignore
 impl Model {

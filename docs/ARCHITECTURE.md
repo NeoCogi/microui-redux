@@ -10,6 +10,11 @@
 - **Rendering**: widgets obtain a local `Painter` from `WidgetPaintCtx`; retained traversal owns the internal display list, and `Renderer` executes it through one exclusively borrowed `RendererBackend::Frame`. The portable target supports drawables up to 8192x8192 and geometry up to four maximum drawable spans beyond the viewport; see the [render subsystem guide](RENDER.md#supported-coordinate-domain) for the complete coordinate contract and integration API.
 - **Typography**: atlases can bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while text-bearing `*Parameters` select a per-widget font with `.font(...)`.
 - **Style overrides**: every retained node can supply a `Style` in place of its inherited style. A container passes that style to its descendants until another node replaces it. The same effective value drives measurement, placement, input localization, update, and paint.
+- **Application components**: application state may coordinate multiple ordinary retained roots and
+  widgets behind a typed semantic API. `FileDialog` owns dialog behavior; `WindowMenu<Command>`
+  owns a window menu model while Context continues to own its window and popup trees. Components
+  connect internal events through an application-state accessor and publish results through the
+  same dispatcher as built-in widgets.
 
 The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained concepts such as `Node`, `Children`, `Container`, `Linear`, `Disclosure`, typed widget handles, and `Context`. Low-level rendering lives under `microui_redux::render`, and atlas construction lives under `microui_redux::atlas::builder`.
 
@@ -57,6 +62,10 @@ Root creation consumes one persistent application `Node` and returns a non-ownin
 Roots cannot be replaced while retaining their identity: mutate descendants through a container
 state's weak topology capability, or destroy and recreate the root. Visibility is controlled with
 `set_root_visible`.
+A composed control with an exact screen-space popup anchor uses `show_popup_at`, which applies
+placement, popup exclusivity, dismissal of a displaced popup, z-order, and visibility in one checked
+window-manager transaction. Per-window application menus use this path so their independent panel
+root is positioned directly below the heading observed by the opening event.
 A visible dialog is modal: it stays above every window and popup, receives all eligible pointer,
 keyboard, text, focus, and capture routing, and blocks interaction with other roots until hidden or
 destroyed. Other roots remain visible and continue to be laid out and painted.

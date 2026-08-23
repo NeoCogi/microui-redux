@@ -44,6 +44,7 @@ builds.
 - [Architecture](docs/ARCHITECTURE.md)
 - [Typed events and retained services](docs/EVENTS.md)
 - [Retained layout](docs/LAYOUT.md)
+- [Per-window application menus](docs/MENUS.md)
 - [Rendering and backend integration](docs/RENDER.md)
 - [Backend frames and custom rendering](docs/BACKENDS.md)
 - [Fonts and typography](docs/TYPOGRAPHY.md)

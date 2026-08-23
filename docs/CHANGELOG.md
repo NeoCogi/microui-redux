@@ -1,7 +1,10 @@
 # Version history and roadmap
 
 ## Roadmap to Version 0.9
-- [ ] Menus
+- [x] Per-window menus
+    - [x] Application-owned typed menu specifications and command delivery.
+    - [x] Popup-root panels with separator groups, disabled items, check/radio markers, and shortcut hints.
+    - [x] Atomic screen-space popup anchoring and generic outside/replacement dismissal.
 - [ ] Key navigation
 - [ ] Async/Multi-Threading?
 - [ ] Theming/Skinning
@@ -47,6 +50,12 @@ removing the remaining application-level frame polling from `demo-full`.
     - [x] Sequential activations reuse the application's retained component and root, while multiple application-owned `FileDialog` instances remain independent.
     - [x] `FileDialogStatus` represents terminal outcomes only; `FileDialog::is_open()` represents active state while completion handlers exhaustively match accepted or cancelled outcomes.
     - [x] The general layer remains unaware of combos and file-dialog behavior: `EventContext` exposes generic root operations, while specialized state and payloads stay with their application-owned components.
+- [x] Added application-owned per-window menus.
+    - [x] `WindowMenu<Command>` mounts a retained menu bar above one window's content and reuses an independent auto-sized popup panel for its active top-level menu.
+    - [x] Typed specifications support separator groups, disabled commands, check/radio markers, shortcut presentation hints, live state mutation, and `MenuInvoked<Command>` delivery.
+    - [x] `Context` and `EventContext` expose `show_popup_at` for atomic anchored placement, visibility, z-order, exclusivity, and displaced-popup dismissal.
+    - [x] `demo-full` includes File, View, and Help menus that invoke the file dialog, log behavior, and live spacing style changes.
+    - [x] Logical-key accelerators, navigation, mnemonics, and cascading submenus remain intentionally staged with the roadmap's key-navigation and popup-family work.
 - [x] Unified rendering behind recorded painter operations and typed backend frames.
     - [x] `Painter` records backend-neutral work into the framework-owned display list.
     - [x] `RendererBackend::Frame<'a>` gives each backend one exclusive submission frame.
