@@ -225,9 +225,9 @@ impl Widget for MenuBar {
 pub enum MenuItemMark {
     /// The item has no persistent marker.
     None,
-    /// A checkable item whose boolean controls check-glyph visibility.
+    /// A checkable item whose application-managed boolean controls check-glyph visibility.
     Checked(bool),
-    /// A radio item whose boolean controls selection-marker visibility.
+    /// A radio item whose application-managed boolean controls selection-marker visibility.
     Radio(bool),
 }
 
@@ -287,6 +287,8 @@ impl MenuItemParameters {
     }
 
     /// Adds presentation-only accelerator text such as Ctrl+O.
+    ///
+    /// This does not register a shortcut or cause keyboard input to submit the item.
     pub fn shortcut_hint(mut self, shortcut_hint: impl Into<String>) -> Self {
         self.shortcut_hint = Some(shortcut_hint.into());
         self

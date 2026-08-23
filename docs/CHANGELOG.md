@@ -6,13 +6,34 @@
 - [ ] Theming/Skinning
     - [ ] Win311 Theme
 
+## Version 0.8.0-alpha.4
+
+`0.8.0-alpha.4` continues the breaking retained-API redesign from the published
+`0.8.0-alpha.3`. It is intended for integration testing and API feedback before the stable
+`0.8.0` release.
+
+- [x] Simplified application-owned event coordination.
+    - [x] Folded the separate event listener into Context subscriptions and renamed weak widget event endpoints to `WidgetEventPortHandle<E>`.
+    - [x] Made `FileDialog` an application-owned retained component with reusable controls, subscriber-driven completion, and independent instances.
+    - [x] Extracted an `InputRouter` per retained runtime for node targeting, focus, hover, and capture state.
+- [x] Completed reusable retained scrolling composition.
+    - [x] Promoted `Scrollbar` to a public retained widget with a typed range/value/event contract.
+    - [x] Made `ScrollArea` a complete one-child viewport with retained scrollbars and `scroll_to_end` support.
+    - [x] Rebuilt `TextArea` from editable content and `ScrollArea`, including nested wheel delegation and stable viewport layout.
+- [x] Added cascading per-widget style overrides without replacing Context-owned theme defaults.
+- [x] Added application-owned per-window menus.
+    - [x] Concrete `MenuItem`, `MenuGroup`, `Menu`, `MenuPanel`, and `WindowMenu` types compose registered retained items without a command type, generic menu model, `Any`, or copied specifications.
+    - [x] Each item owns its typed `MenuItemSubmitted` source and live enabled/check/radio presentation; top-level menus retain independent auto-sized popup trees.
+    - [x] `PopupHandle` gives `show_popup_at` compile-time root-kind safety for anchored placement and popup exclusivity.
+    - [x] `demo-full` includes File, View, and Help menus that invoke application behavior and update live item state.
+    - [x] Shortcut hints are presentation-only; keyboard navigation, mnemonics, automatic check/radio behavior, and cascading submenus are not implemented in this alpha.
+
 ## Version 0.8.0-alpha.3
 
 `0.8.0-alpha.3` builds on the first public alpha of the breaking retained-API redesign relative to
 `0.7.0`. It is intended for integration testing and API feedback before the stable `0.8.0`
 release. This alpha completes event-time coordination for transient roots and file-dialog results,
-adds application-owned per-window menus, and removes the remaining application-level frame polling
-from `demo-full`.
+removing the remaining application-level frame polling from `demo-full`.
 
 - [x] Replaced retained tree building with unique owning `Node` values.
     - [x] Handle-bearing built-in leaf and container constructors return `(TypedWidgetHandle<W>, Node)`; stateless `Custom::create` returns a runtime for explicit `Node` mounting.
@@ -23,36 +44,28 @@ from `demo-full`.
     - [x] `LeafWidget` defines intrinsic measurement and `ContainerWidget` defines child-aware layout.
     - [x] `Linear`, `Grid`, `Disclosure`, and `ScrollArea` expose retained mutation through typed handles.
 - [x] Made `Context` the retained transaction boundary.
-    - [x] Context owns the ordered input FIFO, complete root forest, renderer, and application widget-event dispatcher.
+    - [x] Context owns the ordered input FIFO, complete root forest, renderer, and application event dispatcher.
     - [x] `update_ui` and `update_ui_state` commit layout after every queued input event.
     - [x] `ContextFrame::render_ui` is paint-only and rejects missing, stale, or dimension-mismatched commits before backend acquisition.
     - [x] `EventContext<'_>` lends safe Context-owned mutation access only after retained widget borrows end and before the next layout commit.
 - [x] Added context-owned typed application events.
-    - [x] Widgets expose weak `WidgetEventPortHandle<E>` endpoints for their native event types.
+    - [x] Widgets expose weak `WidgetEventHandle<E>` endpoints for their native event types.
     - [x] `Context<B, State>::subscribe` and `subscribe_with` dispatch into application state after retained widget borrows end.
-    - [x] `subscribe_context` and `subscribe_context_with` opt handlers into the same typed dispatch with short-lived root mutation access.
-    - [x] Application-owned components publish typed lifecycle events through the same generic dispatcher without control-specific dispatcher branches.
-    - [x] The crate-provided `FileDialog` is owned by application state, binds its internal controls through an application-state accessor, and registers only an ordinary hidden modal root with the window manager.
+    - [x] `subscribe_context` and `subscribe_context_with` opt handlers into the same typed dispatch with short-lived root and service mutation access.
+    - [x] Context-owned services publish typed lifecycle events through the same generic dispatcher without control-specific dispatcher branches.
     - [x] Removed the public standalone event `Session`; applications without model callbacks continue to use `Context<B>` without rebuilding retained roots.
 - [x] Extracted backend-independent retained root management.
     - [x] Windows, dialogs, and popups remain context-owned until explicit destruction.
-    - [x] `RootHandle` and the popup-specific `PopupHandle` expose typed chrome state and events without extending root lifetime.
+    - [x] `RootHandle` exposes typed chrome state and events without extending root lifetime.
     - [x] Modal routing, popup dismissal, focus, capture, root movement, and resizing share one retained window manager.
-    - [x] Each retained `UiRuntime` delegates node targeting, focus, hover, and capture state to an independent `InputRouter` while retaining authoritative layout and traversal ownership.
 - [x] Removed frame-polled transient-root and file-dialog coordination from the full demo.
-    - [x] Popup and file-dialog opening mutate retained state directly from the typed event that requested them; application command flags were removed.
+    - [x] Popup and file-dialog opening mutate Context-owned state directly from the typed event that requested them; application command flags were removed.
     - [x] `ComboSubmitted` carries same-transaction opening geometry; the demo's existing shared state reconciles `RootSubmitted::PopupDismissed` back into `Combo`, so source-root interaction or replacement by another popup closes its semantic state without geometry APIs or frame polling.
     - [x] Demo window position, size, and minimum-size reconciliation consume `RootChanged` rather than polling `RootChrome` from frame processing.
-    - [x] File-dialog acceptance and cancellation publish exactly one `FileDialogCompleted` event through the component-owned source; application frame code does not poll for results.
-    - [x] Sequential activations reuse the application's retained component and root, while multiple application-owned `FileDialog` instances remain independent.
-    - [x] `FileDialogStatus` represents terminal outcomes only; `FileDialog::is_open()` represents active state while completion handlers exhaustively match accepted or cancelled outcomes.
-    - [x] The general layer remains unaware of combos and file-dialog behavior: `EventContext` exposes generic root operations, while specialized state and payloads stay with their application-owned components.
-- [x] Added application-owned per-window menus.
-    - [x] Concrete `MenuItem`, `MenuGroup`, `Menu`, `MenuPanel`, and `WindowMenu` types compose registered retained items without a command type, generic menu model, `Any`, or copied specifications.
-    - [x] Each item owns its typed `MenuItemSubmitted` source and live enabled/check/radio state; top-level menus retain independent auto-sized popup trees.
-    - [x] `Context` and `EventContext` expose `show_popup_at` through `PopupHandle` for compile-time root-kind safety and atomic anchored placement, visibility, z-order, exclusivity, and displaced-popup dismissal.
-    - [x] `demo-full` includes File, View, and Help menus that invoke the file dialog, log behavior, and live spacing style changes.
-    - [x] Logical-key accelerators, navigation, mnemonics, and cascading submenus remain intentionally staged with the roadmap's key-navigation and popup-family work.
+    - [x] File-dialog acceptance and cancellation publish exactly one `FileDialogCompleted` event through a Context-lifetime source; application frame code no longer polls session status.
+    - [x] Abandoned file-dialog sessions are settled after application dispatch and before layout or the next queued input; `FileDialogSession` warns when its ownership capability is ignored.
+    - [x] `FileDialogStatus` represents terminal outcomes only; `FileDialogSession::status()` uses `None` for pending while completion handlers exhaustively match accepted or cancelled outcomes.
+    - [x] The general layer remains unaware of combos and file-dialog behavior: `EventContext` exposes existing root/service operations, while specialized payloads stay with their owners.
 - [x] Unified rendering behind recorded painter operations and typed backend frames.
     - [x] `Painter` records backend-neutral work into the framework-owned display list.
     - [x] `RendererBackend::Frame<'a>` gives each backend one exclusive submission frame.

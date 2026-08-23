@@ -176,6 +176,10 @@ struct PopupBinding<State> {
 ///
 /// Each top-level Menu becomes one retained popup tree. WindowMenu stores only root and bar handles;
 /// item state and item identity remain in the concrete widgets created by the application.
+/// [`Context`] owns the window and popup trees. Directly changing their visibility bypasses this
+/// coordinator and can desynchronize [`Self::active_menu`] from the visible root and bar highlight.
+/// Destroying any of those roots invalidates the component; discard the `WindowMenu` instead of
+/// calling it afterward.
 pub struct WindowMenu {
     /// Ordinary application window containing the persistent bar and caller content.
     window: RootHandle,
@@ -197,6 +201,9 @@ impl WindowMenu {
     /// MenuGroup. The adapter closes the active popup first, then invokes the supplied handler.
     /// State and renderer generics exist only at this context API boundary; every menu type remains
     /// concrete.
+    ///
+    /// Enabled items that are not registered have no coordinated action: their unconsumed event is
+    /// discarded and selecting them does not close the active popup.
     pub fn register_item<B, State>(
         context: &mut Context<B, State>,
         menu: WindowMenuAccessor<State>,
@@ -269,19 +276,19 @@ impl WindowMenu {
         component
     }
 
-    /// Returns the ordinary retained window that owns the menu bar and caller content.
+    /// Returns a weak handle to the Context-owned window containing the menu bar and caller content.
     pub fn window(&self) -> &RootHandle {
         &self.window
     }
 
-    /// Returns all concrete top-level popup roots in heading order.
+    /// Returns weak typed handles to all Context-owned top-level popup roots in heading order.
     pub fn popups(&self) -> &[PopupHandle] {
         // Expose only typed popup capabilities so callers cannot lose the root-kind proof required
         // by Context::show_popup_at.
         &self.popups
     }
 
-    /// Returns one top-level popup root by heading index.
+    /// Returns a weak typed handle to one top-level popup root by heading index.
     pub fn popup(&self, index: usize) -> Option<&PopupHandle> {
         // Preserve the typed capability when selecting one menu root by its stable heading order.
         self.popups.get(index)
@@ -298,6 +305,10 @@ impl WindowMenu {
     }
 
     /// Closes the active menu from ordinary application code.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the component's popup roots or retained menu bar were destroyed independently.
     pub fn close<B, State>(&mut self, context: &mut Context<B, State>)
     where
         B: RendererBackend,
