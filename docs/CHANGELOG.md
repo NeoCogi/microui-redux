@@ -48,8 +48,8 @@ from `demo-full`.
     - [x] `FileDialogStatus` represents terminal outcomes only; `FileDialog::is_open()` represents active state while completion handlers exhaustively match accepted or cancelled outcomes.
     - [x] The general layer remains unaware of combos and file-dialog behavior: `EventContext` exposes generic root operations, while specialized state and payloads stay with their application-owned components.
 - [x] Added application-owned per-window menus.
-    - [x] `WindowMenu<Command>` mounts a retained menu bar above one window's content and reuses an independent auto-sized popup panel for its active top-level menu.
-    - [x] Typed specifications support separator groups, disabled commands, check/radio markers, shortcut presentation hints, live state mutation, and `MenuInvoked<Command>` delivery.
+    - [x] Concrete `MenuItem`, `MenuGroup`, `Menu`, `MenuPanel`, and `WindowMenu` types compose registered retained items without a command type, generic menu model, `Any`, or copied specifications.
+    - [x] Each item owns its typed `MenuItemSubmitted` source and live enabled/check/radio state; top-level menus retain independent auto-sized popup trees.
     - [x] `Context` and `EventContext` expose `show_popup_at` for atomic anchored placement, visibility, z-order, exclusivity, and displaced-popup dismissal.
     - [x] `demo-full` includes File, View, and Help menus that invoke the file dialog, log behavior, and live spacing style changes.
     - [x] Logical-key accelerators, navigation, mnemonics, and cascading submenus remain intentionally staged with the roadmap's key-navigation and popup-family work.

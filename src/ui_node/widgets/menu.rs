@@ -27,12 +27,10 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-//! Retained presentation widgets used by the application-owned window-menu component.
+//! Concrete retained widgets used by application menus.
 //!
-//! A menu spans two independent root trees: its bar lives inside the owning window while its panel
-//! lives in an auto-sized popup root. These widgets deliberately publish only internal coordination
-//! events. [`crate::WindowMenu`] owns the public semantic menu specification, reconciles both
-//! widgets at context event boundaries, and exposes one typed application command source.
+//! [`MenuItem`] is a public leaf widget with its own typed submission source. `MenuBar` and
+//! `MenuSeparator` are private presentation details composed by [`crate::WindowMenu`].
 
 use super::*;
 use std::{cell::RefCell, rc::Rc};
@@ -222,176 +220,199 @@ impl Widget for MenuBar {
     }
 }
 
-/// Command selection emitted by the popup panel to its coordinating component.
-#[derive(Clone, Debug)]
-pub(crate) struct MenuPanelSubmitted<C: 'static> {
-    /// Application-defined command cloned from the selected semantic entry.
-    pub(crate) command: C,
+/// Visual state displayed in the fixed marker column of one menu item.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum MenuItemMark {
+    /// The item has no persistent marker.
+    None,
+    /// A checkable item whose boolean controls check-glyph visibility.
+    Checked(bool),
+    /// A radio item whose boolean controls selection-marker visibility.
+    Radio(bool),
 }
 
-impl<C: 'static> crate::WidgetEvent for MenuPanelSubmitted<C> {}
-
-/// Auto-sized popup content that renders and interacts with one flat menu at a time.
-pub(crate) struct MenuPanel<C: Clone + 'static> {
-    /// Current semantic entry snapshot supplied by the coordinating window menu.
-    entries: Vec<crate::MenuEntry<C>>,
-    /// Selectable row currently under the pointer, expressed as an entry index.
-    selected: Option<usize>,
-    /// Minimum panel width inherited from the heading that opened this menu.
-    minimum_width: i32,
-    /// Body font used by labels and shortcut hints.
-    font: FontChoice,
-    /// Panel options; hold focus prepares this leaf for later keyboard navigation.
-    opt: WidgetOption,
-    /// Shared command source retained across replacement entry snapshots.
-    submitted_event: Rc<RefCell<crate::event::WidgetEventPort<MenuPanelSubmitted<C>>>>,
+/// One-shot construction input for a concrete menu item.
+pub struct MenuItemParameters {
+    /// Initial user-visible label.
+    pub label: String,
+    /// Whether the item initially accepts pointer submission.
+    pub enabled: bool,
+    /// Initial check or radio presentation.
+    pub mark: MenuItemMark,
+    /// Presentation-only accelerator text aligned at the right edge.
+    pub shortcut_hint: Option<String>,
+    /// Font used by both label and accelerator text.
+    pub font: FontChoice,
 }
 
-impl<C: Clone + 'static> MenuPanel<C> {
-    /// Creates one initially empty panel and its internal command endpoint.
-    pub(crate) fn create() -> (TypedWidgetHandle<Self>, Node, WidgetEventPortHandle<MenuPanelSubmitted<C>>) {
-        let submitted_event = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
-        let submitted = WidgetEventPortHandle::new(&submitted_event);
-        let widget = Self {
-            entries: Vec::new(),
-            selected: None,
-            minimum_width: 0,
+impl WidgetParameters for MenuItemParameters {}
+
+impl MenuItemParameters {
+    /// Creates an enabled, unmarked item without a shortcut hint.
+    pub fn new(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            enabled: true,
+            mark: MenuItemMark::None,
+            shortcut_hint: None,
             font: FontChoice::Role(FontRole::Body),
-            opt: WidgetOption::HOLD_FOCUS,
-            submitted_event,
-        };
-        let (handle, node) = Node::typed_widget(widget);
-        (handle, node, submitted)
-    }
-
-    /// Replaces the visible menu snapshot and resets pointer selection for a fresh activation.
-    pub(crate) fn set_menu(&mut self, entries: Vec<crate::MenuEntry<C>>, minimum_width: i32) {
-        // Entry ownership remains with this widget until another heading opens. The application
-        // component retains its authoritative specification separately so closing a popup never
-        // destroys menu definitions or mutable enabled/check state.
-        self.entries = entries;
-        self.minimum_width = minimum_width.max(0);
-        self.selected = None;
-    }
-
-    /// Returns the current entry snapshot for component behavior tests.
-    #[cfg(test)]
-    pub(crate) fn entries(&self) -> &[crate::MenuEntry<C>] {
-        &self.entries
-    }
-
-    /// Computes the vertical extent assigned to a separator group boundary.
-    fn separator_height(style: &Style) -> i32 {
-        // A separator reserves breathing room around its one-pixel rule. Saturating callers remain
-        // well-defined even for unusual styles with zero or negative spacing.
-        style.spacing.max(3)
-    }
-
-    /// Computes row rectangles in entry order for hit testing and painting.
-    fn entry_rects(&self, bounds: Recti, style: &Style, atlas: &AtlasHandle) -> Vec<Recti> {
-        let row_height = menu_row_height(style, atlas, self.font);
-        let separator_height = Self::separator_height(style);
-        let mut y = bounds.y;
-        self.entries
-            .iter()
-            .map(|entry| {
-                let height = if entry.is_separator() { separator_height } else { row_height };
-                let row = Recti::new(bounds.x, y, bounds.width.max(0), height);
-                y = y.saturating_add(height);
-                row
-            })
-            .collect()
-    }
-
-    /// Returns the enabled item index at one panel-local pointer position.
-    fn selectable_entry_at(&self, bounds: Recti, style: &Style, atlas: &AtlasHandle, position: Vec2i) -> Option<usize> {
-        self.entry_rects(bounds, style, atlas)
-            .iter()
-            .position(|row| row.contains(&position))
-            .filter(|index| self.entries[*index].as_item().is_some_and(crate::MenuItemSpec::is_enabled))
-    }
-
-    /// Measures the widest label and shortcut used by the active menu.
-    fn text_column_widths(&self, style: &Style, atlas: &AtlasHandle) -> (i32, i32) {
-        let font = style.resolve_font_choice(self.font);
-        // Both strings are drawn into one control-text rectangle: labels align left and shortcut
-        // hints align right. Their maxima determine the intrinsic width needed to keep a
-        // padding-sized gap between those two ends for every row.
-        self.entries
-            .iter()
-            .filter_map(crate::MenuEntry::as_item)
-            .fold((0, 0), |(label_width, shortcut_width), item| {
-                (
-                    label_width.max(atlas.get_text_size(font, item.label()).width.max(0)),
-                    shortcut_width.max(
-                        item.shortcut_hint()
-                            .map(|shortcut| atlas.get_text_size(font, shortcut).width.max(0))
-                            .unwrap_or(0),
-                    ),
-                )
-            })
-    }
-
-    /// Computes the desired panel size from aligned marker, label, and shortcut columns.
-    fn preferred_size(&self, style: &Style, atlas: &AtlasHandle) -> Dimensioni {
-        let padding = style.padding.max(1);
-        let marker_width = atlas.get_icon_size(style.icons.check).width.max(0);
-        let (label_width, shortcut_width) = self.text_column_widths(style, atlas);
-        let mut height = 0i32;
-
-        for entry in &self.entries {
-            if entry.is_separator() {
-                height = height.saturating_add(Self::separator_height(style));
-                continue;
-            }
-            height = height.saturating_add(menu_row_height(style, atlas, self.font));
         }
-
-        // Layout reserves marker + label + optional shortcut columns with explicit padding between
-        // them. The heading width remains a lower bound so very short menus still align visually
-        // with the top-level surface that opened them.
-        let shortcut_extent = if shortcut_width > 0 { padding.saturating_add(shortcut_width) } else { 0 };
-        let content_width = padding
-            .saturating_add(marker_width)
-            .saturating_add(padding)
-            .saturating_add(label_width)
-            .saturating_add(shortcut_extent)
-            .saturating_add(padding);
-        Dimensioni::new(content_width.max(self.minimum_width), height)
     }
 
-    /// Splits one row into its marker and shared control-text rectangles.
-    fn row_regions(row: Recti, style: &Style, atlas: &AtlasHandle) -> (Recti, Recti) {
-        let padding = style.padding.max(1);
-        let marker_width = atlas.get_icon_size(style.icons.check).width.max(0);
-        let marker = Recti::new(row.x.saturating_add(padding), row.y, marker_width, row.height);
-        let text_x = marker.x.saturating_add(marker.width);
-        let text = Recti::new(text_x, row.y, row.x.saturating_add(row.width).saturating_sub(text_x).max(0), row.height);
-        // `draw_control_text_*` owns the padding inside `text`. Passing one shared control region is
-        // essential: allocating already-tight label/shortcut cells would apply that padding again
-        // and clip the trailing/leading glyphs respectively.
-        (marker, text)
+    /// Replaces the initial enabled state.
+    pub const fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
     }
 
-    /// Derives a subdued text color without adding a menu-specific palette slot.
-    fn disabled_text_color(style: &Style) -> Color {
+    /// Makes the item initially disabled.
+    pub const fn disabled(self) -> Self {
+        self.enabled(false)
+    }
+
+    /// Replaces the initial marker state.
+    pub const fn mark(mut self, mark: MenuItemMark) -> Self {
+        self.mark = mark;
+        self
+    }
+
+    /// Configures an initially checked or unchecked item.
+    pub const fn checked(self, checked: bool) -> Self {
+        self.mark(MenuItemMark::Checked(checked))
+    }
+
+    /// Configures an initially selected or unselected radio item.
+    pub const fn radio(self, selected: bool) -> Self {
+        self.mark(MenuItemMark::Radio(selected))
+    }
+
+    /// Adds presentation-only accelerator text such as Ctrl+O.
+    pub fn shortcut_hint(mut self, shortcut_hint: impl Into<String>) -> Self {
+        self.shortcut_hint = Some(shortcut_hint.into());
+        self
+    }
+
+    /// Replaces the font used by the item.
+    pub const fn font(mut self, font: FontChoice) -> Self {
+        self.font = font;
+        self
+    }
+}
+
+/// Event emitted by one specific menu item after an enabled pointer submission.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub struct MenuItemSubmitted;
+
+impl crate::WidgetEvent for MenuItemSubmitted {}
+
+/// Concrete retained menu item with its own semantic state and event source.
+pub struct MenuItem {
+    /// Mutable user-visible label.
+    label: String,
+    /// Mutable interaction state.
+    enabled: bool,
+    /// Mutable check or radio presentation.
+    mark: MenuItemMark,
+    /// Mutable presentation-only accelerator text.
+    shortcut_hint: Option<String>,
+    /// Initialization-only font choice.
+    font: FontChoice,
+    /// Preserve existing keyboard focus while operating menus.
+    opt: WidgetOption,
+    /// Runtime-owned source registered independently for this item.
+    submitted_event: Rc<RefCell<crate::event::WidgetEventPort<MenuItemSubmitted>>>,
+}
+
+impl MenuItem {
+    /// Constructs one retained item node and its weak typed handle.
+    pub fn create(parameters: MenuItemParameters) -> (TypedWidgetHandle<Self>, Node) {
+        // The node is the sole strong owner; registration and live updates use only the weak handle.
+        Node::typed_widget(Self {
+            label: parameters.label,
+            enabled: parameters.enabled,
+            mark: parameters.mark,
+            shortcut_hint: parameters.shortcut_hint,
+            font: parameters.font,
+            opt: WidgetOption::PRESERVE_FOCUS,
+            submitted_event: Rc::new(RefCell::new(crate::event::WidgetEventPort::new())),
+        })
+    }
+
+    /// Returns the current user-visible label.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// Replaces the label without emitting a submission.
+    pub fn set_label(&mut self, label: impl Into<String>) {
+        self.label = label.into();
+    }
+
+    /// Returns whether the item currently accepts submission.
+    pub const fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Enables or disables pointer submission immediately.
+    pub const fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
+    /// Returns the current check or radio presentation.
+    pub const fn mark(&self) -> MenuItemMark {
+        self.mark
+    }
+
+    /// Replaces the check or radio presentation without emitting a submission.
+    pub const fn set_mark(&mut self, mark: MenuItemMark) {
+        self.mark = mark;
+    }
+
+    /// Returns the current presentation-only accelerator text.
+    pub fn shortcut_hint(&self) -> Option<&str> {
+        self.shortcut_hint.as_deref()
+    }
+
+    /// Replaces presentation-only accelerator text.
+    pub fn set_shortcut_hint(&mut self, shortcut_hint: Option<String>) {
+        self.shortcut_hint = shortcut_hint;
+    }
+
+    /// Returns the item's native submission endpoint.
+    pub fn submitted(&self) -> WidgetEventPortHandle<MenuItemSubmitted> {
+        <Self as crate::TypedWidget<MenuItemSubmitted>>::event(self)
+    }
+
+    /// Derives a subdued text color without adding a menu-only palette slot.
+    fn text_color(&self, style: &Style) -> Color {
         let mut color = style.colors[ControlColor::Text as usize];
-        // Preserve hue and use alpha as the single compositing-independent disabled-state signal.
-        // At least one alpha unit keeps non-transparent themes from erasing disabled labels entirely.
-        color.a = ((u16::from(color.a) * 45) / 100).max(1) as u8;
+        if !self.enabled {
+            // Alpha preserves the theme hue and works consistently on every renderer backend.
+            color.a = ((u16::from(color.a) * 45) / 100).max(1) as u8;
+        }
         color
     }
 
-    /// Draws a check or radio marker centered inside the row's marker column.
-    fn paint_marker(ctx: &mut WidgetPaintCtx<'_>, marker: Recti, mark: crate::MenuItemMark, enabled: bool) {
-        let color = if enabled {
-            ctx.style().colors[ControlColor::Text as usize]
-        } else {
-            Self::disabled_text_color(ctx.style())
-        };
-        match mark {
-            crate::MenuItemMark::None | crate::MenuItemMark::Checked(false) | crate::MenuItemMark::Radio(false) => {}
-            crate::MenuItemMark::Checked(true) => {
+    /// Splits the allocation into a marker column and shared label/hint region.
+    fn row_regions(bounds: Recti, style: &Style, atlas: &AtlasHandle) -> (Recti, Recti) {
+        let padding = style.padding.max(1);
+        let marker_width = atlas.get_icon_size(style.icons.check).width.max(0);
+        let marker = Recti::new(bounds.x.saturating_add(padding), bounds.y, marker_width, bounds.height);
+        let text_x = marker.x.saturating_add(marker.width);
+        let text = Recti::new(
+            text_x,
+            bounds.y,
+            bounds.x.saturating_add(bounds.width).saturating_sub(text_x).max(0),
+            bounds.height,
+        );
+        (marker, text)
+    }
+
+    /// Draws the current marker centered in its fixed column.
+    fn paint_marker(&self, ctx: &mut WidgetPaintCtx<'_>, marker: Recti, color: Color) {
+        match self.mark {
+            MenuItemMark::None | MenuItemMark::Checked(false) | MenuItemMark::Radio(false) => {}
+            MenuItemMark::Checked(true) => {
                 let size = ctx.atlas().get_icon_size(ctx.style().icons.check);
                 let icon = Recti::new(
                     marker.x.saturating_add((marker.width - size.width) / 2),
@@ -401,9 +422,8 @@ impl<C: Clone + 'static> MenuPanel<C> {
                 );
                 ctx.draw_icon(ctx.style().icons.check, icon, color);
             }
-            crate::MenuItemMark::Radio(true) => {
-                // The default atlas has no radio glyph. A compact filled square preserves a distinct
-                // radio presentation without extending the mandatory semantic icon set.
+            MenuItemMark::Radio(true) => {
+                // The required atlas has no radio glyph, so a compact square is the stable fallback.
                 let extent = (marker.width.min(marker.height) / 3).max(3);
                 let indicator = Recti::new(
                     marker.x.saturating_add((marker.width - extent) / 2),
@@ -417,148 +437,128 @@ impl<C: Clone + 'static> MenuPanel<C> {
     }
 }
 
-impl<C: Clone + 'static> LeafWidget for MenuPanel<C> {
+impl LeafWidget for MenuItem {
     fn measure(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
-        self.preferred_size(style, atlas)
+        // Reserve one marker column for every item so mixed marked and unmarked rows align.
+        let padding = style.padding.max(1);
+        let font = style.resolve_font_choice(self.font);
+        let marker_width = atlas.get_icon_size(style.icons.check).width.max(0);
+        let label_width = atlas.get_text_size(font, &self.label).width.max(0);
+        let shortcut_width = self
+            .shortcut_hint
+            .as_deref()
+            .map(|hint| atlas.get_text_size(font, hint).width.max(0))
+            .unwrap_or(0);
+        let shortcut_extent = if shortcut_width == 0 { 0 } else { padding.saturating_add(shortcut_width) };
+        let width = padding
+            .saturating_add(marker_width)
+            .saturating_add(padding)
+            .saturating_add(label_width)
+            .saturating_add(shortcut_extent)
+            .saturating_add(padding);
+        Dimensioni::new(width, menu_row_height(style, atlas, self.font))
     }
 }
 
-impl<C: Clone + 'static> Widget for MenuPanel<C> {
+impl Widget for MenuItem {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
-        if !ctx.hovered() && !ctx.active() {
-            // Retain selection during a captured drag outside the panel, but clear ordinary stale
-            // hover as soon as another root or widget becomes the current pointer target.
-            self.selected = None;
-        }
-
-        let bounds = ctx.local_rect();
-        match input {
-            Some(UiInputEvent::MouseMove { pos, .. }) | Some(UiInputEvent::MouseDrag { pos, .. }) | Some(UiInputEvent::MouseDown { pos, .. }) => {
-                self.selected = self.selectable_entry_at(bounds, ctx.style(), ctx.atlas(), *pos);
-            }
-            Some(UiInputEvent::MouseUp { pos, button }) if button.intersects(MouseButton::LEFT) => {
-                self.selected = self.selectable_entry_at(bounds, ctx.style(), ctx.atlas(), *pos);
-                let Some(index) = self.selected else { return };
-                let Some(item) = self.entries[index].as_item() else { return };
-                self.submitted_event.borrow_mut().emit(MenuPanelSubmitted { command: item.command().clone() });
-            }
-            _ => {}
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
+        // Disabled items retain ordinary routing for hover cleanup but never publish application work.
+        if self.enabled && ctx.clicked() {
+            self.submitted_event.borrow_mut().emit(MenuItemSubmitted);
         }
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let bounds = ctx.local_rect();
-        ctx.draw_rect(bounds, ctx.style().colors[ControlColor::WindowBG as usize]);
+        if self.enabled && (ctx.hovered() || ctx.focused()) {
+            ctx.draw_rect(bounds, ctx.style().colors[ControlColor::ButtonHover as usize]);
+        }
+
+        let color = self.text_color(ctx.style());
+        let (marker, text) = Self::row_regions(bounds, ctx.style(), ctx.atlas());
+        self.paint_marker(ctx, marker, color);
         let font = ctx.style().resolve_font_choice(self.font);
-
-        for (index, row) in self.entry_rects(bounds, ctx.style(), ctx.atlas()).into_iter().enumerate() {
-            let Some(item) = self.entries[index].as_item() else {
-                // Center a one-pixel rule in the separator allocation while retaining horizontal
-                // padding so adjacent popup frames remain visually distinct.
-                let padding = ctx.style().padding.max(1);
-                let rule = Recti::new(
-                    row.x.saturating_add(padding),
-                    row.y.saturating_add(row.height / 2),
-                    row.width.saturating_sub(padding.saturating_mul(2)).max(0),
-                    1,
-                );
-                ctx.draw_rect(rule, ctx.style().colors[ControlColor::Border as usize]);
-                continue;
-            };
-
-            if self.selected == Some(index) {
-                ctx.draw_rect(row, ctx.style().colors[ControlColor::ButtonHover as usize]);
-            }
-
-            let (marker, text) = Self::row_regions(row, ctx.style(), ctx.atlas());
-            Self::paint_marker(ctx, marker, item.marker(), item.is_enabled());
-            let color = if item.is_enabled() {
-                ctx.style().colors[ControlColor::Text as usize]
-            } else {
-                Self::disabled_text_color(ctx.style())
-            };
-            // Label and hint deliberately share this rectangle. The common control-text primitive
-            // then owns left/right padding and clipping exactly once for both alignments.
-            ctx.draw_control_text_color_with_font(font, item.label(), text, color, WidgetOption::NONE);
-            if let Some(hint) = item.shortcut_hint() {
-                ctx.draw_control_text_color_with_font(font, hint, text, color, WidgetOption::ALIGN_RIGHT);
-            }
+        ctx.draw_control_text_color_with_font(font, &self.label, text, color, WidgetOption::NONE);
+        if let Some(hint) = &self.shortcut_hint {
+            ctx.draw_control_text_color_with_font(font, hint, text, color, WidgetOption::ALIGN_RIGHT);
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_support::test_atlas;
-    use crate::ui_node::text_layout::control_text_position_with_font;
+impl crate::TypedWidget<MenuItemSubmitted> for MenuItem {
+    fn event(&self) -> WidgetEventPortHandle<MenuItemSubmitted> {
+        WidgetEventPortHandle::new(&self.submitted_event)
+    }
+}
 
-    /// Commands used only to give regression entries concrete semantic identity.
-    #[derive(Copy, Clone, Debug)]
-    enum Command {
-        /// Long unhinted row that exercises the label-only control-text region.
-        Comfortable,
-        /// Short row carrying the widest shortcut column in the test menu.
-        Open,
+impl TypedWidgetHandle<MenuItem> {
+    /// Returns this specific item's native submission endpoint.
+    pub fn submitted(&self) -> WidgetEventPortHandle<MenuItemSubmitted> {
+        self.widget_event()
     }
 
-    /// Verifies actual glyph bounds against the shared control-text clipping region.
-    fn assert_panel_text_fits(entries: Vec<crate::MenuEntry<Command>>, expected_shortcut_width: i32) {
-        let atlas = test_atlas();
-        let style = Style::default();
-        let (panel, panel_node, _) = MenuPanel::create();
-        panel
-            .try_update_with(entries, |panel, entries| panel.set_menu(entries, 0))
-            .expect("unmounted panel node must own its widget");
-
-        panel
-            .try_read(|panel| {
-                let font = style.resolve_font_choice(panel.font);
-                let desired = panel.preferred_size(&style, &atlas);
-                let (label_width, shortcut_width) = panel.text_column_widths(&style, &atlas);
-                let rows = panel.entry_rects(Recti::new(0, 0, desired.width, desired.height), &style, &atlas);
-                assert_eq!(shortcut_width, expected_shortcut_width);
-
-                for (entry, row) in panel.entries.iter().zip(rows) {
-                    let item = entry.as_item().expect("test entries are command rows");
-                    let (_, text) = MenuPanel::<Command>::row_regions(row, &style, &atlas);
-                    let label_size = atlas.get_text_size(font, item.label());
-                    let label_position = control_text_position_with_font(&style, &atlas, font, item.label(), text, WidgetOption::NONE);
-                    assert!(label_size.width <= label_width);
-                    assert!(label_position.x >= text.x);
-                    assert!(label_position.x.saturating_add(label_size.width) <= text.x.saturating_add(text.width));
-
-                    if let Some(hint) = item.shortcut_hint() {
-                        let shortcut_size = atlas.get_text_size(font, hint);
-                        let shortcut_position = control_text_position_with_font(&style, &atlas, font, hint, text, WidgetOption::ALIGN_RIGHT);
-                        assert!(label_position.x.saturating_add(label_size.width).saturating_add(style.padding) <= shortcut_position.x);
-                        assert!(shortcut_position.x.saturating_add(shortcut_size.width) <= text.x.saturating_add(text.width));
-                    }
-                }
-            })
-            .expect("unmounted panel node must own its widget");
-
-        // Keep the sole strong widget owner alive until every weak-handle assertion has completed.
-        drop(panel_node);
+    /// Returns the current enabled state while the retained item is alive.
+    pub fn is_enabled(&self) -> Option<bool> {
+        self.try_read(MenuItem::is_enabled)
     }
 
-    #[test]
-    fn shared_control_text_region_preserves_every_menu_glyph() {
-        let atlas = test_atlas();
-        let font = Style::default().resolve_font_choice(FontChoice::Role(FontRole::Body));
-        let shortcut_width = atlas.get_text_size(font, "Ctrl+O").width;
+    /// Enables or disables this specific retained item.
+    pub fn set_enabled(&self, enabled: bool) -> Option<()> {
+        self.try_update(|item| item.set_enabled(enabled))
+    }
 
-        assert_panel_text_fits(
-            vec![
-                crate::MenuEntry::item("Comfortable Spacing", Command::Comfortable),
-                crate::MenuEntry::item("Open", Command::Open).shortcut_hint("Ctrl+O"),
-            ],
-            shortcut_width,
+    /// Returns the current marker while the retained item is alive.
+    pub fn mark(&self) -> Option<MenuItemMark> {
+        self.try_read(MenuItem::mark)
+    }
+
+    /// Replaces this specific item's marker.
+    pub fn set_mark(&self, mark: MenuItemMark) -> Option<()> {
+        self.try_update(|item| item.set_mark(mark))
+    }
+}
+
+/// Non-interactive rule inserted between two non-empty menu groups.
+pub(crate) struct MenuSeparator {
+    /// Separator rows never participate in input routing.
+    opt: WidgetOption,
+}
+
+impl MenuSeparator {
+    /// Creates one private retained separator node.
+    pub(crate) fn create() -> Node {
+        // No typed handle is needed because a separator has no mutable semantic state.
+        Node::typed_widget(Self { opt: WidgetOption::NO_INTERACT }).1
+    }
+}
+
+impl LeafWidget for MenuSeparator {
+    fn measure(&self, style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+        Dimensioni::new(0, style.spacing.max(3))
+    }
+}
+
+impl Widget for MenuSeparator {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.opt
+    }
+
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
+
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
+        // Center one rule in the allocation and leave horizontal breathing room.
+        let bounds = ctx.local_rect();
+        let padding = ctx.style().padding.max(1);
+        let rule = Recti::new(
+            bounds.x.saturating_add(padding),
+            bounds.y.saturating_add(bounds.height / 2),
+            bounds.width.saturating_sub(padding.saturating_mul(2)).max(0),
+            1,
         );
-        assert_panel_text_fits(vec![crate::MenuEntry::item("Comfortable Spacing", Command::Comfortable)], 0);
+        ctx.draw_rect(rule, ctx.style().colors[ControlColor::Border as usize]);
     }
 }

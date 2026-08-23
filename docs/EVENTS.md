@@ -75,10 +75,9 @@ Application State
 │      ├── holds weak handles into its ordinary Context-owned dialog root
 │      ├── owns shared dynamic-row event ports
 │      └── owns WidgetEventPort<FileDialogCompleted>
-└── owns WindowMenu<Command>
+└── owns WindowMenu
        ├── holds weak handles into its Context-owned window and popup roots
-       ├── owns the authoritative menu specification
-       └── owns WidgetEventPort<MenuInvoked<Command>>
+       └── coordinates concrete MenuItem event registrations
 ```
 
 The only strong event-port owner is its retained producer. Consequently:
@@ -429,11 +428,12 @@ application handler: it resets request-specific state and shows the existing ord
 Acceptance or cancellation hides the root again while preserving the component, ports, and static
 widgets. Multiple component instances are independent and participate in the generic modal stack.
 
-`WindowMenu<Command>` uses the same application-owned component binding for a different root
-composition. It mounts a persistent bar in one ordinary window, reuses a second popup root for the
-active menu panel, consumes generic popup-dismissal events internally, and publishes only the typed
-`MenuInvoked<Command>` result to application state. See the [menu guide](MENUS.md) for construction,
-state mutation, and current keyboard-navigation scope.
+`WindowMenu` uses the same application-owned component binding for a different root composition.
+Applications create and register concrete `MenuItem` event sources, then move their nodes through
+concrete groups, menus, and a panel. The component mounts a persistent bar, retains one popup root
+per top-level menu, and consumes generic popup-dismissal events internally. Item-specific handlers
+receive `MenuItemSubmitted` directly; no command payload or generic menu model intervenes. See the
+[menu guide](MENUS.md) for construction, state mutation, and current keyboard-navigation scope.
 
 ```rust,ignore
 impl Model {

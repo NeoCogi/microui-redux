@@ -88,7 +88,8 @@ pub use combo::{Combo, ComboBuilder, ComboChanged, ComboParameters, ComboSubmitt
 pub use custom::{Custom, CustomBuilder, CustomParameters};
 pub use list_box::{ListBox, ListBoxBuilder, ListBoxParameters, ListBoxSubmitted};
 pub use list_item::{ListItem, ListItemBuilder, ListItemParameters, ListItemSubmitted};
-pub(crate) use menu::{MenuBar, MenuBarSubmitted, MenuPanel, MenuPanelSubmitted};
+pub(crate) use menu::{MenuBar, MenuBarSubmitted, MenuSeparator};
+pub use menu::{MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted};
 pub use number::{Number, NumberBuilder, NumberChanged, NumberParameters};
 pub use scrollbar::{Scrollbar, ScrollbarAxis, ScrollbarChanged, ScrollbarParameters};
 pub use slider::{Slider, SliderBuilder, SliderChanged, SliderParameters};

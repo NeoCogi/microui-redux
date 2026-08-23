@@ -1,179 +1,139 @@
-# Per-window application menus
+# Application menus
 
-`WindowMenu<Command>` adds an application menu to one retained window. The application owns the
-component and its semantic `MenuBarSpec<Command>`; `Context` continues to own the window, popup,
-and widget trees. Selecting an enabled item emits `MenuInvoked<Command>` through the ordinary typed
-event dispatcher.
+Application menus use the same concrete retained widgets, typed handles, event ports, nodes, layout
+containers, and Context-owned roots as the rest of microui-redux. There is no command type and no
+generic menu data model.
 
-This is deliberately a per-window design. A menu bar is mounted in the window's retained layout,
-so multiple windows may expose different commands and state without introducing active-application
-or active-window policy into `Context`. Platform integrations may translate the same typed menu
-model into a native global menu later, but that is not part of the portable retained contract.
+The ownership flow is:
 
-## Model and component boundary
+```text
+MenuItem node -> MenuGroup -> Menu -> MenuPanel -> WindowMenu
+```
 
-The public types have distinct responsibilities:
+Create and register each actionable item first. Then move its unique Node through the concrete
+hierarchy. Keep a TypedWidgetHandle<MenuItem> only when application state must later change that
+item.
 
-| Type | Responsibility |
+## Concrete types
+
+| Type | Role |
 | --- | --- |
-| `MenuBarSpec<Command>` | Ordered collection of top-level menus. |
-| `MenuSpec<Command>` | One heading and its flat list of entries. |
-| `MenuEntry<Command>` | Either a command item or a separator group boundary. |
-| `MenuItemSpec<Command>` | Label, command, enabled state, marker, and shortcut hint. |
-| `WindowMenu<Command>` | Coordinates the retained bar, popup panel, and typed events. |
-| `MenuInvoked<Command>` | Application-facing selection payload. |
+| `MenuItem` | Retained leaf widget with label, enabled state, marker, hint, and its own event port. |
+| `MenuGroup` | Ordered item nodes. Adjacent non-empty groups receive a separator. |
+| `Menu` | One top-level heading and its concrete groups. |
+| `MenuPanel` | Ordered top-level menus installed into a window. |
+| `WindowMenu` | Coordinates the persistent bar, popup roots, and owning window. |
 
-`Command` is application-defined and must implement `Clone + 'static`. It should normally be a
-small enum. Add `PartialEq` when the application needs the live enabled/check/radio mutation APIs.
+None of these types has a type parameter. No `Any` or runtime downcast is used.
 
-## Creating a menu window
-
-Store the component in application state, provide an accessor to that stable location, and
-subscribe to its command port once:
+## Construction and registration
 
 ```rust
 use microui_redux::prelude::*;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum Command {
-    Open,
-    Save,
-    WordWrap,
-    About,
-}
-
 struct Model {
-    menu: WindowMenu<Command>,
-    word_wrap: bool,
+    menu: WindowMenu,
+    save: TypedWidgetHandle<MenuItem>,
 }
 
 impl Model {
-    fn menu_mut(model: &mut Self) -> &mut WindowMenu<Command> {
-        &mut model.menu
+    fn menu_mut(state: &mut Self) -> &mut WindowMenu {
+        &mut state.menu
     }
 
-    fn menu_invoked(&mut self, _context: &mut EventContext<'_>, event: &MenuInvoked<Command>) {
-        match event.command {
-            Command::Open => {
-                // Open an application-owned document or dialog.
-            }
-            Command::Save => {
-                // Save the active document.
-            }
-            Command::WordWrap => {
-                self.word_wrap = !self.word_wrap;
-                self.menu.set_checked(&Command::WordWrap, self.word_wrap);
-            }
-            Command::About => {
-                // Show application information.
-            }
-        }
+    fn open(
+        &mut self,
+        _context: &mut EventContext<'_>,
+        _event: &MenuItemSubmitted,
+    ) {
+        // Open the document.
     }
 }
 
-let specification = MenuBarSpec::new([
-    MenuSpec::new(
-        "File",
-        [
-            MenuEntry::item("Open...", Command::Open).shortcut_hint("Ctrl+O"),
-            MenuEntry::item("Save", Command::Save).shortcut_hint("Ctrl+S").disabled(),
-        ],
-    ),
-    MenuSpec::new(
-        "View",
-        [
-            MenuEntry::item("Word Wrap", Command::WordWrap).checked(true),
-            MenuEntry::separator(),
-            MenuEntry::item("About", Command::About),
-        ],
-    ),
+let (open, open_node) =
+    MenuItem::create(MenuItemParameters::new("Open...").shortcut_hint("Ctrl+O"));
+WindowMenu::register_item(
+    &mut context,
+    Model::menu_mut,
+    &open,
+    Model::open,
+)?;
+
+let (save, save_node) =
+    MenuItem::create(MenuItemParameters::new("Save").shortcut_hint("Ctrl+S").disabled());
+
+let panel = MenuPanel::new([
+    Menu::new("File", [
+        MenuGroup::new([open_node, save_node]),
+    ]),
 ]);
 
-let body = TextBlock::create(TextBlockParameters::new("Document content")).1;
+let body = TextBlock::create(TextBlockParameters::new("document")).1;
 let menu = WindowMenu::create(
     &mut context,
     Model::menu_mut,
     "Document",
-    rect(30, 30, 480, 320),
-    specification,
+    rect(20, 20, 640, 480),
+    panel,
     body,
 );
-let invoked = menu.invoked();
-context.subscribe_context(invoked, Model::menu_invoked)?;
-
-let mut model = Model {
-    menu,
-    word_wrap: true,
-};
+# Ok::<(), SubscribeError>(())
 ```
 
-The component must be installed at the supplied accessor before the first
-`Context::update_ui_state` call. This matches `FileDialog`: construction records typed internal
-subscriptions, while later dispatch resolves the component through application state.
+`WindowMenu::register_item` is generic only over the renderer and application state needed by
+`Context`. It connects that exact item's concrete `MenuItemSubmitted` port, closes the active
+menu, and calls the supplied application method. The menu types and event payload remain concrete.
 
-## Entries and groups
+As with other application-owned components, store the returned `WindowMenu` at the accessor's
+location before the first context update. An item port accepts one subscription, so do not also
+subscribe the same item through `Context::subscribe_context`.
 
-`MenuEntry::separator()` creates a non-interactive group boundary. Command entries may be disabled
-or decorated with check/radio state:
+Disabled items may be left unregistered when they have no behavior.
+
+## Groups and separators
+
+A `MenuGroup` contains item nodes in display order. `Menu` inserts a retained separator widget
+between adjacent non-empty groups:
 
 ```rust
-let view = MenuSpec::new(
-    "View",
-    [
-        MenuEntry::item("Show Grid", Command::WordWrap).checked(false),
-        MenuEntry::separator(),
-        MenuEntry::item("Comfortable", Command::Open).radio(true),
-        MenuEntry::item("Compact", Command::Save).radio(false),
-    ],
-);
+let file = Menu::new("File", [
+    MenuGroup::new([new_node, open_node, save_node]),
+    MenuGroup::new([clear_node]),
+    MenuGroup::new([exit_node]),
+]);
 ```
 
-Radio behavior is intentionally application-owned. When one choice is invoked, update every item
-in that logical group. This keeps command semantics explicit and avoids hiding a selection model in
-presentation widgets:
+This keeps separators structural. Applications do not create sentinel entries or encode separator
+positions in a command list.
+
+## Live item state
+
+State lives on the concrete item and changes through its typed handle:
 
 ```rust
-menu.set_radio(&Command::Open, false);
-menu.set_radio(&Command::Save, true);
-menu.set_enabled(&Command::Save, document_is_dirty);
+save.set_enabled(true);
+auto_scroll.set_mark(MenuItemMark::Checked(enabled));
+comfortable.set_mark(MenuItemMark::Radio(selected));
+compact.set_mark(MenuItemMark::Radio(!selected));
 ```
 
-Each setter updates every matching command and returns the number of changed entries. If the
-affected top-level menu is open, its retained popup snapshot is refreshed immediately. The initial
-topology is fixed; create a new component and roots when an application needs a structurally
-different set or order of menus.
+These mutations are silent. They invalidate retained measurement when needed and do not synthesize a
+user submission. Dropping the menu roots expires the weak handles.
 
-## Retained roots and popup placement
+`MenuItemParameters::shortcut_hint` is presentation-only. Logical shortcut dispatch remains a
+separate input concern.
 
-`WindowMenu::create` creates two roots:
+## Roots and dismissal
 
-- `window()` is the ordinary visible root. Its one application node is a vertical shell containing
-  the menu bar above the supplied content.
-- `popup()` is a hidden auto-sized popup root reused for each top-level menu.
+`WindowMenu::create` creates:
 
-The panel is a separate root so it is not clipped to the owning window and participates in generic
-popup z-order, outside dismissal, modal blocking, and replacement policy. A bar submission carries
-the current screen-space heading anchor. `EventContext::show_popup_at` installs that anchor and
-shows the popup atomically before the next layout commit.
+- one ordinary window containing the bar and supplied body;
+- one hidden, auto-sized popup root per top-level menu.
 
-Only one generic popup is visible in a `Context` at a time. Opening another menu, combo, or popup
-dismisses the current one and publishes `RootSubmitted::PopupDismissed`; `WindowMenu` consumes that
-lifecycle event to reconcile its bar and semantic open state. Use `WindowMenu::close` for an
-application-requested close so all three authorities remain synchronized.
+Opening a heading shows its already-retained popup at the heading anchor. It does not clone a
+specification or rebuild item nodes. Selecting a registered item closes the active popup before the
+application handler runs. Outside presses and popup replacement use ordinary
+`RootSubmitted::PopupDismissed` policy and reconcile the bar automatically.
 
-## Styling and current scope
-
-Menus use the current semantic `Style` rather than a separate skin:
-
-- `PanelBG` paints the bar and panel backgrounds.
-- `ButtonHover` and `ButtonFocus` paint hovered and open headings/items.
-- `Text` paints enabled labels and shortcut hints; disabled text uses reduced alpha.
-- The theme's check icon paints checked items; radio choices use a compact filled marker.
-
-The first menu contract is pointer-driven and flat. Shortcut hints are presentation strings, not
-active accelerators. Logical-key navigation, mnemonics, and cascading submenus remain future work;
-they require typed key chords, focus traversal, and popup-family ownership rather than control-local
-special cases. The flat API does not simulate these features with text input.
-
-See `demo-full` for File, View, and Help menus with live checked/radio state, disabled entries,
-separator groups, shortcut hints, and a file-dialog command.
+Use `WindowMenu::window`, `WindowMenu::popups`, or `WindowMenu::popup` to inspect root handles.
+Use `WindowMenu::close` for programmatic closure so root and bar state remain synchronized.

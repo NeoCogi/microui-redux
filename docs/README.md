@@ -8,7 +8,7 @@ cover the retained UI model, integration details, and repository workflows.
 - [Architecture](ARCHITECTURE.md) — retained trees, roots, widget ownership, and node identity.
 - [Events](EVENTS.md) — typed widget events, dispatch ordering, roots, and retained services.
 - [Layout](LAYOUT.md) — measurement, tracks, placement, invalidation, and update/paint boundaries.
-- [Application menus](MENUS.md) — per-window menu models, typed commands, popup coordination, and
+- [Application menus](MENUS.md) — concrete registered items, retained composition, popup coordination, and
   current keyboard/submenu scope.
 - [Typography](TYPOGRAPHY.md) — semantic font roles, UTF-8 behavior, glyph coverage, and atlas setup.
 

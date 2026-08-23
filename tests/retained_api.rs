@@ -33,8 +33,8 @@ use std::cell::Cell;
 use microui_redux::render::{FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex};
 use microui_redux::retained::*;
 use microui_redux::prelude::{
-    Dimensioni, FileDialog, FileDialogRequest, FileDialogStatus, MenuBarSpec, MenuEntry, MenuInvoked, MenuItemMark, MenuSpec, Recti, TextBlock,
-    TextBlockParameters, WindowMenu,
+    Dimensioni, EventContext, FileDialog, FileDialogRequest, FileDialogStatus, Menu, MenuGroup, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted,
+    MenuPanel, Recti, TextBlock, TextBlockParameters, TypedWidgetHandle, WindowMenu,
 };
 use microui_redux::{
     color, rect, AtlasHandle, AtlasSource, Constraints, Context, Disclosure, DisclosureParameters, FontEntry, Grid, GridParameters, Linear, LinearParameters,
@@ -133,83 +133,73 @@ fn downstream_file_dialog_completion_is_subscriber_driven_without_widget_access(
     assert!(!model.dialog.is_open());
 }
 
-/// Commands used to compile and exercise the downstream per-window menu contract.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum MenuCommand {
-    /// Enabled command used as a normal item.
-    Open,
-    /// Disabled command whose state is changed through the component API.
-    Save,
-    /// Checkable command used to verify marker mutation.
-    WordWrap,
-}
-
 /// Minimal downstream application state that owns one complete menu component.
 struct MenuModel {
     /// Menu component found by its internal subscription accessor.
-    menu: WindowMenu<MenuCommand>,
-    /// Commands observed through the public typed application endpoint.
-    invoked: Vec<MenuCommand>,
+    menu: WindowMenu,
+    /// Live handle for an item whose enabled state changes.
+    save: TypedWidgetHandle<MenuItem>,
+    /// Live handle for an item whose marker changes.
+    word_wrap: TypedWidgetHandle<MenuItem>,
+    /// Item-specific application effects observed through concrete ports.
+    invoked: Vec<&'static str>,
 }
 
 impl MenuModel {
     /// Returns the stable component location required by `WindowMenu::create`.
-    fn menu_mut(state: &mut Self) -> &mut WindowMenu<MenuCommand> {
+    fn menu_mut(state: &mut Self) -> &mut WindowMenu {
         &mut state.menu
     }
 
-    /// Records public semantic delivery without accessing either internal widget.
-    fn menu_invoked(&mut self, event: &MenuInvoked<MenuCommand>) {
-        self.invoked.push(event.command);
+    /// Handles the concrete Open item's event source.
+    fn open_submitted(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+        self.invoked.push("Open");
     }
 }
 
 #[test]
-fn downstream_window_menu_exposes_typed_specs_roots_and_live_state() {
+fn downstream_window_menu_exposes_concrete_items_roots_and_live_state() {
     let mut context = context_with_state::<MenuModel>();
-    let specification = MenuBarSpec::new([
-        MenuSpec::new(
-            "File",
-            [
-                MenuEntry::item("Open", MenuCommand::Open).shortcut_hint("Ctrl+O"),
-                MenuEntry::item("Save", MenuCommand::Save).disabled(),
-            ],
-        ),
-        MenuSpec::new(
-            "View",
-            [MenuEntry::item("Word Wrap", MenuCommand::WordWrap).checked(true), MenuEntry::separator()],
-        ),
+    let (open, open_node) = MenuItem::create(MenuItemParameters::new("Open").shortcut_hint("Ctrl+O"));
+    WindowMenu::register_item(&mut context, MenuModel::menu_mut, &open, MenuModel::open_submitted).unwrap();
+    let (save, save_node) = MenuItem::create(MenuItemParameters::new("Save").disabled());
+    let (word_wrap, word_wrap_node) = MenuItem::create(MenuItemParameters::new("Word Wrap").checked(true));
+    let panel = MenuPanel::new([
+        Menu::new("File", [MenuGroup::new([open_node, save_node])]),
+        Menu::new("View", [MenuGroup::new([word_wrap_node])]),
     ]);
     let body = TextBlock::create(TextBlockParameters::new("body")).1;
-    let mut menu = WindowMenu::create(&mut context, MenuModel::menu_mut, "document", rect(20, 20, 240, 160), specification, body);
-    let invoked = menu.invoked();
-    context.subscribe(invoked, MenuModel::menu_invoked).unwrap();
+    let menu = WindowMenu::create(&mut context, MenuModel::menu_mut, "document", rect(20, 20, 240, 160), panel, body);
     // The deliberately minimal downstream atlas contains no chrome icons, so this compile-contract
     // test removes title controls before committing the retained tree.
     context
         .set_root_options(menu.window().id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
 
-    // Public state mutations update the authoritative semantic model before the first frame.
-    assert_eq!(menu.set_enabled(&MenuCommand::Save, true), 1);
-    assert_eq!(menu.set_checked(&MenuCommand::WordWrap, false), 1);
-    assert_eq!(menu.specification().menus().len(), 2);
-    assert_eq!(
-        menu.specification().menus()[1].entries()[0].as_item().unwrap().marker(),
-        MenuItemMark::Checked(false)
-    );
+    // Public state mutations address the concrete retained items directly.
+    assert_eq!(save.set_enabled(true), Some(()));
+    assert_eq!(word_wrap.set_mark(MenuItemMark::Checked(false)), Some(()));
+    assert_eq!(save.is_enabled(), Some(true));
+    assert_eq!(word_wrap.mark(), Some(MenuItemMark::Checked(false)));
 
     // Both roots are ordinary Context-owned retained roots. Anchored placement accepts only the
     // component's popup, leaving the semantic component closed until its bar requests activation.
     let window_id = menu.window().id();
-    let popup_id = menu.popup().id();
+    let popup_id = menu.popup(0).unwrap().id();
     assert_eq!(context.show_popup_at(window_id, rect(40, 40, 100, 1)), Err(RootMutationError::NotPopup));
     context.show_popup_at(popup_id, rect(40, 40, 100, 1)).unwrap();
     context.set_root_visible(popup_id, false).unwrap();
 
-    let model = MenuModel { menu, invoked: Vec::new() };
+    let model = MenuModel {
+        menu,
+        save,
+        word_wrap,
+        invoked: Vec::new(),
+    };
     assert!(model.menu.window().widget().is_alive());
-    assert!(model.menu.popup().widget().is_alive());
+    assert!(model.menu.popup(0).unwrap().widget().is_alive());
+    assert!(model.save.is_alive());
+    assert!(model.word_wrap.is_alive());
     assert!(model.invoked.is_empty());
 }
 

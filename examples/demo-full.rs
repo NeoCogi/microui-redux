@@ -1039,65 +1039,78 @@ fn centered_button(label: impl Into<String>) -> (WidgetEventPortHandle<ButtonSub
     (submitted, node)
 }
 
-/// Semantic commands produced by the application menu attached to the main demo window.
-///
-/// Keeping this enum independent of widget identity lets the menu remain a declarative view of
-/// application behavior. The same command may later be invoked by a toolbar or key binding without
-/// coupling those entry points to retained menu widgets.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum DemoMenuCommand {
-    /// Clears transient demo output and starts a fresh log session.
-    NewSession,
-    /// Opens the application-owned file dialog component.
-    OpenFile,
-    /// Reserved disabled action used to demonstrate unavailable menu presentation.
-    SaveSnapshot,
-    /// Clears all text currently displayed by the log window.
-    ClearLog,
-    /// Reserved disabled application-exit action for the non-terminating demo.
-    Exit,
-    /// Toggles whether newly written log messages scroll into view.
-    ToggleAutoScroll,
-    /// Selects the normal demo spacing preset.
-    ComfortableSpacing,
-    /// Selects a compact demo spacing preset.
-    CompactSpacing,
-    /// Writes application information to the log window.
-    About,
+/// Concrete menu item handles retained only where application state mutates live presentation.
+struct DemoMenuItems {
+    /// Open is disabled while the independent file dialog is active.
+    open_file: TypedWidgetHandle<MenuItem>,
+    /// Auto-scroll reflects the current log-following state.
+    auto_scroll: TypedWidgetHandle<MenuItem>,
+    /// Comfortable is one half of the spacing radio pair.
+    comfortable_spacing: TypedWidgetHandle<MenuItem>,
+    /// Compact is the other half of the spacing radio pair.
+    compact_spacing: TypedWidgetHandle<MenuItem>,
 }
 
-/// Builds the complete menu model shown above the main demo content.
-///
-/// Separators create command groups, shortcut strings exercise the presentation column, and the
-/// deliberately disabled actions make non-interactive state visible without inventing behavior the
-/// demo application does not implement.
-fn demo_menu_specification() -> MenuBarSpec<DemoMenuCommand> {
-    MenuBarSpec::new([
-        MenuSpec::new(
+/// Creates and registers one concrete item before its node enters the menu hierarchy.
+fn registered_menu_item(
+    context: &mut Context<SelectedBackend, State>,
+    parameters: MenuItemParameters,
+    handler: for<'a> fn(&mut State, &mut EventContext<'a>, &MenuItemSubmitted),
+) -> (TypedWidgetHandle<MenuItem>, Node) {
+    // Registration binds this exact widget event source directly to its application behavior.
+    let (item, node) = MenuItem::create(parameters);
+    WindowMenu::register_item(context, State::window_menu_mut, &item, handler).expect("new menu item must be unsubscribed");
+    (item, node)
+}
+
+/// Builds the concrete retained menu hierarchy used by the main demo window.
+fn demo_menu_panel(context: &mut Context<SelectedBackend, State>) -> (MenuPanel, DemoMenuItems) {
+    let (new_session, new_session_node) =
+        registered_menu_item(context, MenuItemParameters::new("New Session").shortcut_hint("Ctrl+N"), State::menu_new_session);
+    let (open_file, open_file_node) = registered_menu_item(context, MenuItemParameters::new("Open...").shortcut_hint("Ctrl+O"), State::menu_open_file);
+    let (_, save_snapshot_node) = MenuItem::create(MenuItemParameters::new("Save Snapshot").shortcut_hint("Ctrl+S").disabled());
+    let (clear_log, clear_log_node) = registered_menu_item(context, MenuItemParameters::new("Clear Log"), State::menu_clear_log);
+    let (_, exit_node) = MenuItem::create(MenuItemParameters::new("Exit").disabled());
+
+    let (auto_scroll, auto_scroll_node) = registered_menu_item(
+        context,
+        MenuItemParameters::new("Auto-scroll Log").checked(true),
+        State::menu_toggle_auto_scroll,
+    );
+    let (comfortable_spacing, comfortable_node) = registered_menu_item(
+        context,
+        MenuItemParameters::new("Comfortable Spacing").radio(true),
+        State::menu_comfortable_spacing,
+    );
+    let (compact_spacing, compact_node) = registered_menu_item(context, MenuItemParameters::new("Compact Spacing").radio(false), State::menu_compact_spacing);
+
+    let (about, about_node) = registered_menu_item(context, MenuItemParameters::new("About microui-redux"), State::menu_about);
+
+    let panel = MenuPanel::new([
+        Menu::new(
             "File",
             [
-                MenuEntry::item("New Session", DemoMenuCommand::NewSession).shortcut_hint("Ctrl+N"),
-                MenuEntry::item("Open...", DemoMenuCommand::OpenFile).shortcut_hint("Ctrl+O"),
-                MenuEntry::item("Save Snapshot", DemoMenuCommand::SaveSnapshot)
-                    .shortcut_hint("Ctrl+S")
-                    .disabled(),
-                MenuEntry::separator(),
-                MenuEntry::item("Clear Log", DemoMenuCommand::ClearLog),
-                MenuEntry::separator(),
-                MenuEntry::item("Exit", DemoMenuCommand::Exit).disabled(),
+                MenuGroup::new([new_session_node, open_file_node, save_snapshot_node]),
+                MenuGroup::new([clear_log_node]),
+                MenuGroup::new([exit_node]),
             ],
         ),
-        MenuSpec::new(
-            "View",
-            [
-                MenuEntry::item("Auto-scroll Log", DemoMenuCommand::ToggleAutoScroll).checked(true),
-                MenuEntry::separator(),
-                MenuEntry::item("Comfortable Spacing", DemoMenuCommand::ComfortableSpacing).radio(true),
-                MenuEntry::item("Compact Spacing", DemoMenuCommand::CompactSpacing).radio(false),
-            ],
-        ),
-        MenuSpec::new("Help", [MenuEntry::item("About microui-redux", DemoMenuCommand::About)]),
-    ])
+        Menu::new("View", [MenuGroup::new([auto_scroll_node]), MenuGroup::new([comfortable_node, compact_node])]),
+        Menu::new("Help", [MenuGroup::new([about_node])]),
+    ]);
+
+    // Handles without live application state are intentionally dropped; their retained nodes and
+    // registered weak event ports remain owned by the Context.
+    drop((new_session, clear_log, about));
+    (
+        panel,
+        DemoMenuItems {
+            open_file,
+            auto_scroll,
+            comfortable_spacing,
+            compact_spacing,
+        },
+    )
 }
 
 fn set_slider_value(state: &TypedWidgetHandle<Slider>, value: Real) {
@@ -1167,8 +1180,16 @@ struct State {
     combo_popup_root: RootHandle,
     popup_root: RootHandle,
 
-    /// Application-owned component coordinating the main window's bar and popup menu panel.
-    window_menu: WindowMenu<DemoMenuCommand>,
+    /// Application-owned component coordinating the main window's concrete menus.
+    window_menu: WindowMenu,
+    /// Concrete Open item whose enabled state follows file-dialog activity.
+    menu_open_file: TypedWidgetHandle<MenuItem>,
+    /// Concrete check item reflecting log auto-scroll state.
+    menu_auto_scroll_item: TypedWidgetHandle<MenuItem>,
+    /// First concrete item in the spacing radio pair.
+    menu_comfortable_spacing: TypedWidgetHandle<MenuItem>,
+    /// Second concrete item in the spacing radio pair.
+    menu_compact_spacing: TypedWidgetHandle<MenuItem>,
     /// Whether log writes should keep the newest output visible.
     menu_auto_scroll: bool,
     file_dialog: FileDialog,
@@ -1417,17 +1438,10 @@ impl State {
             popup: popup_content,
         };
 
-        // Attach the menu as part of the main window's retained shell. WindowMenu creates the
-        // ordinary window and one hidden popup root while the existing demo content remains a
-        // uniquely owned child below its persistent bar.
-        let window_menu = WindowMenu::create(
-            ctx,
-            Self::window_menu_mut,
-            "Demo Window",
-            rect(40, 40, 300, 450),
-            demo_menu_specification(),
-            demo_node,
-        );
+        // Create and register concrete items first, compose them into the concrete hierarchy, then
+        // attach that panel above the existing uniquely owned demo content.
+        let (menu_panel, menu_items) = demo_menu_panel(ctx);
+        let window_menu = WindowMenu::create(ctx, Self::window_menu_mut, "Demo Window", rect(40, 40, 300, 450), menu_panel, demo_node);
         let demo_root = window_menu.window().clone();
         let _style_root = ctx.create_window("Style Editor", rect(350, 250, 300, 240), style_node);
         let _log_root = ctx.create_window("Log Window", rect(350, 40, 300, 200), log_node);
@@ -1616,6 +1630,10 @@ impl State {
             combo_popup_root,
             popup_root,
             window_menu,
+            menu_open_file: menu_items.open_file,
+            menu_auto_scroll_item: menu_items.auto_scroll,
+            menu_comfortable_spacing: menu_items.comfortable_spacing,
+            menu_compact_spacing: menu_items.compact_spacing,
             menu_auto_scroll: true,
             file_dialog,
             fps: 0.0,
@@ -1669,9 +1687,6 @@ impl State {
         }
         context.subscribe(self.combo_popup_root.submitted(), Self::combo_popup_submitted).unwrap();
         context.subscribe_context(self.demo_root.changed(), Self::demo_root_changed).unwrap();
-        // Application commands stay typed across the component boundary. The handler receives an
-        // EventContext because Open needs to show the independent file-dialog root immediately.
-        context.subscribe_context(self.window_menu.invoked(), Self::menu_invoked).unwrap();
         for (submitted, label) in self.popup_button_submitted.iter().zip(["Hello", "World"]) {
             context.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
         }
@@ -1815,47 +1830,63 @@ impl State {
         }
     }
 
-    /// Applies one typed application-menu command after the panel has closed itself.
-    fn menu_invoked(&mut self, context: &mut EventContext<'_>, event: &MenuInvoked<DemoMenuCommand>) {
-        match event.command {
-            DemoMenuCommand::NewSession => {
-                self.clear_log();
-                self.write_log("Started a new demo session");
-            }
-            DemoMenuCommand::OpenFile if !self.file_dialog.is_open() => {
-                // Disable re-entry until the component reports completion. Although the popup has
-                // already closed, the authoritative menu model updates now and is ready for its
-                // next activation.
-                self.window_menu.set_enabled(&DemoMenuCommand::OpenFile, false);
-                self.file_dialog.open_from_event(context, FileDialogRequest::default());
-                self.write_log("Opened the file dialog from File > Open...");
-            }
-            DemoMenuCommand::OpenFile => {}
-            DemoMenuCommand::ClearLog => self.clear_log(),
-            DemoMenuCommand::ToggleAutoScroll => {
-                self.menu_auto_scroll = !self.menu_auto_scroll;
-                self.window_menu.set_checked(&DemoMenuCommand::ToggleAutoScroll, self.menu_auto_scroll);
-                self.write_log(if self.menu_auto_scroll {
-                    "Enabled log auto-scroll"
-                } else {
-                    "Disabled log auto-scroll"
-                });
-            }
-            DemoMenuCommand::ComfortableSpacing => self.select_menu_spacing(DemoMenuCommand::ComfortableSpacing, 4),
-            DemoMenuCommand::CompactSpacing => self.select_menu_spacing(DemoMenuCommand::CompactSpacing, 1),
-            DemoMenuCommand::About => self.write_log("microui-redux retained-mode full demo with per-window menus"),
-            DemoMenuCommand::SaveSnapshot | DemoMenuCommand::Exit => {
-                // Disabled items cannot emit MenuInvoked through pointer submission. Keep explicit
-                // arms so extending activation sources later cannot accidentally make them fatal.
-            }
-        }
+    /// Starts a fresh log session for the registered New Session item.
+    fn menu_new_session(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+        self.clear_log();
+        self.write_log("Started a new demo session");
     }
 
-    /// Selects one mutually exclusive spacing command and applies it to the live demo style.
-    fn select_menu_spacing(&mut self, selected: DemoMenuCommand, spacing: i32) {
-        let comfortable = selected == DemoMenuCommand::ComfortableSpacing;
-        self.window_menu.set_radio(&DemoMenuCommand::ComfortableSpacing, comfortable);
-        self.window_menu.set_radio(&DemoMenuCommand::CompactSpacing, !comfortable);
+    /// Opens the independent file dialog for the registered Open item.
+    fn menu_open_file(&mut self, context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+        if self.file_dialog.is_open() {
+            return;
+        }
+        self.menu_open_file.set_enabled(false).expect("Open menu item unavailable");
+        self.file_dialog.open_from_event(context, FileDialogRequest::default());
+        self.write_log("Opened the file dialog from File > Open...");
+    }
+
+    /// Clears log output for the registered Clear Log item.
+    fn menu_clear_log(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+        self.clear_log();
+    }
+
+    /// Toggles auto-scroll and updates this concrete item's check marker.
+    fn menu_toggle_auto_scroll(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+        self.menu_auto_scroll = !self.menu_auto_scroll;
+        self.menu_auto_scroll_item
+            .set_mark(MenuItemMark::Checked(self.menu_auto_scroll))
+            .expect("auto-scroll menu item unavailable");
+        self.write_log(if self.menu_auto_scroll {
+            "Enabled log auto-scroll"
+        } else {
+            "Disabled log auto-scroll"
+        });
+    }
+
+    /// Selects comfortable spacing through its registered concrete item.
+    fn menu_comfortable_spacing(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+        self.select_menu_spacing(true, 4);
+    }
+
+    /// Selects compact spacing through its registered concrete item.
+    fn menu_compact_spacing(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+        self.select_menu_spacing(false, 1);
+    }
+
+    /// Writes application information for the registered About item.
+    fn menu_about(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+        self.write_log("microui-redux retained-mode full demo with per-window menus");
+    }
+
+    /// Updates the two concrete spacing markers and applies the chosen style value.
+    fn select_menu_spacing(&mut self, comfortable: bool, spacing: i32) {
+        self.menu_comfortable_spacing
+            .set_mark(MenuItemMark::Radio(comfortable))
+            .expect("comfortable-spacing menu item unavailable");
+        self.menu_compact_spacing
+            .set_mark(MenuItemMark::Radio(!comfortable))
+            .expect("compact-spacing menu item unavailable");
         self.style.spacing = spacing;
         set_slider_value(&self.style_value_slider_states[1], spacing as Real);
         self.write_log(if comfortable {
@@ -1864,7 +1895,6 @@ impl State {
             "Selected compact control spacing"
         });
     }
-
     fn demo_root_changed(&mut self, context: &mut EventContext<'_>, event: &RootChanged) {
         // Root chrome emits only after a user-driven move or resize, replacing the old frame-time
         // rectangle readback. Clamp the demo-specific minimum at this same mutation boundary.
@@ -2370,13 +2400,13 @@ impl State {
     }
 
     /// Resolves the stable application-owned menu location for internal component subscriptions.
-    fn window_menu_mut(state: &mut Self) -> &mut WindowMenu<DemoMenuCommand> {
+    fn window_menu_mut(state: &mut Self) -> &mut WindowMenu {
         &mut state.window_menu
     }
 
     fn file_dialog_completed(&mut self, event: &FileDialogCompleted) {
         // Completion makes File > Open available again regardless of acceptance or cancellation.
-        self.window_menu.set_enabled(&DemoMenuCommand::OpenFile, true);
+        self.menu_open_file.set_enabled(true).expect("Open menu item unavailable");
         match event.status() {
             FileDialogStatus::Accepted(result) => {
                 self.write_log(format!("Selected file: {}", result.file_name).as_str());

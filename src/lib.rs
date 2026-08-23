@@ -212,7 +212,7 @@ mod window_manager;
 pub mod retained {
     pub use crate::event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventPortHandle};
     pub use crate::file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};
-    pub use crate::menu::{MenuBarSpec, MenuEntry, MenuInvoked, MenuItemMark, MenuItemSpec, MenuSpec, WindowMenu};
+    pub use crate::menu::{Menu, MenuGroup, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted, MenuPanel, WindowMenu};
     pub use crate::render::{CustomRenderArgs, CustomRenderHandle};
     pub use crate::ui_node::{
         AvailableSpace, ChildParticipation, Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, Disclosure, DisclosureParameters,
@@ -235,7 +235,7 @@ pub mod prelude {
         IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON,
     };
     pub use crate::file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};
-    pub use crate::menu::{MenuBarSpec, MenuEntry, MenuInvoked, MenuItemMark, MenuItemSpec, MenuSpec, WindowMenu};
+    pub use crate::menu::{Menu, MenuGroup, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted, MenuPanel, WindowMenu};
     pub use crate::image::{ImageSource, load_image_bytes};
     pub use crate::input::{KeyCode, KeyMode, MouseButton};
     pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame, TextureId};
@@ -271,7 +271,7 @@ pub use context::{Context, ContextFrame, EventContext};
 pub use window_manager::{RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted, WindowOption};
 pub use event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventPortHandle};
 pub use file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};
-pub use menu::{MenuBarSpec, MenuEntry, MenuInvoked, MenuItemMark, MenuItemSpec, MenuSpec, WindowMenu};
+pub use menu::{Menu, MenuGroup, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted, MenuPanel, WindowMenu};
 pub use image::{ImageSource, load_image_bytes};
 pub use input::{KeyCode, KeyMode, MouseButton};
 pub use math::{expand_rect, rect, vec2};
