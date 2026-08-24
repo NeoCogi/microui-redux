@@ -2675,7 +2675,10 @@ impl GridProjection {
     fn new(area: Recti, white_uv: Vec2f) -> Self {
         // Z is the vertical world axis, leaving the requested X-Y grid on the ground plane. The
         // asymmetric camera position makes parallel world lines visibly converge in perspective.
-        let view = lookat(&Vec3f::new(12.0, -16.0, 11.0), &Vec3f::new(0.0, 0.0, 0.0), &Vec3f::new(0.0, 0.0, 1.0));
+        // Keep the camera outside the complete +/-20 grid extent. Every segment then remains in
+        // front of the view plane, so the lightweight CPU projection needs no behind-camera line
+        // clipping before the normal UI renderer clips it to the custom-render rectangle.
+        let view = lookat(&Vec3f::new(24.0, -32.0, 26.0), &Vec3f::new(0.0, 0.0, 0.0), &Vec3f::new(0.0, 0.0, 1.0));
         let aspect = area.width.max(1) as f32 / area.height.max(1) as f32;
         let projection = perspective(std::f32::consts::FRAC_PI_3, aspect, 0.1, 100.0);
         Self {

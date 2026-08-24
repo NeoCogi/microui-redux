@@ -9,7 +9,7 @@
 ## Version 0.8.0-alpha.5
 
 `0.8.0-alpha.5` adds explicit retained-root layering to the breaking 0.8 API and demonstrates the
-model with a fullscreen menu-bearing application surface beneath independent floating windows.
+model with a fullscreen menu-bearing X-Y grid surface beneath independent floating windows.
 
 - [x] Added sixteen fixed application layers for ordinary windows.
     - [x] Layers are numbered `0` through `15`, ordered bottom to top, and new windows retain the compatibility-preserving default layer `15`.
@@ -29,7 +29,8 @@ model with a fullscreen menu-bearing application surface beneath independent flo
     - [x] Pointer capture, popup-to-source activation, modal routing, root hiding, and destruction reconcile the active root without adding parent-window ownership.
 - [x] Added edge-to-edge application-surface support.
     - [x] `WindowOption::NO_PADDING` removes only the root-owned content inset and preserves normal descendant style padding.
-    - [x] `demo-full` now resizes its chromeless `WindowMenu` root to the drawable viewport at layer `0`; its independent default-layer windows float above it and modal dialogs remain topmost.
+    - [x] `demo-full` now resizes a dedicated chromeless `WindowMenu` root to the drawable viewport at layer `0`, renders a perspective X-Y grid in its body, and gives that surface its own Grid/Help menu.
+    - [x] The original movable, resizable Demo Window and all other independent windows remain at the default layer above the grid; modal dialogs remain topmost.
 - [x] Added retained and downstream tests for layer validation, bounded raising, popup inheritance and lifetime, modal popups, active-root keyboard routing, and no-padding chrome geometry.
 
 ## Version 0.8.0-alpha.4

@@ -116,8 +116,9 @@ context.set_root_rect(surface.id(), rect(0, 0, dimensions.width, dimensions.heig
 ```
 
 `NO_PADDING` removes only the root-owned content inset; descendant widgets still use the complete
-`Style`, including ordinary control and container padding. `demo-full` applies this recipe to its
-menu-bearing main surface while its floating windows remain independent default-layer roots.
+`Style`, including ordinary control and container padding. `demo-full` applies this recipe to a
+dedicated menu-bearing perspective X-Y grid surface. Its original Demo Window and the other
+floating windows remain independent default-layer roots above that background.
 
 ```rust
 #[derive(Default)]

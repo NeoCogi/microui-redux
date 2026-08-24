@@ -13,8 +13,10 @@
 - [`demo-full`](../examples/demo-full.rs) combines retained widgets, per-window File/View/Help
   menus, dialogs, custom drawing, external textures, and custom backend rendering. Its menu shows
   grouped and disabled commands, shortcut hints, a live checked item, radio choices, and typed
-  command dispatch into the file dialog, log, and style state. The menu-bearing main root is a
-  chromeless fullscreen surface fixed at layer 0; independent default-layer windows float above it.
+  command dispatch into the file dialog, log, and style state. A separate titleless fullscreen root
+  at layer 0 renders a perspective X-Y grid beneath the original Demo Window and every other
+  default-layer floating window. The grid surface owns an independent Grid/Help menu whose popups
+  inherit layer 0.
 
 ## Full demo
 

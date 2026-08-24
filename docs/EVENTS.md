@@ -421,8 +421,8 @@ retained handles: `RootSubmitted::PopupDismissed` closes the combo's shared sema
 outside press or replacement by another popup. This coordination stays with the composed-control
 owner instead of leaking popup policy into the base widget abstractions. Paint does no
 coordination, and application state performs no per-frame popup polling. The frame callback only
-synchronizes the fullscreen layer-0 application surface with platform dimensions and produces the
-FPS diagnostic.
+synchronizes the dedicated fullscreen layer-0 grid surface with platform dimensions and produces
+the FPS diagnostic for the separate floating Demo Window.
 
 `FileDialog` remains a reusable crate component while its instance and behavior live application-side.
 The application constructs it with an accessor into its model, stores the returned value there, and
