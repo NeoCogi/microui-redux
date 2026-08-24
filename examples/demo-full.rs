@@ -53,7 +53,9 @@
 //! Full retained-mode demo application.
 //!
 //! This example exercises core widgets, layout groups, scroll areas, images, and optional 3D
-//! renderer integrations in one interactive application.
+//! renderer integrations in one interactive application. A dedicated titleless layer-0 root fills
+//! the client area with its own menu and a perspective X-Y grid; ordinary demo windows float above
+//! it at the default layer.
 #[path = "./common/mod.rs"]
 mod common;
 
@@ -74,6 +76,7 @@ use common::vulkan_renderer::VulkanRenderer as SelectedBackend;
 #[cfg(all(not(feature = "example-glow"), not(feature = "example-vulkan"), feature = "example-wgpu"))]
 use common::wgpu_renderer::WgpuRenderer as SelectedBackend;
 use microui_redux::{prelude::*, render::Vertex};
+use rs_math3d::{lookat, perspective, project3};
 use std::{cell::RefCell, f32::consts::PI, fs, path::PathBuf, rc::Rc, time::Instant};
 
 type SelectedFrame<'a> = <SelectedBackend as RendererBackend>::Frame<'a>;
@@ -101,6 +104,12 @@ const TRI_VERTS: [TriVertex; 3] = [
 
 struct TriangleState {
     angle: f32,
+}
+
+/// Application-owned presentation state shared with the fullscreen X-Y grid renderer.
+struct Grid3dState {
+    /// Whether unit-spaced lines are drawn between the stronger five-unit divisions.
+    show_minor_lines: bool,
 }
 
 struct PainterDemo {
@@ -1051,6 +1060,12 @@ struct DemoMenuItems {
     compact_spacing: TypedWidgetHandle<MenuItem>,
 }
 
+/// Concrete item handles whose presentation mirrors the fullscreen grid state.
+struct GridMenuItems {
+    /// Checked item controlling whether the renderer includes unit-spaced grid lines.
+    show_minor_lines: TypedWidgetHandle<MenuItem>,
+}
+
 /// Creates and registers one concrete item before its node enters the menu hierarchy.
 fn registered_menu_item(
     context: &mut Context<SelectedBackend, State>,
@@ -1111,6 +1126,30 @@ fn demo_menu_panel(context: &mut Context<SelectedBackend, State>) -> (MenuPanel,
             compact_spacing,
         },
     )
+}
+
+/// Builds the independent menu hierarchy owned by the fullscreen X-Y grid surface.
+fn grid_menu_panel(context: &mut Context<SelectedBackend, State>) -> (MenuPanel, GridMenuItems) {
+    // Register these item ports against the grid coordinator rather than the Demo Window's menu.
+    // Each WindowMenu must close and reconcile its own popup before invoking application behavior.
+    let (show_minor_lines, show_minor_lines_node) = MenuItem::create(MenuItemParameters::new("Minor Grid Lines").checked(true));
+    WindowMenu::register_item(context, State::grid_window_menu_mut, &show_minor_lines, State::grid_toggle_minor_lines)
+        .expect("new grid menu item must be unsubscribed");
+
+    let (about_grid, about_grid_node) = MenuItem::create(MenuItemParameters::new("About X-Y Grid"));
+    WindowMenu::register_item(context, State::grid_window_menu_mut, &about_grid, State::grid_about).expect("new grid menu item must be unsubscribed");
+
+    // The panel is intentionally separate from the floating demo's File/View/Help component. Its
+    // popup roots inherit layer zero from the grid surface and therefore stay below layer-15
+    // floating windows exactly like every other widget initiated by this background root.
+    let panel = MenuPanel::new([
+        Menu::new("Grid", [MenuGroup::new([show_minor_lines_node])]),
+        Menu::new("Help", [MenuGroup::new([about_grid_node])]),
+    ]);
+
+    // The About item needs no later presentation updates; Context retains its node and event port.
+    drop(about_grid);
+    (panel, GridMenuItems { show_minor_lines })
 }
 
 fn set_slider_value(state: &TypedWidgetHandle<Slider>, value: Real) {
@@ -1180,6 +1219,13 @@ struct State {
     combo_popup_root: PopupHandle,
     popup_root: PopupHandle,
 
+    /// Shared visibility controls consumed by the background grid's custom-render callback.
+    grid_3d_state: Rc<RefCell<Grid3dState>>,
+    /// Independent coordinator for the fullscreen grid surface and its retained menu popups.
+    grid_window_menu: WindowMenu,
+    /// Concrete checked item reflecting whether unit-spaced grid lines are enabled.
+    grid_show_minor_lines_item: TypedWidgetHandle<MenuItem>,
+
     /// Application-owned component coordinating the main window's concrete menus.
     window_menu: WindowMenu,
     /// Concrete Open item whose enabled state follows file-dialog activity.
@@ -1222,6 +1268,21 @@ impl State {
             let rect_extent = Vec2f::new(rect.width as f32, rect.height as f32);
             let texture_extent = Vec2f::new(dim.width as f32, dim.height as f32);
             (rect_min + rect_extent * 0.5) / texture_extent
+        };
+
+        // The fullscreen grid is rendered through the same backend-neutral colored-triangle path
+        // used by the standalone cube example. Application state owns only the menu-controlled
+        // density flag; the callback receives authoritative committed geometry at paint time.
+        let grid_3d_state = Rc::new(RefCell::new(Grid3dState { show_minor_lines: true }));
+        let grid_renderer = {
+            let grid_3d_state = grid_3d_state.clone();
+            ctx.register_custom_renderer(move |frame: &mut SelectedFrame<'_>, args: CustomRenderArgs| {
+                let area = area_from_args(&args);
+                let show_minor_lines = grid_3d_state.borrow().show_minor_lines;
+                let vertices = build_xy_grid_vertices(area.rect, white_uv, show_minor_lines);
+                frame.enqueue_colored_vertices(area, vertices);
+            })
+            .expect("register fullscreen X-Y grid renderer")
         };
 
         let triangle_data = Rc::new(RefCell::new(TriangleState { angle: 0.0 }));
@@ -1438,24 +1499,35 @@ impl State {
             popup: popup_content,
         };
 
-        // Create and register concrete items first, compose them into the concrete hierarchy, then
-        // attach that panel above the existing uniquely owned demo content. The placeholder extent
-        // is replaced from the real drawable dimensions by `sync_fullscreen_surface` every frame;
-        // construction cannot yet observe the platform window size.
-        let (menu_panel, menu_items) = demo_menu_panel(ctx);
-        let window_menu = WindowMenu::create(ctx, Self::window_menu_mut, "Demo Window", rect(0, 0, 1, 1), menu_panel, demo_node);
-        let demo_root = window_menu.window().clone();
-        // Layer zero turns the main application surface into a stable desktop beneath every
-        // ordinary floating demo window, all of which retain the default fixed layer 15. Removing
-        // chrome and only the root-owned padding gives the persistent menu bar an edge-to-edge
-        // surface without changing spacing inside any descendant control.
-        ctx.set_root_layer(demo_root.id(), MIN_LAYER)
-            .expect("demo root must accept the bottom application layer");
+        // The grid owns a separate WindowMenu and custom-render body. Its placeholder extent is
+        // replaced from real drawable dimensions by `sync_grid_surface` every frame because this
+        // construction callback cannot yet observe the platform window size.
+        let (grid_menu_panel, grid_menu_items) = grid_menu_panel(ctx);
+        let grid_node = Node::custom_render(Custom::create(CustomParameters::new("Perspective X-Y Grid")), grid_renderer);
+        let grid_window_menu = WindowMenu::create(
+            ctx,
+            Self::grid_window_menu_mut,
+            "X-Y Grid Surface",
+            rect(0, 0, 1, 1),
+            grid_menu_panel,
+            grid_node,
+        );
+        let grid_root = grid_window_menu.window();
+        // This dedicated desktop-like root is the only layer-0 window. Its menu remains visible at
+        // the top edge, while the custom-render body consumes every remaining pixel below it.
+        ctx.set_root_layer(grid_root.id(), MIN_LAYER)
+            .expect("grid root must accept the bottom application layer");
         ctx.set_root_options(
-            demo_root.id(),
+            grid_root.id(),
             WindowOption::NO_TITLE | WindowOption::NO_CLOSE | WindowOption::NO_RESIZE | WindowOption::NO_PADDING,
         )
-        .expect("demo root must accept fullscreen chrome options");
+        .expect("grid root must accept fullscreen chrome options");
+
+        // Preserve the original Demo Window as an independently movable and resizable layer-15
+        // window. Its existing menu is unrelated to the fullscreen grid menu above.
+        let (menu_panel, menu_items) = demo_menu_panel(ctx);
+        let window_menu = WindowMenu::create(ctx, Self::window_menu_mut, "Demo Window", rect(40, 40, 300, 450), menu_panel, demo_node);
+        let demo_root = window_menu.window().clone();
         let _style_root = ctx.create_window("Style Editor", rect(350, 250, 300, 240), style_node);
         let _log_root = ctx.create_window("Log Window", rect(350, 40, 300, 200), log_node);
         let combo_popup_root = ctx.create_popup("Combo Box Popup", combo_node);
@@ -1498,7 +1570,7 @@ impl State {
             .expect("combo state unavailable");
         let combo_items = combo_item_pairs.map(|(_, runtime)| runtime);
         let window_info_value_pairs =
-            ["0, 0", "1, 1", "0.0"].map(|label| stateful_leaf::<ListItemBuilder>(ListItemParameters::with_opt(label, WidgetOption::NO_INTERACT)));
+            ["40, 40", "300, 450", "0.0"].map(|label| stateful_leaf::<ListItemBuilder>(ListItemParameters::with_opt(label, WidgetOption::NO_INTERACT)));
         let window_info_value_states = window_info_value_pairs.each_ref().map(|(state, _)| state.clone());
         let window_info_values = window_info_value_pairs.map(|(_, runtime)| runtime);
         let (submit_button_submitted, submit_button) = centered_button("Submit");
@@ -1642,6 +1714,9 @@ impl State {
             demo_root,
             combo_popup_root,
             popup_root,
+            grid_3d_state,
+            grid_window_menu,
+            grid_show_minor_lines_item: grid_menu_items.show_minor_lines,
             window_menu,
             menu_open_file: menu_items.open_file,
             menu_auto_scroll_item: menu_items.auto_scroll,
@@ -1699,6 +1774,9 @@ impl State {
             context.subscribe_context_with(submitted.clone(), index, Self::combo_item).unwrap();
         }
         context.subscribe(self.combo_popup_root.submitted(), Self::combo_popup_submitted).unwrap();
+        // The floating Demo Window still owns user-driven move/resize diagnostics independently of
+        // the platform-sized grid root.
+        context.subscribe_context(self.demo_root.changed(), Self::demo_root_changed).unwrap();
         for (submitted, label) in self.popup_button_submitted.iter().zip(["Hello", "World"]) {
             context.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
         }
@@ -1893,6 +1971,30 @@ impl State {
         self.write_log("microui-redux retained-mode full demo with per-window menus");
     }
 
+    /// Toggles unit-spaced geometry from the fullscreen grid's own checked menu item.
+    fn grid_toggle_minor_lines(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+        // End the shared-state borrow before updating the item and log, keeping callback-owned data
+        // independent from the rest of mutable application state.
+        let show_minor_lines = {
+            let mut grid = self.grid_3d_state.borrow_mut();
+            grid.show_minor_lines = !grid.show_minor_lines;
+            grid.show_minor_lines
+        };
+        self.grid_show_minor_lines_item
+            .set_mark(MenuItemMark::Checked(show_minor_lines))
+            .expect("minor-grid-lines menu item unavailable");
+        self.write_log(if show_minor_lines {
+            "Enabled minor X-Y grid lines"
+        } else {
+            "Showing major X-Y grid lines only"
+        });
+    }
+
+    /// Describes the separate background root from its own Help menu.
+    fn grid_about(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+        self.write_log("Layer-0 fullscreen perspective X-Y grid with an independent menu");
+    }
+
     /// Updates the two concrete spacing markers and applies the chosen style value.
     fn select_menu_spacing(&mut self, comfortable: bool, spacing: i32) {
         self.menu_comfortable_spacing
@@ -1909,6 +2011,28 @@ impl State {
             "Selected compact control spacing"
         });
     }
+
+    /// Reconciles diagnostics and the minimum size of the ordinary floating Demo Window.
+    fn demo_root_changed(&mut self, context: &mut EventContext<'_>, event: &RootChanged) {
+        // Root chrome emits only after a user-driven move or resize. Clamp the demo-specific
+        // minimum at this event boundary without coupling it to the fullscreen grid geometry.
+        let mut rect = event.rect;
+        rect.width = rect.width.max(240);
+        rect.height = rect.height.max(300);
+        if (rect.width, rect.height) != (event.rect.width, event.rect.height) {
+            context.set_root_rect(self.demo_root.id(), rect).expect("demo root must exist");
+        }
+
+        // These retained values describe the floating Demo Window, not the platform-sized grid.
+        let [value_pos, value_size, _] = &self.window_info_value_states;
+        value_pos
+            .try_update(|value| value.set_label(format!("{}, {}", rect.x, rect.y)))
+            .expect("window position state unavailable");
+        value_size
+            .try_update(|value| value.set_label(format!("{}, {}", rect.width, rect.height)))
+            .expect("window size state unavailable");
+    }
+
     fn submit_log(&mut self, text: String) {
         self.write_log(text.as_str());
         self.submit_buf_state.try_update(Textbox::clear).expect("submit textbox unavailable");
@@ -2397,6 +2521,11 @@ impl State {
         &mut state.window_menu
     }
 
+    /// Resolves the independent fullscreen grid menu for its internal subscriptions.
+    fn grid_window_menu_mut(state: &mut Self) -> &mut WindowMenu {
+        &mut state.grid_window_menu
+    }
+
     fn file_dialog_completed(&mut self, event: &FileDialogCompleted) {
         // Completion makes File > Open available again regardless of acceptance or cancellation.
         self.menu_open_file.set_enabled(true).expect("Open menu item unavailable");
@@ -2410,31 +2539,21 @@ impl State {
         }
     }
 
-    /// Keeps the chromeless application surface exactly aligned with the drawable viewport.
-    fn sync_fullscreen_surface(&mut self, ctx: &mut Context<SelectedBackend, Self>, dimensions: Dimensioni) {
+    /// Keeps the chromeless layer-0 grid surface exactly aligned with the drawable viewport.
+    fn sync_grid_surface(&mut self, ctx: &mut Context<SelectedBackend, Self>, dimensions: Dimensioni) {
         // The platform owns drawable dimensions, while Context owns retained root geometry. Join
         // those authorities once per host frame so window resizes become visible in the second
         // update/layout commit performed by the shared example runner before painting.
-        ctx.set_root_rect(self.demo_root.id(), rect(0, 0, dimensions.width, dimensions.height))
-            .expect("fullscreen demo root must remain registered");
-
-        // The diagnostic rows describe this fixed application surface. Position is invariant and
-        // size comes from the same authoritative dimensions used above, so neither value depends on
-        // user-driven RootChanged events from chrome that this surface intentionally does not have.
-        let [value_pos, value_size, _] = &self.window_info_value_states;
-        value_pos
-            .try_update(|value| value.set_label("0, 0"))
-            .expect("window position state unavailable");
-        value_size
-            .try_update(|value| value.set_label(format!("{}, {}", dimensions.width, dimensions.height)))
-            .expect("window size state unavailable");
+        let grid_root = self.grid_window_menu.window().id();
+        ctx.set_root_rect(grid_root, rect(0, 0, dimensions.width, dimensions.height))
+            .expect("fullscreen grid root must remain registered");
     }
 
     /// Applies application-owned animation, style, and viewport state between update commits.
     fn process_frame(&mut self, ctx: &mut Context<SelectedBackend, Self>, dimensions: Dimensioni) {
         // Synchronize geometry before the style and animated state changes below; all of them are
         // consumed together by the runner's post-callback retained update.
-        self.sync_fullscreen_surface(ctx, dimensions);
+        self.sync_grid_surface(ctx, dimensions);
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
@@ -2537,6 +2656,129 @@ fn build_diamond_polygon(center: Vec2f, radius: f32) -> [Vec2f; 4] {
     ]
 }
 
+/// Projection state reused while the fullscreen callback converts world-space grid lines.
+struct GridProjection {
+    /// Camera view matrix looking obliquely across the `z = 0` X-Y plane.
+    view: Mat4f,
+    /// Perspective projection derived from the current custom-render allocation.
+    projection: Mat4f,
+    /// Bottom-left viewport endpoint expected by `rs_math3d::project3`.
+    screen_bottom_left: Vec2f,
+    /// Top-right endpoint with reversed Y so output uses microui's top-left origin.
+    screen_top_right: Vec2f,
+    /// Atlas coordinate sampled by every solid colored line triangle.
+    white_uv: Vec2f,
+}
+
+impl GridProjection {
+    /// Creates the fixed perspective camera for one current grid viewport.
+    fn new(area: Recti, white_uv: Vec2f) -> Self {
+        // Z is the vertical world axis, leaving the requested X-Y grid on the ground plane. The
+        // asymmetric camera position makes parallel world lines visibly converge in perspective.
+        let view = lookat(&Vec3f::new(12.0, -16.0, 11.0), &Vec3f::new(0.0, 0.0, 0.0), &Vec3f::new(0.0, 0.0, 1.0));
+        let aspect = area.width.max(1) as f32 / area.height.max(1) as f32;
+        let projection = perspective(std::f32::consts::FRAC_PI_3, aspect, 0.1, 100.0);
+        Self {
+            view,
+            projection,
+            screen_bottom_left: Vec2f::new(area.x as f32, (area.y + area.height) as f32),
+            screen_top_right: Vec2f::new((area.x + area.width) as f32, area.y as f32),
+            white_uv,
+        }
+    }
+
+    /// Projects a 3D segment and appends a constant-pixel-width screen-space quad.
+    fn push_line(&self, vertices: &mut Vec<Vertex>, start: Vec3f, end: Vec3f, width: f32, color: Color4b) {
+        // The world endpoints establish the perspective geometry. Thickness is applied only after
+        // projection so distant lines remain legible instead of collapsing below one framebuffer
+        // pixel as a thin world-space mesh would.
+        let start = project3(&self.view, &self.projection, &self.screen_bottom_left, &self.screen_top_right, &start);
+        let end = project3(&self.view, &self.projection, &self.screen_bottom_left, &self.screen_top_right, &end);
+        let start = Vec2f::new(start.x, start.y);
+        let end = Vec2f::new(end.x, end.y);
+        let delta = end - start;
+        let length = delta.length();
+        if !length.is_finite() || length <= f32::EPSILON {
+            return;
+        }
+
+        // Rotate the normalized segment direction ninety degrees to obtain the two quad edges.
+        let half_width = width.max(0.5) * 0.5;
+        let normal = Vec2f::new(-delta.y / length, delta.x / length) * half_width;
+        let a = start + normal;
+        let b = end + normal;
+        let c = end - normal;
+        let d = start - normal;
+        for point in [a, b, c, a, c, d] {
+            vertices.push(Vertex::new(point, self.white_uv, color));
+        }
+    }
+}
+
+/// Builds a perspective X-Y ground grid for the dedicated fullscreen background root.
+fn build_xy_grid_vertices(area: Recti, white_uv: Vec2f, show_minor_lines: bool) -> Vec<Vertex> {
+    if area.width <= 0 || area.height <= 0 {
+        return Vec::new();
+    }
+
+    const HALF_EXTENT: i32 = 20;
+    const MAJOR_INTERVAL: i32 = 5;
+    let projection = GridProjection::new(area, white_uv);
+    let mut vertices = Vec::with_capacity((HALF_EXTENT as usize * 4 + 2) * 6);
+
+    // Draw non-axis lines first so the red X and green Y axes remain visually authoritative at the
+    // origin. Major divisions survive when the menu disables the denser unit-spaced lines.
+    for coordinate in -HALF_EXTENT..=HALF_EXTENT {
+        if coordinate == 0 {
+            continue;
+        }
+        let major = coordinate % MAJOR_INTERVAL == 0;
+        if !major && !show_minor_lines {
+            continue;
+        }
+        let coordinate = coordinate as f32;
+        let extent = HALF_EXTENT as f32;
+        let (width, line_color) = if major {
+            (1.5, color4b(78, 92, 118, 230))
+        } else {
+            (1.0, color4b(48, 58, 76, 180))
+        };
+        projection.push_line(
+            &mut vertices,
+            Vec3f::new(coordinate, -extent, 0.0),
+            Vec3f::new(coordinate, extent, 0.0),
+            width,
+            line_color,
+        );
+        projection.push_line(
+            &mut vertices,
+            Vec3f::new(-extent, coordinate, 0.0),
+            Vec3f::new(extent, coordinate, 0.0),
+            width,
+            line_color,
+        );
+    }
+
+    // Conventional axis colors distinguish the two directions without requiring text labels in
+    // the non-interactive rendering surface.
+    let extent = HALF_EXTENT as f32;
+    projection.push_line(
+        &mut vertices,
+        Vec3f::new(-extent, 0.0, 0.0),
+        Vec3f::new(extent, 0.0, 0.0),
+        2.5,
+        color4b(220, 72, 72, 255),
+    );
+    projection.push_line(
+        &mut vertices,
+        Vec3f::new(0.0, -extent, 0.0),
+        Vec3f::new(0.0, extent, 0.0),
+        2.5,
+        color4b(72, 205, 112, 255),
+    );
+    vertices
+}
+
 fn build_triangle_vertices(area: Recti, white_uv: Vec2f, angle: f32) -> Vec<Vertex> {
     let (sin_theta, cos_theta) = angle.sin_cos();
     let half_w = (area.width.max(1) as f32) * 0.5;
@@ -2603,5 +2845,34 @@ fn load_external_image_texture(ctx: &mut Context<SelectedBackend, State>) -> Opt
             eprintln!("Failed to decode {}: {err}", image_path.display());
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod grid_tests {
+    use super::*;
+
+    #[test]
+    fn perspective_grid_density_changes_only_minor_line_geometry() {
+        let area = rect(0, 20, 1024, 748);
+        let white_uv = Vec2f::new(0.5, 0.5);
+        let dense = build_xy_grid_vertices(area, white_uv, true);
+        let major_only = build_xy_grid_vertices(area, white_uv, false);
+
+        // Dense mode has 40 non-axis coordinates in each direction plus two axes. Major-only mode
+        // retains eight five-unit divisions in each direction plus the same axes. Every projected
+        // line is one six-vertex screen-space quad.
+        assert_eq!(dense.len(), 82 * 6);
+        assert_eq!(major_only.len(), 18 * 6);
+        assert!(dense.iter().all(|vertex| {
+            let position = vertex.position();
+            position.x.is_finite() && position.y.is_finite()
+        }));
+    }
+
+    #[test]
+    fn empty_grid_viewport_emits_no_custom_geometry() {
+        assert!(build_xy_grid_vertices(rect(0, 0, 0, 600), Vec2f::default(), true).is_empty());
+        assert!(build_xy_grid_vertices(rect(0, 0, 800, 0), Vec2f::default(), true).is_empty());
     }
 }
