@@ -184,9 +184,10 @@ impl<'a> EventContext<'a> {
 ///
 /// Across ordinary roots, pointer hover and new presses follow topmost hit geometry. A press raises
 /// its root only within the effective layer and records the ordinary `active_root` independently.
-/// Drag and wheel remain confined by pointer capture or the front eligible visual root; keyboard
-/// and text return to the captured or active root. Captured pointer release still returns to its
-/// widget so local drag state is cleaned up.
+/// Drag remains confined by pointer capture or the front eligible visual root, while wheel input
+/// follows the topmost eligible root under the pointer. Keyboard and text return to the captured
+/// or active root. Captured pointer release still returns to its widget so local drag state is
+/// cleaned up.
 ///
 /// A visible dialog is modal. It occupies the dedicated band above all application layers and forms
 /// the only eligible input group together with a popup that it initiates. Pointer input outside

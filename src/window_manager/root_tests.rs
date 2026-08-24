@@ -1439,7 +1439,7 @@ fn blank_root_press_confines_drag_to_the_pressed_root() {
 }
 
 #[test]
-fn active_root_confines_scroll_while_hover_and_press_remain_hit_routed() {
+fn scroll_and_new_press_reach_a_hovered_lower_layer_independently_of_activation() {
     let (probe_state, probe) = OrderedProbe::create(WidgetOption::GRAB_SCROLL);
     let mut ctx = context();
     let first = ctx.create_window("first", rect(0, 0, 100, 80), empty_content());
@@ -1448,6 +1448,7 @@ fn active_root_confines_scroll_while_hover_and_press_remain_hit_routed() {
         ctx.set_root_options(root, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
             .unwrap();
     }
+    ctx.set_root_layer(second.id(), MIN_LAYER).unwrap();
     ctx.update_and_render_ui();
 
     let first_body = ctx.debug_root_body(first.id()).unwrap();
@@ -1460,11 +1461,11 @@ fn active_root_confines_scroll_while_hover_and_press_remain_hit_routed() {
     ctx.mousemove(second_point.x, second_point.y);
     ctx.scroll(0, 1);
     ctx.update_and_render_ui();
-    assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(vec!["move"]));
+    assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(vec!["move", "scroll"]));
 
     ctx.mousedown(second_point.x, second_point.y, MouseButton::LEFT);
     ctx.update_and_render_ui();
-    assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(vec!["move", "down"]));
+    assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(vec!["move", "scroll", "down"]));
 }
 
 #[test]

@@ -908,12 +908,13 @@ impl WindowManager {
             }
         }
 
-        // Drag and wheel remain confined to the current visual/captured root, while keyboard and
-        // text use the independently activated root. Hover and new-press targeting continue to
-        // follow pointer geometry across stack layers.
-        let captured_root = self.captured_pointer_root();
+        // A drag remains confined to the root that owns pointer capture (or the front eligible
+        // root when no widget captured the initiating press). Wheel input has no press lifecycle,
+        // so it follows the topmost eligible root under the pointer just like hover. Keyboard and
+        // text continue to use the independently activated root.
+        let drag_root = self.drag_input_root();
         let pointer_root = match event {
-            crate::UiInputEvent::MouseDrag { .. } | crate::UiInputEvent::Scroll { .. } => captured_root,
+            crate::UiInputEvent::MouseDrag { .. } => drag_root,
             _ => hover_root,
         };
         let keyboard_root = self.keyboard_input_root();
@@ -1129,8 +1130,8 @@ impl WindowManager {
             .map(|(_, entry)| entry.id)
     }
 
-    /// Returns the root that exclusively accepts drag and wheel input.
-    fn captured_pointer_root(&self) -> Option<RootId> {
+    /// Returns the root that exclusively accepts continuation of an in-progress pointer drag.
+    fn drag_input_root(&self) -> Option<RootId> {
         let modal = self.modal_stack.last().copied();
         self.roots
             .iter()
