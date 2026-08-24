@@ -88,6 +88,12 @@ bitflags! {
         const NO_CLOSE = 64;
         /// Prevents the user from resizing the root.
         const NO_RESIZE = 16;
+        /// Removes the Style-owned inset around root content.
+        ///
+        /// This is useful for edge-to-edge application surfaces whose content, such as a menu bar,
+        /// already owns its internal spacing. It is independent of [`Self::FRAME`]: removing the
+        /// frame does not otherwise remove the ordinary window-content inset.
+        const NO_PADDING = 8;
         /// No special options.
         const NONE = 0;
     }
@@ -104,6 +110,32 @@ impl RootId {
     }
 }
 
+/// Lowest application-selectable root layer.
+pub const MIN_LAYER: u8 = 0;
+/// Highest application-selectable root layer.
+pub const MAX_LAYER: u8 = 15;
+/// Layer assigned to newly created ordinary windows.
+pub const DEFAULT_LAYER: u8 = MAX_LAYER;
+
+/// Describes how one retained root obtains its stacking layer.
+///
+/// Ordinary windows have a [`Fixed`](Self::Fixed) application layer. A visible popup records the
+/// root that initiated it and inherits that root's effective layer. Dialogs occupy the dedicated
+/// modal layer above all sixteen application layers. Popup and modal bindings are managed by the
+/// window manager; application code changes only fixed window layers through
+/// [`crate::Context::set_root_layer`].
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum LayerBinding {
+    /// A caller-selected application layer in the inclusive range [`MIN_LAYER`]..=[`MAX_LAYER`].
+    Fixed(u8),
+    /// A hidden popup that has not yet been associated with an initiating root.
+    Unbound,
+    /// A popup inheriting the effective layer of the identified initiating root.
+    Inherited(RootId),
+    /// A dialog in the dedicated layer above all application-selectable layers.
+    Modal,
+}
+
 /// Backend- and application-state-independent retained window manager.
 pub(crate) struct WindowManager {
     /// Reusable operation storage for window-manager frame and chrome drawing.
@@ -115,8 +147,16 @@ pub(crate) struct WindowManager {
     last_zindex: i32,
     /// Registered window-manager roots replayed by [`crate::ContextFrame::render_ui`].
     roots: Vec<WindowEntry>,
-    /// Visible dialogs in nesting order; the last entry is the sole input root.
+    /// Visible dialogs in nesting order; the last entry owns the active modal input group.
+    ///
+    /// That group contains the dialog and, while open, the one popup initiated by the dialog. No
+    /// ordinary application-layer root may receive input until the modal stack becomes empty.
     modal_stack: Vec<RootId>,
+    /// Last ordinary root explicitly activated by a pointer press.
+    ///
+    /// Activation is deliberately independent of stacking. A user can therefore focus a control
+    /// in a low layer without raising that root over windows in a higher layer.
+    active_root: Option<RootId>,
     /// Next root id counter.
     next_root_id: usize,
     /// Ordered input state owned and consumed directly by this window manager.
@@ -133,6 +173,7 @@ impl WindowManager {
             last_zindex: 0,
             roots: Vec::default(),
             modal_stack: Vec::new(),
+            active_root: None,
             next_root_id: 1,
             input: Input::default(),
             ui_commit: None,

@@ -499,7 +499,14 @@ pub(super) fn root_chrome_geometry(
     style: &Style,
     atlas: &AtlasHandle,
 ) -> RootChromeGeometry {
-    let padding = style.padding.max(0);
+    // Root padding is chrome geometry rather than child layout policy. Edge-to-edge application
+    // surfaces can remove only this outer inset while descendants continue inheriting the complete
+    // Context style, including its ordinary control and container padding.
+    let padding = if options.intersects(WindowOption::NO_PADDING) {
+        0
+    } else {
+        style.padding.max(0)
+    };
     let title_height = root_titlebar_height(style, atlas);
     let border = if options.intersects(WindowOption::FRAME) {
         style.frame_border().width.max(0)

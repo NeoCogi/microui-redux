@@ -36,7 +36,7 @@
 //! context-owned dispatcher only drains semantic [`crate::WidgetEvent`] ports into application
 //! state.
 
-use crate::window_manager::{PopupHandle, RootHandle, RootId, RootMutationError, WindowManager, WindowOption};
+use crate::window_manager::{LayerBinding, PopupHandle, RootHandle, RootId, RootMutationError, WindowManager, WindowOption};
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, FrameInfo, RenderError, Renderer, RendererBackend};
 use crate::{Dimensioni, ImageSource, KeyCode, KeyMode, MouseButton, Node, Recti, Style, TextureId};
 
@@ -115,6 +115,18 @@ impl<'a> EventContext<'a> {
         self.window_manager.set_root_options(root, options)
     }
 
+    /// Assigns an ordinary window to one of the sixteen fixed application layers.
+    pub fn set_root_layer(&mut self, root: RootId, layer: u8) -> Result<(), RootMutationError> {
+        // Layer validation, inherited-popup propagation, and modal restrictions remain one
+        // WindowManager transaction at the event-safe mutation boundary.
+        self.window_manager.set_root_layer(root, layer)
+    }
+
+    /// Returns the registered root's fixed, inherited, unbound, or modal layer policy.
+    pub fn root_layer_binding(&self, root: RootId) -> Result<LayerBinding, RootMutationError> {
+        self.window_manager.root_layer_binding(root)
+    }
+
     /// Shows or hides a retained root while preserving its tree and concrete widget state.
     ///
     /// Dialog modal-stack changes and popup exclusivity use the same policy as
@@ -125,15 +137,20 @@ impl<'a> EventContext<'a> {
         self.window_manager.set_root_visible(root, visible)
     }
 
+    /// Shows a popup at the current pointer position in its initiating root's layer.
+    pub fn show_popup(&mut self, popup: &PopupHandle, initiator: RootId) -> Result<(), RootMutationError> {
+        self.window_manager.show_popup(popup, initiator)
+    }
+
     /// Shows a popup at an exact screen-space anchor before the following layout commit.
     ///
     /// This atomic form is intended for composed controls such as menus and combos. It both applies
     /// popup exclusivity and replaces the popup rectangle, so no pointer-relative intermediate
     /// placement can be observed. The typed handle prevents passing a window or dialog root.
-    pub fn show_popup_at(&mut self, popup: &PopupHandle, anchor: Recti) -> Result<(), RootMutationError> {
+    pub fn show_popup_at(&mut self, popup: &PopupHandle, initiator: RootId, anchor: Recti) -> Result<(), RootMutationError> {
         // Delegate the complete transaction while retaining compile-time popup identity across the
         // event façade boundary.
-        self.window_manager.show_popup_at(popup, anchor)
+        self.window_manager.show_popup_at(popup, initiator, anchor)
     }
 
     /// Raises a registered root and reports whether it still exists.
@@ -423,6 +440,20 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         self.window_manager.set_root_options(root, options)
     }
 
+    /// Assigns an ordinary window to a fixed application layer in the inclusive range `0..=15`.
+    ///
+    /// Newly created windows use layer 15. Popups inherit their initiating root's effective layer
+    /// when shown, and dialogs occupy the separate modal layer, so both managed root kinds reject
+    /// direct layer assignment.
+    pub fn set_root_layer(&mut self, root: RootId, layer: u8) -> Result<(), RootMutationError> {
+        self.window_manager.set_root_layer(root, layer)
+    }
+
+    /// Returns the registered root's current layer-binding policy.
+    pub fn root_layer_binding(&self, root: RootId) -> Result<LayerBinding, RootMutationError> {
+        self.window_manager.root_layer_binding(root)
+    }
+
     /// Shows or hides a retained root, preserving its tree and concrete widget state.
     ///
     /// Showing a dialog pushes it onto the modal stack. Hiding the active dialog restores the
@@ -433,10 +464,19 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         self.window_manager.set_root_visible(root, visible)
     }
 
+    /// Shows a popup at the current pointer position in its initiating root's layer.
+    ///
+    /// The explicit initiator makes layer inheritance authoritative even for programmatic popup
+    /// requests where pointer position or visual frontmost state cannot identify the source.
+    pub fn show_popup(&mut self, popup: &PopupHandle, initiator: RootId) -> Result<(), RootMutationError> {
+        self.window_manager.show_popup(popup, initiator)
+    }
+
     /// Shows a popup at an exact screen-space anchor in one checked root mutation.
     ///
-    /// Use this for a popup whose position belongs to the semantic event that opened it. Ordinary
-    /// pointer-relative popups may continue to use [`Self::set_root_visible`]. The typed parameter
+    /// Use this for a popup whose position belongs to the semantic event that opened it. Use
+    /// [`Self::show_popup`] when the current pointer position is the desired anchor. Both forms
+    /// require the initiating root so the popup can inherit the correct layer. The typed parameter
     /// makes an ordinary [`RootHandle`] ineligible for popup-only placement policy:
     ///
     /// ```compile_fail
@@ -447,13 +487,13 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     ///     window: &RootHandle,
     ///     anchor: Recti,
     /// ) {
-    ///     context.show_popup_at(window, anchor);
+    ///     context.show_popup_at(window, window.id(), anchor);
     /// }
     /// ```
-    pub fn show_popup_at(&mut self, popup: &PopupHandle, anchor: Recti) -> Result<(), RootMutationError> {
+    pub fn show_popup_at(&mut self, popup: &PopupHandle, initiator: RootId, anchor: Recti) -> Result<(), RootMutationError> {
         // Keep popup identity typed through the public façade; the manager still checks whether the
         // weak root remains registered and whether its widget state can be borrowed atomically.
-        self.window_manager.show_popup_at(popup, anchor)
+        self.window_manager.show_popup_at(popup, initiator, anchor)
     }
 
     /// Raises a registered root and reports whether it exists.
@@ -658,6 +698,14 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
 
     pub(crate) fn debug_root_zindex(&self, root: RootId) -> Option<i32> {
         self.window_manager.debug_root_zindex(root)
+    }
+
+    pub(crate) fn debug_root_layer_binding(&self, root: RootId) -> Option<LayerBinding> {
+        self.window_manager.debug_root_layer_binding(root)
+    }
+
+    pub(crate) fn debug_active_root(&self) -> Option<RootId> {
+        self.window_manager.debug_active_root()
     }
 
     pub(crate) fn debug_modal_root(&self) -> Option<RootId> {

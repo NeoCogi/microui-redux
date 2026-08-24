@@ -1766,7 +1766,9 @@ impl State {
                 // Apply the popup request at the typed-event boundary. WindowManager owns placement,
                 // exclusivity, and the layout commit; State needs no frame-polled command flag.
                 let popup_width = (self.style.default_cell_width + self.style.padding.max(0) * 2).max(80);
-                context.set_root_visible(self.popup_root.id(), true).expect("test popup root must exist");
+                context
+                    .show_popup(&self.popup_root, self.demo_root.id())
+                    .expect("test popup root and initiating demo window must exist");
                 context
                     .set_root_size(self.popup_root.id(), Dimensioni::new(popup_width, 1))
                     .expect("test popup root must exist");
@@ -1792,8 +1794,8 @@ impl State {
             // The submission owns the geometry from the update that routed this click, so opening
             // needs neither a widget-state read nor a previous-frame anchor snapshot.
             context
-                .show_popup_at(&self.combo_popup_root, event.anchor)
-                .expect("combo popup root must exist");
+                .show_popup_at(&self.combo_popup_root, self.demo_root.id(), event.anchor)
+                .expect("combo popup root and initiating demo window must exist");
         } else {
             context
                 .set_root_visible(self.combo_popup_root.id(), false)

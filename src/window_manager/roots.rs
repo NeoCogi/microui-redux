@@ -56,6 +56,20 @@ pub enum RootMutationError {
     /// Checked mutations return this error instead of panicking or partially applying a cross-root
     /// transaction. The caller may retry after the conflicting access closure has returned.
     Borrowed,
+    /// The requested fixed layer is outside the supported inclusive range `0..=15`.
+    InvalidLayer(u8),
+    /// The root's layer is controlled by popup inheritance or modal policy.
+    ///
+    /// Only ordinary windows own a directly configurable fixed layer. Show a popup from its
+    /// initiating root to establish inheritance; dialogs always use the dedicated modal layer.
+    ManagedLayer,
+    /// A popup was requested through generic visibility without identifying its initiating root.
+    PopupInitiatorRequired,
+    /// The supplied popup initiator cannot establish a valid live inheritance relationship.
+    ///
+    /// This includes using the target popup as its own initiator, using an unbound popup as the
+    /// initiator, or attempting to open a non-modal popup while another modal root is active.
+    InvalidPopupInitiator,
 }
 
 /// Cloneable non-owning capability for one retained popup root.
@@ -112,6 +126,28 @@ pub(super) enum WindowKind {
     Modal,
     /// A transient root governed by exclusive visibility and outside-press dismissal policy.
     Popup,
+}
+
+/// Resolved stacking band used by ordering and modal eligibility.
+///
+/// `Fixed` preserves the application's numeric layer while `Modal` remains structurally above all
+/// values in the fixed range. Keeping the modal band out of the public numeric range makes it
+/// impossible for an ordinary root to collide with modal policy.
+#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum StackBand {
+    Fixed(u8),
+    Modal,
+}
+
+/// Total ordering key shared by layout traversal, paint, and pointer hit testing.
+///
+/// Popups use a transient tier inside their inherited band. Consequently they cover ordinary
+/// roots in that same layer without escaping above a higher numeric layer.
+#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct StackKey {
+    band: StackBand,
+    transient: bool,
+    z_index: i32,
 }
 
 /// One persistent retained tree and its traversal-local runtime state.
@@ -201,12 +237,25 @@ impl WidgetTree {
 pub(super) struct WindowEntry {
     pub(super) id: RootId,
     pub(super) kind: WindowKind,
+    /// Publicly observable source of this root's stacking band.
+    pub(super) layer_binding: LayerBinding,
+    /// Cached effective band, synchronized whenever a fixed source layer or popup initiator changes.
+    effective_band: StackBand,
     pub(super) z_index: i32,
     pub(super) root_widget: TypedWidgetHandle<RootChrome>,
     pub(super) tree: WidgetTree,
 }
 
 impl WindowEntry {
+    /// Returns the complete stacking key used everywhere roots compete for visual priority.
+    fn stack_key(&self) -> StackKey {
+        StackKey {
+            band: self.effective_band,
+            transient: self.kind == WindowKind::Popup,
+            z_index: self.z_index,
+        }
+    }
+
     /// Clears runtime interaction identities and the application-visible root chrome mode.
     fn clear_transient_targets(&mut self) {
         // Generic descendant widgets reconcile private modes from their next inactive update.
@@ -242,10 +291,20 @@ impl WindowManager {
         } else {
             -1
         };
+        // A window starts in the compatibility-preserving top application layer, a dialog enters
+        // the structurally higher modal band, and a hidden popup remains unbound until the show
+        // operation identifies the root that initiated it.
+        let (layer_binding, effective_band) = match kind {
+            WindowKind::Window => (LayerBinding::Fixed(DEFAULT_LAYER), StackBand::Fixed(DEFAULT_LAYER)),
+            WindowKind::Modal => (LayerBinding::Modal, StackBand::Modal),
+            WindowKind::Popup => (LayerBinding::Unbound, StackBand::Fixed(DEFAULT_LAYER)),
+        };
         // Context is the sole tree owner; the entry's typed widget handle cannot retain the root.
         self.roots.push(WindowEntry {
             id,
             kind,
+            layer_binding,
+            effective_band,
             z_index,
             root_widget: root_widget.clone(),
             tree: WidgetTree::new(root),
@@ -272,19 +331,21 @@ impl WindowManager {
 
     /// Creates a hidden retained dialog around one uniquely owned application node.
     ///
-    /// Show it with [`crate::Context::set_root_visible`]. A visible dialog becomes the active modal root:
-    /// it stays frontmost and is the only root eligible for input until hidden or destroyed.
-    /// Hiding preserves all descendant state.
+    /// Show it with [`crate::Context::set_root_visible`]. A visible dialog enters the dedicated
+    /// modal layer and becomes the active modal input group. Only that dialog and a popup it
+    /// initiates remain input-eligible until the dialog is hidden or destroyed. Hiding preserves
+    /// all descendant state.
     pub fn create_dialog(&mut self, name: &str, rect: Recti, content: Node) -> RootHandle {
         self.register_root(WindowKind::Modal, name, rect, content, WindowOption::FRAME, false)
     }
 
     /// Creates a hidden auto-sized popup around one uniquely owned application node.
     ///
-    /// Showing places it at the current pointer position. An outside press hides it and records a
-    /// submission before ordinary routing may continue beneath the popup boundary. Showing another
-    /// popup also hides this one and records the same dismissal. While a dialog is active, a shown
-    /// popup remains visible but is kept below the dialog and receives no input.
+    /// Show it through [`crate::Context::show_popup`] or [`crate::Context::show_popup_at`], which
+    /// require the initiating root and bind the popup to that root's effective layer. Within that
+    /// layer, the popup's transient tier is above ordinary roots; it never crosses a higher fixed
+    /// layer. A popup initiated by the active dialog occupies the transient tier above the modal
+    /// itself. An outside press or another popup request hides it and records a submission.
     pub fn create_popup(&mut self, name: &str, content: Node) -> PopupHandle {
         // Wrap the generic registry handle at the only construction point that installs popup
         // policy. Callers can therefore prove popup identity by type instead of a runtime check.
@@ -324,6 +385,41 @@ impl WindowManager {
         Ok(())
     }
 
+    /// Assigns one ordinary window to a fixed application stacking layer.
+    ///
+    /// Layers are ordered from zero at the bottom through fifteen at the top. Popup and modal roots
+    /// reject this operation because their bindings are governed by their initiator and the modal
+    /// stack respectively. A visible popup initiated by this window follows the new layer in the
+    /// same transaction.
+    pub fn set_root_layer(&mut self, root: RootId, layer: u8) -> Result<(), RootMutationError> {
+        let index = self.root_index(root)?;
+        if layer > MAX_LAYER {
+            return Err(RootMutationError::InvalidLayer(layer));
+        }
+        if self.roots[index].kind != WindowKind::Window {
+            return Err(RootMutationError::ManagedLayer);
+        }
+
+        // The fixed source and all popups currently inheriting from it move atomically from the
+        // perspective of the next layout, input, or paint traversal. Popup initiators are
+        // normalized to a non-popup root when shown, so a single scan covers submenu chains too.
+        self.roots[index].layer_binding = LayerBinding::Fixed(layer);
+        self.roots[index].effective_band = StackBand::Fixed(layer);
+        for entry in &mut self.roots {
+            if entry.layer_binding == LayerBinding::Inherited(root) {
+                entry.effective_band = StackBand::Fixed(layer);
+            }
+        }
+        self.invalidate_ui_commit();
+        Ok(())
+    }
+
+    /// Returns the registered root's current layer-binding policy.
+    pub fn root_layer_binding(&self, root: RootId) -> Result<LayerBinding, RootMutationError> {
+        let index = self.root_index(root)?;
+        Ok(self.roots[index].layer_binding)
+    }
+
     /// Shows or hides a retained root, preserving its tree and concrete widget state.
     ///
     /// Showing a dialog pushes it onto the modal stack. Hiding the active dialog restores the
@@ -332,18 +428,25 @@ impl WindowManager {
     /// This is distinct from [`crate::Context::destroy_root`], which drops the complete retained owner.
     pub fn set_root_visible(&mut self, root: RootId, visible: bool) -> Result<(), RootMutationError> {
         let target = self.root_index(root)?;
-        let mouse = self.input.snapshot().mouse_pos;
         let kind = self.roots[target].kind;
         if visible && kind == WindowKind::Popup {
-            // Preserve the established convenience behavior for generic popups: the first show is
-            // pointer-relative, while showing an already-visible popup retains its authoritative
-            // rectangle. Components with a semantic anchor use `show_popup_at` instead.
-            let popup_rect = self.roots[target]
-                .root_widget
-                .try_read(|state| if state.is_visible() { state.rect() } else { rect(mouse.x, mouse.y, 1, 1) })
-                .ok_or(RootMutationError::Borrowed)?;
-            return self.show_popup_index_at(target, popup_rect);
+            // Visibility alone cannot establish the layer-inheritance invariant. Require callers to
+            // use show_popup or show_popup_at, both of which name the root that initiated the
+            // transient before it becomes observable.
+            return Err(RootMutationError::PopupInitiatorRequired);
         } else {
+            // Entering a new modal domain closes the one globally visible popup before the dialog
+            // becomes observable. This prevents a transient belonging to the previous ordinary or
+            // modal domain from occupying the popup tier above the newly active dialog.
+            if visible && kind == WindowKind::Modal {
+                self.dismiss_visible_popup()?;
+            }
+            // A source root and its visible transient close as one checked transaction. Preflight
+            // the popup borrow before changing source visibility so a conflicting application
+            // access cannot leave half of that relationship observable.
+            if !visible {
+                self.dismiss_popup_initiated_by(root)?;
+            }
             self.update_root_widget(root, |state| state.set_visible_silent(visible))?;
         }
 
@@ -356,6 +459,9 @@ impl WindowManager {
             }
         } else {
             self.roots[target].clear_transient_targets();
+            if self.active_root == Some(root) {
+                self.active_root = None;
+            }
             if kind == WindowKind::Modal {
                 self.remove_modal(root);
             }
@@ -364,25 +470,37 @@ impl WindowManager {
         Ok(())
     }
 
+    /// Shows one typed popup at the current pointer position and inherits its initiator's layer.
+    ///
+    /// This is the pointer-relative counterpart to [`Self::show_popup_at`]. Naming the initiator is
+    /// mandatory because popup visibility and layer inheritance are committed atomically.
+    pub fn show_popup(&mut self, popup: &PopupHandle, initiator: RootId) -> Result<(), RootMutationError> {
+        let mouse = self.input.snapshot().mouse_pos;
+        self.show_popup_at(popup, initiator, rect(mouse.x, mouse.y, 1, 1))
+    }
+
     /// Shows one typed popup at an exact screen-space anchor in a single root transaction.
     ///
     /// The supplied rectangle is installed before the next layout observes the popup. Showing it
     /// dismisses any other visible popup and publishes that root's ordinary dismissal event.
     /// Accepting [`PopupHandle`] makes windows and dialogs ineligible at compile time; a handle
     /// whose root was destroyed is still reported as [`RootMutationError::UnknownRoot`].
-    pub fn show_popup_at(&mut self, popup: &PopupHandle, anchor: Recti) -> Result<(), RootMutationError> {
+    pub fn show_popup_at(&mut self, popup: &PopupHandle, initiator: RootId, anchor: Recti) -> Result<(), RootMutationError> {
         // Resolve the weak capability on every mutation because destroying a popup does not destroy
         // application-held handles. Root IDs are never reused, so a successful lookup identifies
         // the same popup originally wrapped by PopupHandle::new.
         let target = self.root_index(popup.id())?;
-        self.show_popup_index_at(target, anchor)
+        let source = self.popup_layer_source(initiator, popup.id())?;
+        self.show_popup_index_at(target, source, anchor)
     }
 
     /// Applies anchored popup policy to an already-resolved popup registry index.
-    fn show_popup_index_at(&mut self, target: usize, anchor: Recti) -> Result<(), RootMutationError> {
-        // Both callers establish popup identity before entering the shared transaction: the public
-        // path resolves an unforgeable PopupHandle, while set_root_visible branches on WindowKind.
+    fn show_popup_index_at(&mut self, target: usize, source: RootId, anchor: Recti) -> Result<(), RootMutationError> {
+        // The public typed handle establishes target popup identity, while popup_layer_source has
+        // normalized the initiator to a visible non-popup root with an authoritative stack band.
         debug_assert_eq!(self.roots[target].kind, WindowKind::Popup);
+        let source_index = self.root_index(source)?;
+        let inherited_band = self.roots[source_index].effective_band;
 
         // Find the displaced popup before borrowing either concrete RootChrome mutably. Retained
         // handles use checked RefCell access, so a conflicting application borrow returns a typed
@@ -423,11 +541,105 @@ impl WindowManager {
             })?;
         }
 
-        // A popup is an ordinary non-modal root for z-order purposes. Preserve an active modal
-        // above it, invalidate once, and let the following layout auto-size from the anchor.
+        // Commit inheritance only after all checked widget borrows succeeded, so a failed popup
+        // replacement cannot leave a hidden root attached to a new source. The transient tier in
+        // StackKey places this popup above roots in the inherited band but below the next layer.
+        self.roots[target].layer_binding = LayerBinding::Inherited(source);
+        self.roots[target].effective_band = inherited_band;
         self.raise_root_index(target);
-        self.raise_active_modal();
         self.invalidate_ui_commit();
+        Ok(())
+    }
+
+    /// Resolves a popup initiator to the non-popup root that owns its effective layer.
+    fn popup_layer_source(&self, initiator: RootId, target: RootId) -> Result<RootId, RootMutationError> {
+        if initiator == target {
+            return Err(RootMutationError::InvalidPopupInitiator);
+        }
+        let initiator_index = self.root_index(initiator)?;
+        let initiator_visible = self.roots[initiator_index]
+            .root_widget
+            .try_read(RootChrome::is_visible)
+            .ok_or(RootMutationError::Borrowed)?;
+        if !initiator_visible {
+            return Err(RootMutationError::InvalidPopupInitiator);
+        }
+
+        // A popup can initiate a submenu. Because every shown popup stores an already-normalized
+        // non-popup source, one lookup collapses an arbitrarily deep transient chain without
+        // retaining a parent/child window hierarchy or permitting inheritance cycles.
+        let source = match self.roots[initiator_index].kind {
+            WindowKind::Window | WindowKind::Modal => initiator,
+            WindowKind::Popup => match self.roots[initiator_index].layer_binding {
+                LayerBinding::Inherited(source) => source,
+                LayerBinding::Fixed(_) | LayerBinding::Unbound | LayerBinding::Modal => {
+                    return Err(RootMutationError::InvalidPopupInitiator);
+                }
+            },
+        };
+        let source_index = self.root_index(source)?;
+        let source_visible = self.roots[source_index]
+            .root_widget
+            .try_read(RootChrome::is_visible)
+            .ok_or(RootMutationError::Borrowed)?;
+        if !source_visible {
+            return Err(RootMutationError::InvalidPopupInitiator);
+        }
+
+        // A modal transaction may only create transients belonging to the active modal. This keeps
+        // a blocked ordinary root from placing an interactive popup into or underneath the modal
+        // input domain through a programmatic call.
+        if let Some(modal) = self.modal_stack.last().copied()
+            && source != modal
+        {
+            return Err(RootMutationError::InvalidPopupInitiator);
+        }
+        Ok(source)
+    }
+
+    /// Dismisses the one globally visible popup if it inherits from `source`.
+    fn dismiss_popup_initiated_by(&mut self, source: RootId) -> Result<(), RootMutationError> {
+        // Several retained menu popups may remember the same source after earlier openings. Search
+        // for the visible member rather than stopping at the first hidden inherited binding.
+        let popup = self.roots.iter().enumerate().find_map(|(index, entry)| {
+            if entry.kind != WindowKind::Popup || entry.layer_binding != LayerBinding::Inherited(source) {
+                return None;
+            }
+            entry
+                .root_widget
+                .try_read(RootChrome::is_visible)
+                .map(|visible| visible.then_some(index))
+                .ok_or(RootMutationError::Borrowed)
+                .transpose()
+        });
+        let Some(index) = popup.transpose()? else { return Ok(()) };
+        self.roots[index]
+            .root_widget
+            .try_update(RootChrome::dismiss_popup)
+            .ok_or(RootMutationError::Borrowed)?;
+        self.roots[index].clear_transient_targets();
+        Ok(())
+    }
+
+    /// Dismisses the globally visible popup, if any, through checked retained access.
+    fn dismiss_visible_popup(&mut self) -> Result<(), RootMutationError> {
+        let popup = self.roots.iter().enumerate().find_map(|(index, entry)| {
+            if entry.kind != WindowKind::Popup {
+                return None;
+            }
+            entry
+                .root_widget
+                .try_read(RootChrome::is_visible)
+                .map(|visible| visible.then_some(index))
+                .ok_or(RootMutationError::Borrowed)
+                .transpose()
+        });
+        let Some(index) = popup.transpose()? else { return Ok(()) };
+        self.roots[index]
+            .root_widget
+            .try_update(RootChrome::dismiss_popup)
+            .ok_or(RootMutationError::Borrowed)?;
+        self.roots[index].clear_transient_targets();
         Ok(())
     }
 
@@ -454,11 +666,29 @@ impl WindowManager {
     /// There is intentionally no root-content replacement operation. Destroy and recreate a root
     /// to install a different root owner, or mutate descendants through their typed widget handles.
     pub fn destroy_root(&mut self, root: RootId) -> bool {
-        let Some(index) = self.roots.iter().position(|entry| entry.id == root) else {
+        if !self.roots.iter().any(|entry| entry.id == root) {
             return false;
-        };
+        }
+        // A popup cannot remain meaningfully visible after its initiating root disappears. Root
+        // destruction is already an unconditional lifetime operation, so a conflicting transient
+        // borrow is an invariant violation rather than a recoverable partial mutation.
+        self.dismiss_popup_initiated_by(root)
+            .expect("popup initiated by a destroyed root is unexpectedly borrowed");
+        let index = self.root_index(root).expect("destroy target must remain registered after popup dismissal");
         let kind = self.roots[index].kind;
         self.roots.remove(index);
+        // Hidden popups may retain their last source binding so layer inspection remains useful
+        // while a source is merely hidden. Once that source is destroyed, clear every such stale
+        // relationship; the next show operation must establish a new live initiator.
+        for entry in &mut self.roots {
+            if entry.layer_binding == LayerBinding::Inherited(root) {
+                entry.layer_binding = LayerBinding::Unbound;
+                entry.effective_band = StackBand::Fixed(DEFAULT_LAYER);
+            }
+        }
+        if self.active_root == Some(root) {
+            self.active_root = None;
+        }
         if kind == WindowKind::Modal {
             self.remove_modal(root);
         }
@@ -496,7 +726,18 @@ impl WindowManager {
         self.roots[index].z_index = self.last_zindex;
     }
 
-    /// Makes one visible dialog the sole input root and clears every other tree's targets.
+    /// Orders the registry from back to front using the one authoritative stacking key.
+    fn sort_roots_for_stacking(&mut self) {
+        // Stable sorting preserves registry order when the saturating z-index counter eventually
+        // produces ties. Every other ordering query uses WindowEntry::stack_key directly, so paint,
+        // layout traversal, and hit testing cannot disagree about layer or popup precedence.
+        self.roots.sort_by_key(WindowEntry::stack_key);
+    }
+
+    /// Makes one visible dialog the active modal input group and clears every other tree's targets.
+    ///
+    /// A popup initiated by this dialog may temporarily join the group; ordinary application-layer
+    /// roots remain blocked until every dialog has left the modal stack.
     fn push_modal(&mut self, root: RootId) {
         let index = self.root_index(root).expect("modal root must remain registered");
         assert!(self.roots[index].kind == WindowKind::Modal, "modal root must have modal kind");
@@ -588,7 +829,7 @@ impl WindowManager {
 
     /// Synchronizes auto-size and layout for every visible root.
     fn layout(&mut self, viewport: Recti, atlas: &crate::AtlasHandle) {
-        self.roots.sort_by_key(|entry| entry.z_index);
+        self.sort_roots_for_stacking();
 
         for index in 0..self.roots.len() {
             let (visible, options, rect) = self.roots[index]
@@ -642,7 +883,10 @@ impl WindowManager {
 
     /// Routes and applies one normalized event, visiting every eligible tree exactly once.
     fn update_for_event(&mut self, atlas: &crate::AtlasHandle, event: &crate::UiInputEvent, input: crate::input::InputSnapshot) {
-        if self.modal_stack.is_empty() && matches!(event, crate::UiInputEvent::MouseDown { .. }) {
+        if matches!(event, crate::UiInputEvent::MouseDown { .. }) {
+            // Outside dismissal applies equally to ordinary and modal-originated popups. The input
+            // root is resolved only afterward so this same press can reach the newly revealed
+            // initiating window or modal without a one-event delay.
             self.dismiss_outside_popup(input.mouse_pos);
         }
 
@@ -650,6 +894,7 @@ impl WindowManager {
         if matches!(event, crate::UiInputEvent::MouseDown { .. })
             && let Some(root) = hover_root
         {
+            self.activate_pointer_root(root);
             let _ = self.bring_root_to_front(root);
             // A new press may target any root. Transfer global pointer ownership before routing so
             // no previous root can retain a widget-level capture alongside the new press target.
@@ -660,21 +905,22 @@ impl WindowManager {
             }
         }
 
-        // Drag, wheel, keyboard, and text input remain confined to the current input root. Hover
-        // and new-press targeting continue to follow pointer geometry across ordinary roots.
-        let captured_root = self.captured_input_root();
+        // Drag and wheel remain confined to the current visual/captured root, while keyboard and
+        // text use the independently activated root. Hover and new-press targeting continue to
+        // follow pointer geometry across stack layers.
+        let captured_root = self.captured_pointer_root();
         let pointer_root = match event {
             crate::UiInputEvent::MouseDrag { .. } | crate::UiInputEvent::Scroll { .. } => captured_root,
             _ => hover_root,
         };
-        let keyboard_root = captured_root;
+        let keyboard_root = self.keyboard_input_root();
         let modal_root = self.modal_stack.last().copied();
         for entry in &mut self.roots {
             let visible = entry
                 .root_widget
                 .try_read(RootChrome::is_visible)
                 .expect("registered root state unavailable before input update");
-            if visible && modal_root.is_none_or(|modal| modal == entry.id) {
+            if visible && modal_root.is_none_or(|modal| entry.id == modal || entry.layer_binding == LayerBinding::Inherited(modal)) {
                 entry.tree.begin_input_event(pointer_root == Some(entry.id), event);
             }
         }
@@ -684,9 +930,12 @@ impl WindowManager {
             // presses still perform ordinary hit routing, constrained by pointer_root above.
             let capture_index = matches!(event, crate::UiInputEvent::MouseDrag { .. } | crate::UiInputEvent::MouseUp { .. })
                 .then(|| {
-                    self.roots
-                        .iter()
-                        .position(|entry| self.modal_stack.last().is_none_or(|modal| *modal == entry.id) && entry.tree.has_capture())
+                    self.roots.iter().position(|entry| {
+                        self.modal_stack
+                            .last()
+                            .is_none_or(|modal| *modal == entry.id || entry.layer_binding == LayerBinding::Inherited(*modal))
+                            && entry.tree.has_capture()
+                    })
                 })
                 .flatten();
             let mut capture_handled = false;
@@ -720,14 +969,14 @@ impl WindowManager {
             entry.tree.route_focus(&self.style, event);
         }
 
-        self.roots.sort_by_key(|entry| entry.z_index);
+        self.sort_roots_for_stacking();
         let modal_root = self.modal_stack.last().copied();
         for entry in &mut self.roots {
             let visible = entry
                 .root_widget
                 .try_read(RootChrome::is_visible)
                 .expect("registered root state unavailable during input update");
-            if !visible || modal_root.is_some_and(|modal| modal != entry.id) {
+            if !visible || modal_root.is_some_and(|modal| entry.id != modal && entry.layer_binding != LayerBinding::Inherited(modal)) {
                 entry.clear_transient_targets();
                 continue;
             }
@@ -741,13 +990,16 @@ impl WindowManager {
                 entry.clear_transient_targets();
             }
         }
+        if self.active_root.is_some_and(|root| !self.root_is_visible(root)) {
+            self.active_root = None;
+        }
     }
 
     /// Paints and records the already committed trees without updating or laying them out.
     pub(crate) fn paint(&mut self, dimensions: Dimensioni, atlas: &crate::AtlasHandle) {
         self.display_list.clear();
         let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
-        self.roots.sort_by_key(|entry| entry.z_index);
+        self.sort_roots_for_stacking();
         for entry in &mut self.roots {
             let visible = entry
                 .root_widget
@@ -789,6 +1041,40 @@ impl WindowManager {
         }
     }
 
+    /// Maps a pointer target to the ordinary root whose keyboard activation it represents.
+    fn activation_source(&self, root: RootId) -> Option<RootId> {
+        let index = self.root_index(root).ok()?;
+        match self.roots[index].kind {
+            WindowKind::Window => Some(root),
+            // A popup preserves its initiating root's keyboard activation. Modal roots need no
+            // ordinary activation because the modal stack is already authoritative while visible.
+            WindowKind::Popup => match self.roots[index].layer_binding {
+                LayerBinding::Inherited(source) => {
+                    let source_index = self.root_index(source).ok()?;
+                    (self.roots[source_index].kind == WindowKind::Window).then_some(source)
+                }
+                LayerBinding::Fixed(_) | LayerBinding::Unbound | LayerBinding::Modal => None,
+            },
+            WindowKind::Modal => None,
+        }
+    }
+
+    /// Records pointer activation without changing any root's fixed stacking layer.
+    fn activate_pointer_root(&mut self, root: RootId) {
+        if let Some(source) = self.activation_source(root) {
+            self.active_root = Some(source);
+        }
+    }
+
+    /// Returns whether a registered root is currently visible.
+    fn root_is_visible(&self, root: RootId) -> bool {
+        let Ok(index) = self.root_index(root) else { return false };
+        self.roots[index]
+            .root_widget
+            .try_read(RootChrome::is_visible)
+            .unwrap_or_else(|| self.root_access_failure(index))
+    }
+
     fn front_root_at(&self, point: Vec2i) -> Option<RootId> {
         self.roots
             .iter()
@@ -799,7 +1085,7 @@ impl WindowManager {
                     .try_read(|state| state.is_visible() && state.rect().contains(&point))
                     .unwrap_or_else(|| self.root_access_failure(*index))
             })
-            .max_by_key(|(_, entry)| entry.z_index)
+            .max_by_key(|(_, entry)| entry.stack_key())
             .map(|(_, entry)| entry.id)
     }
 
@@ -813,7 +1099,7 @@ impl WindowManager {
                     .try_read(RootChrome::is_visible)
                     .unwrap_or_else(|| self.root_access_failure(*index))
             })
-            .max_by_key(|(_, entry)| entry.z_index)
+            .max_by_key(|(_, entry)| entry.stack_key())
             .map(|(_, entry)| entry.id)
     }
 
@@ -822,29 +1108,64 @@ impl WindowManager {
         let Some(modal) = self.modal_stack.last().copied() else {
             return self.front_root_at(point);
         };
-        let index = self.root_index(modal).expect("modal root must remain registered");
-        self.roots[index]
-            .root_widget
-            .try_read(|state| (state.is_visible() && state.rect().contains(&point)).then_some(modal))
-            .unwrap_or_else(|| self.root_access_failure(index))
+        // The active modal and popups initiated by it form one exclusive input group. Roots in all
+        // fixed layers, lower dialogs, and their transients remain painted but cannot receive the
+        // event even when the pointer lies outside the active modal rectangle.
+        self.roots
+            .iter()
+            .enumerate()
+            .filter(|(index, entry)| {
+                let eligible = entry.id == modal || entry.layer_binding == LayerBinding::Inherited(modal);
+                eligible
+                    && self.roots[*index]
+                        .root_widget
+                        .try_read(|state| state.is_visible() && state.rect().contains(&point))
+                        .unwrap_or_else(|| self.root_access_failure(*index))
+            })
+            .max_by_key(|(_, entry)| entry.stack_key())
+            .map(|(_, entry)| entry.id)
     }
 
-    /// Returns the root that exclusively accepts drag, wheel, keyboard, and text input.
-    ///
-    /// An active modal is always authoritative. Otherwise a widget-level pointer capture keeps its
-    /// owning root authoritative even if z-order changes programmatically; without either, the
-    /// ordinary front visible root remains the current input root.
-    fn captured_input_root(&self) -> Option<RootId> {
-        self.modal_stack
-            .last()
-            .copied()
-            .or_else(|| self.roots.iter().find(|entry| entry.tree.has_capture()).map(|entry| entry.id))
+    /// Returns the root that exclusively accepts drag and wheel input.
+    fn captured_pointer_root(&self) -> Option<RootId> {
+        let modal = self.modal_stack.last().copied();
+        self.roots
+            .iter()
+            .find(|entry| modal.is_none_or(|modal| entry.id == modal || entry.layer_binding == LayerBinding::Inherited(modal)) && entry.tree.has_capture())
+            .map(|entry| entry.id)
             .or_else(|| self.front_input_root())
     }
 
-    /// Returns the sole keyboard-eligible modal root or the ordinary front visible root.
+    /// Returns the sole keyboard-eligible root without deriving activation from visual stacking.
+    fn keyboard_input_root(&self) -> Option<RootId> {
+        if let Some(modal) = self.modal_stack.last().copied() {
+            return Some(modal);
+        }
+        self.roots
+            .iter()
+            .find(|entry| entry.tree.has_capture())
+            .map(|entry| entry.id)
+            .or_else(|| self.active_root.filter(|root| self.root_is_visible(*root)))
+            .or_else(|| self.front_input_root().and_then(|root| self.activation_source(root)))
+    }
+
+    /// Returns the front visible root under modal eligibility for pointer confinement fallback.
     fn front_input_root(&self) -> Option<RootId> {
-        self.modal_stack.last().copied().or_else(|| self.front_visible_root())
+        let Some(modal) = self.modal_stack.last().copied() else {
+            return self.front_visible_root();
+        };
+        self.roots
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.id == modal || entry.layer_binding == LayerBinding::Inherited(modal))
+            .filter(|(index, entry)| {
+                entry
+                    .root_widget
+                    .try_read(RootChrome::is_visible)
+                    .unwrap_or_else(|| self.root_access_failure(*index))
+            })
+            .max_by_key(|(_, entry)| entry.stack_key())
+            .map(|(_, entry)| entry.id)
     }
 
     const fn default_popup_options() -> WindowOption {
@@ -863,17 +1184,27 @@ impl WindowManager {
             .filter_map(|(index, entry)| {
                 entry
                     .root_widget
-                    .try_read(|state| state.is_visible().then(|| (entry.z_index, state.name().to_owned())))
+                    .try_read(|state| state.is_visible().then(|| (entry.stack_key(), state.name().to_owned())))
                     .unwrap_or_else(|| self.root_access_failure(index))
             })
             .collect::<Vec<_>>();
-        names.sort_by_key(|(z, _)| *z);
+        names.sort_by_key(|(key, _)| *key);
         names.into_iter().map(|(_, name)| name).collect()
     }
 
     #[cfg(test)]
     pub(crate) fn debug_root_zindex(&self, root: RootId) -> Option<i32> {
         self.roots.iter().find(|entry| entry.id == root).map(|entry| entry.z_index)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_root_layer_binding(&self, root: RootId) -> Option<LayerBinding> {
+        self.roots.iter().find(|entry| entry.id == root).map(|entry| entry.layer_binding)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_active_root(&self) -> Option<RootId> {
+        self.active_root
     }
 
     #[cfg(test)]

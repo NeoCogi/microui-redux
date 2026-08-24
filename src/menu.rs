@@ -335,7 +335,12 @@ impl WindowMenu {
             self.finish_close();
             return;
         };
-        context.show_popup_at(popup, event.anchor).expect("window-menu popup must remain registered");
+        // The persistent bar belongs to this component's ordinary window, so that window is the
+        // authoritative layer initiator for every top-level menu popup. A low-layer application
+        // surface therefore keeps its menus below unrelated roots in higher application layers.
+        context
+            .show_popup_at(popup, self.window.id(), event.anchor)
+            .expect("window-menu popup and its initiating window must remain registered");
         self.active_menu = Some(event.index);
         self.bar
             .try_update(|bar| bar.set_open_menu(Some(event.index)))
