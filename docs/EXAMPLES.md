@@ -16,7 +16,10 @@
   command dispatch into the file dialog, log, and style state. A separate titleless fullscreen root
   at layer 0 renders a perspective X-Y grid beneath the original Demo Window and every other
   default-layer floating window. The grid surface owns an independent Grid/Help menu whose popups
-  inherit layer 0.
+  inherit layer 0. Left-drag an exposed part of the grid to rotate its arcball camera, use the mouse
+  wheel there to zoom, or choose Grid > Reset View to restore the initial composition. Grid > Minor
+  Grid Lines controls its unit-spaced divisions. Grid segments are clipped in homogeneous space so
+  rotation cannot project behind-camera endpoints into stray lines across the UI.
 
 ## Full demo
 

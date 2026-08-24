@@ -27,9 +27,11 @@ model with a fullscreen menu-bearing X-Y grid surface beneath independent floati
 - [x] Separated ordinary keyboard activation from visual stacking with `active_root`.
     - [x] Pressing a lower-layer window focuses it without raising it across a higher layer, while overlap hit testing continues to follow visual priority.
     - [x] Pointer capture, popup-to-source activation, modal routing, root hiding, and destruction reconcile the active root without adding parent-window ownership.
+    - [x] Wheel input follows the topmost eligible root under the pointer independently of `active_root`, while an in-progress pointer drag remains confined to its captured root.
 - [x] Added edge-to-edge application-surface support.
     - [x] `WindowOption::NO_PADDING` removes only the root-owned content inset and preserves normal descendant style padding.
-    - [x] `demo-full` now resizes a dedicated chromeless `WindowMenu` root to the drawable viewport at layer `0`, renders a perspective X-Y grid in its body, and gives that surface its own Grid/Help menu.
+    - [x] `demo-full` now resizes a dedicated chromeless `WindowMenu` root to the drawable viewport at layer `0`, renders an interactive perspective X-Y grid in its body, and gives that surface its own Grid/Help menu.
+    - [x] The exposed grid supports left-drag arcball rotation, bounded wheel zoom, and menu-driven view reset; homogeneous six-plane segment clipping prevents behind-camera projections from emitting stray geometry.
     - [x] The original movable, resizable Demo Window and all other independent windows remain at the default layer above the grid; modal dialogs remain topmost.
 - [x] Added retained and downstream tests for layer validation, bounded raising, popup inheritance and lifetime, modal popups, active-root keyboard routing, and no-padding chrome geometry.
 

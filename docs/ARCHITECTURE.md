@@ -96,8 +96,11 @@ dialog is hidden or destroyed.
 Visual order is deliberately separate from keyboard activation. A pointer press records the
 ordinary `active_root` (or a popup's ordinary source) without moving it to a different fixed layer.
 Keyboard and text input return to that root after the press, while pointer overlap still follows
-the visual stack. Modal policy and active pointer capture take precedence. Hiding or destroying the
-active root clears the record.
+the visual stack. Pointer drags remain with their captured root, but wheel input has no capture
+lifecycle and goes to the topmost eligible root under the pointer. This lets exposed regions of a
+layer-0 application surface scroll or zoom even while a layer-15 floating window remains active.
+Modal policy and active pointer capture take precedence. Hiding or destroying the active root clears
+the record.
 
 A fullscreen application surface is therefore an ordinary window at layer `0`, not a special root
 kind or a parent window. Remove its chrome and outer inset, keep its rectangle synchronized with the
@@ -117,8 +120,9 @@ context.set_root_rect(surface.id(), rect(0, 0, dimensions.width, dimensions.heig
 
 `NO_PADDING` removes only the root-owned content inset; descendant widgets still use the complete
 `Style`, including ordinary control and container padding. `demo-full` applies this recipe to a
-dedicated menu-bearing perspective X-Y grid surface. Its original Demo Window and the other
-floating windows remain independent default-layer roots above that background.
+dedicated menu-bearing perspective X-Y grid surface with left-drag arcball rotation, wheel zoom,
+and homogeneous line clipping. Its original Demo Window and the other floating windows remain
+independent default-layer roots above that background.
 
 ```rust
 #[derive(Default)]
