@@ -76,7 +76,6 @@ use common::vulkan_renderer::VulkanRenderer as SelectedBackend;
 #[cfg(all(not(feature = "example-glow"), not(feature = "example-vulkan"), feature = "example-wgpu"))]
 use common::wgpu_renderer::WgpuRenderer as SelectedBackend;
 use microui_redux::{prelude::*, render::Vertex};
-use rs_math3d::{lookat, perspective, project3};
 use std::{cell::RefCell, f32::consts::PI, fs, path::PathBuf, rc::Rc, time::Instant};
 
 type SelectedFrame<'a> = <SelectedBackend as RendererBackend>::Frame<'a>;
@@ -106,10 +105,104 @@ struct TriangleState {
     angle: f32,
 }
 
-/// Application-owned presentation state shared with the fullscreen X-Y grid renderer.
+/// Half-width of the finite X-Y grid in world-space units.
+const GRID_HALF_EXTENT: i32 = 20;
+/// Interval between the visually stronger grid divisions.
+const GRID_MAJOR_INTERVAL: i32 = 5;
+/// Closest useful orbit radius, kept outside the grid's bounding sphere.
+const GRID_MIN_CAMERA_DISTANCE: f32 = 32.0;
+/// Furthest useful orbit radius before the finite grid becomes needlessly small.
+const GRID_MAX_CAMERA_DISTANCE: f32 = 120.0;
+/// Converts the example runner's integer wheel units into world-space camera movement.
+const GRID_WHEEL_DISTANCE_SCALE: f32 = 0.1;
+
+/// Application-owned view and presentation state shared by the grid widget and renderer.
 struct Grid3dState {
+    /// Arcball camera whose current PVM is consumed by the custom renderer.
+    view_3d: View3D,
     /// Whether unit-spaced lines are drawn between the stronger five-unit divisions.
     show_minor_lines: bool,
+}
+
+/// Invisible retained widget that turns the custom-rendered grid into an input surface.
+struct Grid3dWidget {
+    /// Shared camera state; rendering observes the same value updated by pointer input.
+    data: Rc<RefCell<Grid3dState>>,
+    /// Claims drag focus and wheel delivery without contributing ordinary painted geometry.
+    opt: WidgetOption,
+}
+
+/// Construction parameters for [`Grid3dWidget`].
+struct Grid3dWidgetParameters {
+    /// Application-owned grid state installed before the retained tree is committed.
+    data: Rc<RefCell<Grid3dState>>,
+}
+
+impl WidgetParameters for Grid3dWidgetParameters {}
+
+/// Typed builder used by `Node::custom_render` to pair input with backend rendering.
+struct Grid3dWidgetBuilder;
+
+impl WidgetBuilder for Grid3dWidgetBuilder {
+    type Parameters = Grid3dWidgetParameters;
+    type W = Grid3dWidget;
+
+    /// Creates a focus-holding, scroll-grabbing leaf over the complete grid body.
+    fn create_widget(parameters: Self::Parameters) -> Self::W {
+        Self::W {
+            data: parameters.data,
+            opt: WidgetOption::HOLD_FOCUS | WidgetOption::GRAB_SCROLL,
+        }
+    }
+}
+
+impl Widget for Grid3dWidget {
+    /// Exposes the interaction capabilities used by retained hit testing and routing.
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.opt
+    }
+
+    /// Applies left-button arcball motion and wheel zoom to the shared grid camera.
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+        let bounds = ctx.local_rect();
+        if bounds.width <= 0 || bounds.height <= 0 {
+            return;
+        }
+
+        // View3D normalizes pointer positions against its current dimensions, so synchronize the
+        // retained allocation before interpreting this event. Coordinates are already local to
+        // the widget and can therefore be passed directly to the arcball helper.
+        let mut grid = self.data.borrow_mut();
+        grid.view_3d.set_dimension(Dimensioni::new(bounds.width, bounds.height));
+
+        match input {
+            Some(UiInputEvent::MouseDrag { pos, delta, buttons }) if buttons.intersects(MouseButton::LEFT) => {
+                let previous = *pos - *delta;
+                let _ = grid.view_3d.update_drag(previous, *pos);
+            }
+            Some(UiInputEvent::Scroll { delta, .. }) => {
+                // Prefer the conventional vertical wheel axis, while accepting horizontal wheel
+                // devices as a useful fallback. Positive distance moves away from the origin.
+                let wheel = if delta.y != 0 { delta.y } else { delta.x };
+                if wheel != 0 {
+                    let _ = grid
+                        .view_3d
+                        .apply_scroll_with_limits(wheel as f32 * GRID_WHEEL_DISTANCE_SCALE, GRID_MIN_CAMERA_DISTANCE, GRID_MAX_CAMERA_DISTANCE);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Paints nothing because the associated backend custom renderer owns all grid geometry.
+    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+}
+
+impl LeafWidget for Grid3dWidget {
+    /// Supplies a small intrinsic size; the fullscreen root's flex layout expands it to fit.
+    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+        Dimensioni::new(80, 24)
+    }
 }
 
 struct PainterDemo {
@@ -1132,6 +1225,9 @@ fn demo_menu_panel(context: &mut Context<SelectedBackend, State>) -> (MenuPanel,
 fn grid_menu_panel(context: &mut Context<SelectedBackend, State>) -> (MenuPanel, GridMenuItems) {
     // Register these item ports against the grid coordinator rather than the Demo Window's menu.
     // Each WindowMenu must close and reconcile its own popup before invoking application behavior.
+    let (reset_view, reset_view_node) = MenuItem::create(MenuItemParameters::new("Reset View"));
+    WindowMenu::register_item(context, State::grid_window_menu_mut, &reset_view, State::grid_reset_view).expect("new grid menu item must be unsubscribed");
+
     let (show_minor_lines, show_minor_lines_node) = MenuItem::create(MenuItemParameters::new("Minor Grid Lines").checked(true));
     WindowMenu::register_item(context, State::grid_window_menu_mut, &show_minor_lines, State::grid_toggle_minor_lines)
         .expect("new grid menu item must be unsubscribed");
@@ -1143,12 +1239,13 @@ fn grid_menu_panel(context: &mut Context<SelectedBackend, State>) -> (MenuPanel,
     // popup roots inherit layer zero from the grid surface and therefore stay below layer-15
     // floating windows exactly like every other widget initiated by this background root.
     let panel = MenuPanel::new([
-        Menu::new("Grid", [MenuGroup::new([show_minor_lines_node])]),
+        Menu::new("Grid", [MenuGroup::new([reset_view_node]), MenuGroup::new([show_minor_lines_node])]),
         Menu::new("Help", [MenuGroup::new([about_grid_node])]),
     ]);
 
-    // The About item needs no later presentation updates; Context retains its node and event port.
-    drop(about_grid);
+    // These command items need no later presentation updates; Context retains their nodes and
+    // registered event ports while this function releases its temporary strong handles.
+    drop((reset_view, about_grid));
     (panel, GridMenuItems { show_minor_lines })
 }
 
@@ -1219,7 +1316,7 @@ struct State {
     combo_popup_root: PopupHandle,
     popup_root: PopupHandle,
 
-    /// Shared visibility controls consumed by the background grid's custom-render callback.
+    /// Shared camera and presentation state consumed by the grid widget and render callback.
     grid_3d_state: Rc<RefCell<Grid3dState>>,
     /// Independent coordinator for the fullscreen grid surface and its retained menu popups.
     grid_window_menu: WindowMenu,
@@ -1271,15 +1368,28 @@ impl State {
         };
 
         // The fullscreen grid is rendered through the same backend-neutral colored-triangle path
-        // used by the standalone cube example. Application state owns only the menu-controlled
-        // density flag; the callback receives authoritative committed geometry at paint time.
-        let grid_3d_state = Rc::new(RefCell::new(Grid3dState { show_minor_lines: true }));
+        // used by the standalone cube example. The retained input widget and paint callback share
+        // one View3D so arcball and wheel changes are consumed by the very next rendered frame.
+        let grid_3d_state = Rc::new(RefCell::new(Grid3dState {
+            view_3d: create_grid_view_3d(),
+            show_minor_lines: true,
+        }));
         let grid_renderer = {
             let grid_3d_state = grid_3d_state.clone();
             ctx.register_custom_renderer(move |frame: &mut SelectedFrame<'_>, args: CustomRenderArgs| {
                 let area = area_from_args(&args);
-                let show_minor_lines = grid_3d_state.borrow().show_minor_lines;
-                let vertices = build_xy_grid_vertices(area.rect, white_uv, show_minor_lines);
+                if area.rect.width <= 0 || area.rect.height <= 0 {
+                    frame.enqueue_colored_vertices(area, Vec::new());
+                    return;
+                }
+                let mut grid = grid_3d_state.borrow_mut();
+                // Rendering can precede input after a host resize, so keep the projection's
+                // aspect authoritative even when no pointer event has reached the widget yet.
+                grid.view_3d.set_dimension(Dimensioni::new(area.rect.width, area.rect.height));
+                let pvm = grid.view_3d.pvm();
+                let show_minor_lines = grid.show_minor_lines;
+                drop(grid);
+                let vertices = build_xy_grid_vertices(area.rect, white_uv, show_minor_lines, pvm);
                 frame.enqueue_colored_vertices(area, vertices);
             })
             .expect("register fullscreen X-Y grid renderer")
@@ -1503,7 +1613,10 @@ impl State {
         // replaced from real drawable dimensions by `sync_grid_surface` every frame because this
         // construction callback cannot yet observe the platform window size.
         let (grid_menu_panel, grid_menu_items) = grid_menu_panel(ctx);
-        let grid_node = Node::custom_render(Custom::create(CustomParameters::new("Perspective X-Y Grid")), grid_renderer);
+        let grid_node = Node::custom_render(
+            Grid3dWidgetBuilder::create_widget(Grid3dWidgetParameters { data: grid_3d_state.clone() }),
+            grid_renderer,
+        );
         let grid_window_menu = WindowMenu::create(
             ctx,
             Self::grid_window_menu_mut,
@@ -1971,6 +2084,14 @@ impl State {
         self.write_log("microui-redux retained-mode full demo with per-window menus");
     }
 
+    /// Restores the fullscreen grid's documented initial camera orientation and distance.
+    fn grid_reset_view(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+        // Replace the complete view rather than attempting to reverse an accumulated quaternion;
+        // this also restores projection and zoom bounds-derived state in one authoritative value.
+        self.grid_3d_state.borrow_mut().view_3d = create_grid_view_3d();
+        self.write_log("Reset X-Y grid arcball view");
+    }
+
     /// Toggles unit-spaced geometry from the fullscreen grid's own checked menu item.
     fn grid_toggle_minor_lines(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
         // End the shared-state borrow before updating the item and log, keeping callback-owned data
@@ -1992,7 +2113,7 @@ impl State {
 
     /// Describes the separate background root from its own Help menu.
     fn grid_about(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
-        self.write_log("Layer-0 fullscreen perspective X-Y grid with an independent menu");
+        self.write_log("Layer-0 fullscreen X-Y grid: left-drag to orbit and use the wheel to zoom");
     }
 
     /// Updates the two concrete spacing markers and applies the chosen style value.
@@ -2656,49 +2777,116 @@ fn build_diamond_polygon(center: Vec2f, radius: f32) -> [Vec2f; 4] {
     ]
 }
 
+/// Creates the documented oblique orbit camera and finite bounds for the fullscreen grid.
+fn create_grid_view_3d() -> View3D {
+    // Camera::new positions cameras by rotating the +Z basis vector. This shortest-arc
+    // quaternion maps that basis onto the original `(24, -32, 26)` viewing offset, preserving the
+    // useful initial composition while allowing View3D to accumulate arbitrary arcball rotation.
+    let camera_offset = Vec3f::new(24.0, -32.0, 26.0);
+    let camera_direction = Vec3f::normalize(&camera_offset);
+    let basis = Vec3f::new(0.0, 0.0, 1.0);
+    let axis = Vec3f::cross(&basis, &camera_direction);
+    let rotation = Quatf::normalize(&Quatf::new(axis.x, axis.y, axis.z, 1.0 + Vec3f::dot(&basis, &camera_direction)));
+    let extent = GRID_HALF_EXTENT as f32;
+    let bounds = Box3f::new(&Vec3f::new(-extent, -extent, -0.1), &Vec3f::new(extent, extent, 0.1));
+    let camera = Camera::new(
+        Vec3f::new(0.0, 0.0, 0.0),
+        camera_offset.length(),
+        rotation,
+        std::f32::consts::FRAC_PI_3,
+        1.0,
+        0.1,
+        GRID_MAX_CAMERA_DISTANCE + extent * 2.0,
+    );
+    View3D::new(camera, Dimensioni::new(1, 1), bounds)
+}
+
 /// Projection state reused while the fullscreen callback converts world-space grid lines.
 struct GridProjection {
-    /// Camera view matrix looking obliquely across the `z = 0` X-Y plane.
-    view: Mat4f,
-    /// Perspective projection derived from the current custom-render allocation.
-    projection: Mat4f,
-    /// Bottom-left viewport endpoint expected by `rs_math3d::project3`.
-    screen_bottom_left: Vec2f,
-    /// Top-right endpoint with reversed Y so output uses microui's top-left origin.
-    screen_top_right: Vec2f,
+    /// Interactive projection-view-model matrix copied from the shared [`View3D`].
+    pvm: Mat4f,
+    /// Current custom-render allocation used to map normalized device coordinates to pixels.
+    area: Recti,
     /// Atlas coordinate sampled by every solid colored line triangle.
     white_uv: Vec2f,
 }
 
 impl GridProjection {
-    /// Creates the fixed perspective camera for one current grid viewport.
-    fn new(area: Recti, white_uv: Vec2f) -> Self {
-        // Z is the vertical world axis, leaving the requested X-Y grid on the ground plane. The
-        // asymmetric camera position makes parallel world lines visibly converge in perspective.
-        // Keep the camera outside the complete +/-20 grid extent. Every segment then remains in
-        // front of the view plane, so the lightweight CPU projection needs no behind-camera line
-        // clipping before the normal UI renderer clips it to the custom-render rectangle.
-        let view = lookat(&Vec3f::new(24.0, -32.0, 26.0), &Vec3f::new(0.0, 0.0, 0.0), &Vec3f::new(0.0, 0.0, 1.0));
-        let aspect = area.width.max(1) as f32 / area.height.max(1) as f32;
-        let projection = perspective(std::f32::consts::FRAC_PI_3, aspect, 0.1, 100.0);
-        Self {
-            view,
-            projection,
-            screen_bottom_left: Vec2f::new(area.x as f32, (area.y + area.height) as f32),
-            screen_top_right: Vec2f::new((area.x + area.width) as f32, area.y as f32),
-            white_uv,
+    /// Captures one render allocation and its already aspect-correct interactive projection.
+    fn new(area: Recti, white_uv: Vec2f, pvm: Mat4f) -> Self {
+        Self { pvm, area, white_uv }
+    }
+
+    /// Clips a world-space segment against all six homogeneous view-frustum planes.
+    fn clip_segment(&self, start: Vec3f, end: Vec3f) -> Option<(Vec4f, Vec4f)> {
+        let start = self.pvm * Vec4f::new(start.x, start.y, start.z, 1.0);
+        let end = self.pvm * Vec4f::new(end.x, end.y, end.z, 1.0);
+        if !clip_point_is_finite(start) || !clip_point_is_finite(end) {
+            return None;
         }
+
+        // A point lies inside the OpenGL-style homogeneous frustum when every expression below
+        // is non-negative. Parametric clipping happens before division by W, preventing segments
+        // behind the camera from producing the enormous stray screen coordinates seen previously.
+        let start_planes = clip_plane_distances(start);
+        let end_planes = clip_plane_distances(end);
+        let mut enter = 0.0_f32;
+        let mut leave = 1.0_f32;
+        for (start_distance, end_distance) in start_planes.into_iter().zip(end_planes) {
+            if start_distance < 0.0 && end_distance < 0.0 {
+                return None;
+            }
+            if start_distance < 0.0 || end_distance < 0.0 {
+                let denominator = start_distance - end_distance;
+                if denominator.abs() <= f32::EPSILON {
+                    return None;
+                }
+                let intersection = start_distance / denominator;
+                if start_distance < 0.0 {
+                    enter = enter.max(intersection);
+                } else {
+                    leave = leave.min(intersection);
+                }
+                if enter > leave {
+                    return None;
+                }
+            }
+        }
+
+        let delta = end - start;
+        let clipped_start = start + delta * enter;
+        let clipped_end = start + delta * leave;
+        (clipped_start.w > f32::EPSILON && clipped_end.w > f32::EPSILON).then_some((clipped_start, clipped_end))
+    }
+
+    /// Converts one clipped homogeneous point to microui's top-left-origin screen coordinates.
+    fn screen_point(&self, point: Vec4f) -> Option<Vec2f> {
+        if !clip_point_is_finite(point) || point.w <= f32::EPSILON {
+            return None;
+        }
+        let normalized_x = point.x / point.w;
+        let normalized_y = point.y / point.w;
+        let screen = Vec2f::new(
+            self.area.x as f32 + (normalized_x * 0.5 + 0.5) * self.area.width as f32,
+            self.area.y as f32 + (-normalized_y * 0.5 + 0.5) * self.area.height as f32,
+        );
+        (screen.x.is_finite() && screen.y.is_finite()).then_some(screen)
     }
 
     /// Projects a 3D segment and appends a constant-pixel-width screen-space quad.
     fn push_line(&self, vertices: &mut Vec<Vertex>, start: Vec3f, end: Vec3f, width: f32, color: Color4b) {
-        // The world endpoints establish the perspective geometry. Thickness is applied only after
-        // projection so distant lines remain legible instead of collapsing below one framebuffer
-        // pixel as a thin world-space mesh would.
-        let start = project3(&self.view, &self.projection, &self.screen_bottom_left, &self.screen_top_right, &start);
-        let end = project3(&self.view, &self.projection, &self.screen_bottom_left, &self.screen_top_right, &end);
-        let start = Vec2f::new(start.x, start.y);
-        let end = Vec2f::new(end.x, end.y);
+        // The world endpoints establish perspective geometry. Clip them before the homogeneous
+        // divide, then apply thickness after projection so distant lines remain legible instead of
+        // collapsing below one framebuffer pixel as a thin world-space mesh would.
+        let Some((start, end)) = self.clip_segment(start, end) else {
+            return;
+        };
+        let Some(start) = self.screen_point(start) else {
+            return;
+        };
+        let Some(end) = self.screen_point(end) else {
+            return;
+        };
         let delta = end - start;
         let length = delta.length();
         if !length.is_finite() || length <= f32::EPSILON {
@@ -2718,29 +2906,44 @@ impl GridProjection {
     }
 }
 
+/// Returns whether every component is safe for homogeneous clipping and division.
+fn clip_point_is_finite(point: Vec4f) -> bool {
+    point.x.is_finite() && point.y.is_finite() && point.z.is_finite() && point.w.is_finite()
+}
+
+/// Evaluates the six canonical homogeneous frustum half-spaces for one clip-space point.
+fn clip_plane_distances(point: Vec4f) -> [f32; 6] {
+    [
+        point.x + point.w,
+        point.w - point.x,
+        point.y + point.w,
+        point.w - point.y,
+        point.z + point.w,
+        point.w - point.z,
+    ]
+}
+
 /// Builds a perspective X-Y ground grid for the dedicated fullscreen background root.
-fn build_xy_grid_vertices(area: Recti, white_uv: Vec2f, show_minor_lines: bool) -> Vec<Vertex> {
+fn build_xy_grid_vertices(area: Recti, white_uv: Vec2f, show_minor_lines: bool, pvm: Mat4f) -> Vec<Vertex> {
     if area.width <= 0 || area.height <= 0 {
         return Vec::new();
     }
 
-    const HALF_EXTENT: i32 = 20;
-    const MAJOR_INTERVAL: i32 = 5;
-    let projection = GridProjection::new(area, white_uv);
-    let mut vertices = Vec::with_capacity((HALF_EXTENT as usize * 4 + 2) * 6);
+    let projection = GridProjection::new(area, white_uv, pvm);
+    let mut vertices = Vec::with_capacity((GRID_HALF_EXTENT as usize * 4 + 2) * 6);
 
     // Draw non-axis lines first so the red X and green Y axes remain visually authoritative at the
     // origin. Major divisions survive when the menu disables the denser unit-spaced lines.
-    for coordinate in -HALF_EXTENT..=HALF_EXTENT {
+    for coordinate in -GRID_HALF_EXTENT..=GRID_HALF_EXTENT {
         if coordinate == 0 {
             continue;
         }
-        let major = coordinate % MAJOR_INTERVAL == 0;
+        let major = coordinate % GRID_MAJOR_INTERVAL == 0;
         if !major && !show_minor_lines {
             continue;
         }
         let coordinate = coordinate as f32;
-        let extent = HALF_EXTENT as f32;
+        let extent = GRID_HALF_EXTENT as f32;
         let (width, line_color) = if major {
             (1.5, color4b(78, 92, 118, 230))
         } else {
@@ -2764,7 +2967,7 @@ fn build_xy_grid_vertices(area: Recti, white_uv: Vec2f, show_minor_lines: bool) 
 
     // Conventional axis colors distinguish the two directions without requiring text labels in
     // the non-interactive rendering surface.
-    let extent = HALF_EXTENT as f32;
+    let extent = GRID_HALF_EXTENT as f32;
     projection.push_line(
         &mut vertices,
         Vec3f::new(-extent, 0.0, 0.0),
@@ -2855,27 +3058,90 @@ fn load_external_image_texture(ctx: &mut Context<SelectedBackend, State>) -> Opt
 mod grid_tests {
     use super::*;
 
+    /// Produces the same aspect-correct initial PVM used by the live fullscreen widget.
+    fn initial_grid_pvm(area: Recti) -> Mat4f {
+        let mut view = create_grid_view_3d();
+        view.set_dimension(Dimensioni::new(area.width.max(1), area.height.max(1)));
+        view.pvm()
+    }
+
     #[test]
     fn perspective_grid_density_changes_only_minor_line_geometry() {
         let area = rect(0, 20, 1024, 748);
         let white_uv = Vec2f::new(0.5, 0.5);
-        let dense = build_xy_grid_vertices(area, white_uv, true);
-        let major_only = build_xy_grid_vertices(area, white_uv, false);
+        let pvm = initial_grid_pvm(area);
+        let dense = build_xy_grid_vertices(area, white_uv, true, pvm);
+        let major_only = build_xy_grid_vertices(area, white_uv, false, pvm);
 
-        // Dense mode has 40 non-axis coordinates in each direction plus two axes. Major-only mode
-        // retains eight five-unit divisions in each direction plus the same axes. Every projected
-        // line is one six-vertex screen-space quad.
-        assert_eq!(dense.len(), 82 * 6);
-        assert_eq!(major_only.len(), 18 * 6);
+        // Frustum clipping may discard whole lines at narrow aspect ratios, so assert structural
+        // geometry invariants instead of coupling the test to one exact camera composition.
+        assert!(!major_only.is_empty());
+        assert!(dense.len() > major_only.len());
+        assert_eq!(dense.len() % 6, 0);
+        assert_eq!(major_only.len() % 6, 0);
         assert!(dense.iter().all(|vertex| {
             let position = vertex.position();
-            position.x.is_finite() && position.y.is_finite()
+            position.x.is_finite()
+                && position.y.is_finite()
+                && position.x >= area.x as f32 - 2.0
+                && position.x <= (area.x + area.width) as f32 + 2.0
+                && position.y >= area.y as f32 - 2.0
+                && position.y <= (area.y + area.height) as f32 + 2.0
         }));
     }
 
     #[test]
     fn empty_grid_viewport_emits_no_custom_geometry() {
-        assert!(build_xy_grid_vertices(rect(0, 0, 0, 600), Vec2f::default(), true).is_empty());
-        assert!(build_xy_grid_vertices(rect(0, 0, 800, 0), Vec2f::default(), true).is_empty());
+        assert!(build_xy_grid_vertices(rect(0, 0, 0, 600), Vec2f::default(), true, Mat4f::identity()).is_empty());
+        assert!(build_xy_grid_vertices(rect(0, 0, 800, 0), Vec2f::default(), true, Mat4f::identity()).is_empty());
+    }
+
+    #[test]
+    fn homogeneous_clipping_bounds_a_segment_that_crosses_the_viewport() {
+        let area = rect(10, 20, 800, 600);
+        let projection = GridProjection::new(area, Vec2f::default(), Mat4f::identity());
+        let mut vertices = Vec::new();
+
+        projection.push_line(
+            &mut vertices,
+            Vec3f::new(-2.0, 0.0, 0.0),
+            Vec3f::new(2.0, 0.0, 0.0),
+            2.0,
+            color4b(255, 255, 255, 255),
+        );
+
+        assert_eq!(vertices.len(), 6);
+        assert!(vertices.iter().all(|vertex| {
+            let position = vertex.position();
+            position.x >= area.x as f32 - 1.1
+                && position.x <= (area.x + area.width) as f32 + 1.1
+                && position.y >= area.y as f32 - 1.1
+                && position.y <= (area.y + area.height) as f32 + 1.1
+        }));
+    }
+
+    #[test]
+    fn arcball_and_zoom_change_the_grid_projection_without_invalid_vertices() {
+        let area = rect(0, 0, 800, 600);
+        let mut view = create_grid_view_3d();
+        view.set_dimension(Dimensioni::new(area.width, area.height));
+        let before = build_xy_grid_vertices(area, Vec2f::default(), false, view.pvm());
+
+        let _ = view.update_drag(Vec2i::new(400, 300), Vec2i::new(460, 330));
+        let _ = view.apply_scroll_with_limits(-3.0, GRID_MIN_CAMERA_DISTANCE, GRID_MAX_CAMERA_DISTANCE);
+        let after = build_xy_grid_vertices(area, Vec2f::default(), false, view.pvm());
+
+        assert!(!before.is_empty());
+        assert!(!after.is_empty());
+        assert!(
+            before
+                .iter()
+                .zip(after.iter())
+                .any(|(left, right)| (left.position() - right.position()).length() > 0.01)
+        );
+        assert!(after.iter().all(|vertex| {
+            let position = vertex.position();
+            position.x.is_finite() && position.y.is_finite()
+        }));
     }
 }

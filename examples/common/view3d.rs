@@ -108,8 +108,17 @@ impl View3D {
     }
 
     pub fn apply_scroll(&mut self, delta: f32) -> UpdateResult {
-        self.scroll += delta;
-        self.scroll = f32::max(0.5, self.scroll);
+        self.apply_scroll_with_limits(delta, 0.5, f32::MAX)
+    }
+
+    /// Moves the orbit camera along its view radius while enforcing caller-selected limits.
+    pub fn apply_scroll_with_limits(&mut self, delta: f32, minimum: f32, maximum: f32) -> UpdateResult {
+        // Components know the useful scale of their own scene. Keeping the clamp here ensures the
+        // authoritative `scroll` radius and reconstructed Camera can never diverge when a wheel
+        // delta crosses either limit.
+        let minimum = minimum.max(0.5);
+        let maximum = maximum.max(minimum);
+        self.scroll = (self.scroll + delta).clamp(minimum, maximum);
         let distance = self.scroll;
         let aspect = (self.dimension.width as f32) / (self.dimension.height as f32);
         self.camera = Camera::new(
