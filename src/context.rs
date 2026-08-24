@@ -129,7 +129,7 @@ impl<'a> EventContext<'a> {
 
     /// Shows or hides a retained root while preserving its tree and concrete widget state.
     ///
-    /// Dialog modal-stack changes and popup exclusivity use the same policy as
+    /// Dialog modal-stack changes and popup-chain dismissal use the same policy as
     /// [`Context::set_root_visible`]. Showing a popup through this generic operation is rejected
     /// because it cannot establish layer inheritance; use [`Self::show_popup`] or
     /// [`Self::show_popup_at`] instead. Hiding a popup remains supported.
@@ -146,9 +146,11 @@ impl<'a> EventContext<'a> {
 
     /// Shows a popup at an exact screen-space anchor before the following layout commit.
     ///
-    /// This atomic form is intended for composed controls such as menus and combos. It both applies
-    /// popup exclusivity and replaces the popup rectangle, so no pointer-relative intermediate
-    /// placement can be observed. The typed handle prevents passing a window or dialog root.
+    /// This atomic form is intended for composed controls such as menus and combos. It applies
+    /// popup-chain replacement and replaces the popup rectangle, so no pointer-relative intermediate
+    /// placement can be observed. A popup initiator retains its visible ancestor chain; a window or
+    /// dialog initiator opens an exclusive top-level popup. The typed handle prevents passing a
+    /// window or dialog root as the popup target.
     pub fn show_popup_at(&mut self, popup: &PopupHandle, initiator: RootId, anchor: Recti) -> Result<(), RootMutationError> {
         // Delegate the complete transaction while retaining compile-time popup identity across the
         // event façade boundary.
@@ -486,8 +488,10 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     ///
     /// Use this for a popup whose position belongs to the semantic event that opened it. Use
     /// [`Self::show_popup`] when the current pointer position is the desired anchor. Both forms
-    /// require the initiating root so the popup can inherit the correct layer. The typed parameter
-    /// makes an ordinary [`RootHandle`] ineligible for popup-only placement policy:
+    /// require the initiating root so the popup can inherit the correct layer. A popup initiator
+    /// retains its ancestor chain for cascading menus; a window or dialog initiator replaces other
+    /// visible chains. The typed parameter makes an ordinary [`RootHandle`] ineligible for
+    /// popup-only placement policy:
     ///
     /// ```compile_fail
     /// use microui_redux::prelude::*;

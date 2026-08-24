@@ -36,39 +36,98 @@
 //! TypedWidgetHandle.
 
 use crate::render::RendererBackend;
-use crate::ui_node::widgets::{MenuBar, MenuBarSubmitted, MenuSeparator};
-use crate::{Context, EventContext, Linear, LinearItem, LinearParameters, Node, PopupHandle, Recti, RootHandle, RootSubmitted, SubscribeError, TypedWidgetHandle};
+use crate::ui_node::widgets::{MenuBar, MenuBarSubmitted, MenuList, MenuSeparator, MenuSubmenu, MenuSubmenuSubmitted};
+use crate::{
+    Context, EventContext, Linear, LinearItem, LinearParameters, Node, PopupHandle, Recti, RootHandle, RootSubmitted, SubscribeError, TypedWidgetHandle,
+    WidgetEventPortHandle, WindowOption,
+};
 pub use crate::ui_node::widgets::{MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted};
 
 /// Accessor retained by context subscriptions to locate one application-owned menu.
 type WindowMenuAccessor<State> = for<'a> fn(&'a mut State) -> &'a mut WindowMenu;
 
-/// One concrete separator-delimited group of retained menu item nodes.
+/// One entry in a concrete menu group.
+enum MenuEntry {
+    /// An application-created actionable item node.
+    Item(Node),
+    /// A recursively composed cascading submenu.
+    Submenu(Submenu),
+}
+
+/// One recursively composable cascading submenu.
+pub struct Submenu {
+    /// User-visible label displayed in its parent menu row.
+    label: String,
+    /// Concrete groups transferred into the submenu popup in display order.
+    groups: Vec<MenuGroup>,
+}
+
+impl Submenu {
+    /// Creates a submenu from a parent-row label and its retained groups.
+    pub fn new(label: impl Into<String>, groups: impl IntoIterator<Item = MenuGroup>) -> Self {
+        Self {
+            label: label.into(),
+            groups: groups.into_iter().collect(),
+        }
+    }
+
+    /// Returns the user-visible parent-row label.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// Returns the number of groups waiting to be mounted.
+    pub fn len(&self) -> usize {
+        self.groups.len()
+    }
+
+    /// Returns whether this submenu contains no groups.
+    pub fn is_empty(&self) -> bool {
+        self.groups.is_empty()
+    }
+}
+
+/// One concrete separator-delimited group of retained menu items and submenus.
 pub struct MenuGroup {
-    /// Unique unmounted nodes transferred into this group in display order.
-    items: Vec<Node>,
+    /// Unique unmounted entries transferred into this group in display order.
+    entries: Vec<MenuEntry>,
 }
 
 impl MenuGroup {
     /// Creates a group from concrete retained menu item nodes.
     pub fn new(items: impl IntoIterator<Item = Node>) -> Self {
         // Collect once at the ownership boundary; no description is cloned when a menu opens.
-        Self { items: items.into_iter().collect() }
+        Self {
+            entries: items.into_iter().map(MenuEntry::Item).collect(),
+        }
     }
 
-    /// Returns the number of retained item nodes waiting to be mounted.
+    /// Creates a group containing one cascading submenu.
+    pub fn submenu(submenu: Submenu) -> Self {
+        Self {
+            entries: vec![MenuEntry::Submenu(submenu)],
+        }
+    }
+
+    /// Appends a cascading submenu after this group's existing entries.
+    pub fn with_submenu(mut self, submenu: Submenu) -> Self {
+        self.entries.push(MenuEntry::Submenu(submenu));
+        self
+    }
+
+    /// Returns the number of retained items and submenus waiting to be mounted.
     pub fn len(&self) -> usize {
-        self.items.len()
+        self.entries.len()
     }
 
-    /// Returns whether this group contains no item nodes.
+    /// Returns whether this group contains no items or submenus.
     pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
+        self.entries.is_empty()
     }
 
-    /// Transfers this group's unique nodes to its concrete menu.
-    fn into_items(self) -> Vec<Node> {
-        self.items
+    /// Transfers this group's unique entries to its concrete menu.
+    fn into_entries(self) -> Vec<MenuEntry> {
+        self.entries
     }
 }
 
@@ -104,33 +163,84 @@ impl Menu {
     pub fn is_empty(&self) -> bool {
         self.groups.is_empty()
     }
-
-    /// Mounts all non-empty groups into one concrete vertical popup tree.
-    fn into_popup(self) -> (String, Node) {
-        let mut rows = Vec::new();
-        for group in self.groups {
-            let items = group.into_items();
-            if items.is_empty() {
-                continue;
-            }
-            if !rows.is_empty() {
-                // Group boundaries become ordinary retained separator widgets.
-                rows.push(LinearItem::content(MenuSeparator::create()));
-            }
-            rows.extend(items.into_iter().map(LinearItem::content));
-        }
-
-        // Reuse the established retained linear container for row ownership, measurement, and
-        // placement. The popup root owns this tree once WindowMenu registers it.
-        let (_, popup) = Linear::create(LinearParameters::vertical(rows));
-        (self.label, popup)
-    }
 }
 
 /// Concrete collection of top-level menus installed into one window menu.
 pub struct MenuPanel {
     /// Menus transferred into this panel in heading order.
     menus: Vec<Menu>,
+}
+
+/// One compiled popup tree waiting to be registered with Context.
+struct PopupDefinition {
+    /// Label path used only for the diagnostic root name.
+    path: String,
+    /// Uniquely owned retained menu surface.
+    content: Node,
+}
+
+/// One compiled submenu row binding its parent popup to its child popup.
+struct SubmenuDefinition {
+    parent: usize,
+    child: usize,
+    submitted: WidgetEventPortHandle<MenuSubmenuSubmitted>,
+}
+
+/// Flattened retained popup definitions produced from a recursively composed menu panel.
+struct CompiledMenus {
+    labels: Vec<String>,
+    popups: Vec<Option<PopupDefinition>>,
+    top_level: Vec<usize>,
+    submenus: Vec<SubmenuDefinition>,
+}
+
+impl CompiledMenus {
+    fn new(panel: MenuPanel) -> Self {
+        let mut compiled = Self {
+            labels: Vec::new(),
+            popups: Vec::new(),
+            top_level: Vec::new(),
+            submenus: Vec::new(),
+        };
+        for menu in panel.into_menus() {
+            compiled.labels.push(menu.label.clone());
+            let path = menu.label.clone();
+            let popup = compiled.push_popup(path, menu.groups);
+            compiled.top_level.push(popup);
+        }
+        compiled
+    }
+
+    /// Reserves the parent index before recursion so every submenu binding can name both roots.
+    fn push_popup(&mut self, path: String, groups: Vec<MenuGroup>) -> usize {
+        let index = self.popups.len();
+        self.popups.push(None);
+
+        let mut rows = Vec::new();
+        for group in groups {
+            let entries = group.into_entries();
+            if entries.is_empty() {
+                continue;
+            }
+            if !rows.is_empty() {
+                rows.push(MenuSeparator::create());
+            }
+            for entry in entries {
+                match entry {
+                    MenuEntry::Item(item) => rows.push(item),
+                    MenuEntry::Submenu(submenu) => {
+                        let child_path = format!("{path} {}", submenu.label);
+                        let child = self.push_popup(child_path, submenu.groups);
+                        let (row, submitted) = MenuSubmenu::create(submenu.label);
+                        rows.push(row);
+                        self.submenus.push(SubmenuDefinition { parent: index, child, submitted });
+                    }
+                }
+            }
+        }
+        self.popups[index] = Some(PopupDefinition { path, content: MenuList::create(rows) });
+        index
+    }
 }
 
 impl MenuPanel {
@@ -168,14 +278,21 @@ struct MenuItemBinding<State> {
 struct PopupBinding<State> {
     /// Finds the coordinating menu in application state after popup dismissal.
     menu: WindowMenuAccessor<State>,
-    /// Concrete popup position whose lifecycle source owns this binding.
-    index: usize,
+    /// Top-level heading represented by this root, absent for submenu roots.
+    top_level: Option<usize>,
+}
+
+/// Generic submenu-row adapter kept above the concrete recursive model.
+struct SubmenuBinding<State> {
+    menu: WindowMenuAccessor<State>,
+    parent: usize,
+    child: usize,
 }
 
 /// Application-owned coordinator for one concrete menu bar and its concrete popup roots.
 ///
-/// Each top-level Menu becomes one retained popup tree. WindowMenu stores only root and bar handles;
-/// item state and item identity remain in the concrete widgets created by the application.
+/// Each Menu and Submenu becomes one retained popup tree. WindowMenu stores only root and bar
+/// handles; item state and item identity remain in the concrete widgets created by the application.
 /// [`Context`] owns the window and popup trees. Directly changing their visibility bypasses this
 /// coordinator and can desynchronize [`Self::active_menu`] from the visible root and bar highlight.
 /// Destroying any of those roots invalidates the component; discard the `WindowMenu` instead of
@@ -185,6 +302,8 @@ pub struct WindowMenu {
     window: RootHandle,
     /// One hidden retained popup root for each top-level menu.
     popups: Vec<PopupHandle>,
+    /// Every top-level and cascading popup in flattened construction order.
+    all_popups: Vec<PopupHandle>,
     /// Weak typed access used to reconcile the highlighted heading.
     bar: TypedWidgetHandle<MenuBar>,
     /// Currently visible top-level menu index.
@@ -235,10 +354,14 @@ impl WindowMenu {
         B: RendererBackend,
         State: 'static,
     {
-        // Consume the concrete hierarchy once. Every top-level menu becomes its own retained popup,
-        // so opening a menu only changes root visibility and never rebuilds or copies item data.
-        let menus: Vec<(String, Node)> = panel.into_menus().into_iter().map(Menu::into_popup).collect();
-        let labels = menus.iter().map(|(label, _)| label.clone()).collect();
+        // Consume the concrete hierarchy once. Every menu level becomes its own retained popup, so
+        // opening either a heading or submenu only changes root visibility.
+        let CompiledMenus {
+            labels,
+            popups: definitions,
+            top_level,
+            submenus,
+        } = CompiledMenus::new(panel);
         let (bar, bar_node, bar_submitted) = MenuBar::create(labels);
         #[cfg(test)]
         let bar_node_id = bar_node.id();
@@ -247,15 +370,28 @@ impl WindowMenu {
         let (_, shell) = Linear::create(LinearParameters::vertical([LinearItem::content(bar_node), LinearItem::flex(content, 1.0)]));
         let window = context.create_window(name, rect, shell);
 
-        // Register one independently retained popup per concrete top-level menu.
-        let popups: Vec<PopupHandle> = menus
+        // Register every popup up front. Menu surfaces own their full background, so remove the
+        // generic popup content inset and let only root framing surround that color.
+        let all_popups: Vec<PopupHandle> = definitions
             .into_iter()
-            .map(|(label, popup)| context.create_popup(&format!("{name} {label} Menu"), popup))
+            .map(|definition| {
+                let definition = definition.expect("recursive menu compilation must fill every reserved popup");
+                let popup = context.create_popup(&format!("{name} {} Menu", definition.path), definition.content);
+                context
+                    .set_root_options(
+                        popup.id(),
+                        WindowOption::FRAME | WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE | WindowOption::NO_TITLE | WindowOption::NO_PADDING,
+                    )
+                    .expect("new window-menu popup must remain registered");
+                popup
+            })
             .collect();
+        let popups = top_level.iter().map(|index| all_popups[*index].clone()).collect();
 
         let component = Self {
             window,
-            popups: popups.clone(),
+            popups,
+            all_popups: all_popups.clone(),
             bar,
             active_menu: None,
             #[cfg(test)]
@@ -264,10 +400,24 @@ impl WindowMenu {
 
         // Popup lifecycle handlers are registered before the bar handler. An outside press that
         // reaches another heading therefore reconciles the old popup before that heading opens.
-        for (index, popup) in popups.into_iter().enumerate() {
+        for (index, popup) in all_popups.iter().enumerate() {
+            let top_level = top_level.iter().position(|popup_index| *popup_index == index);
             context
-                .subscribe_with(popup.submitted(), PopupBinding { menu: accessor, index }, Self::dispatch_popup::<State>)
+                .subscribe_with(popup.submitted(), PopupBinding { menu: accessor, top_level }, Self::dispatch_popup::<State>)
                 .expect("new window-menu popup source must be unsubscribed");
+        }
+        for submenu in submenus {
+            context
+                .subscribe_context_with(
+                    submenu.submitted,
+                    SubmenuBinding {
+                        menu: accessor,
+                        parent: submenu.parent,
+                        child: submenu.child,
+                    },
+                    Self::dispatch_submenu::<State>,
+                )
+                .expect("new window-menu submenu source must be unsubscribed");
         }
         context
             .subscribe_context_with(bar_submitted, accessor, Self::dispatch_bar::<State>)
@@ -292,6 +442,14 @@ impl WindowMenu {
     pub fn popup(&self, index: usize) -> Option<&PopupHandle> {
         // Preserve the typed capability when selecting one menu root by its stable heading order.
         self.popups.get(index)
+    }
+
+    /// Returns every Context-owned menu and submenu popup in parent-before-descendant order.
+    ///
+    /// Use this complete view for inspection or whole-component teardown. Use [`Self::popups`] when
+    /// indices need to correspond to top-level headings.
+    pub fn all_popups(&self) -> &[PopupHandle] {
+        &self.all_popups
     }
 
     /// Returns the visible top-level menu index, if any.
@@ -357,9 +515,22 @@ impl WindowMenu {
         self.finish_close();
     }
 
+    /// Opens one child popup beside its parent while retaining the complete ancestor chain.
+    fn submenu_submitted(&mut self, context: &mut EventContext<'_>, parent: usize, child: usize, event: &MenuSubmenuSubmitted) {
+        if self.active_menu.is_none() {
+            return;
+        }
+        let (Some(parent), Some(child)) = (self.all_popups.get(parent), self.all_popups.get(child)) else {
+            return;
+        };
+        context
+            .show_popup_at(child, parent.id(), event.anchor)
+            .expect("window-menu submenu and its parent popup must remain registered");
+    }
+
     /// Reconciles state after one concrete popup is dismissed by window-manager policy.
-    fn popup_submitted(&mut self, index: usize, event: &RootSubmitted) {
-        if matches!(event, RootSubmitted::PopupDismissed) && self.active_menu == Some(index) {
+    fn popup_submitted(&mut self, top_level: Option<usize>, event: &RootSubmitted) {
+        if matches!(event, RootSubmitted::PopupDismissed) && top_level.is_some_and(|index| self.active_menu == Some(index)) {
             // The root is already hidden; only application-owned and bar state require mutation.
             self.finish_close();
         }
@@ -385,7 +556,12 @@ impl WindowMenu {
 
     /// Adapts one concrete popup lifecycle event to the application-owned component.
     fn dispatch_popup<State>(state: &mut State, binding: &PopupBinding<State>, event: &RootSubmitted) {
-        (binding.menu)(state).popup_submitted(binding.index, event);
+        (binding.menu)(state).popup_submitted(binding.top_level, event);
+    }
+
+    /// Adapts one private submenu-row event to the application-owned component.
+    fn dispatch_submenu<State>(state: &mut State, binding: &SubmenuBinding<State>, context: &mut EventContext<'_>, event: &MenuSubmenuSubmitted) {
+        (binding.menu)(state).submenu_submitted(context, binding.parent, binding.child, event);
     }
 }
 
@@ -420,6 +596,11 @@ mod tests {
         fn save_submitted(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
             self.invoked.push("Save");
         }
+
+        /// Handles an item nested inside a cascading submenu.
+        fn about_submitted(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+            self.invoked.push("About");
+        }
     }
 
     /// Constructs registered concrete items, composes them, and installs the resulting window.
@@ -434,10 +615,17 @@ mod tests {
 
         let (word_wrap, word_wrap_node) = MenuItem::create(MenuItemParameters::new("Word Wrap").checked(true));
         let (about, about_node) = MenuItem::create(MenuItemParameters::new("About"));
+        WindowMenu::register_item(&mut context, Model::menu_mut, &about, Model::about_submitted).unwrap();
 
         let panel = MenuPanel::new([
             Menu::new("File", [MenuGroup::new([new_node, save_node])]),
-            Menu::new("View", [MenuGroup::new([word_wrap_node]), MenuGroup::new([about_node])]),
+            Menu::new(
+                "View",
+                [
+                    MenuGroup::new([word_wrap_node]),
+                    MenuGroup::submenu(Submenu::new("Details", [MenuGroup::new([about_node])])),
+                ],
+            ),
         ]);
         let body = TextBlock::create(TextBlockParameters::new("body")).1;
         let menu = WindowMenu::create(&mut context, Model::menu_mut, "Menu Window", rect(20, 20, 260, 180), panel, body);
@@ -515,5 +703,40 @@ mod tests {
         assert!(!model.menu.is_open());
         assert_eq!(model.menu.bar.try_read(MenuBar::open_menu), Some(None));
         assert_eq!(model.menu.popup(0).unwrap().widget().try_read(RootChrome::is_visible), Some(false),);
+    }
+
+    #[test]
+    fn submenu_retains_its_parent_and_nested_item_closes_the_complete_chain() {
+        let (mut context, mut model) = context_and_model();
+        context.update_ui_state(Dimensioni::new(480, 320), &mut model);
+        let bar = context.debug_root_node_rect(model.menu.window.id(), model.menu.bar_node).unwrap();
+
+        // File occupies the first compact heading; the next point opens View.
+        click(&mut context, &mut model, bar.x + 55, bar.y + bar.height / 2);
+        let parent = model.menu.popup(1).unwrap().clone();
+        let parent_rect = parent.widget().try_read(RootChrome::rect).unwrap();
+        click(
+            &mut context,
+            &mut model,
+            parent_rect.x + parent_rect.width / 2,
+            parent_rect.y + parent_rect.height - 10,
+        );
+
+        let child = model.menu.all_popups[2].clone();
+        assert_eq!(parent.widget().try_read(RootChrome::is_visible), Some(true));
+        assert_eq!(child.widget().try_read(RootChrome::is_visible), Some(true));
+
+        let child_rect = child.widget().try_read(RootChrome::rect).unwrap();
+        click(
+            &mut context,
+            &mut model,
+            child_rect.x + child_rect.width / 2,
+            child_rect.y + child_rect.height / 2,
+        );
+
+        assert_eq!(model.invoked, ["About"]);
+        assert!(!model.menu.is_open());
+        assert_eq!(parent.widget().try_read(RootChrome::is_visible), Some(false));
+        assert_eq!(child.widget().try_read(RootChrome::is_visible), Some(false));
     }
 }

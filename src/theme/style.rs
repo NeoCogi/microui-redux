@@ -93,6 +93,10 @@ pub struct Style {
     pub thumb_size: i32,
     /// Width of inside-aligned widget and container borders.
     pub frame_border_width: i32,
+    /// Foreground color used by menu bars, menu items, and cascading submenu items.
+    pub menu_foreground: Color,
+    /// Background color used by menu bars, popup menus, and cascading submenus.
+    pub menu_background: Color,
     /// Palette of [`crate::ControlColor`] entries.
     pub colors: [Color; 14],
 }
@@ -114,6 +118,8 @@ impl Default for Style {
             scrollbar_size: 12,
             thumb_size: 8,
             frame_border_width: 1,
+            menu_foreground: Color { r: 230, g: 230, b: 230, a: 255 },
+            menu_background: Color { r: 50, g: 50, b: 50, a: 255 },
             colors: [
                 Color { r: 230, g: 230, b: 230, a: 255 },
                 Color { r: 25, g: 25, b: 25, a: 255 },

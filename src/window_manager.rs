@@ -120,9 +120,9 @@ pub const DEFAULT_LAYER: u8 = MAX_LAYER;
 /// Describes how one retained root obtains its stacking layer.
 ///
 /// Ordinary windows have a [`Fixed`](Self::Fixed) application layer. A visible popup records the
-/// root that initiated it and inherits that root's effective layer. Dialogs occupy the dedicated
-/// modal layer above all sixteen application layers. Popup and modal bindings are managed by the
-/// window manager; application code changes only fixed window layers through
+/// non-popup source of its effective layer; the active cascading order remains private.
+/// Dialogs occupy the dedicated modal layer above all sixteen application layers. Popup and modal
+/// bindings are managed by the window manager; application code changes only fixed window layers through
 /// [`crate::Context::set_root_layer`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum LayerBinding {
@@ -147,10 +147,16 @@ pub(crate) struct WindowManager {
     last_zindex: i32,
     /// Registered window-manager roots replayed by [`crate::ContextFrame::render_ui`].
     roots: Vec<WindowEntry>,
+    /// The one visible popup chain, ordered from its top-level popup to its deepest descendant.
+    ///
+    /// Popup policy is globally exclusive, so simultaneously visible popups cannot form separate
+    /// branches. Keeping that invariant here avoids distributing transient ancestry across every
+    /// registered root.
+    popup_stack: Vec<RootId>,
     /// Visible dialogs in nesting order; the last entry owns the active modal input group.
     ///
-    /// That group contains the dialog and, while open, the one popup initiated by the dialog. No
-    /// ordinary application-layer root may receive input until the modal stack becomes empty.
+    /// That group contains the dialog and any popup chain initiated by the dialog. No ordinary
+    /// application-layer root may receive input until the modal stack becomes empty.
     modal_stack: Vec<RootId>,
     /// Last ordinary root explicitly activated by a pointer press.
     ///
@@ -172,6 +178,7 @@ impl WindowManager {
             style,
             last_zindex: 0,
             roots: Vec::default(),
+            popup_stack: Vec::new(),
             modal_stack: Vec::new(),
             active_root: None,
             next_root_id: 1,

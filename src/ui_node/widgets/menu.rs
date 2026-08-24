@@ -29,8 +29,9 @@
 
 //! Concrete retained widgets used by application menus.
 //!
-//! [`MenuItem`] is a public leaf widget with its own typed submission source. `MenuBar` and
-//! `MenuSeparator` are private presentation details composed by [`crate::WindowMenu`].
+//! [`MenuItem`] is a public leaf widget with its own typed submission source. `MenuBar`,
+//! `MenuSubmenu`, `MenuList`, and `MenuSeparator` are private presentation details composed by
+//! [`crate::WindowMenu`].
 
 use super::*;
 use std::{cell::RefCell, rc::Rc};
@@ -204,9 +205,7 @@ impl Widget for MenuBar {
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let bounds = ctx.local_rect();
-        // PanelBG distinguishes the persistent menu strip from ordinary window content while
-        // retaining the context's established semantic palette and style-override behavior.
-        ctx.draw_rect(bounds, ctx.style().colors[ControlColor::PanelBG as usize]);
+        ctx.draw_rect(bounds, ctx.style().menu_background);
 
         let font = ctx.style().resolve_font_choice(self.font);
         for (index, heading) in self.heading_rects(bounds, ctx.style(), ctx.atlas()).into_iter().enumerate() {
@@ -215,8 +214,146 @@ impl Widget for MenuBar {
             } else if self.hovered_menu == Some(index) {
                 ctx.draw_rect(heading, ctx.style().colors[ControlColor::ButtonHover as usize]);
             }
-            ctx.draw_control_text_with_font(font, &self.labels[index], heading, ControlColor::Text, WidgetOption::NONE);
+            ctx.draw_control_text_color_with_font(font, &self.labels[index], heading, ctx.style().menu_foreground, WidgetOption::NONE);
         }
+    }
+}
+
+/// Event emitted by a submenu row when it requests its already-retained child popup.
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct MenuSubmenuSubmitted {
+    /// One-pixel screen-space anchor immediately to the right of the submenu row.
+    pub(crate) anchor: Recti,
+}
+
+impl crate::WidgetEvent for MenuSubmenuSubmitted {}
+
+/// Private actionable row that opens one cascading submenu without representing an application
+/// command.
+pub(crate) struct MenuSubmenu {
+    label: String,
+    font: FontChoice,
+    opt: WidgetOption,
+    submitted_event: Rc<RefCell<crate::event::WidgetEventPort<MenuSubmenuSubmitted>>>,
+}
+
+impl MenuSubmenu {
+    /// Creates one retained submenu row and its internal submission endpoint.
+    pub(crate) fn create(label: String) -> (Node, WidgetEventPortHandle<MenuSubmenuSubmitted>) {
+        let submitted_event = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
+        let submitted = WidgetEventPortHandle::new(&submitted_event);
+        let widget = Self {
+            label,
+            font: FontChoice::Role(FontRole::Body),
+            opt: WidgetOption::PRESERVE_FOCUS,
+            submitted_event,
+        };
+        (Node::typed_widget(widget).1, submitted)
+    }
+}
+
+impl LeafWidget for MenuSubmenu {
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+        let padding = style.padding.max(1);
+        let marker_width = atlas.get_icon_size(style.icons.check).width.max(0);
+        let arrow_width = atlas.get_icon_size(style.icons.expand).width.max(0);
+        let font = style.resolve_font_choice(self.font);
+        let label_width = atlas.get_text_size(font, &self.label).width.max(0);
+        let width = padding
+            .saturating_add(marker_width)
+            .saturating_add(padding)
+            .saturating_add(label_width)
+            .saturating_add(padding)
+            .saturating_add(arrow_width)
+            .saturating_add(padding);
+        Dimensioni::new(width, menu_row_height(style, atlas, self.font))
+    }
+}
+
+impl Widget for MenuSubmenu {
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.opt
+    }
+
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+        if !matches!(input, Some(UiInputEvent::MouseDown { button, .. }) if button.intersects(MouseButton::LEFT)) {
+            return;
+        }
+        let row = ctx.screen_content_rect();
+        let anchor = Recti::new(row.x.saturating_add(row.width), row.y, 1, row.height);
+        self.submitted_event.borrow_mut().emit(MenuSubmenuSubmitted { anchor });
+    }
+
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
+        let bounds = ctx.local_rect();
+        if ctx.hovered() || ctx.focused() {
+            ctx.draw_rect(bounds, ctx.style().colors[ControlColor::ButtonHover as usize]);
+        }
+
+        let style = *ctx.style();
+        let padding = style.padding.max(1);
+        let marker_width = ctx.atlas().get_icon_size(style.icons.check).width.max(0);
+        let arrow_size = ctx.atlas().get_icon_size(style.icons.expand);
+        let text_x = bounds.x.saturating_add(padding).saturating_add(marker_width);
+        let arrow = Recti::new(
+            bounds.x.saturating_add(bounds.width).saturating_sub(padding).saturating_sub(arrow_size.width),
+            bounds.y.saturating_add((bounds.height - arrow_size.height) / 2),
+            arrow_size.width,
+            arrow_size.height,
+        );
+        let text = Recti::new(text_x, bounds.y, arrow.x.saturating_sub(text_x).max(0), bounds.height);
+        let font = style.resolve_font_choice(self.font);
+        ctx.draw_control_text_color_with_font(font, &self.label, text, style.menu_foreground, WidgetOption::NONE);
+        ctx.draw_icon(style.icons.expand, arrow, style.menu_foreground);
+    }
+}
+
+/// Zero-gap vertical menu surface shared by top-level popup menus and every submenu.
+pub(crate) struct MenuList;
+
+impl MenuList {
+    /// Transfers ordered rows into one background-painting retained container.
+    pub(crate) fn create(rows: impl IntoIterator<Item = Node>) -> Node {
+        Node::container(Container::new(Self, rows).1)
+    }
+}
+
+impl ContainerWidget for MenuList {
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: Constraints) -> Dimensioni {
+        let child_constraints = Constraints::new(constraints.width, AvailableSpace::Unbounded);
+        let mut preferred = Dimensioni::default();
+        for index in 0..ctx.child_count() {
+            let child = ctx.measure_child(index, child_constraints).unwrap_or_default();
+            preferred.width = preferred.width.max(child.width);
+            preferred.height = preferred.height.saturating_add(child.height);
+        }
+        preferred
+    }
+
+    fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
+        let constraints = Constraints::new(AvailableSpace::bounded(rect.width), AvailableSpace::Unbounded);
+        let mut y = rect.y;
+        let mut content_width = 0;
+        for index in 0..children.len() {
+            let preferred = ctx.measure_child(children, index, constraints).unwrap_or_default();
+            let child = Recti::new(rect.x, y, rect.width.max(0), preferred.height.max(0));
+            let _ = ctx.layout_child(children, index, child);
+            y = y.saturating_add(child.height);
+            content_width = content_width.max(preferred.width);
+        }
+        ctx.set_content_size(Dimensioni::new(content_width.max(rect.width), y.saturating_sub(rect.y)));
+    }
+}
+
+impl Widget for MenuList {
+    fn widget_opt(&self) -> &WidgetOption {
+        &WidgetOption::NO_INTERACT
+    }
+
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
+
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
+        ctx.draw_rect(ctx.local_rect(), ctx.style().menu_background);
     }
 }
 
@@ -387,7 +524,7 @@ impl MenuItem {
 
     /// Derives a subdued text color without adding a menu-only palette slot.
     fn text_color(&self, style: &Style) -> Color {
-        let mut color = style.colors[ControlColor::Text as usize];
+        let mut color = style.menu_foreground;
         if !self.enabled {
             // Alpha preserves the theme hue and works consistently on every renderer backend.
             color.a = ((u16::from(color.a) * 45) / 100).max(1) as u8;
@@ -561,6 +698,8 @@ impl Widget for MenuSeparator {
             bounds.width.saturating_sub(padding.saturating_mul(2)).max(0),
             1,
         );
-        ctx.draw_rect(rule, ctx.style().colors[ControlColor::Border as usize]);
+        let mut color = ctx.style().menu_foreground;
+        color.a = ((u16::from(color.a) * 45) / 100).max(1) as u8;
+        ctx.draw_rect(rule, color);
     }
 }

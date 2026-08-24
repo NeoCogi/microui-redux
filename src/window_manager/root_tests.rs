@@ -1357,7 +1357,7 @@ fn popup_inherits_its_source_layer_and_uses_only_that_layers_transient_tier() {
 }
 
 #[test]
-fn popup_initiated_by_another_popup_normalizes_to_the_fixed_source() {
+fn popup_initiated_by_another_popup_retains_parent_and_normalizes_to_the_fixed_source() {
     let mut ctx = context();
     let source = ctx.create_window("source", rect(0, 0, 100, 80), empty_content());
     ctx.set_root_layer(source.id(), 6).unwrap();
@@ -1367,9 +1367,59 @@ fn popup_initiated_by_another_popup_normalizes_to_the_fixed_source() {
     ctx.show_popup(&parent, source.id()).unwrap();
     ctx.show_popup(&child, parent.id()).unwrap();
 
-    assert_eq!(parent.widget().try_read(RootChrome::is_visible), Some(false));
+    assert_eq!(parent.widget().try_read(RootChrome::is_visible), Some(true));
     assert_eq!(child.widget().try_read(RootChrome::is_visible), Some(true));
     assert_eq!(ctx.root_layer_binding(child.id()), Ok(LayerBinding::Inherited(source.id())));
+}
+
+#[test]
+fn popup_chain_replaces_only_the_initiators_descendants() {
+    let mut ctx = context();
+    let source = ctx.create_window("source", rect(0, 0, 100, 80), empty_content());
+    let parent = ctx.create_popup("parent", empty_content());
+    let child = ctx.create_popup("child", empty_content());
+    let grandchild = ctx.create_popup("grandchild", empty_content());
+    let sibling = ctx.create_popup("sibling", empty_content());
+
+    ctx.show_popup(&parent, source.id()).unwrap();
+    ctx.show_popup(&child, parent.id()).unwrap();
+    ctx.show_popup(&grandchild, child.id()).unwrap();
+    ctx.show_popup(&sibling, parent.id()).unwrap();
+
+    assert_eq!(parent.widget().try_read(RootChrome::is_visible), Some(true));
+    assert_eq!(child.widget().try_read(RootChrome::is_visible), Some(false));
+    assert_eq!(grandchild.widget().try_read(RootChrome::is_visible), Some(false));
+    assert_eq!(sibling.widget().try_read(RootChrome::is_visible), Some(true));
+    assert_eq!(ctx.root_layer_binding(sibling.id()), Ok(LayerBinding::Inherited(source.id())));
+
+    // The active prefix cannot be attached beneath one of its descendants.
+    assert_eq!(ctx.show_popup(&parent, sibling.id()), Err(RootMutationError::InvalidPopupInitiator));
+    assert_eq!(parent.widget().try_read(RootChrome::is_visible), Some(true));
+    assert_eq!(sibling.widget().try_read(RootChrome::is_visible), Some(true));
+}
+
+#[test]
+fn presses_inside_a_popup_ancestor_close_only_its_descendant_branch() {
+    let mut ctx = context();
+    let source = ctx.create_window("source", rect(0, 0, 300, 220), empty_content());
+    let parent = ctx.create_popup("parent", empty_content());
+    let child = ctx.create_popup("child", empty_content());
+    let fixed_popup = WindowOption::FRAME | WindowOption::NO_RESIZE | WindowOption::NO_TITLE;
+    ctx.set_root_options(parent.id(), fixed_popup).unwrap();
+    ctx.set_root_options(child.id(), fixed_popup).unwrap();
+
+    ctx.show_popup_at(&parent, source.id(), rect(20, 20, 100, 100)).unwrap();
+    ctx.show_popup_at(&child, parent.id(), rect(120, 20, 80, 80)).unwrap();
+    ctx.update_and_render_ui();
+
+    ctx.mousedown(40, 40, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(parent.widget().try_read(RootChrome::is_visible), Some(true));
+    assert_eq!(child.widget().try_read(RootChrome::is_visible), Some(false));
+
+    ctx.mousedown(280, 200, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(parent.widget().try_read(RootChrome::is_visible), Some(false));
 }
 
 #[test]

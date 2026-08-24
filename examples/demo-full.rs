@@ -1203,7 +1203,13 @@ fn demo_menu_panel(context: &mut Context<SelectedBackend, State>) -> (MenuPanel,
                 MenuGroup::new([exit_node]),
             ],
         ),
-        Menu::new("View", [MenuGroup::new([auto_scroll_node]), MenuGroup::new([comfortable_node, compact_node])]),
+        Menu::new(
+            "View",
+            [
+                MenuGroup::new([auto_scroll_node]),
+                MenuGroup::submenu(Submenu::new("Log Spacing", [MenuGroup::new([comfortable_node, compact_node])])),
+            ],
+        ),
         Menu::new("Help", [MenuGroup::new([about_node])]),
     ]);
 
@@ -1255,14 +1261,14 @@ fn set_slider_value(state: &TypedWidgetHandle<Slider>, value: Real) {
 
 struct DemoRuntimes {
     bg_sliders: [Node; 3],
-    style_color_sliders: [Node; 56],
+    style_color_sliders: [Node; 64],
     style_value_sliders: [Node; 5],
     submit_buf: Node,
     text_area: Node,
     combo: Node,
     combo_items: [Node; 4],
-    style_color_labels: [Node; 14],
-    style_color_swatches: [Node; 14],
+    style_color_labels: [Node; 16],
+    style_color_swatches: [Node; 16],
     style_metric_labels: [Node; 5],
     stack_direction_labels: [Node; 2],
     weight_labels: [Node; 2],
@@ -1297,8 +1303,8 @@ struct State {
     bg: [Real; 3],
     bg_slider_states: [TypedWidgetHandle<Slider>; 3],
     bg_slider_changed: [WidgetEventPortHandle<SliderChanged>; 3],
-    style_color_slider_states: [TypedWidgetHandle<Slider>; 56],
-    style_color_slider_changed: [WidgetEventPortHandle<SliderChanged>; 56],
+    style_color_slider_states: [TypedWidgetHandle<Slider>; 64],
+    style_color_slider_changed: [WidgetEventPortHandle<SliderChanged>; 64],
     style_value_slider_states: [TypedWidgetHandle<Slider>; 5],
     style_value_slider_changed: [WidgetEventPortHandle<SliderChanged>; 5],
     logbuf: String,
@@ -1308,7 +1314,7 @@ struct State {
     combo_submitted: WidgetEventPortHandle<ComboSubmitted>,
     combo_item_states: [TypedWidgetHandle<ListItem>; 4],
     combo_item_submitted: [WidgetEventPortHandle<ListItemSubmitted>; 4],
-    style_color_swatch_states: [TypedWidgetHandle<ColorSwatch>; 14],
+    style_color_swatch_states: [TypedWidgetHandle<ColorSwatch>; 16],
     window_info_value_states: [TypedWidgetHandle<ListItem>; 3],
     style: Style,
 
@@ -1758,6 +1764,8 @@ impl State {
                 static_label("basefocus:"),
                 static_label("scrollbase:"),
                 static_label("scrollthumb:"),
+                static_label("menu foreground:"),
+                static_label("menu background:"),
             ],
             style_color_swatches,
             style_metric_labels: [
@@ -1927,7 +1935,13 @@ impl State {
     }
 
     fn style_color_changed(&mut self, index: &usize, event: &SliderChanged) {
-        let color = &mut self.style.colors[*index / 4];
+        let color_index = *index / 4;
+        let color = match color_index {
+            0..=13 => &mut self.style.colors[color_index],
+            14 => &mut self.style.menu_foreground,
+            15 => &mut self.style.menu_background,
+            _ => return,
+        };
         let value = event.value as u8;
         match *index % 4 {
             0 => color.r = value,
@@ -2177,14 +2191,15 @@ impl State {
     }
 
     fn sync_style_controls_from_style(&mut self) {
-        for (i, color) in self.style.colors.iter().enumerate() {
+        let colors = self.style.colors.into_iter().chain([self.style.menu_foreground, self.style.menu_background]);
+        for (i, color) in colors.enumerate() {
             let slider_base = i * 4;
             set_slider_value(&self.style_color_slider_states[slider_base], color.r as Real);
             set_slider_value(&self.style_color_slider_states[slider_base + 1], color.g as Real);
             set_slider_value(&self.style_color_slider_states[slider_base + 2], color.b as Real);
             set_slider_value(&self.style_color_slider_states[slider_base + 3], color.a as Real);
             self.style_color_swatch_states[i]
-                .try_update(|swatch| swatch.set_fill(*color))
+                .try_update(|swatch| swatch.set_fill(color))
                 .expect("style swatch state unavailable");
         }
         set_slider_value(&self.style_value_slider_states[0], self.style.padding as Real);
@@ -2277,19 +2292,11 @@ impl State {
                 tree.with_track(TrackSize::Flex(1.0))
                     .scroll_area(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, |tree| {
                         let mut sliders = style_color_sliders.into_iter();
-                        for ((label, swatch), [red, green, blue, alpha]) in
-                            style_color_labels
-                                .into_iter()
-                                .zip(style_color_swatches)
-                                .zip(std::array::from_fn::<_, 14, _>(|_| {
-                                    [
-                                        sliders.next().expect("red style slider"),
-                                        sliders.next().expect("green style slider"),
-                                        sliders.next().expect("blue style slider"),
-                                        sliders.next().expect("alpha style slider"),
-                                    ]
-                                }))
-                        {
+                        for (label, swatch) in style_color_labels.into_iter().zip(style_color_swatches) {
+                            let red = sliders.next().expect("red style slider");
+                            let green = sliders.next().expect("green style slider");
+                            let blue = sliders.next().expect("blue style slider");
+                            let alpha = sliders.next().expect("alpha style slider");
                             tree.row(&color_row, LinearCrossSize::Content, |tree| {
                                 tree.widget(label);
                                 tree.widget(red);
@@ -2299,6 +2306,7 @@ impl State {
                                 tree.widget(swatch);
                             });
                         }
+                        assert!(sliders.next().is_none(), "every style slider must be mounted");
 
                         for (label, slider) in style_metric_labels.into_iter().zip(style_value_sliders) {
                             tree.row(&metrics_row, LinearCrossSize::Content, |tree| {
@@ -2606,8 +2614,9 @@ impl State {
     }
 
     fn style_window(&mut self, ctx: &mut Context<SelectedBackend, Self>) {
-        for (swatch, color) in self.style_color_swatch_states.iter().zip(self.style.colors.iter()) {
-            swatch.try_update(|swatch| swatch.set_fill(*color)).expect("style swatch state unavailable");
+        let colors = self.style.colors.into_iter().chain([self.style.menu_foreground, self.style.menu_background]);
+        for (swatch, color) in self.style_color_swatch_states.iter().zip(colors) {
+            swatch.try_update(|swatch| swatch.set_fill(color)).expect("style swatch state unavailable");
         }
         ctx.set_style(&self.style);
     }

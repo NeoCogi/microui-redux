@@ -332,7 +332,7 @@ impl WindowManager {
     /// Creates a hidden retained dialog around one uniquely owned application node.
     ///
     /// Show it with [`crate::Context::set_root_visible`]. A visible dialog enters the dedicated
-    /// modal layer and becomes the active modal input group. Only that dialog and a popup it
+    /// modal layer and becomes the active modal input group. Only that dialog and a popup chain it
     /// initiates remain input-eligible until the dialog is hidden or destroyed. Hiding preserves
     /// all descendant state.
     pub fn create_dialog(&mut self, name: &str, rect: Recti, content: Node) -> RootHandle {
@@ -345,7 +345,7 @@ impl WindowManager {
     /// require the initiating root and bind the popup to that root's effective layer. Within that
     /// layer, the popup's transient tier is above ordinary roots; it never crosses a higher fixed
     /// layer. A popup initiated by the active dialog occupies the transient tier above the modal
-    /// itself. An outside press or another popup request hides it and records a submission.
+    /// itself. An outside press or a competing popup request hides it and records a submission.
     pub fn create_popup(&mut self, name: &str, content: Node) -> PopupHandle {
         // Wrap the generic registry handle at the only construction point that installs popup
         // policy. Callers can therefore prove popup identity by type instead of a runtime check.
@@ -437,9 +437,13 @@ impl WindowManager {
             // transient before it becomes observable.
             return Err(RootMutationError::PopupInitiatorRequired);
         } else {
-            // Entering a new modal domain closes the one globally visible popup before the dialog
-            // becomes observable. This prevents a transient belonging to the previous ordinary or
-            // modal domain from occupying the popup tier above the newly active dialog.
+            // Preflight the source mutation before dismissing any associated popup suffix. No user
+            // code runs between this check and the commit, so the later access cannot newly conflict.
+            self.roots[target].root_widget.try_update(|_| {}).ok_or(RootMutationError::Borrowed)?;
+
+            // Entering a new modal domain closes the visible popup chain before the dialog becomes
+            // observable. This prevents transients belonging to the previous ordinary or modal
+            // domain from occupying the popup tier above the newly active dialog.
             if visible && kind == WindowKind::Modal {
                 self.dismiss_visible_popup()?;
             }
@@ -461,6 +465,14 @@ impl WindowManager {
             }
         } else {
             self.roots[target].clear_transient_targets();
+            if kind == WindowKind::Popup {
+                // Descendants were dismissed above, so an active popup can only be the stack tail.
+                // Removing it from the chain is silent because generic hiding is not dismissal.
+                if let Some(position) = self.popup_stack.iter().position(|candidate| *candidate == root) {
+                    debug_assert_eq!(position + 1, self.popup_stack.len());
+                    self.popup_stack.truncate(position);
+                }
+            }
             if self.active_root == Some(root) {
                 self.active_root = None;
             }
@@ -483,8 +495,9 @@ impl WindowManager {
 
     /// Shows one typed popup at an exact screen-space anchor in a single root transaction.
     ///
-    /// The supplied rectangle is installed before the next layout observes the popup. Showing it
-    /// dismisses any other visible popup and publishes that root's ordinary dismissal event.
+    /// The supplied rectangle is installed before the next layout observes the popup. Showing a
+    /// top-level popup replaces the current chain; a popup initiated by a popup retains that
+    /// ancestor chain and replaces only competing descendants.
     /// Accepting [`PopupHandle`] makes windows and dialogs ineligible at compile time; a handle
     /// whose root was destroyed is still reported as [`RootMutationError::UnknownRoot`].
     pub fn show_popup_at(&mut self, popup: &PopupHandle, initiator: RootId, anchor: Recti) -> Result<(), RootMutationError> {
@@ -492,69 +505,67 @@ impl WindowManager {
         // application-held handles. Root IDs are never reused, so a successful lookup identifies
         // the same popup originally wrapped by PopupHandle::new.
         let target = self.root_index(popup.id())?;
-        let source = self.popup_layer_source(initiator, popup.id())?;
-        self.show_popup_index_at(target, source, anchor)
+        let (source, keep_len) = self.popup_layer_source(initiator, popup.id())?;
+        self.show_popup_index_at(target, source, keep_len, anchor)
     }
 
     /// Applies anchored popup policy to an already-resolved popup registry index.
-    fn show_popup_index_at(&mut self, target: usize, source: RootId, anchor: Recti) -> Result<(), RootMutationError> {
+    fn show_popup_index_at(&mut self, target: usize, source: RootId, keep_len: usize, anchor: Recti) -> Result<(), RootMutationError> {
         // The public typed handle establishes target popup identity, while popup_layer_source has
         // normalized the initiator to a visible non-popup root with an authoritative stack band.
         debug_assert_eq!(self.roots[target].kind, WindowKind::Popup);
         let source_index = self.root_index(source)?;
         let inherited_band = self.roots[source_index].effective_band;
+        let target_id = self.roots[target].id;
 
-        // Find the displaced popup before borrowing either concrete RootChrome mutably. Retained
-        // handles use checked RefCell access, so a conflicting application borrow returns a typed
-        // error without partially changing visibility, geometry, or semantic dismissal state.
-        let mut other = None;
-        for (index, entry) in self.roots.iter().enumerate() {
-            if index == target || entry.kind != WindowKind::Popup {
-                continue;
-            }
-            if entry.root_widget.try_read(RootChrome::is_visible).ok_or(RootMutationError::Borrowed)? {
-                other = Some(index);
-                break;
-            }
+        // A target already present in the retained prefix would make one of its descendants its new
+        // parent. A target in the replaced suffix is valid: keep it visible, dismiss its old branch,
+        // and move it directly after the initiating popup.
+        if self.popup_stack[..keep_len].contains(&target_id) {
+            return Err(RootMutationError::InvalidPopupInitiator);
         }
+        let displaced = self.popup_stack[keep_len..]
+            .iter()
+            .rev()
+            .copied()
+            .filter(|root| *root != target_id)
+            .map(|root| self.root_index(root))
+            .collect::<Result<Vec<_>, _>>()?;
 
-        if let Some(other) = other {
-            let old = self.roots[other].root_widget.clone();
-            let new = self.roots[target].root_widget.clone();
-            let changed = old.try_update(|old_state| {
-                new.try_update(|new_state| {
-                    // Replacement is indistinguishable from an outside press to the displaced
-                    // component: close it semantically before making the new popup observable.
-                    old_state.dismiss_popup();
-                    new_state.set_rect_silent(anchor);
-                    new_state.set_visible_silent(true);
-                })
-                .is_some()
-            });
-            match changed {
-                Some(true) => self.roots[other].clear_transient_targets(),
-                Some(false) | None => return Err(RootMutationError::Borrowed),
-            }
-        } else {
-            let root = self.roots[target].id;
-            self.update_root_widget(root, |state| {
+        // Preflight every checked mutable root access before changing visibility so one conflicting
+        // application borrow cannot expose a partially replaced popup chain.
+        for index in displaced.iter().copied().chain(std::iter::once(target)) {
+            self.roots[index].root_widget.try_update(|_| {}).ok_or(RootMutationError::Borrowed)?;
+        }
+        for index in displaced {
+            self.roots[index]
+                .root_widget
+                .try_update(RootChrome::dismiss_popup)
+                .ok_or(RootMutationError::Borrowed)?;
+            self.roots[index].clear_transient_targets();
+        }
+        self.roots[target]
+            .root_widget
+            .try_update(|state| {
                 state.set_rect_silent(anchor);
                 state.set_visible_silent(true);
-            })?;
-        }
+            })
+            .ok_or(RootMutationError::Borrowed)?;
 
         // Commit inheritance only after all checked widget borrows succeeded, so a failed popup
         // replacement cannot leave a hidden root attached to a new source. The transient tier in
         // StackKey places this popup above roots in the inherited band but below the next layer.
         self.roots[target].layer_binding = LayerBinding::Inherited(source);
         self.roots[target].effective_band = inherited_band;
+        self.popup_stack.truncate(keep_len);
+        self.popup_stack.push(target_id);
         self.raise_root_index(target);
         self.invalidate_ui_commit();
         Ok(())
     }
 
     /// Resolves a popup initiator to the non-popup root that owns its effective layer.
-    fn popup_layer_source(&self, initiator: RootId, target: RootId) -> Result<RootId, RootMutationError> {
+    fn popup_layer_source(&self, initiator: RootId, target: RootId) -> Result<(RootId, usize), RootMutationError> {
         if initiator == target {
             return Err(RootMutationError::InvalidPopupInitiator);
         }
@@ -567,13 +578,20 @@ impl WindowManager {
             return Err(RootMutationError::InvalidPopupInitiator);
         }
 
-        // A popup can initiate a submenu. Because every shown popup stores an already-normalized
-        // non-popup source, one lookup collapses an arbitrarily deep transient chain without
-        // retaining a parent/child window hierarchy or permitting inheritance cycles.
-        let source = match self.roots[initiator_index].kind {
-            WindowKind::Window | WindowKind::Modal => initiator,
+        // A popup can initiate a submenu. Its position in the sole active chain directly identifies
+        // the prefix retained by the child; layer inheritance stays normalized to the non-popup
+        // source so stacking and modal eligibility remain independent of chain depth.
+        let (source, keep_len) = match self.roots[initiator_index].kind {
+            WindowKind::Window | WindowKind::Modal => (initiator, 0),
             WindowKind::Popup => match self.roots[initiator_index].layer_binding {
-                LayerBinding::Inherited(source) => source,
+                LayerBinding::Inherited(source) => {
+                    let position = self
+                        .popup_stack
+                        .iter()
+                        .position(|root| *root == initiator)
+                        .ok_or(RootMutationError::InvalidPopupInitiator)?;
+                    (source, position + 1)
+                }
                 LayerBinding::Fixed(_) | LayerBinding::Unbound | LayerBinding::Modal => {
                     return Err(RootMutationError::InvalidPopupInitiator);
                 }
@@ -596,52 +614,47 @@ impl WindowManager {
         {
             return Err(RootMutationError::InvalidPopupInitiator);
         }
-        Ok(source)
+        Ok((source, keep_len))
     }
 
-    /// Dismisses the one globally visible popup if it inherits from `source`.
+    /// Dismisses every visible popup descended from `source`.
     fn dismiss_popup_initiated_by(&mut self, source: RootId) -> Result<(), RootMutationError> {
-        // Several retained menu popups may remember the same source after earlier openings. Search
-        // for the visible member rather than stopping at the first hidden inherited binding.
-        let popup = self.roots.iter().enumerate().find_map(|(index, entry)| {
-            if entry.kind != WindowKind::Popup || entry.layer_binding != LayerBinding::Inherited(source) {
-                return None;
-            }
-            entry
-                .root_widget
-                .try_read(RootChrome::is_visible)
-                .map(|visible| visible.then_some(index))
-                .ok_or(RootMutationError::Borrowed)
-                .transpose()
-        });
-        let Some(index) = popup.transpose()? else { return Ok(()) };
-        self.roots[index]
-            .root_widget
-            .try_update(RootChrome::dismiss_popup)
-            .ok_or(RootMutationError::Borrowed)?;
-        self.roots[index].clear_transient_targets();
-        Ok(())
+        let source_index = self.root_index(source)?;
+        let start = if self.roots[source_index].kind == WindowKind::Popup {
+            self.popup_stack.iter().position(|root| *root == source).map(|position| position + 1)
+        } else {
+            let Some(first) = self.popup_stack.first().copied() else { return Ok(()) };
+            let first_index = self.root_index(first)?;
+            (self.roots[first_index].layer_binding == LayerBinding::Inherited(source)).then_some(0)
+        };
+        let Some(start) = start else { return Ok(()) };
+        self.dismiss_popup_suffix(start)
     }
 
-    /// Dismisses the globally visible popup, if any, through checked retained access.
+    /// Dismisses the sole visible popup chain through checked retained access.
     fn dismiss_visible_popup(&mut self) -> Result<(), RootMutationError> {
-        let popup = self.roots.iter().enumerate().find_map(|(index, entry)| {
-            if entry.kind != WindowKind::Popup {
-                return None;
-            }
-            entry
+        self.dismiss_popup_suffix(0)
+    }
+
+    /// Dismisses one suffix of the active chain from the deepest transient upward.
+    fn dismiss_popup_suffix(&mut self, start: usize) -> Result<(), RootMutationError> {
+        let popups = self.popup_stack[start..]
+            .iter()
+            .rev()
+            .copied()
+            .map(|root| self.root_index(root))
+            .collect::<Result<Vec<_>, _>>()?;
+        for index in &popups {
+            self.roots[*index].root_widget.try_update(|_| {}).ok_or(RootMutationError::Borrowed)?;
+        }
+        for index in popups {
+            self.roots[index]
                 .root_widget
-                .try_read(RootChrome::is_visible)
-                .map(|visible| visible.then_some(index))
-                .ok_or(RootMutationError::Borrowed)
-                .transpose()
-        });
-        let Some(index) = popup.transpose()? else { return Ok(()) };
-        self.roots[index]
-            .root_widget
-            .try_update(RootChrome::dismiss_popup)
-            .ok_or(RootMutationError::Borrowed)?;
-        self.roots[index].clear_transient_targets();
+                .try_update(RootChrome::dismiss_popup)
+                .ok_or(RootMutationError::Borrowed)?;
+            self.roots[index].clear_transient_targets();
+        }
+        self.popup_stack.truncate(start);
         Ok(())
     }
 
@@ -677,6 +690,10 @@ impl WindowManager {
         // borrow is an invariant violation rather than a recoverable partial mutation.
         self.dismiss_popup_initiated_by(root)
             .expect("popup initiated by a destroyed root is unexpectedly borrowed");
+        if let Some(position) = self.popup_stack.iter().position(|candidate| *candidate == root) {
+            debug_assert_eq!(position + 1, self.popup_stack.len());
+            self.popup_stack.truncate(position);
+        }
         let index = self.root_index(root).expect("destroy target must remain registered after popup dismissal");
         let kind = self.roots[index].kind;
         self.roots.remove(index);
@@ -1026,23 +1043,27 @@ impl WindowManager {
     }
 
     fn dismiss_outside_popup(&mut self, mouse: Vec2i) {
-        let popup = self.roots.iter().enumerate().find_map(|(index, entry)| {
-            if entry.kind != WindowKind::Popup {
-                return None;
-            }
-            entry
-                .root_widget
-                .try_read(|state| state.is_visible() && !state.rect().contains(&mouse))
-                .unwrap_or_else(|| self.root_access_failure(index))
-                .then_some(index)
-        });
-        if let Some(index) = popup {
-            self.roots[index]
-                .root_widget
-                .try_update(RootChrome::dismiss_popup)
-                .unwrap_or_else(|| self.root_access_failure(index));
-            self.roots[index].clear_transient_targets();
-        }
+        // A press inside one popup keeps the chain prefix through that popup. A press outside the
+        // complete chain keeps no prefix. Use the actual stacking key because callers may explicitly
+        // reorder overlapping popup roots with bring_root_to_front.
+        let keep_len = self
+            .popup_stack
+            .iter()
+            .enumerate()
+            .filter_map(|(position, root)| {
+                let index = self.root_index(*root).expect("active popup must remain registered");
+                let entry = &self.roots[index];
+                entry
+                    .root_widget
+                    .try_read(|state| state.is_visible() && state.rect().contains(&mouse))
+                    .unwrap_or_else(|| self.root_access_failure(index))
+                    .then_some((entry.stack_key(), position + 1))
+            })
+            .max_by_key(|(key, _)| *key)
+            .map(|(_, keep_len)| keep_len)
+            .unwrap_or(0);
+        self.dismiss_popup_suffix(keep_len)
+            .expect("popup root unavailable during outside-press dismissal");
     }
 
     /// Maps a pointer target to the ordinary root whose keyboard activation it represents.

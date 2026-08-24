@@ -12,7 +12,8 @@
   upload and clipping behavior.
 - [`demo-full`](../examples/demo-full.rs) combines retained widgets, per-window File/View/Help
   menus, dialogs, custom drawing, external textures, and custom backend rendering. Its menu shows
-  grouped and disabled commands, shortcut hints, a live checked item, radio choices, and typed
+  grouped and disabled commands, shortcut hints, a live checked item, radio choices in a cascading
+  View > Log Spacing submenu, and typed
   command dispatch into the file dialog, log, and style state. A separate titleless fullscreen root
   at layer 0 renders a perspective X-Y grid beneath the original Demo Window and every other
   default-layer floating window. The grid surface owns an independent Grid/Help menu whose popups

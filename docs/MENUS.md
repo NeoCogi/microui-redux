@@ -7,11 +7,11 @@ owns a typed event port and the application registers that exact item with its h
 The ownership flow is:
 
 ```text
-MenuItem node -> MenuGroup -> Menu -> MenuPanel -> WindowMenu::create -> Context roots
+MenuItem node / Submenu -> MenuGroup -> Menu -> MenuPanel -> WindowMenu::create -> Context roots
 ```
 
 `Node` is the unique owner while the menu is being assembled. After `WindowMenu::create`, the
-`Context` owns the window tree and one popup tree per top-level menu. `WindowMenu` is an
+`Context` owns the window tree and one popup tree per menu or submenu. `WindowMenu` is an
 application-owned coordinator containing weak widget and root handles; it does not own those roots.
 
 ## Concrete types
@@ -19,12 +19,13 @@ application-owned coordinator containing weak widget and root handles; it does n
 | Type | Role |
 | --- | --- |
 | `MenuItem` | Pointer-operated leaf widget with a label, enabled state, visual mark, shortcut hint, and typed submission port. |
-| `MenuGroup` | Ordered item nodes; empty groups are skipped during assembly. |
+| `Submenu` | Recursively composed label and groups opened beside its parent menu. |
+| `MenuGroup` | Ordered item nodes or appended submenus; empty groups are skipped during assembly. |
 | `Menu` | One top-level heading and its groups. |
 | `MenuPanel` | Ordered top-level menus consumed during window construction. |
 | `WindowMenu` | Coordinates the persistent bar, popup roots, active index, and owning window. |
 
-None of these types has a type parameter. `MenuGroup`, `Menu`, and `MenuPanel` are one-shot
+None of these types has a type parameter. `Submenu`, `MenuGroup`, `Menu`, and `MenuPanel` are one-shot
 composition values. Keep a `TypedWidgetHandle<MenuItem>` only when application code needs to read or
 change that retained item later.
 
@@ -122,6 +123,31 @@ let file = Menu::new("File", [
 Separators are private, non-interactive widgets. Applications do not create sentinel entries or
 encode separator positions in a command list.
 
+## Cascading submenus
+
+`Submenu` uses the same groups and concrete item nodes as a top-level menu and may recursively
+contain another submenu. Add it as its own group, or append it after existing items in a group:
+
+```rust
+let view = Menu::new("View", [
+    MenuGroup::new([word_wrap_node]),
+    MenuGroup::submenu(Submenu::new("Spacing", [
+        MenuGroup::new([comfortable_node, compact_node]),
+    ])),
+]);
+```
+
+Left-pressing the submenu row opens its retained popup beside the parent. The parent and all of its
+ancestors stay visible. Opening a sibling submenu replaces only the older descendant branch;
+selecting a registered item or pressing outside the complete chain closes every level.
+
+## Menu colors
+
+`Style::menu_foreground` colors menu-bar labels, item text, marks, submenu arrows, and separators.
+`Style::menu_background` fills the persistent menu bar and every popup menu surface, including all
+cascading levels. Both fields participate in ordinary context and cascading per-node style
+resolution.
+
 ## Live item state
 
 Enabled and mark state have convenience methods on the typed handle. Each operation returns `None`
@@ -159,7 +185,8 @@ the next layout commit.
 ## Opening, switching, and dismissal
 
 `WindowMenu::create` creates one ordinary window containing the menu bar and supplied body, plus one
-initially hidden, auto-sized popup root per top-level menu. Popup indices match heading order.
+initially hidden, auto-sized popup root per top-level menu and submenu. Public top-level popup
+indices match heading order.
 
 Opening a heading binds its popup to the owning window's effective layer. The popup uses the
 transient tier above ordinary roots in that layer, including the menu window, but it never crosses a
@@ -172,6 +199,7 @@ Interaction is pointer-driven:
 - left-pressing a closed heading opens its existing popup below that heading;
 - left-pressing the active heading toggles it closed;
 - left-pressing another heading switches to that popup;
+- left-pressing a submenu row opens it beside the retained parent chain;
 - selecting a registered, enabled item closes the active popup before its handler runs;
 - an outside pointer press or replacement by another popup dismisses the active popup and clears the
   heading highlight.
@@ -187,7 +215,8 @@ programmatically opening a heading in this alpha.
 
 `WindowMenu::window` returns the ordinary `RootHandle`. `WindowMenu::popups` and
 `WindowMenu::popup` return typed `PopupHandle` values in heading order. These are weak handles to
-roots retained by `Context`.
+top-level roots retained by `Context`; `WindowMenu::all_popups` additionally includes every submenu
+root in parent-before-descendant order for inspection and whole-component teardown.
 
 Treat those handles as inspection and whole-component lifetime capabilities. Calling
 `Context::show_popup`, `Context::show_popup_at`, or the hiding form of
@@ -206,6 +235,5 @@ the `WindowMenu` without using it again.
 - Menu operation is pointer-only; there is no keyboard navigation or mnemonic handling.
 - `shortcut_hint` draws text only. It does not register or dispatch an accelerator.
 - Check and radio marks are application-managed presentation, not automatic selection behavior.
-- Cascading submenus are not represented.
 - Hovering another heading while a menu is open does not switch menus; press the heading instead.
 - The bar and items preserve the application's existing keyboard focus while pointer menus operate.

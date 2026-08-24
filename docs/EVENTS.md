@@ -433,8 +433,8 @@ widgets. Multiple component instances are independent and participate in the gen
 
 `WindowMenu` uses the same application-owned component binding for a different root composition.
 Applications create and register concrete `MenuItem` event sources, then move their nodes through
-concrete groups, menus, and a panel. The component mounts a persistent bar, retains one popup root
-per top-level menu, and consumes generic popup-dismissal events internally. Item-specific handlers
+concrete groups, recursive submenus, menus, and a panel. The component mounts a persistent bar,
+retains one popup root per menu level, and consumes generic popup-dismissal events internally. Item-specific handlers
 receive `MenuItemSubmitted` directly; no command payload or generic menu model intervenes. See the
 [menu guide](MENUS.md) for construction, state mutation, and current keyboard-navigation scope.
 

@@ -34,6 +34,9 @@ model with a fullscreen menu-bearing X-Y grid surface beneath independent floati
     - [x] The exposed grid supports left-drag arcball rotation, bounded wheel zoom, and menu-driven view reset; homogeneous six-plane segment clipping prevents behind-camera projections from emitting stray geometry.
     - [x] The original movable, resizable Demo Window and all other independent windows remain at the default layer above the grid; modal dialogs remain topmost.
 - [x] Added retained and downstream tests for layer validation, bounded raising, popup inheritance and lifetime, modal popups, active-root keyboard routing, and no-padding chrome geometry.
+- [x] Added recursively composed cascading `Submenu` values and retained popup ancestor chains.
+    - [x] `Style::menu_foreground` and `Style::menu_background` consistently color menu bars, menu items, popup surfaces, and every submenu level.
+    - [x] `demo-full` exposes its spacing radio choices through View > Log Spacing and includes the two menu colors in its live style editor.
 
 ## Version 0.8.0-alpha.4
 
@@ -55,7 +58,7 @@ model with a fullscreen menu-bearing X-Y grid surface beneath independent floati
     - [x] Each item owns its typed `MenuItemSubmitted` source and live enabled/check/radio presentation; top-level menus retain independent auto-sized popup trees.
     - [x] `PopupHandle` gives `show_popup_at` compile-time root-kind safety for anchored placement and popup exclusivity.
     - [x] `demo-full` includes File, View, and Help menus that invoke application behavior and update live item state.
-    - [x] Shortcut hints are presentation-only; keyboard navigation, mnemonics, automatic check/radio behavior, and cascading submenus are not implemented in this alpha.
+    - [x] Shortcut hints are presentation-only; keyboard navigation, mnemonics, and automatic check/radio behavior are not implemented in this alpha.
 
 ## Version 0.8.0-alpha.3
 
