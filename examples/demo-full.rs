@@ -1439,10 +1439,23 @@ impl State {
         };
 
         // Create and register concrete items first, compose them into the concrete hierarchy, then
-        // attach that panel above the existing uniquely owned demo content.
+        // attach that panel above the existing uniquely owned demo content. The placeholder extent
+        // is replaced from the real drawable dimensions by `sync_fullscreen_surface` every frame;
+        // construction cannot yet observe the platform window size.
         let (menu_panel, menu_items) = demo_menu_panel(ctx);
-        let window_menu = WindowMenu::create(ctx, Self::window_menu_mut, "Demo Window", rect(40, 40, 300, 450), menu_panel, demo_node);
+        let window_menu = WindowMenu::create(ctx, Self::window_menu_mut, "Demo Window", rect(0, 0, 1, 1), menu_panel, demo_node);
         let demo_root = window_menu.window().clone();
+        // Layer zero turns the main application surface into a stable desktop beneath every
+        // ordinary floating demo window, all of which retain the default fixed layer 15. Removing
+        // chrome and only the root-owned padding gives the persistent menu bar an edge-to-edge
+        // surface without changing spacing inside any descendant control.
+        ctx.set_root_layer(demo_root.id(), MIN_LAYER)
+            .expect("demo root must accept the bottom application layer");
+        ctx.set_root_options(
+            demo_root.id(),
+            WindowOption::NO_TITLE | WindowOption::NO_CLOSE | WindowOption::NO_RESIZE | WindowOption::NO_PADDING,
+        )
+        .expect("demo root must accept fullscreen chrome options");
         let _style_root = ctx.create_window("Style Editor", rect(350, 250, 300, 240), style_node);
         let _log_root = ctx.create_window("Log Window", rect(350, 40, 300, 200), log_node);
         let combo_popup_root = ctx.create_popup("Combo Box Popup", combo_node);
@@ -1485,7 +1498,7 @@ impl State {
             .expect("combo state unavailable");
         let combo_items = combo_item_pairs.map(|(_, runtime)| runtime);
         let window_info_value_pairs =
-            ["40, 40", "300, 450", "0.0"].map(|label| stateful_leaf::<ListItemBuilder>(ListItemParameters::with_opt(label, WidgetOption::NO_INTERACT)));
+            ["0, 0", "1, 1", "0.0"].map(|label| stateful_leaf::<ListItemBuilder>(ListItemParameters::with_opt(label, WidgetOption::NO_INTERACT)));
         let window_info_value_states = window_info_value_pairs.each_ref().map(|(state, _)| state.clone());
         let window_info_values = window_info_value_pairs.map(|(_, runtime)| runtime);
         let (submit_button_submitted, submit_button) = centered_button("Submit");
@@ -1686,7 +1699,6 @@ impl State {
             context.subscribe_context_with(submitted.clone(), index, Self::combo_item).unwrap();
         }
         context.subscribe(self.combo_popup_root.submitted(), Self::combo_popup_submitted).unwrap();
-        context.subscribe_context(self.demo_root.changed(), Self::demo_root_changed).unwrap();
         for (submitted, label) in self.popup_button_submitted.iter().zip(["Hello", "World"]) {
             context.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
         }
@@ -1897,27 +1909,6 @@ impl State {
             "Selected compact control spacing"
         });
     }
-    fn demo_root_changed(&mut self, context: &mut EventContext<'_>, event: &RootChanged) {
-        // Root chrome emits only after a user-driven move or resize, replacing the old frame-time
-        // rectangle readback. Clamp the demo-specific minimum at this same mutation boundary.
-        let mut rect = event.rect;
-        rect.width = rect.width.max(240);
-        rect.height = rect.height.max(300);
-        if (rect.width, rect.height) != (event.rect.width, event.rect.height) {
-            context.set_root_rect(self.demo_root.id(), rect).expect("demo root must exist");
-        }
-
-        // Update retained diagnostics from the event snapshot rather than sampling RootChrome on
-        // every frame. The FPS field is independently produced by the frame callback below.
-        let [value_pos, value_size, _] = &self.window_info_value_states;
-        value_pos
-            .try_update(|value| value.set_label(format!("{}, {}", rect.x, rect.y)))
-            .expect("window position state unavailable");
-        value_size
-            .try_update(|value| value.set_label(format!("{}, {}", rect.width, rect.height)))
-            .expect("window size state unavailable");
-    }
-
     fn submit_log(&mut self, text: String) {
         self.write_log(text.as_str());
         self.submit_buf_state.try_update(Textbox::clear).expect("submit textbox unavailable");
@@ -2419,7 +2410,31 @@ impl State {
         }
     }
 
-    fn process_frame(&mut self, ctx: &mut Context<SelectedBackend, Self>) {
+    /// Keeps the chromeless application surface exactly aligned with the drawable viewport.
+    fn sync_fullscreen_surface(&mut self, ctx: &mut Context<SelectedBackend, Self>, dimensions: Dimensioni) {
+        // The platform owns drawable dimensions, while Context owns retained root geometry. Join
+        // those authorities once per host frame so window resizes become visible in the second
+        // update/layout commit performed by the shared example runner before painting.
+        ctx.set_root_rect(self.demo_root.id(), rect(0, 0, dimensions.width, dimensions.height))
+            .expect("fullscreen demo root must remain registered");
+
+        // The diagnostic rows describe this fixed application surface. Position is invariant and
+        // size comes from the same authoritative dimensions used above, so neither value depends on
+        // user-driven RootChanged events from chrome that this surface intentionally does not have.
+        let [value_pos, value_size, _] = &self.window_info_value_states;
+        value_pos
+            .try_update(|value| value.set_label("0, 0"))
+            .expect("window position state unavailable");
+        value_size
+            .try_update(|value| value.set_label(format!("{}, {}", dimensions.width, dimensions.height)))
+            .expect("window size state unavailable");
+    }
+
+    /// Applies application-owned animation, style, and viewport state between update commits.
+    fn process_frame(&mut self, ctx: &mut Context<SelectedBackend, Self>, dimensions: Dimensioni) {
+        // Synchronize geometry before the style and animated state changes below; all of them are
+        // consumed together by the runner's post-callback retained update.
+        self.sync_fullscreen_surface(ctx, dimensions);
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
@@ -2468,7 +2483,7 @@ fn main() {
 
     app.event_loop_events(
         |state, context| state.subscribe_events(context),
-        |ctx, state, _dimensions| state.process_frame(ctx),
+        |ctx, state, dimensions| state.process_frame(ctx, dimensions),
     );
 }
 
