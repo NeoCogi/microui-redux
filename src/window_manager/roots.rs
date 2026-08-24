@@ -424,6 +424,8 @@ impl WindowManager {
     ///
     /// Showing a dialog pushes it onto the modal stack. Hiding the active dialog restores the
     /// previous visible dialog, if any; otherwise ordinary cross-root routing resumes.
+    /// Showing a popup is rejected because this generic operation cannot identify the source layer;
+    /// use [`Self::show_popup`] or [`Self::show_popup_at`]. Hiding a popup remains supported.
     ///
     /// This is distinct from [`crate::Context::destroy_root`], which drops the complete retained owner.
     pub fn set_root_visible(&mut self, root: RootId, visible: bool) -> Result<(), RootMutationError> {
@@ -643,9 +645,10 @@ impl WindowManager {
         Ok(())
     }
 
-    /// Raises a registered root and reports whether it exists.
+    /// Raises a registered root inside its effective layer and reports whether it exists.
     ///
-    /// The active modal dialog remains above every other root raised through this operation.
+    /// The operation cannot cross a numeric application-layer boundary, and the active modal
+    /// dialog remains above every application root.
     pub fn bring_root_to_front(&mut self, root: RootId) -> bool {
         let Some(index) = self.roots.iter().position(|entry| entry.id == root) else {
             return false;

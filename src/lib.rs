@@ -166,8 +166,9 @@
 //! measurement results.
 //! Retained application logic uses typed weak widget handles returned beside mounted nodes.
 //! The [`retained`] module and repository examples document the 0.8 alpha retained-authoring API.
-//! This release is versioned `0.8.0-alpha.4` and adds application-owned retained components,
-//! reusable scrolling primitives, and per-window menus to that redesign.
+//! This release is versioned `0.8.0-alpha.5` and adds sixteen fixed application layers,
+//! source-bound popup stacking, independent root activation, and fullscreen application surfaces
+//! to that redesign.
 //!
 //! # Rendering pipeline
 //!

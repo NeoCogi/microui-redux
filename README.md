@@ -7,7 +7,7 @@
 using unique owning `Node` trees, typed weak widget handles, context-owned roots, and typed backend
 frames.
 
-> **Alpha status:** `0.8.0-alpha.4` is the current alpha of the breaking retained-API
+> **Alpha status:** `0.8.0-alpha.5` is the current alpha of the breaking retained-API
 > redesign. The 0.8 line is not API-compatible with 0.7 and may continue to evolve before the
 > stable 0.8.0 release.
 
@@ -23,7 +23,7 @@ Use the explicit alpha version while the retained API is being evaluated:
 
 ```toml
 [dependencies]
-microui-redux = "0.8.0-alpha.4"
+microui-redux = "0.8.0-alpha.5"
 ```
 
 `microui-redux` does not create a native window or graphics device. Applications provide a

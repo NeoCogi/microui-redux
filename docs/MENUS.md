@@ -161,6 +161,12 @@ the next layout commit.
 `WindowMenu::create` creates one ordinary window containing the menu bar and supplied body, plus one
 initially hidden, auto-sized popup root per top-level menu. Popup indices match heading order.
 
+Opening a heading binds its popup to the owning window's effective layer. The popup uses the
+transient tier above ordinary roots in that layer, including the menu window, but it never crosses a
+higher fixed application layer. Changing the window's fixed layer also moves any popup retaining
+that source binding. The component supplies the initiator internally; applications do not need to
+coordinate layer state for normal heading interaction.
+
 Interaction is pointer-driven:
 
 - left-pressing a closed heading opens its existing popup below that heading;
@@ -184,9 +190,11 @@ programmatically opening a heading in this alpha.
 roots retained by `Context`.
 
 Treat those handles as inspection and whole-component lifetime capabilities. Calling
-`Context::set_root_visible` or `Context::show_popup_at` directly on a menu popup bypasses the
-coordinator and can make root visibility disagree with `active_menu` and the bar highlight. Use the
-heading interaction or `WindowMenu::close` for normal menu state changes.
+`Context::show_popup`, `Context::show_popup_at`, or the hiding form of
+`Context::set_root_visible` directly on a menu popup bypasses the coordinator and can make root
+visibility disagree with `active_menu` and the bar highlight. Generic visibility cannot show a
+popup because it lacks the required initiating root. Use the heading interaction or
+`WindowMenu::close` for normal menu state changes.
 
 `WindowMenu` assumes its window, bar, and every popup remain registered. Destroying one of those
 roots and then calling component operations can panic. There is no component teardown helper in this

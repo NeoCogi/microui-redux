@@ -62,15 +62,62 @@ Window and dialog creation consume one persistent application `Node` and return 
 `RootHandle`; popup creation returns the more specific non-owning `PopupHandle`.
 Roots cannot be replaced while retaining their identity: mutate descendants through a container
 state's weak topology capability, or destroy and recreate the root. Visibility is controlled with
-`set_root_visible`.
-A composed control with an exact screen-space popup anchor uses `show_popup_at`, which applies
-placement, popup exclusivity, dismissal of a displaced popup, z-order, and visibility in one checked
-window-manager transaction. Its `PopupHandle` parameter makes ordinary windows and dialogs
-ineligible at compile time. Per-window application menus use this path so each already-retained
-top-level popup is positioned directly below the heading observed by the opening event.
-A visible dialog is modal: it stays above every window and popup, receives all eligible pointer,
-keyboard, text, focus, and capture routing, and blocks interaction with other roots until hidden or
-destroyed. Other roots remain visible and continue to be laid out and painted.
+`set_root_visible`; showing a popup is the deliberate exception because visibility alone cannot
+identify the layer it must inherit.
+
+### Root layers, transients, and activation
+
+Ordinary windows occupy one of sixteen fixed application layers. Layer `0` is the bottom, layer
+`15` is the top and the default, and `Context::set_root_layer(root, layer)` changes an ordinary
+window's `LayerBinding::Fixed(u8)`. Numeric validation uses `MIN_LAYER`, `MAX_LAYER`, and
+`DEFAULT_LAYER`. Popups and dialogs reject direct assignment because the window manager owns their
+bindings.
+
+Within a fixed layer, ordinary roots retain their usual z-order and `bring_root_to_front` raises a
+root only among peers in that layer. A root in layer `N` cannot be raised across a root in layer
+`N + 1`. Pointer hit testing and painting consume the same complete stacking key, so overlap always
+selects the root that is visually in front.
+
+A composed control opens a popup with `show_popup(&popup, initiator)` at the current pointer or
+`show_popup_at(&popup, initiator, anchor)` at an exact screen-space rectangle. Both operations name
+the root whose widget initiated the transient. The popup records `LayerBinding::Inherited(source)`
+and occupies a transient tier above all ordinary roots in that effective layer, but below the next
+fixed layer. The `PopupHandle` parameter makes ordinary windows and dialogs ineligible as targets at
+compile time; the explicit `RootId` makes inheritance authoritative. Calling
+`set_root_visible(popup.id(), true)` is rejected with `PopupInitiatorRequired`, while hiding through
+generic visibility remains supported. Per-window application menus use the anchored operation with
+their owning window as source.
+
+Dialogs occupy a dedicated modal band above all sixteen numeric layers. The active dialog and a
+popup it initiates form the only input-eligible modal group; that popup's transient tier is above the
+dialog itself. Other roots remain visible, laid out, and painted but cannot interact until the
+dialog is hidden or destroyed.
+
+Visual order is deliberately separate from keyboard activation. A pointer press records the
+ordinary `active_root` (or a popup's ordinary source) without moving it to a different fixed layer.
+Keyboard and text input return to that root after the press, while pointer overlap still follows
+the visual stack. Modal policy and active pointer capture take precedence. Hiding or destroying the
+active root clears the record.
+
+A fullscreen application surface is therefore an ordinary window at layer `0`, not a special root
+kind or a parent window. Remove its chrome and outer inset, keep its rectangle synchronized with the
+drawable viewport, and let independent windows use the default layer:
+
+```rust,ignore
+context.set_root_layer(surface.id(), MIN_LAYER)?;
+context.set_root_options(
+    surface.id(),
+    WindowOption::NO_TITLE
+        | WindowOption::NO_CLOSE
+        | WindowOption::NO_RESIZE
+        | WindowOption::NO_PADDING,
+)?;
+context.set_root_rect(surface.id(), rect(0, 0, dimensions.width, dimensions.height))?;
+```
+
+`NO_PADDING` removes only the root-owned content inset; descendant widgets still use the complete
+`Style`, including ordinary control and container padding. `demo-full` applies this recipe to its
+menu-bearing main surface while its floating windows remain independent default-layer roots.
 
 ```rust
 #[derive(Default)]

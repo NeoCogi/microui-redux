@@ -6,6 +6,32 @@
 - [ ] Theming/Skinning
     - [ ] Win311 Theme
 
+## Version 0.8.0-alpha.5
+
+`0.8.0-alpha.5` adds explicit retained-root layering to the breaking 0.8 API and demonstrates the
+model with a fullscreen menu-bearing application surface beneath independent floating windows.
+
+- [x] Added sixteen fixed application layers for ordinary windows.
+    - [x] Layers are numbered `0` through `15`, ordered bottom to top, and new windows retain the compatibility-preserving default layer `15`.
+    - [x] `Context::set_root_layer` and `EventContext::set_root_layer` assign `LayerBinding::Fixed(u8)`; `root_layer_binding` exposes fixed, inherited, unbound, and modal policy.
+    - [x] Layout, painting, hit testing, and debug inspection share one complete stacking key, so `bring_root_to_front` and pointer activation reorder only within an effective layer.
+- [x] Bound transient roots to the layer of the root that initiated them.
+    - [x] `show_popup` and `show_popup_at` require an initiating `RootId`; the anchored API therefore gains an additional argument in this alpha.
+    - [x] A shown popup uses `LayerBinding::Inherited(source)` and a transient tier above ordinary roots in that source layer, but remains below every higher fixed layer.
+    - [x] Popup-initiated chains normalize to their non-popup source, source layer changes propagate to retained popups, and source hiding or destruction dismisses visible transients.
+    - [x] Generic `set_root_visible(popup, true)` now returns `PopupInitiatorRequired`; generic visibility remains valid for hiding a popup.
+    - [x] `WindowMenu` supplies its owning window as the initiator, keeping every menu panel in the same effective layer as its persistent bar and body.
+- [x] Kept modal policy structurally above the numeric application range.
+    - [x] Dialogs report `LayerBinding::Modal` and reject direct fixed-layer assignment.
+    - [x] A popup initiated by the active dialog occupies the modal transient tier and joins that dialog's exclusive input group; blocked application roots cannot open popups during a modal transaction.
+- [x] Separated ordinary keyboard activation from visual stacking with `active_root`.
+    - [x] Pressing a lower-layer window focuses it without raising it across a higher layer, while overlap hit testing continues to follow visual priority.
+    - [x] Pointer capture, popup-to-source activation, modal routing, root hiding, and destruction reconcile the active root without adding parent-window ownership.
+- [x] Added edge-to-edge application-surface support.
+    - [x] `WindowOption::NO_PADDING` removes only the root-owned content inset and preserves normal descendant style padding.
+    - [x] `demo-full` now resizes its chromeless `WindowMenu` root to the drawable viewport at layer `0`; its independent default-layer windows float above it and modal dialogs remain topmost.
+- [x] Added retained and downstream tests for layer validation, bounded raising, popup inheritance and lifetime, modal popups, active-root keyboard routing, and no-padding chrome geometry.
+
 ## Version 0.8.0-alpha.4
 
 `0.8.0-alpha.4` continues the breaking retained-API redesign from the published

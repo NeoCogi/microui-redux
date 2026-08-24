@@ -130,7 +130,9 @@ impl<'a> EventContext<'a> {
     /// Shows or hides a retained root while preserving its tree and concrete widget state.
     ///
     /// Dialog modal-stack changes and popup exclusivity use the same policy as
-    /// [`Context::set_root_visible`].
+    /// [`Context::set_root_visible`]. Showing a popup through this generic operation is rejected
+    /// because it cannot establish layer inheritance; use [`Self::show_popup`] or
+    /// [`Self::show_popup_at`] instead. Hiding a popup remains supported.
     pub fn set_root_visible(&mut self, root: RootId, visible: bool) -> Result<(), RootMutationError> {
         // Mutate the root synchronously at the safe dispatch boundary so the following layout sees
         // the requested visibility without an application-owned frame flag.
@@ -153,7 +155,9 @@ impl<'a> EventContext<'a> {
         self.window_manager.show_popup_at(popup, initiator, anchor)
     }
 
-    /// Raises a registered root and reports whether it still exists.
+    /// Raises a registered root inside its effective layer and reports whether it still exists.
+    ///
+    /// This operation never moves an ordinary root across another numeric application layer.
     pub fn bring_root_to_front(&mut self, root: RootId) -> bool {
         // Let WindowManager preserve the active modal root above the requested ordinary root.
         self.window_manager.bring_root_to_front(root)
@@ -178,15 +182,16 @@ impl<'a> EventContext<'a> {
 /// to ordinary root hit routing is the popup boundary: an outside pointer press dismisses the
 /// active popup before the event may continue to the root underneath.
 ///
-/// Across ordinary roots, pointer hover and new presses follow topmost hit geometry. Drag, wheel,
-/// keyboard, and text input are confined to the current input root: a root with widget-level
-/// pointer capture remains authoritative, otherwise the front visible root is authoritative.
-/// Captured pointer release still returns to its widget so local drag state is cleaned up.
+/// Across ordinary roots, pointer hover and new presses follow topmost hit geometry. A press raises
+/// its root only within the effective layer and records the ordinary `active_root` independently.
+/// Drag and wheel remain confined by pointer capture or the front eligible visual root; keyboard
+/// and text return to the captured or active root. Captured pointer release still returns to its
+/// widget so local drag state is cleaned up.
 ///
-/// A visible dialog is modal. It remains above every other root and is the only root eligible for
-/// pointer, keyboard, text, focus, or capture routing until it is hidden or destroyed. Pointer
-/// input outside its rectangle is consumed at the cross-root boundary; other roots remain visible
-/// and continue to participate in layout and paint.
+/// A visible dialog is modal. It occupies the dedicated band above all application layers and forms
+/// the only eligible input group together with a popup that it initiates. Pointer input outside
+/// that group is consumed at the cross-root boundary; other roots remain visible and continue to
+/// participate in layout and paint.
 ///
 /// `Context`, its retained state, and its registered custom-render callbacks stay on the thread
 /// that owns the context. The rendering contracts intentionally do not require `Send` or `Sync`;
@@ -401,19 +406,21 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
 
     /// Creates a hidden retained dialog around one uniquely owned application node.
     ///
-    /// Show it with [`Context::set_root_visible`]. A visible dialog becomes the active modal root:
-    /// it stays frontmost and is the only root eligible for input until hidden or destroyed.
-    /// Hiding preserves all descendant state.
+    /// Show it with [`Context::set_root_visible`]. A visible dialog enters the dedicated modal layer
+    /// and becomes the active modal input group. Only that dialog and a popup it initiates remain
+    /// input-eligible until the dialog is hidden or destroyed. Hiding preserves all descendant
+    /// state.
     pub fn create_dialog(&mut self, name: &str, rect: Recti, content: Node) -> RootHandle {
         self.window_manager.create_dialog(name, rect, content)
     }
 
     /// Creates a hidden auto-sized popup around one uniquely owned application node.
     ///
-    /// Showing places it at the current pointer position. An outside press hides it and records a
-    /// submission before ordinary routing may continue beneath the popup boundary. Showing another
-    /// popup also hides this one and records the same dismissal. While a dialog is active, a shown
-    /// popup remains visible but is kept below the dialog and receives no input.
+    /// Show it through [`Self::show_popup`] or [`Self::show_popup_at`], both of which require the
+    /// initiating root. A popup occupies the transient tier above ordinary roots in that source's
+    /// effective layer without crossing a higher layer. A popup initiated by the active dialog is
+    /// placed above the dialog and joins its modal input group. An outside press or another popup
+    /// request hides it and records a submission.
     pub fn create_popup(&mut self, name: &str, content: Node) -> PopupHandle {
         // Return the typed weak capability created by WindowManager so callers cannot request
         // anchored popup policy for an ordinary window or dialog identifier.
@@ -458,6 +465,8 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     ///
     /// Showing a dialog pushes it onto the modal stack. Hiding the active dialog restores the
     /// previous visible dialog, if any; otherwise ordinary cross-root routing resumes.
+    /// Showing a popup is rejected because this generic operation cannot identify the source layer;
+    /// use [`Self::show_popup`] or [`Self::show_popup_at`]. Hiding a popup remains supported.
     ///
     /// This is distinct from [`Context::destroy_root`], which drops the complete retained owner.
     pub fn set_root_visible(&mut self, root: RootId, visible: bool) -> Result<(), RootMutationError> {
@@ -496,9 +505,10 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         self.window_manager.show_popup_at(popup, initiator, anchor)
     }
 
-    /// Raises a registered root and reports whether it exists.
+    /// Raises a registered root inside its effective layer and reports whether it exists.
     ///
-    /// The active modal dialog remains above every other root raised through this operation.
+    /// The operation cannot cross a numeric application-layer boundary, and the active modal
+    /// dialog remains above every application root.
     pub fn bring_root_to_front(&mut self, root: RootId) -> bool {
         self.window_manager.bring_root_to_front(root)
     }

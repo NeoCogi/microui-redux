@@ -208,12 +208,13 @@ use microui_redux::prelude::*;
 
 struct Model {
     popup: PopupHandle,
+    popup_source: RootId,
 }
 
 impl Model {
     fn show_popup(&mut self, context: &mut EventContext<'_>, _: &ButtonSubmitted) {
-        // The root remains Context-owned. EventContext is only an exclusive transaction borrow.
-        context.set_root_visible(self.popup.id(), true).unwrap();
+        // Both roots remain Context-owned. The source makes popup layer inheritance explicit.
+        context.show_popup(&self.popup, self.popup_source).unwrap();
     }
 }
 
@@ -394,8 +395,8 @@ impl Model {
         _: &ButtonSubmitted,
     ) {
         event_context
-            .set_root_visible(self.popup.id(), true)
-            .expect("popup root must remain registered");
+            .show_popup(&self.popup, self.popup_source)
+            .expect("popup and its initiating root must remain registered");
     }
 }
 
@@ -404,23 +405,24 @@ ctx.subscribe_context(open_button.submitted(), Model::show_popup)?;
 
 `EventContext` owns nothing. It is an exclusive borrow of the Context-owned `WindowManager`, lent
 only after the complete retained-tree update has released its widget borrows and returned before
-the following layout. Rust therefore prevents a handler from retaining it, and the same generic
-root operations work for windows, dialogs, and popups without a `PopupController`, overlay
-registry, per-control command enum, or second root lifetime model.
+the following layout. Rust therefore prevents a handler from retaining it. Windows and dialogs use
+generic visibility; a popup is shown with `show_popup` or `show_popup_at` so the same transaction
+can bind it to its initiating root's effective layer. Popup hiding remains a generic visibility
+operation. No `PopupController`, overlay registry, per-control command enum, or second root lifetime
+model is required.
 
 The full demo composes `Combo` and its popup root entirely through typed events. `ComboSubmitted`
 carries the screen-space anchor from the update that routed the header click, so its context-aware
-handler calls `show_popup_at` to update popup visibility and placement atomically in the triggering
-input transaction. The method accepts `PopupHandle`, so a window or dialog cannot accidentally
-enter popup placement policy and no runtime root-kind error is required. The demo state already
-owns both retained handles: `RootSubmitted::PopupDismissed` closes the combo's shared
-semantic state after an outside press or replacement by another popup. Starting a source-window
-move or resize is such an outside press, so the popup is closed before any `RootChanged` movement
-and requires no geometry-following mechanism. This coordination stays with the composed control
-owner instead of leaking popup policy into the base widget or window-manager abstractions. Paint
-does no coordination, and application state performs no per-frame popup polling. The `RootChanged`
-handler updates the demo window's position and size diagnostics and enforces its minimum size; only
-the FPS label remains frame-produced data.
+handler calls `show_popup_at(&popup, source, anchor)` to bind layer inheritance, visibility, and
+placement atomically in the triggering input transaction. The target parameter accepts
+`PopupHandle`, so a window or dialog cannot accidentally enter popup placement policy; the source
+`RootId` identifies the visible window whose widget initiated it. The demo state already owns both
+retained handles: `RootSubmitted::PopupDismissed` closes the combo's shared semantic state after an
+outside press or replacement by another popup. This coordination stays with the composed-control
+owner instead of leaking popup policy into the base widget abstractions. Paint does no
+coordination, and application state performs no per-frame popup polling. The frame callback only
+synchronizes the fullscreen layer-0 application surface with platform dimensions and produces the
+FPS diagnostic.
 
 `FileDialog` remains a reusable crate component while its instance and behavior live application-side.
 The application constructs it with an accessor into its model, stores the returned value there, and
