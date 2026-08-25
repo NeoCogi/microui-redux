@@ -1073,13 +1073,13 @@ fn owned_roots_keep_screen_geometry_independent_and_inherit_lifecycle_recursivel
 }
 
 #[test]
-fn owned_root_creation_rejects_stale_hidden_and_popup_parents_without_partial_registration() {
+fn owned_root_creation_rejects_ineligible_hidden_and_stale_parents() {
     let mut ctx = context();
     let owner = ctx.create_window("owner", rect(0, 0, 100, 80), empty_content());
     let popup = ctx.create_popup(owner.id(), "popup", empty_content()).unwrap();
 
-    // Popups can own popup descendants for cascading menus, but cannot own ordinary or modal
-    // windows. That single rule prevents geometry/lifetime cycles without a reparenting API.
+    // Popup descendants may extend the transient branch, but persistent roots cannot outlive a
+    // transient parent that dismissal hides.
     assert!(matches!(
         ctx.create_child_window(popup.id(), "invalid child", rect(0, 0, 10, 10), empty_content()),
         Err(RootMutationError::InvalidRootParent)
@@ -1090,8 +1090,14 @@ fn owned_root_creation_rejects_stale_hidden_and_popup_parents_without_partial_re
     ));
 
     let dialog = ctx.create_dialog(owner.id(), "hidden dialog", rect(10, 10, 80, 60), empty_content()).unwrap();
+    // Persistent child roots stay in ordinary window groups. Dialog descendants are limited to
+    // popups, whose input policy already follows the modal root.
     assert!(matches!(
         ctx.create_child_window(dialog.id(), "visible child", rect(20, 20, 30, 30), empty_content()),
+        Err(RootMutationError::InvalidRootParent)
+    ));
+    assert!(matches!(
+        ctx.create_dialog(dialog.id(), "nested dialog", rect(20, 20, 30, 30), empty_content()),
         Err(RootMutationError::InvalidRootParent)
     ));
 
@@ -1141,7 +1147,7 @@ fn destroy_expires_handles_and_ids_are_never_reused() {
 
     assert!(ctx.destroy_root(destroyed_id));
     assert!(!ctx.destroy_root(destroyed_id));
-    assert!(!ctx.bring_root_to_front(destroyed_id));
+    assert_eq!(ctx.bring_root_to_front(destroyed_id), Err(RootMutationError::UnknownRoot));
     assert_eq!(ctx.set_root_rect(destroyed_id, rect(1, 2, 3, 4)), Err(RootMutationError::UnknownRoot));
     assert!(!root.widget().is_alive());
     assert!(!button.is_alive());
@@ -1255,6 +1261,12 @@ fn hiding_a_parent_recursively_hides_its_popup_children() {
     let source = ctx.create_window("source", rect(0, 0, 100, 80), empty_content());
     let first = ctx.create_popup(source.id(), "first", empty_content()).unwrap();
     let second = ctx.create_popup(source.id(), "second", empty_content()).unwrap();
+    let mut dispatcher = crate::event::WidgetEventDispatcher::new();
+    fn record(events: &mut Vec<RootSubmitted>, event: &RootSubmitted) {
+        events.push(*event);
+    }
+    dispatcher.subscribe(second.submitted(), record).unwrap();
+    let mut submissions = Vec::new();
 
     ctx.show_popup(&first).unwrap();
     ctx.set_root_visible(first.id(), false).unwrap();
@@ -1263,6 +1275,8 @@ fn hiding_a_parent_recursively_hides_its_popup_children() {
 
     assert_eq!(first.widget().try_read(RootChrome::is_visible), Some(false));
     assert_eq!(second.widget().try_read(RootChrome::is_visible), Some(false));
+    assert!(dispatcher.dispatch(&mut submissions));
+    assert_eq!(submissions, [RootSubmitted::PopupDismissed]);
 }
 
 #[test]
@@ -1303,7 +1317,8 @@ fn outside_popup_press_hides_and_records_typed_submission() {
     assert_eq!(submissions, [RootSubmitted::PopupDismissed]);
     ctx.show_popup(&popup).unwrap();
     ctx.set_root_visible(popup.id(), false).unwrap();
-    assert!(!widget_event_dispatcher.dispatch(&mut submissions));
+    assert!(widget_event_dispatcher.dispatch(&mut submissions));
+    assert_eq!(submissions, [RootSubmitted::PopupDismissed, RootSubmitted::PopupDismissed]);
 }
 
 #[test]
@@ -1370,7 +1385,7 @@ fn fronting_changes_only_cross_root_z_order() {
     let second = ctx.create_window("second", rect(20, 20, 100, 80), empty_content());
     assert_eq!(ctx.debug_rendered_root_names(), ["first", "second"]);
 
-    assert!(ctx.bring_root_to_front(first.id()));
+    ctx.bring_root_to_front(first.id()).unwrap();
     assert_eq!(ctx.debug_rendered_root_names(), ["second", "first"]);
     assert!(ctx.debug_root_zindex(first.id()).unwrap() > ctx.debug_root_zindex(second.id()).unwrap());
 }
@@ -1406,7 +1421,7 @@ fn raising_reorders_only_inside_a_fixed_layer() {
     ctx.set_root_layer(low_second.id(), 2).unwrap();
 
     assert_eq!(ctx.debug_rendered_root_names(), ["low first", "low second", "high"]);
-    assert!(ctx.bring_root_to_front(low_first.id()));
+    ctx.bring_root_to_front(low_first.id()).unwrap();
     assert_eq!(ctx.debug_rendered_root_names(), ["low second", "low first", "high"]);
     assert!(ctx.debug_root_zindex(low_first.id()).unwrap() > ctx.debug_root_zindex(high.id()).unwrap());
 }
@@ -1421,16 +1436,20 @@ fn popup_inherits_its_parent_layer_and_uses_only_that_layers_transient_tier() {
     ctx.set_root_layer(same_layer.id(), 2).unwrap();
     ctx.set_root_layer(higher.id(), 3).unwrap();
     let popup = ctx.create_popup(source.id(), "popup", empty_content()).unwrap();
+    let submenu = ctx.create_popup(popup.id(), "submenu", empty_content()).unwrap();
 
     assert_eq!(ctx.set_root_visible(popup.id(), true), Err(RootMutationError::PopupShowRequired));
     ctx.show_popup_at(&popup, rect(10, 10, 60, 40)).unwrap();
     assert_eq!(ctx.root_layer_binding(popup.id()), Ok(LayerBinding::Inherited(source.id())));
     assert_eq!(ctx.debug_rendered_root_names(), ["source", "same layer", "popup", "higher"]);
+    ctx.update_and_render_ui();
 
     // Inheritance remains live while the popup is visible: moving the fixed source moves its
-    // transient above all roots in the new layer without giving the popup an independent layer.
+    // complete popup subtree, including a hidden submenu that stacking has sorted before its
+    // visible parent, without giving either popup an independent layer.
     ctx.set_root_layer(source.id(), 4).unwrap();
-    assert_eq!(ctx.debug_rendered_root_names(), ["same layer", "higher", "source", "popup"]);
+    ctx.show_popup(&submenu).unwrap();
+    assert_eq!(ctx.debug_rendered_root_names(), ["same layer", "higher", "source", "popup", "submenu"]);
 }
 
 #[test]
@@ -1603,7 +1622,7 @@ fn pointer_captured_root_remains_the_keyboard_and_text_input_root() {
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_root_has_pointer_capture(first.id()), Some(true));
 
-    assert!(ctx.bring_root_to_front(second.id()));
+    ctx.bring_root_to_front(second.id()).unwrap();
     ctx.keydown(KeyMode::SHIFT);
     ctx.text("captured");
     ctx.update_and_render_ui();
@@ -1642,10 +1661,12 @@ fn visible_dialog_is_the_sole_pointer_root_and_remains_frontmost() {
     assert!(dialog_dispatcher.dispatch(&mut dialog_submissions));
     assert_eq!(dialog_submissions, 1);
 
-    assert!(ctx.bring_root_to_front(window.id()));
+    ctx.bring_root_to_front(window.id()).unwrap();
     ctx.set_root_visible(window.id(), true).unwrap();
     assert_eq!(ctx.debug_rendered_root_names(), ["window", "dialog"]);
-    assert!(ctx.debug_root_zindex(dialog.id()).unwrap() > ctx.debug_root_zindex(window.id()).unwrap());
+    // Numeric z-indices are local ordering values; the modal band remains structurally above the
+    // fixed band even after the ordinary window receives the newer number.
+    assert_eq!(ctx.debug_modal_root(), Some(dialog.id()));
 
     ctx.set_root_visible(dialog.id(), false).unwrap();
     assert_eq!(ctx.debug_modal_root(), None);
@@ -1727,7 +1748,7 @@ fn modal_activation_clears_underlying_focus_and_blocks_keyboard_input() {
 }
 
 #[test]
-fn showing_a_dialog_revokes_underlying_chrome_capture() {
+fn modal_routing_revokes_underlying_chrome_capture_before_drag_continues() {
     let mut ctx = context();
     let window = ctx.create_window("window", rect(30, 30, 140, 100), empty_content());
     let dialog = ctx.create_dialog(window.id(), "dialog", rect(170, 120, 100, 80), empty_content()).unwrap();
@@ -1741,11 +1762,11 @@ fn showing_a_dialog_revokes_underlying_chrome_capture() {
     let before = window.widget().try_read(RootChrome::rect).unwrap();
 
     ctx.set_root_visible(dialog.id(), true).unwrap();
-    assert_eq!(ctx.debug_root_has_pointer_capture(window.id()), Some(false));
-    assert_eq!(window.widget().try_read(RootChrome::is_active), Some(false));
     ctx.mousemove(title.x + 20, title.y + 20);
     ctx.mouseup(title.x + 20, title.y + 20, MouseButton::LEFT);
     ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_root_has_pointer_capture(window.id()), Some(false));
+    assert_eq!(window.widget().try_read(RootChrome::is_active), Some(false));
     assert_eq!(
         window.widget().try_read(|state| {
             let rect = state.rect();
@@ -1756,7 +1777,7 @@ fn showing_a_dialog_revokes_underlying_chrome_capture() {
 }
 
 #[test]
-fn hiding_or_destroying_the_active_dialog_restores_the_previous_modal_dialog() {
+fn hiding_or_destroying_the_front_dialog_reveals_the_next_visible_dialog() {
     let mut ctx = context();
     let owner = ctx.create_window("owner", rect(0, 0, 10, 10), empty_content());
     let first = ctx.create_dialog(owner.id(), "first", rect(20, 20, 120, 90), empty_content()).unwrap();
@@ -1787,7 +1808,7 @@ fn hiding_or_destroying_the_active_dialog_restores_the_previous_modal_dialog() {
 }
 
 #[test]
-fn fronting_remains_widget_borrow_independent_and_does_not_replace_the_active_modal() {
+fn fronting_a_visible_dialog_makes_it_the_active_modal() {
     let mut ctx = context();
     let owner = ctx.create_window("owner", rect(0, 0, 10, 10), empty_content());
     let first = ctx.create_dialog(owner.id(), "first", rect(20, 20, 120, 90), empty_content()).unwrap();
@@ -1797,20 +1818,51 @@ fn fronting_remains_widget_borrow_independent_and_does_not_replace_the_active_mo
     ctx.set_root_visible(middle.id(), true).unwrap();
     ctx.set_root_visible(second.id(), true).unwrap();
 
-    first.widget().try_update(|_| assert!(ctx.bring_root_to_front(first.id()))).unwrap();
-    assert_eq!(ctx.debug_modal_root(), Some(second.id()));
-    assert!(ctx.debug_root_zindex(second.id()).unwrap() > ctx.debug_root_zindex(first.id()).unwrap());
+    ctx.bring_root_to_front(first.id()).unwrap();
+    assert_eq!(ctx.debug_modal_root(), Some(first.id()));
+    assert!(ctx.debug_root_zindex(first.id()).unwrap() > ctx.debug_root_zindex(second.id()).unwrap());
+    // Raising the ordinary owner moves only its fixed-band subtree and leaves modal sibling order
+    // untouched.
+    ctx.bring_root_to_front(owner.id()).unwrap();
+    assert_eq!(ctx.debug_modal_root(), Some(first.id()));
 
+    ctx.set_root_visible(first.id(), false).unwrap();
+    assert_eq!(ctx.debug_modal_root(), Some(second.id()));
     ctx.set_root_visible(second.id(), false).unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(middle.id()));
     ctx.set_root_visible(second.id(), true).unwrap();
 
-    second.widget().try_update(|_| assert!(ctx.bring_root_to_front(second.id()))).unwrap();
+    ctx.bring_root_to_front(second.id()).unwrap();
+    assert_eq!(ctx.debug_modal_root(), Some(second.id()));
+
+    // Fronting is now a checked mutation because deriving modal state reads visible root chrome.
+    first
+        .widget()
+        .try_update(|_| assert_eq!(ctx.bring_root_to_front(first.id()), Err(RootMutationError::Borrowed)))
+        .unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(second.id()));
 }
 
 #[test]
-fn modal_restoration_keeps_hiding_and_destruction_independent_of_other_root_borrows() {
+fn fronting_a_dialog_closes_the_previous_modal_groups_popup() {
+    let mut ctx = context();
+    let owner = ctx.create_window("owner", rect(0, 0, 10, 10), empty_content());
+    let first = ctx.create_dialog(owner.id(), "first", rect(20, 20, 120, 90), empty_content()).unwrap();
+    let second = ctx.create_dialog(owner.id(), "second", rect(40, 40, 120, 90), empty_content()).unwrap();
+    ctx.set_root_visible(first.id(), true).unwrap();
+    ctx.set_root_visible(second.id(), true).unwrap();
+    let popup = ctx.create_popup(second.id(), "popup", empty_content()).unwrap();
+    ctx.show_popup_at(&popup, rect(50, 50, 40, 30)).unwrap();
+
+    // Switching dialog groups dismisses the transient that belonged to the previously active group
+    // before changing modal z-order.
+    ctx.bring_root_to_front(first.id()).unwrap();
+    assert_eq!(ctx.debug_modal_root(), Some(first.id()));
+    assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(false));
+}
+
+#[test]
+fn hiding_and_destruction_ignore_unrelated_root_chrome_borrows() {
     let mut ctx = context();
     let window = ctx.create_window("window", rect(0, 0, 100, 80), empty_content());
     let owner = ctx.create_window("owner", rect(160, 120, 100, 80), empty_content());

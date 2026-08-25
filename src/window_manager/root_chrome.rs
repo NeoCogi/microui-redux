@@ -70,7 +70,7 @@ impl RootHandle {
         self.changed.clone()
     }
 
-    /// Returns the native event endpoint emitted for close and outside-popup submissions.
+    /// Returns the native event endpoint emitted for close and popup-dismissal submissions.
     pub fn submitted(&self) -> crate::WidgetEventPortHandle<RootSubmitted> {
         self.submitted.clone()
     }
@@ -224,7 +224,7 @@ impl crate::WidgetEvent for RootChanged {}
 pub enum RootSubmitted {
     /// The user submitted the root's close affordance.
     Close,
-    /// Popup policy dismissed this root through an outside press or replacement by another popup.
+    /// Popup policy dismissed this root through replacement, an outside press, or root-tree hiding.
     PopupDismissed,
 }
 

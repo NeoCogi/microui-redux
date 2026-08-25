@@ -14,23 +14,25 @@ model with a fullscreen menu-bearing X-Y grid surface beneath independent floati
 - [x] Unified Context-owned windows, dialogs, popups, and submenu popups in one stable ownership forest.
     - [x] `create_child_window`, `create_dialog(parent, ...)`, and `create_popup(parent, ...)` record immutable logical parentage while preserving independent screen-space geometry and retained runtimes.
     - [x] Hiding a root hides its complete descendant subtree; destroying it recursively releases every descendant tree and expires every weak handle.
-    - [x] Parent edges now derive inherited layers, popup ancestor branches, modal input membership, and parent-before-descendant raising without separate popup or modal ancestry stacks.
-    - [x] Popup children remain supported for cascading menus, while popup-owned windows/dialogs, stale parents, and visible children of hidden parents are rejected without partial registration.
-    - [x] The manager retains only the active popup leaf and per-dialog activation order: global popup exclusivity and sibling-dialog restoration are history, not ancestry encoded by a tree.
+    - [x] Parent edges now derive inherited layers, popup ancestor branches, modal input membership, and coherent owned-group raising without separate popup or modal ancestry stacks.
+    - [x] Child windows and dialogs require ordinary window parents; popup children remain supported for cascading menus, while modal/transient-owned persistent roots, stale parents, and visible children of hidden parents are rejected without partial registration.
+    - [x] Each entry stores only one topology edge, its direct parent. Subtrees are found by scanning parent links, popup branches come from visible popup ancestry, and the frontmost visible dialog is the active modal; reverse child edges, mirrored visibility, popup-leaf state, and modal activation history are unnecessary.
 
 - [x] Added sixteen fixed application layers for ordinary windows.
-    - [x] Layers are numbered `0` through `15`, ordered bottom to top, and new windows retain the compatibility-preserving default layer `15`.
+    - [x] Layers are numbered `0` through `15`, ordered bottom to top, and new independent windows use the default layer `15`.
     - [x] `Context::set_root_layer` and `EventContext::set_root_layer` assign `LayerBinding::Fixed(u8)` to independent windows; `root_layer_binding` exposes fixed, direct-parent inherited, and modal policy.
     - [x] Layout, painting, hit testing, and debug inspection share one complete stacking key, so `bring_root_to_front` and pointer activation reorder only within an effective layer.
+    - [x] `bring_root_to_front` is a checked mutation: it reports stale roots and modal reconciliation borrow conflicts, preserves sibling order inside the raised group, and does not reorder modal descendants of an ordinary owner.
 - [x] Bound transient roots to stable ownership instead of a show-time source argument.
     - [x] `show_popup` and `show_popup_at` now need only the typed popup handle and optional anchor; `create_popup(parent, ...)` establishes ancestry and inheritance once.
     - [x] A popup uses `LayerBinding::Inherited(direct_parent)` and a transient tier above ordinary roots in its effective band, but remains below every higher fixed layer.
     - [x] Popup-parent chains retain their ancestors, parent layer changes propagate to descendants, and parent hiding or destruction recursively closes the subtree.
-    - [x] Generic `set_root_visible(popup, true)` now returns `PopupShowRequired`; generic visibility remains valid for hiding a popup.
+    - [x] Generic `set_root_visible(popup, true)` now returns `PopupShowRequired`; hiding a visible popup through generic visibility records the same dismissal as every other popup-closing path.
     - [x] `WindowMenu` registers every menu popup under its window or direct parent popup, so submenu opening supplies only placement.
 - [x] Kept modal policy structurally above the numeric application range.
     - [x] Dialogs report `LayerBinding::Modal` and reject direct fixed-layer assignment.
     - [x] A popup owned by the active dialog subtree occupies the modal transient tier and joins that dialog's exclusive input group; blocked application roots cannot open popups during a modal transaction.
+    - [x] The frontmost visible dialog is active, so bringing a dialog forward activates its modal subtree, dismisses transients from the previous group, and hiding or destroying it reveals the next dialog directly from z-order.
 - [x] Separated ordinary keyboard activation from visual stacking with `active_root`.
     - [x] Pressing a lower-layer window focuses it without raising it across a higher layer, while overlap hit testing continues to follow visual priority.
     - [x] Pointer capture, popup-to-owner activation, modal routing, root hiding, and destruction reconcile the active root through the ownership tree.
@@ -99,7 +101,7 @@ removing the remaining application-level frame polling from `demo-full`.
     - [x] Modal routing, popup dismissal, focus, capture, root movement, and resizing share one retained window manager.
 - [x] Removed frame-polled transient-root and file-dialog coordination from the full demo.
     - [x] Popup and file-dialog opening mutate Context-owned state directly from the typed event that requested them; application command flags were removed.
-    - [x] `ComboSubmitted` carries same-transaction opening geometry; the demo's existing shared state reconciles `RootSubmitted::PopupDismissed` back into `Combo`, so source-root interaction or replacement by another popup closes its semantic state without geometry APIs or frame polling.
+    - [x] `ComboSubmitted` carries same-transaction opening geometry; the demo's existing shared state reconciles `RootSubmitted::PopupDismissed` back into `Combo`, so source-root interaction, recursive hiding, or replacement by another popup closes its semantic state without geometry APIs or frame polling.
     - [x] Demo window position, size, and minimum-size reconciliation consume `RootChanged` rather than polling `RootChrome` from frame processing.
     - [x] File-dialog acceptance and cancellation publish exactly one `FileDialogCompleted` event through a Context-lifetime source; application frame code no longer polls session status.
     - [x] Abandoned file-dialog sessions are settled after application dispatch and before layout or the next queued input; `FileDialogSession` warns when its ownership capability is ignored.

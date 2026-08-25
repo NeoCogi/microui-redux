@@ -502,7 +502,7 @@ impl FileDialog {
         &self.root
     }
 
-    /// Returns whether this component currently owns the active modal dialog.
+    /// Returns whether this component is open, regardless of which visible dialog is frontmost.
     pub const fn is_open(&self) -> bool {
         self.active
     }

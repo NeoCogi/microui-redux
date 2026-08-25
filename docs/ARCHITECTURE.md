@@ -87,19 +87,23 @@ Ownership provides only the relationships that genuinely need ancestry:
 - destroying a root destroys the subtree and expires every descendant weak handle;
 - non-modal descendants inherit their stacking band through direct parents;
 - a popup parent identifies the branch retained when a submenu opens;
-- a visible dialog's subtree is its exclusive modal input group; and
-- raising a subtree preserves parent-before-descendant z-order.
+- the frontmost visible dialog's subtree is the exclusive modal input group; and
+- raising an owned group preserves its internal visual order.
 
 Parentage is fixed at creation; there is no reparenting API and therefore no runtime cycle case.
-Popups may own popup children for cascading menus. A popup cannot own an ordinary child window or
-dialog. Creating a visible child under a hidden parent is rejected. Recursive hiding preserves the
-retained trees but leaves every affected root hidden; callers explicitly show the roots they want
-to reopen. Recursive destruction is permanent.
+Ordinary child windows and dialogs require an ordinary window parent. Dialogs may own popups, and
+popups may own popup children for cascading menus, but neither can own persistent windows or
+dialogs: dismissing a transient must not leave a non-transient child beneath a hidden parent.
+Creating a visible child under any hidden parent is rejected. Recursive hiding preserves the
+retained trees but leaves every affected root hidden; every visible popup it closes records
+dismissal. Callers explicitly show the roots they want to reopen. Recursive destruction is
+permanent.
 
-The manager retains only two small facts that ancestry cannot derive: the active popup leaf, because
-only one popup branch may be visible globally, and each dialog's last explicit activation order,
-because a tree does not encode which visible sibling dialog was shown most recently. There is no
-parallel popup ancestry list or modal stack.
+Each registry entry stores only one topology edge: its direct parent. Descendants are found by
+following those parent links during the uncommon operations that need a complete subtree. The
+visible popup branch is derived from popup chrome visibility and ancestry, while the active modal
+is the frontmost visible dialog in the normal stacking order. There is no reverse child list,
+visibility mirror, active popup leaf, modal activation history, popup ancestry list, or modal stack.
 
 ### Root layers, transients, and activation
 
@@ -120,13 +124,16 @@ popup's direct parent supplies its inherited band. Popup children retain their v
 branch and replace only the previous descendants of that parent; a popup owned by a non-popup root
 starts a new globally exclusive branch. The `PopupHandle` parameter makes ordinary windows and
 dialogs ineligible as targets at compile time. Calling `set_root_visible(popup.id(), true)` is
-rejected with `PopupShowRequired`, while hiding through generic visibility remains supported.
+rejected with `PopupShowRequired`; hiding through generic or recursive visibility records the same
+`PopupDismissed` submission as replacement and outside-press policy.
 
-Dialogs occupy a dedicated modal band above all sixteen numeric layers. The most recently shown
-visible dialog and every owned descendant form the only input-eligible modal group; popup
-descendants use the transient tier above the dialog. Other roots remain visible, laid out, and
-painted but cannot interact until the active dialog is hidden or destroyed. If an older sibling
-dialog remains visible, its recorded activation order restores it without a separate modal stack.
+Dialogs occupy a dedicated modal band above all sixteen numeric layers. The frontmost visible
+dialog and every owned descendant form the only input-eligible modal group; popup descendants use
+the transient tier above the dialog. Other roots remain visible, laid out, and painted but cannot
+interact until no dialog remains visible. Bringing a dialog forward raises its modal subtree and
+closes transients from the previous group. Hiding the front dialog naturally reveals the next
+visible dialog in z-order. Raising an ordinary owner does not reorder dialog descendants because
+they occupy a different band.
 
 Visual order is deliberately separate from keyboard activation. A pointer press records the
 ordinary `active_root` (or a popup's ordinary source) without moving it to a different fixed layer.

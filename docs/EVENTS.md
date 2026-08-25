@@ -407,9 +407,9 @@ only after the complete retained-tree update has released its widget borrows and
 the following layout. Rust therefore prevents a handler from retaining it. Windows and dialogs use
 generic visibility; a popup is shown with `show_popup` or `show_popup_at` so the same transaction
 can reconcile its stable parent branch and placement. The parent supplied to `create_popup` already
-determines inherited stacking and lifetime. Popup hiding remains a generic visibility operation. No
-`PopupController`, overlay registry, per-control command enum, or second root lifetime model is
-required.
+determines inherited stacking and lifetime. Generic or recursive popup hiding emits the same
+`PopupDismissed` submission as replacement and outside-press policy. No `PopupController`, overlay
+registry, per-control command enum, or second root lifetime model is required.
 
 The full demo composes `Combo` and its popup root entirely through typed events. `ComboSubmitted`
 carries the screen-space anchor from the update that routed the header click, so its context-aware
@@ -418,7 +418,7 @@ atomically in the triggering input transaction. The target parameter accepts `Po
 window or dialog cannot accidentally enter popup placement policy. The combo popup was created as a
 stable child of the Demo Window, so showing it does not restate ownership. The demo state already
 owns both retained handles: `RootSubmitted::PopupDismissed` closes the combo's shared semantic state
-after an outside press or replacement by another popup. This coordination stays with the
+after replacement, an outside press, or root-tree hiding. This coordination stays with the
 composed-control owner instead of leaking popup policy into the base widget abstractions. Paint does no
 coordination, and application state performs no per-frame popup polling. The frame callback only
 synchronizes the dedicated fullscreen layer-0 grid surface with platform dimensions and produces
@@ -430,8 +430,8 @@ the returned value there, and subscribes to that instance's completion source. O
 directly inside a context-aware application handler: it resets request-specific state and shows the
 existing dialog root.
 Acceptance or cancellation hides the root again while preserving the component, ports, and static
-widgets. Multiple component instances are independent children in the Context-owned root tree;
-explicit show order determines which visible sibling is the active modal group.
+widgets. Multiple component instances are independent children in the Context-owned root tree; the
+frontmost visible sibling in z-order is the active modal group, whether shown or explicitly raised.
 
 `WindowMenu` uses the same application-owned component binding for a different root composition.
 Applications create and register concrete `MenuItem` event sources, then move their nodes through

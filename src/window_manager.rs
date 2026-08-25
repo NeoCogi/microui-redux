@@ -114,7 +114,7 @@ impl RootId {
 pub const MIN_LAYER: u8 = 0;
 /// Highest application-selectable root layer.
 pub const MAX_LAYER: u8 = 15;
-/// Layer assigned to newly created ordinary windows.
+/// Layer assigned to newly created independent windows.
 pub const DEFAULT_LAYER: u8 = MAX_LAYER;
 
 /// Describes how one retained root obtains its stacking layer.
@@ -145,12 +145,6 @@ pub(crate) struct WindowManager {
     last_zindex: i32,
     /// Registered window-manager roots replayed by [`crate::ContextFrame::render_ui`].
     roots: Vec<WindowEntry>,
-    /// Deepest visible member of the one globally active popup branch.
-    ///
-    /// Parent links reconstruct the branch when an operation must retain ancestors or dismiss a
-    /// suffix. A scalar leaf is sufficient because competing popup branches are never visible at
-    /// the same time.
-    active_popup: Option<RootId>,
     /// Last ordinary root explicitly activated by a pointer press.
     ///
     /// Activation is deliberately independent of stacking. A user can therefore focus a control
@@ -171,7 +165,6 @@ impl WindowManager {
             style,
             last_zindex: 0,
             roots: Vec::default(),
-            active_popup: None,
             active_root: None,
             next_root_id: 1,
             input: Input::default(),

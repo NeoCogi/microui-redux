@@ -75,8 +75,9 @@ impl<'a> EventContext<'a> {
 
     /// Creates an independently positioned child window owned by `parent`.
     ///
-    /// The ownership edge controls lifetime and inherited stacking policy; it does not clip or lay
-    /// out the child. A stale or ineligible parent returns a checked root mutation error.
+    /// `parent` must be an ordinary window. The ownership edge controls lifetime and inherited
+    /// stacking policy; it does not clip or lay out the child. A stale, hidden, or ineligible
+    /// parent returns a checked root mutation error.
     pub fn create_child_window(&mut self, parent: RootId, name: &str, rect: Recti, content: Node) -> Result<RootHandle, RootMutationError> {
         // Event-time construction follows the same checked ownership path as ordinary Context use.
         self.window_manager.create_child_window(parent, name, rect, content)
@@ -84,8 +85,9 @@ impl<'a> EventContext<'a> {
 
     /// Creates a hidden retained dialog owned by `parent`.
     ///
-    /// Show the returned root with [`Self::set_root_visible`]. A shown dialog becomes the active
-    /// modal subtree before the layout immediately following this event dispatch.
+    /// `parent` must be an ordinary window. Show the returned root with
+    /// [`Self::set_root_visible`]; it becomes the front modal subtree before the layout immediately
+    /// following this event dispatch.
     pub fn create_dialog(&mut self, parent: RootId, name: &str, rect: Recti, content: Node) -> Result<RootHandle, RootMutationError> {
         // WindowManager validates and records the stable ownership edge before returning the handle.
         self.window_manager.create_dialog(parent, name, rect, content)
@@ -138,10 +140,10 @@ impl<'a> EventContext<'a> {
 
     /// Shows or hides a retained root while preserving its tree and concrete widget state.
     ///
-    /// Dialog activation and popup-branch dismissal use the same policy as
+    /// Dialog fronting and visible-popup dismissal use the same policy as
     /// [`Context::set_root_visible`]. Showing a popup through this generic operation is rejected
-    /// because it cannot establish layer inheritance; use [`Self::show_popup`] or
-    /// [`Self::show_popup_at`] instead. Hiding a popup remains supported.
+    /// because it cannot reconcile anchored placement; use [`Self::show_popup`] or
+    /// [`Self::show_popup_at`] instead. Hiding a visible popup records a dismissal.
     pub fn set_root_visible(&mut self, root: RootId, visible: bool) -> Result<(), RootMutationError> {
         // Mutate the root synchronously at the safe dispatch boundary so the following layout sees
         // the requested visibility without an application-owned frame flag.
@@ -166,15 +168,19 @@ impl<'a> EventContext<'a> {
         self.window_manager.show_popup_at(popup, anchor)
     }
 
-    /// Raises a registered root inside its effective layer and reports whether it still exists.
+    /// Raises a registered root inside its effective layer.
     ///
-    /// This operation never moves an ordinary root across another numeric application layer.
-    pub fn bring_root_to_front(&mut self, root: RootId) -> bool {
-        // Let WindowManager preserve the active modal root above the requested ordinary root.
+    /// This operation never moves an ordinary root across another numeric application layer. A
+    /// visible dialog moves its modal subtree in front and closes transients from the previous modal
+    /// group. A stale root or modal reconciliation borrow conflict returns a checked mutation error.
+    pub fn bring_root_to_front(&mut self, root: RootId) -> Result<(), RootMutationError> {
+        // Let WindowManager raise the complete owned subtree inside its effective stacking band.
         self.window_manager.bring_root_to_front(root)
     }
 
-    /// Permanently unregisters a root and drops its complete retained tree.
+    /// Permanently unregisters a root and its complete owned-root subtree.
+    ///
+    /// Every descendant tree is dropped and every descendant weak handle expires recursively.
     pub fn destroy_root(&mut self, root: RootId) -> bool {
         // Root destruction also expires every weak widget and root handle owned by the removed tree.
         self.window_manager.destroy_root(root)
@@ -200,8 +206,8 @@ impl<'a> EventContext<'a> {
 /// or active root. Captured pointer release still returns to its widget so local drag state is
 /// cleaned up.
 ///
-/// A visible dialog is modal. It occupies the dedicated band above all application layers and forms
-/// the only eligible input group together with a popup that it initiates. Pointer input outside
+/// The frontmost visible dialog is modal. It occupies the dedicated band above all application
+/// layers, and its complete owned subtree forms the only eligible input group. Pointer input outside
 /// that group is consumed at the cross-root boundary; other roots remain visible and continue to
 /// participate in layout and paint.
 ///
@@ -418,18 +424,19 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
 
     /// Creates an independently positioned child window owned by `parent`.
     ///
-    /// Ownership controls recursive lifecycle and inherited stacking policy without introducing
-    /// parent-relative layout or clipping.
+    /// `parent` must be an ordinary window. Ownership controls recursive lifecycle and inherited
+    /// stacking policy without introducing parent-relative layout or clipping.
     pub fn create_child_window(&mut self, parent: RootId, name: &str, rect: Recti, content: Node) -> Result<RootHandle, RootMutationError> {
-        // Keep parent validation and reverse-edge registration inside the sole root owner.
+        // Keep parent validation and immutable ownership registration inside the sole root owner.
         self.window_manager.create_child_window(parent, name, rect, content)
     }
 
     /// Creates a hidden retained dialog owned by `parent`.
     ///
-    /// Show it with [`Context::set_root_visible`]. A visible dialog enters the dedicated modal layer
-    /// and its complete owned subtree becomes the active modal input group. Other roots remain
-    /// input-ineligible until the dialog is hidden or destroyed.
+    /// `parent` must be an ordinary window. Show the dialog with [`Context::set_root_visible`]. Every
+    /// visible dialog occupies the dedicated modal layer; the frontmost dialog and its popup subtree
+    /// form the active modal input group. Other roots remain input-ineligible until no dialog remains
+    /// visible.
     pub fn create_dialog(&mut self, parent: RootId, name: &str, rect: Recti, content: Node) -> Result<RootHandle, RootMutationError> {
         // The manager records ownership before exposing the weak dialog handle.
         self.window_manager.create_dialog(parent, name, rect, content)
@@ -440,8 +447,8 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// Show it through [`Self::show_popup`] or [`Self::show_popup_at`]. Its stable parent determines
     /// inherited stacking, recursive lifetime, and whether it joins an active modal subtree. A
     /// popup occupies the transient tier above ordinary roots in its effective band without
-    /// crossing a higher fixed layer. An outside press or competing popup request hides it and
-    /// records a submission.
+    /// crossing a higher fixed layer. Replacement, an outside press, generic hiding, or recursive
+    /// ancestor hiding records a dismissal submission.
     pub fn create_popup(&mut self, parent: RootId, name: &str, content: Node) -> Result<PopupHandle, RootMutationError> {
         // Return the typed weak capability created by WindowManager so callers cannot request
         // anchored popup policy for an ordinary window or dialog identifier.
@@ -484,11 +491,11 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
 
     /// Shows or hides a retained root, preserving its tree and concrete widget state.
     ///
-    /// Showing a dialog records it as the most recently activated visible modal subtree. Hiding it
-    /// restores the previous visible sibling dialog, if any; otherwise ordinary cross-root routing
-    /// resumes. Showing a popup is rejected because generic visibility cannot reconcile the active
-    /// popup branch; use [`Self::show_popup`] or [`Self::show_popup_at`]. Hiding a popup remains
-    /// supported. Hiding any root also hides every owned descendant.
+    /// Showing a dialog raises it as the frontmost visible modal subtree. Hiding it reveals the next
+    /// visible dialog in z-order, if any; otherwise ordinary cross-root routing resumes. Showing a
+    /// popup is rejected because generic visibility cannot reconcile the visible popup branch; use
+    /// [`Self::show_popup`] or [`Self::show_popup_at`]. Hiding any root also hides every owned
+    /// descendant, and hiding a visible popup records a dismissal.
     ///
     /// This is distinct from [`Context::destroy_root`], which drops the complete retained owner.
     pub fn set_root_visible(&mut self, root: RootId, visible: bool) -> Result<(), RootMutationError> {
@@ -526,18 +533,20 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         self.window_manager.show_popup_at(popup, anchor)
     }
 
-    /// Raises a registered root inside its effective layer and reports whether it exists.
+    /// Raises a registered root inside its effective layer.
     ///
-    /// The operation cannot cross a numeric application-layer boundary, and the active modal
-    /// dialog remains above every application root.
-    pub fn bring_root_to_front(&mut self, root: RootId) -> bool {
+    /// The operation cannot cross a stacking-band boundary. Bringing a visible dialog forward also
+    /// makes its owned group the active modal; ordinary roots remain below the dedicated modal band.
+    /// A stale root or modal reconciliation borrow conflict returns a checked mutation error.
+    pub fn bring_root_to_front(&mut self, root: RootId) -> Result<(), RootMutationError> {
         self.window_manager.bring_root_to_front(root)
     }
 
-    /// Permanently unregisters a root and releases its complete retained tree.
+    /// Permanently unregisters a root and its complete owned-root subtree.
     ///
-    /// Destroying the active dialog restores the previous visible dialog, if any;
-    /// otherwise ordinary cross-root routing resumes.
+    /// Destroying the active dialog reveals the next visible dialog in z-order, if any; otherwise
+    /// ordinary cross-root routing resumes.
+    /// Every descendant tree is released and every descendant weak handle expires recursively.
     ///
     /// There is intentionally no root-content replacement operation. Destroy and recreate a root
     /// to install a different root owner, or mutate descendants through their typed widget handles.

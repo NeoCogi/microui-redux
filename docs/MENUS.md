@@ -203,8 +203,8 @@ Interaction is pointer-driven:
 - left-pressing another heading switches to that popup;
 - left-pressing a submenu row opens it beside the retained parent chain;
 - selecting a registered, enabled item closes the active popup before its handler runs;
-- an outside pointer press or replacement by another popup dismisses the active popup and clears the
-  heading highlight.
+- an outside pointer press, replacement, or generic/recursive popup hide dismisses the active popup
+  and clears the heading highlight.
 
 Moving across headings changes hover presentation but does not switch or open menus. Opening a menu
 changes root visibility and position; it does not clone a specification or rebuild item nodes.
@@ -224,7 +224,7 @@ Treat those handles as inspection and whole-component lifetime capabilities. Cal
 `Context::show_popup`, `Context::show_popup_at`, or the hiding form of
 `Context::set_root_visible` directly on a menu popup bypasses the coordinator and can make root
 visibility disagree with `active_menu` and the bar highlight. Generic visibility cannot show a
-popup because anchored popup policy must reconcile the active branch. Use the heading interaction or
+popup because anchored popup policy must reconcile the visible branch. Use the heading interaction or
 `WindowMenu::close` for normal menu state changes.
 
 `WindowMenu` assumes its window, bar, and every popup remain registered. Destroying one of those
