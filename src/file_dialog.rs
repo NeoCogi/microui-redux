@@ -567,7 +567,7 @@ impl FileDialog {
     /// Resets activation-specific model and widget state before the root is shown.
     fn prepare_open(&mut self, request: FileDialogRequest, icons: ThemeIcons) -> (String, Recti) {
         assert!(!self.active, "file dialog is already open");
-        assert!(self.root.widget().is_alive(), "application-owned file-dialog root was destroyed");
+        assert!(self.root.is_alive(), "application-owned file-dialog root was destroyed");
 
         let FileDialogRequest { title, initial_directory, rect } = request;
         self.icons = icons;
@@ -880,8 +880,8 @@ mod tests {
         let root = model.dialog.root().id();
         model.dialog.open(&mut context, request);
         assert!(model.dialog.is_open());
-        assert_eq!(model.dialog.root().widget().try_read(|root| root.name().to_owned()).as_deref(), Some("Choose"));
-        let root_rect = model.dialog.root().widget().try_read(crate::RootChrome::rect).unwrap();
+        assert_eq!(context.debug_root_name(root).as_deref(), Some("Choose"));
+        let root_rect = context.debug_root_rect(root).unwrap();
         assert_eq!((root_rect.x, root_rect.y, root_rect.width, root_rect.height), (10, 20, 400, 300));
         assert_eq!(context.debug_modal_root(), Some(root));
         assert!(model.dialog.cancel(&mut context));
@@ -928,7 +928,7 @@ mod tests {
             })]
         );
         assert!(!model.dialog.is_open());
-        assert_eq!(model.dialog.root.widget().try_read(crate::RootChrome::is_visible), Some(false));
+        assert_eq!(context.debug_root_visible(root), Some(false));
     }
 
     #[test]
@@ -980,7 +980,7 @@ mod tests {
         assert_eq!(filename.try_read(|state| state.text().to_owned()).as_deref(), Some(""));
         let offset = scroll.try_read(|state| state.offset()).unwrap();
         assert_eq!((offset.x, offset.y), (0, 0));
-        assert_eq!(model.dialog.root.widget().try_read(|root| root.name().to_owned()).as_deref(), Some("Second"));
+        assert_eq!(context.debug_root_name(root).as_deref(), Some("Second"));
 
         fs::remove_dir_all(first_dir).unwrap();
         fs::remove_dir_all(second_dir).unwrap();
@@ -1081,7 +1081,7 @@ mod tests {
         assert_eq!(cancel_before.height, toolbar_before.height);
         assert_eq!(open_before.height, toolbar_before.height);
 
-        let mut resized = model.dialog.root.widget().try_read(crate::RootChrome::rect).unwrap();
+        let mut resized = context.debug_root_rect(root).unwrap();
         resized.height += 80;
         context.set_root_rect(root, resized).unwrap();
         context.update_ui_state(dimensions(), &mut model);
@@ -1166,7 +1166,7 @@ mod tests {
         context.update_ui_state(dimensions(), &mut model);
         assert_eq!(model.completions, [FileDialogStatus::Cancelled]);
         assert!(!model.dialog.is_open());
-        assert_eq!(model.dialog.root.widget().try_read(crate::RootChrome::is_visible), Some(false));
+        assert_eq!(context.debug_root_visible(root), Some(false));
     }
 
     #[test]

@@ -172,7 +172,7 @@ impl<'a> EventContext<'a> {
     ///
     /// This operation never moves an ordinary root across another numeric application layer. A
     /// visible dialog moves its modal subtree in front and closes transients from the previous modal
-    /// group. A stale root or modal reconciliation borrow conflict returns a checked mutation error.
+    /// group. A stale root returns a checked mutation error.
     pub fn bring_root_to_front(&mut self, root: RootId) -> Result<(), RootMutationError> {
         // Let WindowManager raise the complete owned subtree inside its effective stacking band.
         self.window_manager.bring_root_to_front(root)
@@ -182,7 +182,7 @@ impl<'a> EventContext<'a> {
     ///
     /// Every descendant tree is dropped and every descendant weak handle expires recursively.
     pub fn destroy_root(&mut self, root: RootId) -> bool {
-        // Root destruction also expires every weak widget and root handle owned by the removed tree.
+        // Root destruction also expires every weak application widget and root event handle owned by the removed tree.
         self.window_manager.destroy_root(root)
     }
 
@@ -243,8 +243,8 @@ pub struct Context<B: RendererBackend, State: 'static = ()> {
 /// Exclusively owned logical UI frame.
 ///
 /// This value borrows `Context` to serialize paint/submission, but it does not lock independent
-/// [`crate::TypedWidgetHandle`] or [`RootHandle::widget`] access. Mutating layout-affecting state after the
-/// last update commit makes that commit semantically stale; drop the unsubmitted frame and call
+/// [`crate::TypedWidgetHandle`] access. Mutating layout-affecting state after the last update commit
+/// makes that commit semantically stale; drop the unsubmitted frame and call
 /// [`Context::update_ui`] or [`Context::update_ui_state`] again before painting. No separate
 /// Context token exists.
 ///
@@ -528,8 +528,8 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// }
     /// ```
     pub fn show_popup_at(&mut self, popup: &PopupHandle, anchor: Recti) -> Result<(), RootMutationError> {
-        // Keep popup identity typed through the public façade; the manager still checks whether the
-        // weak root remains registered and whether its widget state can be borrowed atomically.
+        // Keep popup identity typed through the public façade; the manager checks whether its weak
+        // identity remains registered and eligible under popup and modal policy.
         self.window_manager.show_popup_at(popup, anchor)
     }
 
@@ -537,7 +537,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     ///
     /// The operation cannot cross a stacking-band boundary. Bringing a visible dialog forward also
     /// makes its owned group the active modal; ordinary roots remain below the dedicated modal band.
-    /// A stale root or modal reconciliation borrow conflict returns a checked mutation error.
+    /// A stale root returns a checked mutation error.
     pub fn bring_root_to_front(&mut self, root: RootId) -> Result<(), RootMutationError> {
         self.window_manager.bring_root_to_front(root)
     }
@@ -738,6 +738,42 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
 
     pub(crate) fn debug_root_zindex(&self, root: RootId) -> Option<i32> {
         self.window_manager.debug_root_zindex(root)
+    }
+
+    /// Returns the manager-owned root name for internal behavioral tests.
+    pub(crate) fn debug_root_name(&self, root: RootId) -> Option<String> {
+        // Forward through the test-only façade without exposing production chrome access.
+        self.window_manager.debug_root_name(root)
+    }
+
+    /// Returns the authoritative root rectangle for internal behavioral tests.
+    pub(crate) fn debug_root_rect(&self, root: RootId) -> Option<Recti> {
+        // Copy geometry out so tests cannot retain references into the registry.
+        self.window_manager.debug_root_rect(root)
+    }
+
+    /// Returns whether a registered root is visible for internal behavioral tests.
+    pub(crate) fn debug_root_visible(&self, root: RootId) -> Option<bool> {
+        // Preserve `None` for an unknown or destroyed root.
+        self.window_manager.debug_root_visible(root)
+    }
+
+    /// Returns whether any manager-owned chrome gesture is active for tests.
+    pub(crate) fn debug_root_active(&self, root: RootId) -> Option<bool> {
+        // This intentionally excludes application widget capture details.
+        self.window_manager.debug_root_active(root)
+    }
+
+    /// Returns whether a title move gesture is active for internal tests.
+    pub(crate) fn debug_root_moving(&self, root: RootId) -> Option<bool> {
+        // Delegate exact private interaction inspection to WindowManager.
+        self.window_manager.debug_root_moving(root)
+    }
+
+    /// Returns whether a resize gesture is active for internal tests.
+    pub(crate) fn debug_root_resizing(&self, root: RootId) -> Option<bool> {
+        // Delegate exact private interaction inspection to WindowManager.
+        self.window_manager.debug_root_resizing(root)
     }
 
     pub(crate) fn debug_root_layer_binding(&self, root: RootId) -> Option<LayerBinding> {

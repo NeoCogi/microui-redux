@@ -31,19 +31,17 @@
 //! Root registry, cross-root policy, and persistent tree traversal.
 
 use super::*;
-use crate::{MouseButton, Node, RootHandle, RootChrome, TypedWidgetHandle, UiInputEvent, Vec2i, rect};
+use std::{cell::RefCell, rc::Rc};
 
-use super::root_chrome::{create_root_chrome, record_root_overlay, root_handle, RootChromeParameters};
-#[cfg(test)]
-use super::root_chrome::root_chrome_geometry;
+use crate::{MouseButton, Node, RootHandle, UiInputEvent, Vec2i, rect};
+
+use super::root_chrome::{RootChromePart, RootInteraction, RootState, record_root_background, record_root_overlay, root_chrome_geometry, root_handle};
 
 /// Failure reported when the root registry cannot complete a checked state mutation.
 ///
-/// These errors describe registry identity, cross-root policy, and checked access to the retained
-/// root widget. They deliberately live beside the private `WindowEntry` registry records and the
-/// mutation implementations rather than in `root_chrome`: [`RootChrome`] owns local presentation
-/// state, while the registry alone knows whether an identifier is registered and which private
-/// `WindowKind` policy applies to it.
+/// These errors describe registry identity and cross-root policy. Manager-owned chrome state cannot
+/// be externally borrowed, so a mutation either succeeds completely or fails on one of the stable
+/// registry invariants represented here.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum RootMutationError {
     /// The supplied [`RootId`] does not identify a root currently owned by the context.
@@ -51,17 +49,11 @@ pub enum RootMutationError {
     /// Destroying a root invalidates its identifier for all later checked mutations. Root
     /// identifiers are never reused, so this result cannot accidentally address a newer root.
     UnknownRoot,
-    /// The retained root widget is already borrowed by an active typed-access closure.
-    ///
-    /// Checked mutations return this error instead of panicking or partially applying a cross-root
-    /// transaction. The caller may retry after the conflicting access closure has returned.
-    Borrowed,
     /// The requested parent cannot own the new root kind, or a visible child has a hidden parent.
     ///
     /// Child windows and dialogs require an ordinary window parent, while popup roots may own only
     /// popup descendants. These rules keep persistent-root activation out of modal and transient
-    /// policy. A stale parent is [`Self::UnknownRoot`]; when visible-child creation must inspect
-    /// parent chrome, a conflicting borrow is [`Self::Borrowed`].
+    /// policy. A stale parent is reported as [`Self::UnknownRoot`].
     InvalidRootParent,
     /// The requested fixed layer is outside the supported inclusive range `0..=15`.
     InvalidLayer(u8),
@@ -105,10 +97,10 @@ impl PopupHandle {
         self.root.id()
     }
 
-    /// Returns the weak typed handle for the popup's concrete root-chrome widget.
-    pub fn widget(&self) -> &TypedWidgetHandle<RootChrome> {
-        // Reuse RootHandle's non-owning chrome access; this does not extend the popup lifetime.
-        self.root.widget()
+    /// Returns whether the Context still owns this popup definition.
+    pub fn is_alive(&self) -> bool {
+        // PopupHandle mirrors RootHandle liveness without exposing manager-owned chrome state.
+        self.root.is_alive()
     }
 
     /// Returns the native event endpoint emitted after a user-driven move or resize.
@@ -158,7 +150,9 @@ struct StackKey {
 
 /// One persistent retained tree and its traversal-local runtime state.
 pub(super) struct WidgetTree {
+    /// Sole application-authored node at this screen-space root.
     root: Node,
+    /// Traversal state for measurement, input, update, and painting of `root`.
     runtime: UiRuntime,
 }
 
@@ -200,8 +194,10 @@ impl WidgetTree {
         self.runtime.accepts_pointer_input()
     }
 
-    fn route_pointer(&mut self, style: &Style, event: &UiInputEvent, root_chrome_hit: bool, mouse_buttons: MouseButton) {
-        if let Some((owner, result)) = self.runtime.route_root_input_event_to_node_ref(&mut self.root, style, event, root_chrome_hit) {
+    /// Routes one ordinary pointer event into the application tree.
+    fn route_pointer(&mut self, style: &Style, event: &UiInputEvent, mouse_buttons: MouseButton) {
+        // Manager-owned chrome has already consumed any overlapping hit before this method runs.
+        if let Some((owner, result)) = self.runtime.route_input_event_to_node_ref(&mut self.root, style, event) {
             self.runtime.update_pointer_capture(owner, result, event, mouse_buttons);
         }
     }
@@ -254,9 +250,13 @@ pub(super) struct WindowEntry {
     effective_band: StackBand,
     /// Monotonic ordering value inside the effective band and transient tier.
     pub(super) z_index: i32,
-    /// Weak typed access to the root chrome owned by `tree`.
-    pub(super) root_widget: TypedWidgetHandle<RootChrome>,
-    /// Sole strong owner of the complete retained widget subtree for this screen-space root.
+    /// Authoritative manager-owned chrome and surface state.
+    pub(super) state: RootState,
+    /// Strong owner of move and resize notifications.
+    changed_event: Rc<RefCell<crate::event::WidgetEventPort<crate::RootChanged>>>,
+    /// Strong owner of close and popup-dismissal notifications.
+    submitted_event: Rc<RefCell<crate::event::WidgetEventPort<crate::RootSubmitted>>>,
+    /// Sole strong owner of the complete application widget tree for this screen-space root.
     pub(super) tree: WidgetTree,
 }
 
@@ -270,15 +270,39 @@ impl WindowEntry {
         }
     }
 
-    /// Clears runtime interaction identities and the application-visible root chrome mode.
+    /// Returns whether chrome or application content owns an in-progress pointer gesture.
+    fn has_capture(&self) -> bool {
+        // Both capture sources participate in the same cross-root exclusivity policy.
+        self.state.is_active() || self.tree.has_capture()
+    }
+
+    /// Emits a user-driven geometry change through the root's weak public event endpoint.
+    fn emit_changed(&mut self) {
+        // Report the authoritative rectangle after applying the complete pointer delta.
+        self.changed_event.borrow_mut().emit(crate::RootChanged { rect: self.state.rect });
+    }
+
+    /// Emits one semantic root submission without exposing the owned event queue.
+    fn emit_submitted(&mut self, event: crate::RootSubmitted) {
+        // Subscribers run only at WindowManager's dispatch boundary after this borrow is released.
+        self.submitted_event.borrow_mut().emit(event);
+    }
+
+    /// Hides a popup and reports policy dismissal exactly once.
+    fn dismiss_popup(&mut self) {
+        // A hidden popup is already outside the active branch and must not emit duplicate closure.
+        if self.state.visible {
+            self.state.set_visible(false);
+            self.emit_submitted(crate::RootSubmitted::PopupDismissed);
+        }
+        self.clear_transient_targets();
+    }
+
+    /// Clears runtime interaction identities and manager-owned chrome capture.
     fn clear_transient_targets(&mut self) {
-        // Generic descendant widgets reconcile private modes from their next inactive update.
-        // RootChrome is different because callers can observe `is_active` immediately after a
-        // window-manager operation, so its mode changes in the same ownership transaction.
+        // Keep both capture sources synchronized when cross-root policy revokes interaction.
         self.tree.clear_transient_targets();
-        self.root_widget
-            .try_update(RootChrome::clear_interaction_silent)
-            .expect("registered root widget unavailable while clearing transient targets");
+        self.state.clear_interaction();
     }
 }
 
@@ -308,26 +332,17 @@ impl WindowManager {
             }
         }
         if visible && let Some(parent_index) = parent_index {
-            let parent_visible = self.roots[parent_index]
-                .root_widget
-                .try_read(RootChrome::is_visible)
-                .ok_or(RootMutationError::Borrowed)?;
-            if !parent_visible {
+            if !self.roots[parent_index].state.visible {
                 return Err(RootMutationError::InvalidRootParent);
             }
         }
         // Allocate lifecycle identity before construction; IDs are never derived from node identity.
         let id = self.next_root_id();
-        // Root chrome returns one concrete Container and the weak typed widget handle Context registers.
-        let (root_widget, changed, submitted, root) = create_root_chrome(RootChromeParameters {
-            name: name.to_owned(),
-            options,
-            rect,
-            visible,
-            content,
-        });
-        // Finish the private branch with the same Node::container boundary used by application code.
-        let root = Node::container(root);
+        // The registry strongly owns semantic event queues and exposes only weak handles to callers.
+        let changed_event = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
+        let submitted_event = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
+        let changed = crate::WidgetEventPortHandle::new(&changed_event);
+        let submitted = crate::WidgetEventPortHandle::new(&submitted_event);
         // Hidden roots remain registered but sit outside visible z-order until explicitly shown.
         let z_index = if visible {
             // next_z_index = previous_z_index + 1.
@@ -344,19 +359,21 @@ impl WindowManager {
                 .map(|parent_index| self.roots[parent_index].effective_band)
                 .unwrap_or(StackBand::Fixed(DEFAULT_LAYER)),
         };
-        // Context is the sole tree owner; the entry's typed widget handle cannot retain the root.
+        // Context owns both plain chrome state and the application tree; neither has a second owner.
         self.roots.push(WindowEntry {
             id,
             kind,
             parent,
             effective_band,
             z_index,
-            root_widget: root_widget.clone(),
-            tree: WidgetTree::new(root),
+            state: RootState::new(name.to_owned(), options, rect, visible),
+            changed_event,
+            submitted_event,
+            tree: WidgetTree::new(content),
         });
         // New topology requires a layout commit before rendering or pointer routing.
         self.invalidate_ui_commit();
-        Ok(root_handle(id, root_widget, changed, submitted))
+        Ok(root_handle(id, changed, submitted))
     }
 
     fn next_root_id(&mut self) -> RootId {
@@ -421,34 +438,42 @@ impl WindowManager {
 
     /// Replaces a retained root title without emitting a root-change event.
     pub fn set_root_name(&mut self, root: RootId, name: String) -> Result<(), RootMutationError> {
-        self.update_root_widget(root, |state| state.set_name_silent(name))
+        // Chrome state is manager-owned, so this checked mutation cannot fail after ID resolution.
+        let index = self.root_index(root)?;
+        self.roots[index].state.name = name;
+        self.invalidate_ui_commit();
+        Ok(())
     }
 
     /// Replaces a root rectangle silently while retaining any compatible captured chrome mode.
     pub fn set_root_rect(&mut self, root: RootId, rect: Recti) -> Result<(), RootMutationError> {
-        self.update_root_widget(root, |state| state.set_rect_silent(rect))
+        // Programmatic geometry replaces all four authoritative outer-rectangle components.
+        let index = self.root_index(root)?;
+        self.roots[index].state.rect = rect;
+        self.invalidate_ui_commit();
+        Ok(())
     }
 
     /// Replaces a root size silently without changing its origin.
     pub fn set_root_size(&mut self, root: RootId, size: Dimensioni) -> Result<(), RootMutationError> {
-        self.update_root_widget(root, |state| state.set_size_silent(size))
+        // Preserve screen position while replacing only the allocated outer extents.
+        let index = self.root_index(root)?;
+        self.roots[index].state.rect.width = size.width;
+        self.roots[index].state.rect.height = size.height;
+        self.invalidate_ui_commit();
+        Ok(())
     }
 
     /// Replaces root chrome options silently.
     pub fn set_root_options(&mut self, root: RootId, options: WindowOption) -> Result<(), RootMutationError> {
         let index = self.root_index(root)?;
-        let was_active = self.roots[index]
-            .root_widget
-            .try_read(RootChrome::is_active)
-            .ok_or(RootMutationError::Borrowed)?;
-        self.update_root_widget(root, |state| state.set_options_silent(options))?;
-        let active = self.roots[index]
-            .root_widget
-            .try_read(RootChrome::is_active)
-            .unwrap_or_else(|| self.root_access_failure(index));
-        if was_active && !active {
+        let was_active = self.roots[index].state.is_active();
+        self.roots[index].state.set_options(options);
+        if was_active && !self.roots[index].state.is_active() {
+            // Disabling the active chrome affordance also revokes application runtime targets.
             self.roots[index].clear_transient_targets();
         }
+        self.invalidate_ui_commit();
         Ok(())
     }
 
@@ -526,16 +551,10 @@ impl WindowManager {
             return Err(RootMutationError::InvalidRootParent);
         }
 
-        // Preflight the target before dismissing another overlay so a conflicting application borrow
-        // cannot leave the previous state closed without making the requested root visible.
-        self.roots[target].root_widget.try_update(|_| {}).ok_or(RootMutationError::Borrowed)?;
         if kind == WindowKind::Modal {
-            self.dismiss_popups_except(None)?;
+            self.dismiss_popups_except(None);
         }
-        self.roots[target]
-            .root_widget
-            .try_update(|state| state.set_visible_silent(true))
-            .ok_or(RootMutationError::Borrowed)?;
+        self.roots[target].state.set_visible(true);
 
         match kind {
             WindowKind::Modal | WindowKind::Window => self.raise_root_subtree(root),
@@ -582,7 +601,7 @@ impl WindowManager {
 
         // A popup under the active modal must remain inside that modal's owned subtree. This prevents
         // a blocked ordinary window from opening a transient above or beneath the active modal group.
-        if let Some(modal) = self.active_modal_root()?
+        if let Some(modal) = self.active_modal_root()
             && !self.is_descendant_or_self(parent, modal)
         {
             return Err(RootMutationError::InvalidPopupParent);
@@ -600,17 +619,9 @@ impl WindowManager {
             None
         };
 
-        // Preflight the target before dismissing competing popups. The dismissal helper preflights
-        // its own complete set, so a borrow conflict cannot leave half of a branch replaced.
-        self.roots[target].root_widget.try_update(|_| {}).ok_or(RootMutationError::Borrowed)?;
-        self.dismiss_popups_except(keep)?;
-        self.roots[target]
-            .root_widget
-            .try_update(|state| {
-                state.set_rect_silent(anchor);
-                state.set_visible_silent(true);
-            })
-            .ok_or(RootMutationError::Borrowed)?;
+        self.dismiss_popups_except(keep);
+        self.roots[target].state.rect = anchor;
+        self.roots[target].state.set_visible(true);
 
         self.raise_root_subtree(target_id);
         self.invalidate_ui_commit();
@@ -621,32 +632,23 @@ impl WindowManager {
     ///
     /// The visible popup branch is derived directly from root chrome visibility and stable parent
     /// links. Dismissing deepest-first keeps submenu submissions in intuitive closing order.
-    fn dismiss_popups_except(&mut self, keep: Option<RootId>) -> Result<(), RootMutationError> {
+    fn dismiss_popups_except(&mut self, keep: Option<RootId>) {
         let mut popups = Vec::new();
         for (index, entry) in self.roots.iter().enumerate() {
             if entry.kind != WindowKind::Popup {
                 continue;
             }
-            let visible = entry.root_widget.try_read(RootChrome::is_visible).ok_or(RootMutationError::Borrowed)?;
             let retained = keep.is_some_and(|leaf| self.is_descendant_or_self(leaf, entry.id));
-            if visible && !retained {
+            if entry.state.visible && !retained {
                 popups.push(index);
             }
         }
         popups.sort_by_key(|index| std::cmp::Reverse(self.roots[*index].z_index));
 
-        // Preflight before the first dismissal so checked access remains all-or-nothing.
-        for index in &popups {
-            self.roots[*index].root_widget.try_update(|_| {}).ok_or(RootMutationError::Borrowed)?;
-        }
+        // Closing deepest-first preserves intuitive submenu notification order.
         for index in popups {
-            self.roots[index]
-                .root_widget
-                .try_update(RootChrome::dismiss_popup)
-                .ok_or(RootMutationError::Borrowed)?;
-            self.roots[index].clear_transient_targets();
+            self.roots[index].dismiss_popup();
         }
-        Ok(())
     }
 
     /// Raises a registered root inside its effective layer.
@@ -659,9 +661,9 @@ impl WindowManager {
         // Switching dialog groups invalidates transients belonging to the previous group. All
         // checked widget access completes before z-order changes, preserving mutation atomicity.
         if self.roots[index].kind == WindowKind::Modal && self.root_is_visible_checked(root)? {
-            let active_modal = self.active_modal_root()?;
+            let active_modal = self.active_modal_root();
             if active_modal != Some(root) {
-                self.dismiss_popups_except(None)?;
+                self.dismiss_popups_except(None);
             }
         }
         self.raise_root_subtree(root);
@@ -725,10 +727,7 @@ impl WindowManager {
     /// Returns checked visibility for a registered root during a fallible cross-root mutation.
     fn root_is_visible_checked(&self, root: RootId) -> Result<bool, RootMutationError> {
         let index = self.root_index(root)?;
-        self.roots[index]
-            .root_widget
-            .try_read(RootChrome::is_visible)
-            .ok_or(RootMutationError::Borrowed)
+        Ok(self.roots[index].state.visible)
     }
 
     /// Hides one root and every owned descendant as a single checked transaction.
@@ -736,30 +735,16 @@ impl WindowManager {
         let subtree = self.subtree_ids(root)?;
         let indices = subtree.iter().rev().copied().map(|root| self.root_index(root)).collect::<Result<Vec<_>, _>>()?;
 
-        // Preflight every root before mutating any visibility. This preserves the existing atomic
-        // checked-access contract even when a parent owns many independent retained trees.
-        for index in &indices {
-            self.roots[*index].root_widget.try_update(|_| {}).ok_or(RootMutationError::Borrowed)?;
-        }
+        // Descendants close before owners so popup submissions observe a coherent remaining tree.
         for index in indices {
-            let visible = self.roots[index]
-                .root_widget
-                .try_read(RootChrome::is_visible)
-                .ok_or(RootMutationError::Borrowed)?;
-            if visible && self.roots[index].kind == WindowKind::Popup {
+            if self.roots[index].state.visible && self.roots[index].kind == WindowKind::Popup {
                 // Every popup closure has the same semantic meaning, whether requested directly or
                 // caused by an ancestor closing, so coordinating menu controls always reconcile.
-                self.roots[index]
-                    .root_widget
-                    .try_update(RootChrome::dismiss_popup)
-                    .ok_or(RootMutationError::Borrowed)?;
+                self.roots[index].dismiss_popup();
             } else {
-                self.roots[index]
-                    .root_widget
-                    .try_update(|state| state.set_visible_silent(false))
-                    .ok_or(RootMutationError::Borrowed)?;
+                self.roots[index].state.set_visible(false);
+                self.roots[index].clear_transient_targets();
             }
-            self.roots[index].clear_transient_targets();
         }
 
         if self.active_root.is_some_and(|active| self.is_descendant_or_self(active, root)) {
@@ -767,25 +752,6 @@ impl WindowManager {
         }
         self.invalidate_ui_commit();
         Ok(())
-    }
-
-    fn update_root_widget(&mut self, root: RootId, update: impl FnOnce(&mut RootChrome)) -> Result<(), RootMutationError> {
-        let index = self.root_index(root)?;
-        if self.roots[index].root_widget.try_update(update).is_some() {
-            self.invalidate_ui_commit();
-            Ok(())
-        } else if self.roots[index].root_widget.is_alive() {
-            Err(RootMutationError::Borrowed)
-        } else {
-            panic!("registered root lost its persistent RootChrome owner")
-        }
-    }
-
-    fn root_access_failure(&self, index: usize) -> ! {
-        if self.roots[index].root_widget.is_alive() {
-            panic!("registered root widget is unexpectedly borrowed during traversal")
-        }
-        panic!("registered root lost its persistent RootChrome owner")
     }
 
     /// Assigns a fresh z-index without applying modal policy.
@@ -824,40 +790,89 @@ impl WindowManager {
     ///
     /// Modality needs no separate activation history: the same z-order that determines painting
     /// determines exclusive input, and hiding the front dialog reveals the one immediately below.
-    fn active_modal_root(&self) -> Result<Option<RootId>, RootMutationError> {
+    fn active_modal_root(&self) -> Option<RootId> {
         let mut front = None;
         for entry in &self.roots {
             if entry.kind != WindowKind::Modal {
                 continue;
             }
-            let visible = entry.root_widget.try_read(RootChrome::is_visible).ok_or(RootMutationError::Borrowed)?;
-            if visible && front.is_none_or(|(key, _)| entry.stack_key() > key) {
+            if entry.state.visible && front.is_none_or(|(key, _)| entry.stack_key() > key) {
                 front = Some((entry.stack_key(), entry.id));
             }
         }
-        Ok(front.map(|(_, root)| root))
+        front.map(|(_, root)| root)
     }
 
-    /// Reconciles state-local root closure with logical ownership after each routed event.
-    ///
-    /// Root chrome can close itself without calling `set_root_visible`. Any still-visible child of a
-    /// newly hidden parent is therefore found here and its complete subtree is closed. Popup targets
-    /// submit dismissal because the parent closure, not an explicit popup hide, invalidated them.
-    fn reconcile_closed_subtrees(&mut self) {
-        // Root chrome can close itself but cannot update descendants. Find each still-visible child
-        // whose direct parent closed and apply the same recursive hide operation used by the API.
-        loop {
-            let orphan = self.roots.iter().find_map(|entry| {
-                let parent = entry.parent?;
-                (self.root_is_visible(entry.id) && !self.root_is_visible(parent)).then_some(entry.id)
-            });
-            let Some(orphan) = orphan else { break };
-            self.hide_root_subtree(orphan)
-                .expect("orphaned root subtree is unexpectedly borrowed after input routing");
-        }
-
-        if self.active_root.is_some_and(|active| !self.root_is_visible(active)) {
-            self.active_root = None;
+    /// Routes one pointer event to manager-owned chrome and reports whether it was consumed.
+    fn route_chrome_event(&mut self, root: RootId, event: &UiInputEvent) -> bool {
+        let Ok(index) = self.root_index(root) else { return false };
+        match event {
+            UiInputEvent::MouseDown { pos, button } if button.intersects(MouseButton::LEFT) => {
+                match self.roots[index].state.chrome_part_at(*pos) {
+                    Some(RootChromePart::Close) => {
+                        // Hide the complete owned subtree before queueing Close so subscribers
+                        // observe final visibility and popup state at their safe dispatch boundary.
+                        self.hide_root_subtree(root).expect("chrome target must remain registered while closing");
+                        let index = self.root_index(root).expect("closing a root must not destroy it");
+                        self.roots[index].emit_submitted(crate::RootSubmitted::Close);
+                        true
+                    }
+                    Some(RootChromePart::Resize) => {
+                        // Chrome takes pointer ownership away from any application target in this root.
+                        self.roots[index].tree.clear_transient_targets();
+                        self.roots[index].state.interaction = RootInteraction::Resizing;
+                        true
+                    }
+                    Some(RootChromePart::Title) => {
+                        // Title movement and resizing share the same manager-level capture lifetime.
+                        self.roots[index].tree.clear_transient_targets();
+                        self.roots[index].state.interaction = RootInteraction::Moving;
+                        true
+                    }
+                    None => false,
+                }
+            }
+            UiInputEvent::MouseDrag { pos, delta, .. } => {
+                let initial = self.roots[index].state.rect;
+                match self.roots[index].state.interaction {
+                    RootInteraction::Moving => {
+                        self.roots[index].state.rect.x = initial.x.saturating_add(delta.x);
+                        self.roots[index].state.rect.y = initial.y.saturating_add(delta.y);
+                    }
+                    RootInteraction::Resizing => {
+                        let minimum = self.roots[index].state.geometry.minimum_outer;
+                        self.roots[index].state.rect.width = initial.width.saturating_add(delta.x).max(minimum.width);
+                        self.roots[index].state.rect.height = initial.height.saturating_add(delta.y).max(minimum.height);
+                    }
+                    RootInteraction::None => {
+                        // An uncaptured drag still cannot pass through chrome painted above content.
+                        return self.roots[index].state.chrome_part_at(*pos).is_some();
+                    }
+                }
+                // Every accepted drag changes at least the gesture state; emit geometry only when
+                // saturation or a minimum bound did not collapse the delta to the existing rect.
+                if (
+                    self.roots[index].state.rect.x,
+                    self.roots[index].state.rect.y,
+                    self.roots[index].state.rect.width,
+                    self.roots[index].state.rect.height,
+                ) != (initial.x, initial.y, initial.width, initial.height)
+                {
+                    self.roots[index].emit_changed();
+                    self.invalidate_ui_commit();
+                }
+                true
+            }
+            UiInputEvent::MouseUp { button, .. } if button.intersects(MouseButton::LEFT) && self.roots[index].state.is_active() => {
+                // The release ends chrome capture even when it occurs outside the root rectangle.
+                self.roots[index].state.clear_interaction();
+                true
+            }
+            _ => {
+                // Hover, scroll, non-left presses, and uncaptured releases are observational, but
+                // chrome still occludes the application tree anywhere it is painted above it.
+                event.position().is_some_and(|pos| self.roots[index].state.chrome_part_at(pos).is_some())
+            }
         }
     }
 
@@ -893,7 +908,6 @@ impl WindowManager {
             let Some(event) = event else { break };
             let input = self.input.snapshot();
             self.update_for_event(atlas, &event, input);
-            self.reconcile_closed_subtrees();
             // Application subscribers run only after the complete cross-root update has released
             // retained borrows. Their state/topology changes are therefore safe and become visible
             // to the layout immediately below, before routing the next raw input event.
@@ -908,52 +922,52 @@ impl WindowManager {
         self.sort_roots_for_stacking();
 
         for index in 0..self.roots.len() {
-            let (visible, options, rect) = self.roots[index]
-                .root_widget
-                .try_read(|state| (state.is_visible(), state.options(), state.rect()))
-                .unwrap_or_else(|| self.root_access_failure(index));
+            let visible = self.roots[index].state.visible;
+            let options = self.roots[index].state.options;
+            let rect = self.roots[index].state.rect;
             let auto_width = options.intersects(WindowOption::AUTO_WIDTH);
             let auto_height = options.intersects(WindowOption::AUTO_HEIGHT);
             if visible && options.intersects(WindowOption::AUTO_SIZE) {
-                // An automatic root axis asks for intrinsic size. A retained axis supplies its
-                // programmed outer bound so root chrome can offer the exact remaining body extent
-                // without exposing frame or padding arithmetic to the application.
-                let constraints = crate::Constraints::new(
+                // Convert retained outer bounds to application-body bounds before measuring. The
+                // measured body is then converted back to an outer intrinsic size exactly once.
+                let shell = root_chrome_geometry(rect, Dimensioni::default(), &self.roots[index].state.name, options, &self.style, atlas);
+                let horizontal_chrome = rect.width.saturating_sub(shell.body.width);
+                let vertical_chrome = rect.height.saturating_sub(shell.body.height);
+                let child_constraints = crate::Constraints::new(
                     if auto_width {
                         crate::AvailableSpace::Unbounded
                     } else {
-                        crate::AvailableSpace::bounded(rect.width)
+                        crate::AvailableSpace::bounded(rect.width).shrink(horizontal_chrome)
                     },
                     if auto_height {
                         crate::AvailableSpace::Unbounded
                     } else {
-                        crate::AvailableSpace::bounded(rect.height)
+                        crate::AvailableSpace::bounded(rect.height).shrink(vertical_chrome)
                     },
                 );
-                let tree = &mut self.roots[index].tree;
-                let size = tree.measure(&self.style, atlas, constraints);
-                let size = Dimensioni::new(
-                    if auto_width { size.width } else { rect.width },
-                    if auto_height { size.height } else { rect.height },
-                );
-                self.roots[index]
-                    .root_widget
-                    .try_update(|state| state.set_size_silent(size))
-                    .unwrap_or_else(|| self.root_access_failure(index));
+                let child = self.roots[index].tree.measure(&self.style, atlas, child_constraints);
+                let intrinsic = root_chrome_geometry(Recti::default(), child, &self.roots[index].state.name, options, &self.style, atlas).intrinsic_outer;
+                self.roots[index].state.rect.width = if auto_width { intrinsic.width } else { rect.width };
+                self.roots[index].state.rect.height = if auto_height { intrinsic.height } else { rect.height };
             }
         }
 
         for entry in &mut self.roots {
-            let (visible, rect) = entry
-                .root_widget
-                .try_read(|state| (state.is_visible(), state.rect()))
-                .expect("registered root state unavailable during frame");
-            if !visible {
+            if !entry.state.visible {
                 entry.clear_transient_targets();
                 continue;
             }
 
-            entry.tree.layout(&self.style, atlas.clone(), rect, viewport);
+            // Commit chrome and body geometry together so layout, hit testing, and paint share it.
+            entry.state.geometry = root_chrome_geometry(
+                entry.state.rect,
+                Dimensioni::default(),
+                &entry.state.name,
+                entry.state.options,
+                &self.style,
+                atlas,
+            );
+            entry.tree.layout(&self.style, atlas.clone(), entry.state.geometry.body, viewport);
         }
     }
 
@@ -976,7 +990,7 @@ impl WindowManager {
             // A new press may target any root. Transfer global pointer ownership before routing so
             // no previous root can retain a widget-level capture alongside the new press target.
             for entry in &mut self.roots {
-                if entry.id != root && entry.tree.has_capture() {
+                if entry.id != root && entry.has_capture() {
                     entry.clear_transient_targets();
                 }
             }
@@ -992,21 +1006,27 @@ impl WindowManager {
             _ => hover_root,
         };
         let keyboard_root = self.keyboard_input_root();
-        let modal_root = self.active_modal_root().expect("modal root unavailable before input routing");
+        let modal_root = self.active_modal_root();
         for index in 0..self.roots.len() {
             let root = self.roots[index].id;
-            let visible = self.roots[index]
-                .root_widget
-                .try_read(RootChrome::is_visible)
-                .expect("registered root state unavailable before input update");
+            let visible = self.roots[index].state.visible;
             if visible && modal_root.is_none_or(|modal| self.is_descendant_or_self(root, modal)) {
                 self.roots[index].tree.begin_input_event(pointer_root == Some(root), event);
             }
         }
 
         if event.is_pointer() {
-            // Widget capture owns drag continuation and release cleanup only. Wheel, hover, and new
-            // presses still perform ordinary hit routing, constrained by pointer_root above.
+            // Chrome capture and widget capture both own continuation, but only one can survive a
+            // new press because activation above clears every competing root's transient targets.
+            let chrome_root = matches!(event, crate::UiInputEvent::MouseDrag { .. } | crate::UiInputEvent::MouseUp { .. })
+                .then(|| {
+                    self.roots
+                        .iter()
+                        .find(|entry| modal_root.is_none_or(|modal| self.is_descendant_or_self(entry.id, modal)) && entry.state.is_active())
+                        .map(|entry| entry.id)
+                })
+                .flatten();
+            let mut capture_handled = chrome_root.is_some_and(|root| self.route_chrome_event(root, event));
             let capture_index = matches!(event, crate::UiInputEvent::MouseDrag { .. } | crate::UiInputEvent::MouseUp { .. })
                 .then(|| {
                     self.roots
@@ -1014,27 +1034,19 @@ impl WindowManager {
                         .position(|entry| modal_root.is_none_or(|modal| self.is_descendant_or_self(entry.id, modal)) && entry.tree.has_capture())
                 })
                 .flatten();
-            let mut capture_handled = false;
-            if let Some(index) = capture_index {
+            if !capture_handled && let Some(index) = capture_index {
                 let entry = &mut self.roots[index];
                 capture_handled = entry.tree.route_captured_pointer(&self.style, input.mouse_buttons, event).is_some();
             }
 
-            if !capture_handled
-                && let Some(root) = pointer_root
-                && let Some(index) = self.roots.iter().position(|entry| entry.id == root)
-            {
-                let entry = &mut self.roots[index];
-                if entry.tree.accepts_pointer_input() {
-                    // Root chrome is a window-manager overlay, not a customizable container hit
-                    // surface. Resolve it here before generic allocation-based tree targeting.
-                    let root_chrome_hit = entry
-                        .root_widget
-                        .try_read(|state| event.position().is_some_and(|pos| state.pointer_hits_chrome(pos)))
-                        .expect("registered root state unavailable during pointer targeting");
-                    // Capture is updated only after the selected target and its ancestors have
-                    // finished classifying the event.
-                    entry.tree.route_pointer(&self.style, event, root_chrome_hit, input.mouse_buttons);
+            if !capture_handled && let Some(root) = pointer_root {
+                // Chrome is painted above content, so it gets the first chance at an ordinary hit.
+                let chrome_handled = self.route_chrome_event(root, event);
+                if !chrome_handled
+                    && let Some(index) = self.roots.iter().position(|entry| entry.id == root)
+                    && self.roots[index].tree.accepts_pointer_input()
+                {
+                    self.roots[index].tree.route_pointer(&self.style, event, input.mouse_buttons);
                 }
             }
         } else if event.is_focus_input()
@@ -1046,24 +1058,17 @@ impl WindowManager {
         }
 
         self.sort_roots_for_stacking();
-        let modal_root = self.active_modal_root().expect("modal root unavailable before retained updates");
+        let modal_root = self.active_modal_root();
         for index in 0..self.roots.len() {
             let root = self.roots[index].id;
-            let visible = self.roots[index]
-                .root_widget
-                .try_read(RootChrome::is_visible)
-                .expect("registered root state unavailable during input update");
+            let visible = self.roots[index].state.visible;
             if !visible || modal_root.is_some_and(|modal| !self.is_descendant_or_self(root, modal)) {
                 self.roots[index].clear_transient_targets();
                 continue;
             }
             self.roots[index].tree.update(&self.style, atlas.clone(), input);
 
-            let visible = self.roots[index]
-                .root_widget
-                .try_read(RootChrome::is_visible)
-                .expect("registered root state unavailable after root update");
-            if !visible {
+            if !self.roots[index].state.visible {
                 self.roots[index].clear_transient_targets();
             }
         }
@@ -1078,23 +1083,13 @@ impl WindowManager {
         let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
         self.sort_roots_for_stacking();
         for entry in &mut self.roots {
-            let visible = entry
-                .root_widget
-                .try_read(RootChrome::is_visible)
-                .expect("registered root state unavailable during paint");
-            if !visible {
+            if !entry.state.visible {
                 continue;
             }
+            // Chrome surrounds the application display list in the same order users perceive it.
+            record_root_background(&mut self.display_list, viewport, &entry.state, &self.style);
             entry.tree.paint(&mut self.display_list, &self.style, atlas.clone());
-            let root_style = entry
-                .root_widget
-                .try_style_override()
-                .expect("registered root style unavailable during overlay paint")
-                .unwrap_or(self.style);
-            entry
-                .root_widget
-                .try_read(|state| record_root_overlay(&mut self.display_list, viewport, state, &root_style, atlas))
-                .expect("registered root state unavailable during overlay paint");
+            record_root_overlay(&mut self.display_list, viewport, &entry.state, &self.style, atlas);
         }
     }
 
@@ -1104,17 +1099,10 @@ impl WindowManager {
         let keep = self
             .roots
             .iter()
-            .enumerate()
-            .filter(|(index, entry)| {
-                entry.kind == WindowKind::Popup
-                    && entry
-                        .root_widget
-                        .try_read(|state| state.is_visible() && state.rect().contains(&mouse))
-                        .unwrap_or_else(|| self.root_access_failure(*index))
-            })
-            .max_by_key(|(_, entry)| entry.stack_key())
-            .map(|(_, entry)| entry.id);
-        self.dismiss_popups_except(keep).expect("popup root unavailable during outside-press dismissal");
+            .filter(|entry| entry.kind == WindowKind::Popup && entry.state.visible && entry.state.rect.contains(&mouse))
+            .max_by_key(|entry| entry.stack_key())
+            .map(|entry| entry.id);
+        self.dismiss_popups_except(keep);
     }
 
     /// Maps a pointer target to the ordinary root whose keyboard activation it represents.
@@ -1143,80 +1131,59 @@ impl WindowManager {
     /// Returns whether a registered root is currently visible.
     fn root_is_visible(&self, root: RootId) -> bool {
         let Ok(index) = self.root_index(root) else { return false };
-        self.roots[index]
-            .root_widget
-            .try_read(RootChrome::is_visible)
-            .unwrap_or_else(|| self.root_access_failure(index))
+        self.roots[index].state.visible
     }
 
+    /// Returns the front visible root whose outer rectangle contains `point`.
     fn front_root_at(&self, point: Vec2i) -> Option<RootId> {
         self.roots
             .iter()
-            .enumerate()
-            .filter(|(index, _)| {
-                self.roots[*index]
-                    .root_widget
-                    .try_read(|state| state.is_visible() && state.rect().contains(&point))
-                    .unwrap_or_else(|| self.root_access_failure(*index))
-            })
-            .max_by_key(|(_, entry)| entry.stack_key())
-            .map(|(_, entry)| entry.id)
+            .filter(|entry| entry.state.visible && entry.state.rect.contains(&point))
+            .max_by_key(|entry| entry.stack_key())
+            .map(|entry| entry.id)
     }
 
+    /// Returns the visually frontmost visible root across all stacking bands.
     fn front_visible_root(&self) -> Option<RootId> {
         self.roots
             .iter()
-            .enumerate()
-            .filter(|(index, _)| {
-                self.roots[*index]
-                    .root_widget
-                    .try_read(RootChrome::is_visible)
-                    .unwrap_or_else(|| self.root_access_failure(*index))
-            })
-            .max_by_key(|(_, entry)| entry.stack_key())
-            .map(|(_, entry)| entry.id)
+            .filter(|entry| entry.state.visible)
+            .max_by_key(|entry| entry.stack_key())
+            .map(|entry| entry.id)
     }
 
     /// Returns the sole pointer-eligible root at `point` under the active modal policy.
     fn input_root_at(&self, point: Vec2i) -> Option<RootId> {
-        let Some(modal) = self.active_modal_root().expect("modal root unavailable during pointer targeting") else {
+        let Some(modal) = self.active_modal_root() else {
             return self.front_root_at(point);
         };
         // The active modal's owned subtree forms one exclusive input group. Roots in fixed layers,
         // lower dialogs, and unrelated descendants remain painted but cannot receive this event.
         self.roots
             .iter()
-            .enumerate()
-            .filter(|(index, entry)| {
-                let eligible = self.is_descendant_or_self(entry.id, modal);
-                eligible
-                    && self.roots[*index]
-                        .root_widget
-                        .try_read(|state| state.is_visible() && state.rect().contains(&point))
-                        .unwrap_or_else(|| self.root_access_failure(*index))
-            })
-            .max_by_key(|(_, entry)| entry.stack_key())
-            .map(|(_, entry)| entry.id)
+            .filter(|entry| self.is_descendant_or_self(entry.id, modal) && entry.state.visible && entry.state.rect.contains(&point))
+            .max_by_key(|entry| entry.stack_key())
+            .map(|entry| entry.id)
     }
 
     /// Returns the root that exclusively accepts continuation of an in-progress pointer drag.
     fn drag_input_root(&self) -> Option<RootId> {
-        let modal = self.active_modal_root().expect("modal root unavailable during drag targeting");
+        let modal = self.active_modal_root();
         self.roots
             .iter()
-            .find(|entry| modal.is_none_or(|modal| self.is_descendant_or_self(entry.id, modal)) && entry.tree.has_capture())
+            .find(|entry| modal.is_none_or(|modal| self.is_descendant_or_self(entry.id, modal)) && entry.has_capture())
             .map(|entry| entry.id)
             .or_else(|| self.front_input_root())
     }
 
     /// Returns the sole keyboard-eligible root without deriving activation from visual stacking.
     fn keyboard_input_root(&self) -> Option<RootId> {
-        if let Some(modal) = self.active_modal_root().expect("modal root unavailable during keyboard targeting") {
+        if let Some(modal) = self.active_modal_root() {
             return Some(modal);
         }
         self.roots
             .iter()
-            .find(|entry| entry.tree.has_capture())
+            .find(|entry| entry.has_capture())
             .map(|entry| entry.id)
             .or_else(|| self.active_root.filter(|root| self.root_is_visible(*root)))
             .or_else(|| self.front_input_root().and_then(|root| self.activation_source(root)))
@@ -1224,21 +1191,15 @@ impl WindowManager {
 
     /// Returns the front visible root under modal eligibility for pointer confinement fallback.
     fn front_input_root(&self) -> Option<RootId> {
-        let Some(modal) = self.active_modal_root().expect("modal root unavailable during input fallback") else {
+        let Some(modal) = self.active_modal_root() else {
             return self.front_visible_root();
         };
         self.roots
             .iter()
-            .enumerate()
-            .filter(|(_, entry)| self.is_descendant_or_self(entry.id, modal))
-            .filter(|(index, entry)| {
-                entry
-                    .root_widget
-                    .try_read(RootChrome::is_visible)
-                    .unwrap_or_else(|| self.root_access_failure(*index))
-            })
-            .max_by_key(|(_, entry)| entry.stack_key())
-            .map(|(_, entry)| entry.id)
+            .filter(|entry| self.is_descendant_or_self(entry.id, modal))
+            .filter(|entry| entry.state.visible)
+            .max_by_key(|entry| entry.stack_key())
+            .map(|entry| entry.id)
     }
 
     const fn default_popup_options() -> WindowOption {
@@ -1253,13 +1214,7 @@ impl WindowManager {
         let mut names = self
             .roots
             .iter()
-            .enumerate()
-            .filter_map(|(index, entry)| {
-                entry
-                    .root_widget
-                    .try_read(|state| state.is_visible().then(|| (entry.stack_key(), state.name().to_owned())))
-                    .unwrap_or_else(|| self.root_access_failure(index))
-            })
+            .filter_map(|entry| entry.state.visible.then(|| (entry.stack_key(), entry.state.name.clone())))
             .collect::<Vec<_>>();
         names.sort_by_key(|(key, _)| *key);
         names.into_iter().map(|(_, name)| name).collect()
@@ -1268,6 +1223,54 @@ impl WindowManager {
     #[cfg(test)]
     pub(crate) fn debug_root_zindex(&self, root: RootId) -> Option<i32> {
         self.roots.iter().find(|entry| entry.id == root).map(|entry| entry.z_index)
+    }
+
+    /// Returns a retained root's displayed name for behavioral tests.
+    #[cfg(test)]
+    pub(crate) fn debug_root_name(&self, root: RootId) -> Option<String> {
+        // Clone the private string so tests cannot acquire a borrow into manager-owned state.
+        self.roots.iter().find(|entry| entry.id == root).map(|entry| entry.state.name.clone())
+    }
+
+    /// Returns a retained root's authoritative screen-space rectangle for tests.
+    #[cfg(test)]
+    pub(crate) fn debug_root_rect(&self, root: RootId) -> Option<Recti> {
+        // Recti is copied, preserving the manager as the sole mutable geometry owner.
+        self.roots.iter().find(|entry| entry.id == root).map(|entry| entry.state.rect)
+    }
+
+    /// Returns whether a retained root currently participates in traversal.
+    #[cfg(test)]
+    pub(crate) fn debug_root_visible(&self, root: RootId) -> Option<bool> {
+        // Unknown IDs remain distinguishable from registered hidden roots through Option.
+        self.roots.iter().find(|entry| entry.id == root).map(|entry| entry.state.visible)
+    }
+
+    /// Returns whether either manager-owned chrome gesture is active.
+    #[cfg(test)]
+    pub(crate) fn debug_root_active(&self, root: RootId) -> Option<bool> {
+        // This exposes behavioral capture state without restoring a public mutable chrome handle.
+        self.roots.iter().find(|entry| entry.id == root).map(|entry| entry.state.is_active())
+    }
+
+    /// Returns whether title movement currently owns manager pointer capture.
+    #[cfg(test)]
+    pub(crate) fn debug_root_moving(&self, root: RootId) -> Option<bool> {
+        // Exact interaction inspection keeps drag tests independent of application runtime capture.
+        self.roots
+            .iter()
+            .find(|entry| entry.id == root)
+            .map(|entry| entry.state.interaction == RootInteraction::Moving)
+    }
+
+    /// Returns whether resize chrome currently owns manager pointer capture.
+    #[cfg(test)]
+    pub(crate) fn debug_root_resizing(&self, root: RootId) -> Option<bool> {
+        // Exact interaction inspection distinguishes resize behavior from title movement.
+        self.roots
+            .iter()
+            .find(|entry| entry.id == root)
+            .map(|entry| entry.state.interaction == RootInteraction::Resizing)
     }
 
     #[cfg(test)]
@@ -1282,16 +1285,23 @@ impl WindowManager {
 
     #[cfg(test)]
     pub(crate) fn debug_modal_root(&self) -> Option<RootId> {
-        self.active_modal_root().expect("debug modal root unexpectedly borrowed")
+        self.active_modal_root()
     }
 
     #[cfg(test)]
     pub(crate) fn debug_root_body(&self, root: RootId, atlas: &crate::AtlasHandle) -> Option<Recti> {
         let entry = self.roots.iter().find(|entry| entry.id == root)?;
-        let style = entry.root_widget.try_style_override()?.unwrap_or(self.style);
-        entry
-            .root_widget
-            .try_read(|state| root_chrome_geometry(state.rect(), Dimensioni::default(), state.name(), state.options(), &style, atlas).body)
+        Some(
+            root_chrome_geometry(
+                entry.state.rect,
+                Dimensioni::default(),
+                &entry.state.name,
+                entry.state.options,
+                &self.style,
+                atlas,
+            )
+            .body,
+        )
     }
 
     #[cfg(test)]
@@ -1306,7 +1316,7 @@ impl WindowManager {
 
     #[cfg(test)]
     pub(crate) fn debug_root_has_pointer_capture(&self, root: RootId) -> Option<bool> {
-        self.roots.iter().find(|entry| entry.id == root).map(|entry| entry.tree.has_capture())
+        self.roots.iter().find(|entry| entry.id == root).map(WindowEntry::has_capture)
     }
 
     #[cfg(test)]
@@ -1324,10 +1334,14 @@ impl WindowManager {
     #[cfg(test)]
     pub(crate) fn debug_root_chrome(&self, root: RootId, atlas: &crate::AtlasHandle) -> Option<(Option<Recti>, Option<Recti>, Option<Recti>)> {
         let entry = self.roots.iter().find(|entry| entry.id == root)?;
-        let style = entry.root_widget.try_style_override()?.unwrap_or(self.style);
-        entry.root_widget.try_read(|state| {
-            let geometry = root_chrome_geometry(state.rect(), Dimensioni::default(), state.name(), state.options(), &style, atlas);
-            (geometry.title, geometry.close, geometry.resize)
-        })
+        let geometry = root_chrome_geometry(
+            entry.state.rect,
+            Dimensioni::default(),
+            &entry.state.name,
+            entry.state.options,
+            &self.style,
+            atlas,
+        );
+        Some((geometry.title, geometry.close, geometry.resize))
     }
 }

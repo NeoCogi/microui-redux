@@ -459,7 +459,6 @@ impl InputRouter {
     }
 
     /// Routes one topmost ordinary hit and bubbles an ignored event only through its ancestors.
-    #[cfg(test)]
     pub(super) fn route_input_event_to_node_ref(
         &mut self,
         node: &mut Node,
@@ -471,43 +470,6 @@ impl InputRouter {
         // Select exactly one target before any handler runs so ignored events cannot reveal a
         // covered sibling.
         let target = self.hit_test_pointer_node_ref(node, parent_transform, pos)?;
-        self.hover = Some(target);
-        self.route_input_event_to_target_path_from(node, target, parent_transform, style, event)
-    }
-
-    /// Routes a root's post-tree chrome before its application descendants.
-    ///
-    /// Ordinary retained containers remain child-first. A root is different because its title,
-    /// close button, and resize grip are painted after the complete application tree and therefore
-    /// occupy the top input layer where their rectangles overlap application content.
-    pub(super) fn route_root_input_event_to_node_ref(
-        &mut self,
-        node: &mut Node,
-        parent_transform: Transform,
-        style: &Style,
-        event: &UiInputEvent,
-        root_chrome_hit: bool,
-    ) -> Option<(RuntimeNodeId, RouteResult)> {
-        let pos = event.position()?;
-        // The window manager owns post-tree chrome geometry. When it reports a chrome hit, the
-        // root wins before descendants; otherwise ordinary targeting starts inside the root body.
-        let target = if root_chrome_hit {
-            Some(node.id())
-        } else {
-            let child_transform = parent_transform.push(node.state.layout);
-            node_children_visible(node)
-                .then(|| {
-                    node.with_children(|children| {
-                        children
-                            .iter()
-                            .rev()
-                            .filter(|child| child.intersects_clip(child_transform))
-                            .find_map(|child| self.hit_test_pointer_node_ref(child, child_transform, pos))
-                    })
-                })
-                .flatten()
-        }?;
-
         self.hover = Some(target);
         self.route_input_event_to_target_path_from(node, target, parent_transform, style, event)
     }

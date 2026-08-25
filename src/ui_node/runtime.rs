@@ -203,26 +203,18 @@ impl UiRuntime {
         self.input_router.route_focus_input_event(roots, self.root_transform, style, event)
     }
 
-    /// Routes a pointer event through root chrome or the deepest topmost application node.
-    pub(crate) fn route_root_input_event_to_node_ref(
-        &mut self,
-        node: &mut Node,
-        style: &Style,
-        event: &UiInputEvent,
-        root_chrome_hit: bool,
-    ) -> Option<(RuntimeNodeId, input_router::RouteResult)> {
-        self.input_router
-            .route_root_input_event_to_node_ref(node, self.root_transform, style, event, root_chrome_hit)
-    }
-
     /// Commits pointer-capture ownership after the selected target has classified an event.
     pub(crate) fn update_pointer_capture(&mut self, owner: RuntimeNodeId, result: input_router::RouteResult, event: &UiInputEvent, mouse_buttons: MouseButton) {
         self.input_router.update_pointer_capture(owner, result, event, mouse_buttons);
     }
 
-    /// Routes one ordinary pointer hit for focused retained-runtime tests.
-    #[cfg(test)]
-    pub(crate) fn route_input_event_to_node_ref(&mut self, node: &mut Node, style: &Style, event: &UiInputEvent) -> Option<(RuntimeNodeId, RouteResult)> {
+    /// Routes one ordinary pointer hit to the deepest topmost application node.
+    pub(crate) fn route_input_event_to_node_ref(
+        &mut self,
+        node: &mut Node,
+        style: &Style,
+        event: &UiInputEvent,
+    ) -> Option<(RuntimeNodeId, input_router::RouteResult)> {
         self.input_router.route_input_event_to_node_ref(node, self.root_transform, style, event)
     }
 

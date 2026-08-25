@@ -73,8 +73,7 @@
 //! `-- WindowManager
 //!     `-- roots: Vec<WindowEntry>
 //!         `-- WindowEntry
-//!             +-- root_widget: TypedWidgetHandle<RootChrome>
-//!             |   `-.-> RootChrome WidgetStorage allocation inside root
+//!             +-- state: manager-owned chrome, geometry, and visibility
 //!             `-- tree: WidgetTree
 //!                 +-- runtime: UiRuntime
 //!                 |   `-- traversal state only; it does not own Node objects

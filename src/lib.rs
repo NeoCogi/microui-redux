@@ -223,8 +223,7 @@ pub mod retained {
     };
     pub use crate::context::{Context, ContextFrame, EventContext};
     pub use crate::window_manager::{
-        DEFAULT_LAYER, LayerBinding, MAX_LAYER, MIN_LAYER, PopupHandle, RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted,
-        WindowOption,
+        DEFAULT_LAYER, LayerBinding, MAX_LAYER, MIN_LAYER, PopupHandle, RootChanged, RootHandle, RootId, RootMutationError, RootSubmitted, WindowOption,
     };
 }
 
@@ -246,10 +245,10 @@ pub mod prelude {
     pub use crate::retained::{
         ChildParticipation, Children, Container, ContainerLayoutCtx, ContainerWidget, Context, ContextFrame, EventContext, CustomRenderArgs, AvailableSpace,
         Constraints, CustomRenderHandle, Disclosure, DisclosureParameters, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, Linear, LinearCrossSize,
-        LinearDirection, LinearItem, LinearParameters, Node, PopupHandle, RootChanged, RootHandle, MeasureCtx, RootId, RootMutationError, RootChrome,
-        RootSubmitted, LayerBinding, DEFAULT_LAYER, MAX_LAYER, MIN_LAYER, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Scrollbar, ScrollbarAxis,
-        ScrollbarChanged, ScrollbarParameters, TrackSize, LeafWidget, TextWrap, UiInputEvent, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption,
-        WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx, WindowOption,
+        LinearDirection, LinearItem, LinearParameters, Node, PopupHandle, RootChanged, RootHandle, MeasureCtx, RootId, RootMutationError, RootSubmitted,
+        LayerBinding, DEFAULT_LAYER, MAX_LAYER, MIN_LAYER, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Scrollbar, ScrollbarAxis, ScrollbarChanged,
+        ScrollbarParameters, TrackSize, LeafWidget, TextWrap, UiInputEvent, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption, WidgetOption,
+        WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx, WindowOption,
     };
     pub use crate::math::{expand_rect, rect, vec2};
     pub use crate::theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, color};
@@ -273,7 +272,7 @@ pub use atlas::{
 };
 pub use context::{Context, ContextFrame, EventContext};
 pub use window_manager::{
-    DEFAULT_LAYER, LayerBinding, MAX_LAYER, MIN_LAYER, PopupHandle, RootChanged, RootHandle, RootId, RootMutationError, RootChrome, RootSubmitted, WindowOption,
+    DEFAULT_LAYER, LayerBinding, MAX_LAYER, MIN_LAYER, PopupHandle, RootChanged, RootHandle, RootId, RootMutationError, RootSubmitted, WindowOption,
 };
 pub use event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventPortHandle};
 pub use file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};

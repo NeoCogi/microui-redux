@@ -195,8 +195,8 @@ fn downstream_window_menu_exposes_concrete_items_roots_and_live_state() {
         word_wrap,
         invoked: Vec::new(),
     };
-    assert!(model.menu.window().widget().is_alive());
-    assert!(model.menu.popup(0).unwrap().widget().is_alive());
+    assert!(model.menu.window().is_alive());
+    assert!(model.menu.popup(0).unwrap().is_alive());
     assert!(model.save.is_alive());
     assert!(model.word_wrap.is_alive());
     assert!(model.invoked.is_empty());
@@ -340,10 +340,10 @@ fn root_creation_and_lifecycle_need_no_projection_or_generated_node_identity() {
     let root = ctx.create_window("root", rect(10, 20, 100, 80), content);
     let id = root.id();
 
-    assert_eq!(root.widget().try_read(|widget| widget.is_visible()), Some(true));
+    assert!(root.is_alive());
     ctx.set_root_visible(id, false).unwrap();
-    assert_eq!(root.widget().try_read(|widget| widget.is_visible()), Some(false));
+    assert!(root.is_alive(), "hiding retains the root and its application tree");
     assert!(ctx.destroy_root(id));
-    assert!(!root.widget().is_alive());
+    assert!(!root.is_alive());
     assert_eq!(ctx.set_root_rect(id, rect(0, 0, 1, 1)), Err(RootMutationError::UnknownRoot));
 }

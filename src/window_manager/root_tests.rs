@@ -366,7 +366,7 @@ fn routed_recipient_gets_one_event_while_every_node_still_updates_in_fifo_order(
         })
         .unwrap();
     let metrics = ctx.debug_root_runtime_metrics(root.id()).unwrap();
-    assert_eq!(metrics.updates, 12, "chrome receives None for each event while the probe receives Some");
+    assert_eq!(metrics.updates, 6, "the application node receives each event exactly once");
 }
 
 #[test]
@@ -382,14 +382,14 @@ fn update_drains_each_input_into_one_full_update_and_one_followup_layout() {
 
     let metrics = ctx.debug_root_runtime_metrics(root.id()).unwrap();
     assert_eq!(metrics.tree_layouts, 4, "one synchronization layout plus one per input event");
-    assert_eq!(metrics.updates, 6, "three events update both chrome and content");
+    assert_eq!(metrics.updates, 3, "three events update the application tree");
     assert_eq!(metrics.paints, 0, "update_ui must not paint");
 
     ctx.frame(frame_info(dimensions)).render_ui().unwrap();
     let metrics = ctx.debug_root_runtime_metrics(root.id()).unwrap();
     assert_eq!(metrics.tree_layouts, 4, "render must not lay out");
-    assert_eq!(metrics.updates, 6, "render must not update widgets");
-    assert_eq!(metrics.paints, 2, "render paints chrome and content exactly once");
+    assert_eq!(metrics.updates, 3, "render must not update widgets");
+    assert_eq!(metrics.paints, 1, "render paints the application tree exactly once");
 }
 
 #[test]
@@ -433,7 +433,7 @@ fn invalid_update_dimensions_panic_before_dequeue_and_preserve_pending_input() {
     ctx.update_ui(Dimensioni::new(320, 240));
     let metrics = ctx.debug_root_runtime_metrics(root.id()).unwrap();
     assert_eq!(metrics.tree_layouts, 2);
-    assert_eq!(metrics.updates, 2, "the event queued before the panic must still be drained");
+    assert_eq!(metrics.updates, 1, "the event queued before the panic must still be drained");
 }
 
 #[test]
@@ -453,7 +453,7 @@ fn every_event_layout_commit_updates_hit_geometry_for_the_next_queued_event() {
     ctx.mousedown(close.x + close.width / 2 + shift.x, close.y + close.height / 2 + shift.y, MouseButton::LEFT);
     ctx.update_ui(dimensions);
 
-    assert_eq!(root.widget().try_read(RootChrome::is_visible), Some(false));
+    assert_eq!(ctx.debug_root_visible(root.id()), Some(false));
 }
 
 #[test]
@@ -858,15 +858,12 @@ fn context_aware_handler_creates_and_mutates_every_root_kind_before_layout() {
     let dialog = model.dialog.as_ref().expect("event handler must retain the weak dialog handle");
     let popup = model.popup.as_ref().expect("event handler must retain the weak popup handle");
     assert_eq!(
-        window.widget().try_read(|root| {
-            let rect = root.rect();
-            (rect.x, rect.y, rect.width, rect.height)
-        }),
+        context.debug_root_rect(window.id()).map(|rect| (rect.x, rect.y, rect.width, rect.height)),
         Some((30, 40, 110, 75))
     );
-    assert_eq!(dialog.widget().try_read(RootChrome::is_visible), Some(true));
-    assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(true));
-    assert_eq!(popup.widget().try_read(|root| (root.rect().x, root.rect().y)), Some((180, 30)));
+    assert_eq!(context.debug_root_visible(dialog.id()), Some(true));
+    assert_eq!(context.debug_root_visible(popup.id()), Some(true));
+    assert_eq!(context.debug_root_rect(popup.id()).map(|rect| (rect.x, rect.y)), Some((180, 30)));
     assert!(context.debug_root_node_count(window.id()).is_some());
     assert!(context.debug_root_node_count(dialog.id()).is_some());
     assert!(context.debug_root_node_count(popup.id()).is_some());
@@ -927,8 +924,8 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     context.update_ui_state(dimensions, &mut model);
 
     let anchor = model.submitted_anchor.expect("combo submission must carry its routed anchor");
-    assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(true));
-    assert_eq!(popup.widget().try_read(|root| (root.rect().x, root.rect().y)), Some((anchor.x, anchor.y)));
+    assert_eq!(context.debug_root_visible(popup.id()), Some(true));
+    assert_eq!(context.debug_root_rect(popup.id()).map(|rect| (rect.x, rect.y)), Some((anchor.x, anchor.y)));
     assert_eq!(combo.is_open(), Some(true));
 
     // Root chrome is outside the composed popup. Its press dismisses the popup and reconciles the
@@ -938,14 +935,14 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     let title_y = title.y + title.height / 2;
     context.mousedown(title_x, title_y, MouseButton::LEFT);
     context.update_ui_state(dimensions, &mut model);
-    assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(false));
+    assert_eq!(context.debug_root_visible(popup.id()), Some(false));
     assert_eq!(combo.is_open(), Some(false));
-    assert_eq!(source.widget().try_read(RootChrome::is_moving), Some(true));
+    assert_eq!(context.debug_root_moving(source.id()), Some(true));
 
     context.mousemove(title_x + 15, title_y + 10);
     context.update_ui_state(dimensions, &mut model);
-    assert_eq!(source.widget().try_read(|root| (root.rect().x, root.rect().y)), Some((25, 20)));
-    assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(false));
+    assert_eq!(context.debug_root_rect(source.id()).map(|rect| (rect.x, rect.y)), Some((25, 20)));
+    assert_eq!(context.debug_root_visible(popup.id()), Some(false));
     assert_eq!(combo.is_open(), Some(false));
 
     // Reopen the composed popup, then replace it through generic popup exclusivity. The displaced
@@ -955,13 +952,13 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     let moved_combo_rect = context.debug_root_node_rect(source.id(), combo_id).unwrap();
     context.mousedown(moved_combo_rect.x + 1, moved_combo_rect.y + 1, MouseButton::LEFT);
     context.update_ui_state(dimensions, &mut model);
-    assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(true));
+    assert_eq!(context.debug_root_visible(popup.id()), Some(true));
     assert_eq!(combo.is_open(), Some(true));
 
     context.show_popup(&replacement).unwrap();
     context.update_ui_state(dimensions, &mut model);
-    assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(false));
-    assert_eq!(replacement.widget().try_read(RootChrome::is_visible), Some(true));
+    assert_eq!(context.debug_root_visible(popup.id()), Some(false));
+    assert_eq!(context.debug_root_visible(replacement.id()), Some(true));
     assert_eq!(combo.is_open(), Some(false));
 }
 
@@ -999,35 +996,18 @@ fn textbox_handle_event_dispatches_a_complete_snapshot_to_state() {
 }
 
 #[test]
-fn creation_returns_typed_persistent_root_widget() {
+fn creation_returns_persistent_root_handle() {
     let mut ctx = context();
     let root = ctx.create_window("window", rect(20, 30, 120, 90), empty_content());
 
-    assert!(root.widget().is_alive());
-    assert_eq!(root.widget().try_read(|state| state.name().to_owned()), Some("window".to_owned()));
+    assert!(root.is_alive());
+    assert_eq!(ctx.debug_root_name(root.id()), Some("window".to_owned()));
     assert_eq!(
-        root.widget().try_read(|state| {
-            let rect = state.rect();
-            (rect.x, rect.y, rect.width, rect.height)
-        }),
+        ctx.debug_root_rect(root.id()).map(|rect| (rect.x, rect.y, rect.width, rect.height)),
         Some((20, 30, 120, 90))
     );
-    assert_eq!(root.widget().try_read(RootChrome::is_visible), Some(true));
-    assert_eq!(ctx.debug_root_node_count(root.id()), Some(2));
-}
-
-#[test]
-fn every_root_kind_adds_exactly_one_private_chrome_node() {
-    let mut ctx = context();
-    let window = ctx.create_window("window", rect(0, 0, 100, 80), empty_content());
-    let dialog = ctx.create_dialog(window.id(), "dialog", rect(10, 10, 100, 80), empty_content()).unwrap();
-    let popup = ctx.create_popup(window.id(), "popup", empty_content()).unwrap();
-
-    // Each application tree contains one empty vertical Linear node. The second retained node is the one
-    // private root Container; title, close, and resize regions are geometry, not child nodes.
-    assert_eq!(ctx.debug_root_node_count(window.id()), Some(2));
-    assert_eq!(ctx.debug_root_node_count(dialog.id()), Some(2));
-    assert_eq!(ctx.debug_root_node_count(popup.id()), Some(2));
+    assert_eq!(ctx.debug_root_visible(root.id()), Some(true));
+    assert_eq!(ctx.debug_root_node_count(root.id()), Some(1));
 }
 
 #[test]
@@ -1042,10 +1022,7 @@ fn owned_roots_keep_screen_geometry_independent_and_inherit_lifecycle_recursivel
     // Ownership affects stacking and lifetime, not coordinates. The child rectangle remains the
     // exact screen-space rectangle supplied by the caller rather than an offset from its parent.
     assert_eq!(
-        child.widget().try_read(|root| {
-            let rect = root.rect();
-            (rect.x, rect.y, rect.width, rect.height)
-        }),
+        ctx.debug_root_rect(child.id()).map(|rect| (rect.x, rect.y, rect.width, rect.height)),
         Some((220, 170, 80, 60))
     );
     assert_eq!(ctx.root_layer_binding(child.id()), Ok(LayerBinding::Inherited(owner.id())));
@@ -1057,18 +1034,20 @@ fn owned_roots_keep_screen_geometry_independent_and_inherit_lifecycle_recursivel
     // Hiding an owner closes every visible descendant in one transaction. Hidden descendants stay
     // registered so application state and weak handles remain available for later explicit shows.
     ctx.set_root_visible(owner.id(), false).unwrap();
-    assert_eq!(owner.widget().try_read(RootChrome::is_visible), Some(false));
-    assert_eq!(child.widget().try_read(RootChrome::is_visible), Some(false));
-    assert!(dialog.widget().is_alive());
-    assert!(popup.widget().is_alive());
-    assert!(submenu.widget().is_alive());
+    assert_eq!(ctx.debug_root_visible(owner.id()), Some(false));
+    assert_eq!(ctx.debug_root_visible(child.id()), Some(false));
+    assert!(dialog.is_alive());
+    assert!(popup.is_alive());
+    assert!(submenu.is_alive());
 
     // Destruction follows the same tree but releases ownership permanently, including descendants
     // that were already hidden.
     assert!(ctx.destroy_root(owner.id()));
-    for handle in [owner.widget(), child.widget(), dialog.widget(), popup.widget(), submenu.widget()] {
-        assert!(!handle.is_alive());
-    }
+    assert!(!owner.is_alive());
+    assert!(!child.is_alive());
+    assert!(!dialog.is_alive());
+    assert!(!popup.is_alive());
+    assert!(!submenu.is_alive());
     assert_eq!(ctx.set_root_visible(child.id(), true), Err(RootMutationError::UnknownRoot));
 }
 
@@ -1117,8 +1096,7 @@ fn one_child_scroll_area_retains_its_three_structural_children() {
     let root = ctx.create_window("scroll", rect(0, 0, 100, 80), content);
 
     // The application child lives below a scroll surface, beside two real scrollbar widgets.
-    // Root chrome is the sixth retained node and remains separate from the application composite.
-    assert_eq!(ctx.debug_root_node_count(root.id()), Some(6));
+    assert_eq!(ctx.debug_root_node_count(root.id()), Some(5));
 }
 
 #[test]
@@ -1129,12 +1107,12 @@ fn hide_and_show_preserve_root_and_descendant_state() {
 
     ctx.set_root_visible(root.id(), false).unwrap();
     ctx.update_and_render_ui();
-    assert_eq!(root.widget().try_read(RootChrome::is_visible), Some(false));
+    assert_eq!(ctx.debug_root_visible(root.id()), Some(false));
     assert!(button.is_alive());
 
     ctx.set_root_visible(root.id(), true).unwrap();
     ctx.update_and_render_ui();
-    assert_eq!(root.widget().try_read(RootChrome::is_visible), Some(true));
+    assert_eq!(ctx.debug_root_visible(root.id()), Some(true));
     assert!(button.is_alive());
 }
 
@@ -1149,59 +1127,11 @@ fn destroy_expires_handles_and_ids_are_never_reused() {
     assert!(!ctx.destroy_root(destroyed_id));
     assert_eq!(ctx.bring_root_to_front(destroyed_id), Err(RootMutationError::UnknownRoot));
     assert_eq!(ctx.set_root_rect(destroyed_id, rect(1, 2, 3, 4)), Err(RootMutationError::UnknownRoot));
-    assert!(!root.widget().is_alive());
+    assert!(!root.is_alive());
     assert!(!button.is_alive());
 
     let replacement = ctx.create_window("second", rect(0, 0, 100, 80), empty_content());
     assert_ne!(replacement.id(), destroyed_id);
-}
-
-#[test]
-fn active_state_upgrade_does_not_keep_destroyed_root_topology_alive() {
-    let mut ctx = context();
-    let (child, content) = button_content("child");
-    let root = ctx.create_window("window", rect(0, 0, 100, 80), content);
-    let state = root.widget().clone();
-
-    state
-        .try_update(|_| {
-            assert!(ctx.destroy_root(root.id()));
-            assert!(state.is_alive());
-            assert!(!child.is_alive(), "root state access is not a second strong child owner");
-        })
-        .unwrap();
-
-    assert!(!state.is_alive());
-    assert!(!child.is_alive());
-}
-
-#[test]
-fn same_widget_setter_conflict_is_checked() {
-    let mut ctx = context();
-    let root = ctx.create_window("window", rect(0, 0, 100, 80), empty_content());
-    let mut conflict = None;
-
-    root.widget()
-        .try_update(|_| conflict = Some(ctx.set_root_rect(root.id(), rect(10, 10, 100, 80))))
-        .unwrap();
-
-    assert_eq!(conflict, Some(Err(RootMutationError::Borrowed)));
-}
-
-#[test]
-fn popup_switch_is_atomic_when_the_visible_popup_state_is_borrowed() {
-    let mut ctx = context();
-    let source = ctx.create_window("source", rect(0, 0, 100, 80), empty_content());
-    let first = ctx.create_popup(source.id(), "first", empty_content()).unwrap();
-    let second = ctx.create_popup(source.id(), "second", empty_content()).unwrap();
-    ctx.show_popup(&first).unwrap();
-    let mut result = None;
-
-    first.widget().try_update(|_| result = Some(ctx.show_popup(&second))).unwrap();
-
-    assert_eq!(result, Some(Err(RootMutationError::Borrowed)));
-    assert_eq!(first.widget().try_read(RootChrome::is_visible), Some(true));
-    assert_eq!(second.widget().try_read(RootChrome::is_visible), Some(false));
 }
 
 #[test]
@@ -1218,11 +1148,11 @@ fn dynamic_container_root_changes_descendants_without_replacing_the_root() {
     ctx.update_and_render_ui();
     assert_eq!(root.id(), root_id);
     assert!(button.is_alive());
-    assert_eq!(ctx.debug_root_node_count(root_id), Some(3));
+    assert_eq!(ctx.debug_root_node_count(root_id), Some(2));
 
     assert_eq!(column.try_update(|linear: &mut Linear| linear.remove_drop(0)), Some(Some(true)));
     assert!(!button.is_alive());
-    assert!(root.widget().is_alive());
+    assert!(root.is_alive());
 }
 
 #[test]
@@ -1239,16 +1169,13 @@ fn showing_a_popup_atomically_hides_and_dismisses_the_previous_one() {
     let mut submissions = Vec::new();
 
     ctx.show_popup_at(&first, rect(12, 18, 90, 1)).unwrap();
-    assert_eq!(first.widget().try_read(RootChrome::is_visible), Some(true));
+    assert_eq!(ctx.debug_root_visible(first.id()), Some(true));
     ctx.show_popup_at(&second, rect(40, 55, 120, 1)).unwrap();
 
-    assert_eq!(first.widget().try_read(RootChrome::is_visible), Some(false));
-    assert_eq!(second.widget().try_read(RootChrome::is_visible), Some(true));
+    assert_eq!(ctx.debug_root_visible(first.id()), Some(false));
+    assert_eq!(ctx.debug_root_visible(second.id()), Some(true));
     assert_eq!(
-        second.widget().try_read(|root| {
-            let anchor = root.rect();
-            (anchor.x, anchor.y, anchor.width, anchor.height)
-        }),
+        ctx.debug_root_rect(second.id()).map(|anchor| (anchor.x, anchor.y, anchor.width, anchor.height)),
         Some((40, 55, 120, 1))
     );
     assert!(dispatcher.dispatch(&mut submissions));
@@ -1273,8 +1200,8 @@ fn hiding_a_parent_recursively_hides_its_popup_children() {
     ctx.show_popup(&second).unwrap();
     ctx.set_root_visible(source.id(), false).unwrap();
 
-    assert_eq!(first.widget().try_read(RootChrome::is_visible), Some(false));
-    assert_eq!(second.widget().try_read(RootChrome::is_visible), Some(false));
+    assert_eq!(ctx.debug_root_visible(first.id()), Some(false));
+    assert_eq!(ctx.debug_root_visible(second.id()), Some(false));
     assert!(dispatcher.dispatch(&mut submissions));
     assert_eq!(submissions, [RootSubmitted::PopupDismissed]);
 }
@@ -1290,7 +1217,7 @@ fn anchored_popup_operation_rejects_a_destroyed_typed_popup() {
     // PopupHandle makes ordinary windows and dialogs unrepresentable at this API boundary. The
     // remaining identity failure is a once-valid weak popup capability whose root was destroyed.
     assert_eq!(ctx.show_popup_at(&popup, rect(20, 30, 40, 1)), Err(RootMutationError::UnknownRoot));
-    assert!(!popup.widget().is_alive());
+    assert!(!popup.is_alive());
 }
 
 #[test]
@@ -1312,7 +1239,7 @@ fn outside_popup_press_hides_and_records_typed_submission() {
     ctx.mousedown(200, 180, MouseButton::LEFT);
     ctx.update_and_render_ui();
 
-    assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(false));
+    assert_eq!(ctx.debug_root_visible(popup.id()), Some(false));
     assert!(widget_event_dispatcher.dispatch(&mut submissions));
     assert_eq!(submissions, [RootSubmitted::PopupDismissed]);
     ctx.show_popup(&popup).unwrap();
@@ -1339,7 +1266,7 @@ fn outside_popup_press_dismisses_then_routes_once_to_the_revealed_root() {
     ctx.mousedown(15, 15, MouseButton::LEFT);
     ctx.update_ui(Dimensioni::new(320, 240));
 
-    assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(false));
+    assert_eq!(ctx.debug_root_visible(popup.id()), Some(false));
     assert!(dispatcher.dispatch(&mut submissions));
     assert_eq!(submissions, 1);
 }
@@ -1353,7 +1280,7 @@ fn layout_only_update_and_paint_have_separate_phase_counts() {
     let metrics = ctx.debug_root_runtime_metrics(root.id()).unwrap();
     assert_eq!(metrics.tree_layouts, 1);
     assert_eq!(metrics.updates, 0);
-    assert_eq!(metrics.paints, 2);
+    assert_eq!(metrics.paints, 1);
 }
 
 #[test]
@@ -1463,8 +1390,8 @@ fn submenu_popup_retains_its_parent_and_exposes_the_direct_ownership_edge() {
     ctx.show_popup(&parent).unwrap();
     ctx.show_popup(&child).unwrap();
 
-    assert_eq!(parent.widget().try_read(RootChrome::is_visible), Some(true));
-    assert_eq!(child.widget().try_read(RootChrome::is_visible), Some(true));
+    assert_eq!(ctx.debug_root_visible(parent.id()), Some(true));
+    assert_eq!(ctx.debug_root_visible(child.id()), Some(true));
     assert_eq!(ctx.root_layer_binding(child.id()), Ok(LayerBinding::Inherited(parent.id())));
 }
 
@@ -1482,10 +1409,10 @@ fn popup_branch_replaces_only_the_stable_parents_descendants() {
     ctx.show_popup(&grandchild).unwrap();
     ctx.show_popup(&sibling).unwrap();
 
-    assert_eq!(parent.widget().try_read(RootChrome::is_visible), Some(true));
-    assert_eq!(child.widget().try_read(RootChrome::is_visible), Some(false));
-    assert_eq!(grandchild.widget().try_read(RootChrome::is_visible), Some(false));
-    assert_eq!(sibling.widget().try_read(RootChrome::is_visible), Some(true));
+    assert_eq!(ctx.debug_root_visible(parent.id()), Some(true));
+    assert_eq!(ctx.debug_root_visible(child.id()), Some(false));
+    assert_eq!(ctx.debug_root_visible(grandchild.id()), Some(false));
+    assert_eq!(ctx.debug_root_visible(sibling.id()), Some(true));
     assert_eq!(ctx.root_layer_binding(sibling.id()), Ok(LayerBinding::Inherited(parent.id())));
 }
 
@@ -1505,12 +1432,12 @@ fn presses_inside_a_popup_ancestor_close_only_its_descendant_branch() {
 
     ctx.mousedown(40, 40, MouseButton::LEFT);
     ctx.update_and_render_ui();
-    assert_eq!(parent.widget().try_read(RootChrome::is_visible), Some(true));
-    assert_eq!(child.widget().try_read(RootChrome::is_visible), Some(false));
+    assert_eq!(ctx.debug_root_visible(parent.id()), Some(true));
+    assert_eq!(ctx.debug_root_visible(child.id()), Some(false));
 
     ctx.mousedown(280, 200, MouseButton::LEFT);
     ctx.update_and_render_ui();
-    assert_eq!(parent.widget().try_read(RootChrome::is_visible), Some(false));
+    assert_eq!(ctx.debug_root_visible(parent.id()), Some(false));
 }
 
 #[test]
@@ -1526,7 +1453,7 @@ fn destroying_a_parent_recursively_expires_popup_descendants() {
 
     assert!(ctx.destroy_root(source.id()));
     assert_eq!(ctx.root_layer_binding(popup.id()), Err(RootMutationError::UnknownRoot));
-    assert!(!popup.widget().is_alive());
+    assert!(!popup.is_alive());
 }
 
 #[test]
@@ -1708,7 +1635,7 @@ fn active_dialog_accepts_only_its_own_popup_in_the_modal_input_group() {
     assert_eq!(submissions, 1);
 
     ctx.set_root_visible(dialog.id(), false).unwrap();
-    assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(false));
+    assert_eq!(ctx.debug_root_visible(popup.id()), Some(false));
 }
 
 #[test]
@@ -1758,20 +1685,17 @@ fn modal_routing_revokes_underlying_chrome_capture_before_drag_continues() {
     ctx.mousedown(title.x + 2, title.y + 2, MouseButton::LEFT);
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_root_has_pointer_capture(window.id()), Some(true));
-    assert_eq!(window.widget().try_read(RootChrome::is_moving), Some(true));
-    let before = window.widget().try_read(RootChrome::rect).unwrap();
+    assert_eq!(ctx.debug_root_moving(window.id()), Some(true));
+    let before = ctx.debug_root_rect(window.id()).unwrap();
 
     ctx.set_root_visible(dialog.id(), true).unwrap();
     ctx.mousemove(title.x + 20, title.y + 20);
     ctx.mouseup(title.x + 20, title.y + 20, MouseButton::LEFT);
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_root_has_pointer_capture(window.id()), Some(false));
-    assert_eq!(window.widget().try_read(RootChrome::is_active), Some(false));
+    assert_eq!(ctx.debug_root_active(window.id()), Some(false));
     assert_eq!(
-        window.widget().try_read(|state| {
-            let rect = state.rect();
-            (rect.x, rect.y, rect.width, rect.height)
-        }),
+        ctx.debug_root_rect(window.id()).map(|rect| (rect.x, rect.y, rect.width, rect.height)),
         Some((before.x, before.y, before.width, before.height))
     );
 }
@@ -1797,7 +1721,7 @@ fn hiding_or_destroying_the_front_dialog_reveals_the_next_visible_dialog() {
     let close = ctx.debug_root_chrome(second.id()).unwrap().1.unwrap();
     ctx.mousedown(close.x + close.width / 2, close.y + close.height / 2, MouseButton::LEFT);
     ctx.update_and_render_ui();
-    assert_eq!(second.widget().try_read(RootChrome::is_visible), Some(false));
+    assert_eq!(ctx.debug_root_visible(second.id()), Some(false));
     assert_eq!(ctx.debug_modal_root(), Some(first.id()));
 
     ctx.set_root_visible(second.id(), true).unwrap();
@@ -1834,13 +1758,6 @@ fn fronting_a_visible_dialog_makes_it_the_active_modal() {
 
     ctx.bring_root_to_front(second.id()).unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(second.id()));
-
-    // Fronting is now a checked mutation because deriving modal state reads visible root chrome.
-    first
-        .widget()
-        .try_update(|_| assert_eq!(ctx.bring_root_to_front(first.id()), Err(RootMutationError::Borrowed)))
-        .unwrap();
-    assert_eq!(ctx.debug_modal_root(), Some(second.id()));
 }
 
 #[test]
@@ -1858,28 +1775,7 @@ fn fronting_a_dialog_closes_the_previous_modal_groups_popup() {
     // before changing modal z-order.
     ctx.bring_root_to_front(first.id()).unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(first.id()));
-    assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(false));
-}
-
-#[test]
-fn hiding_and_destruction_ignore_unrelated_root_chrome_borrows() {
-    let mut ctx = context();
-    let window = ctx.create_window("window", rect(0, 0, 100, 80), empty_content());
-    let owner = ctx.create_window("owner", rect(160, 120, 100, 80), empty_content());
-    let first = ctx.create_dialog(owner.id(), "first", rect(20, 20, 120, 90), empty_content()).unwrap();
-    let second = ctx.create_dialog(owner.id(), "second", rect(40, 40, 120, 90), empty_content()).unwrap();
-    ctx.set_root_visible(first.id(), true).unwrap();
-    ctx.set_root_visible(second.id(), true).unwrap();
-
-    first.widget().try_update(|_| ctx.set_root_visible(second.id(), false).unwrap()).unwrap();
-    assert_eq!(ctx.debug_modal_root(), Some(first.id()));
-
-    ctx.set_root_visible(second.id(), true).unwrap();
-    first.widget().try_update(|_| assert!(ctx.destroy_root(second.id()))).unwrap();
-    assert_eq!(ctx.debug_modal_root(), Some(first.id()));
-
-    first.widget().try_update(|_| assert!(ctx.destroy_root(window.id()))).unwrap();
-    assert_eq!(ctx.debug_modal_root(), Some(first.id()));
+    assert_eq!(ctx.debug_root_visible(popup.id()), Some(false));
 }
 
 #[test]
@@ -1912,7 +1808,7 @@ fn title_drag_and_close_record_typed_root_events() {
 
     ctx.mousedown(drag_x, drag_y, MouseButton::LEFT);
     ctx.update_and_render_ui();
-    assert_eq!(root.widget().try_read(RootChrome::is_moving), Some(true));
+    assert_eq!(ctx.debug_root_moving(root.id()), Some(true));
     assert!(!dispatcher.dispatch(&mut events));
 
     ctx.mousemove(drag_x + 10, drag_y + 8);
@@ -1922,14 +1818,14 @@ fn title_drag_and_close_record_typed_root_events() {
 
     ctx.mouseup(drag_x + 10, drag_y + 8, MouseButton::LEFT);
     ctx.update_and_render_ui();
-    assert_eq!(root.widget().try_read(RootChrome::is_active), Some(false));
+    assert_eq!(ctx.debug_root_active(root.id()), Some(false));
 
     let close = ctx.debug_root_chrome(root.id()).unwrap().1.unwrap();
     let close_x = close.x + close.width / 2;
     let close_y = close.y + close.height / 2;
     ctx.mousedown(close_x, close_y, MouseButton::LEFT);
     ctx.update_and_render_ui();
-    assert_eq!(root.widget().try_read(RootChrome::is_visible), Some(false));
+    assert_eq!(ctx.debug_root_visible(root.id()), Some(false));
     assert!(dispatcher.dispatch(&mut events));
     assert_eq!(events, [Event::Changed(40, 38, 140, 100), Event::Submitted(RootSubmitted::Close)]);
 }
@@ -1957,17 +1853,17 @@ fn resize_overlay_preempts_content_where_the_grip_overlaps_the_root_body() {
     ctx.update_and_render_ui();
     assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(Vec::new()));
 
-    let before = root.widget().try_read(RootChrome::rect).unwrap();
+    let before = ctx.debug_root_rect(root.id()).unwrap();
     ctx.mousedown(press.x, press.y, MouseButton::LEFT);
     ctx.update_and_render_ui();
-    assert_eq!(root.widget().try_read(RootChrome::is_resizing), Some(true));
+    assert_eq!(ctx.debug_root_resizing(root.id()), Some(true));
     assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(Vec::new()));
 
     ctx.mousemove(press.x + 12, press.y + 8);
     ctx.mouseup(press.x + 12, press.y + 8, MouseButton::LEFT);
     ctx.update_and_render_ui();
     assert_eq!(
-        root.widget().try_read(|state| (state.rect().width, state.rect().height)),
+        ctx.debug_root_rect(root.id()).map(|rect| (rect.width, rect.height)),
         Some((before.width + 12, before.height + 8))
     );
 }
@@ -1995,7 +1891,7 @@ fn content_capture_remains_exclusive_while_dragging_across_root_chrome() {
     ctx.update_and_render_ui();
     assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(vec!["down", "drag"]));
     assert_eq!(probe_state.try_read(|state| state.hovered), Some(true));
-    assert_eq!(root.widget().try_read(RootChrome::is_resizing), Some(false));
+    assert_eq!(ctx.debug_root_resizing(root.id()), Some(false));
 
     ctx.mouseup(over_chrome.x, over_chrome.y, MouseButton::LEFT);
     ctx.update_and_render_ui();
@@ -2013,16 +1909,16 @@ fn hiding_and_showing_root_does_not_restore_chrome_capture() {
     ctx.mousedown(title.x + 2, title.y + 2, MouseButton::LEFT);
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_root_has_pointer_capture(root.id()), Some(true));
-    assert_eq!(root.widget().try_read(RootChrome::is_moving), Some(true));
+    assert_eq!(ctx.debug_root_moving(root.id()), Some(true));
 
     ctx.set_root_visible(root.id(), false).unwrap();
     assert_eq!(ctx.debug_root_has_pointer_capture(root.id()), Some(false));
-    assert_eq!(root.widget().try_read(RootChrome::is_active), Some(false));
+    assert_eq!(ctx.debug_root_active(root.id()), Some(false));
 
     ctx.set_root_visible(root.id(), true).unwrap();
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_root_has_pointer_capture(root.id()), Some(false));
-    assert_eq!(root.widget().try_read(RootChrome::is_active), Some(false));
+    assert_eq!(ctx.debug_root_active(root.id()), Some(false));
 }
 
 #[test]
@@ -2036,24 +1932,10 @@ fn chrome_geometry_exposes_one_body_and_auto_size_tracks_content() {
 
     let body = ctx.debug_root_body(root.id()).unwrap();
     let content = ctx.debug_root_content_size(root.id()).unwrap();
-    let outer = root.widget().try_read(RootChrome::rect).unwrap();
+    let outer = ctx.debug_root_rect(root.id()).unwrap();
     assert!(body.width > 0 && body.height > 0);
     assert!(content.width > 0 && content.height > 0);
     assert!(outer.width >= body.width && outer.height >= body.height);
-}
-
-#[test]
-fn root_container_style_override_drives_window_chrome_geometry() {
-    let mut ctx = context();
-    let root = ctx.create_window("styled", rect(10, 10, 180, 120), empty_content());
-    let mut style = *ctx.style();
-    style.title_height = 41;
-    root.widget().try_set_style_override(style).unwrap();
-
-    ctx.update_ui(Dimensioni::new(320, 240));
-
-    let title = ctx.debug_root_chrome(root.id()).unwrap().0.unwrap();
-    assert_eq!(title.height, 41);
 }
 
 #[test]
@@ -2097,7 +1979,7 @@ fn auto_height_preserves_popup_width_and_stretches_column_items() {
 
     ctx.update_and_render_ui();
 
-    let outer = root.widget().try_read(RootChrome::rect).unwrap();
+    let outer = ctx.debug_root_rect(root.id()).unwrap();
     let body = ctx.debug_root_body(root.id()).unwrap();
     assert_eq!(outer.x, anchor.x);
     assert_eq!(outer.y, anchor.y);
@@ -2125,7 +2007,7 @@ fn auto_width_preserves_programmed_height() {
 
     ctx.update_and_render_ui();
 
-    let outer = root.widget().try_read(RootChrome::rect).unwrap();
+    let outer = ctx.debug_root_rect(root.id()).unwrap();
     assert!(outer.width > programmed.width, "AUTO_WIDTH must derive width from content");
     assert_eq!(outer.height, programmed.height, "AUTO_WIDTH must retain the programmed height");
 }
@@ -2145,11 +2027,11 @@ fn auto_width_consumes_typed_measurement_invalidation_before_intrinsic_measureme
     ctx.show_popup_at(&root, programmed).unwrap();
 
     ctx.update_ui(Dimensioni::new(320, 240));
-    let before = root.widget().try_read(RootChrome::rect).unwrap();
+    let before = ctx.debug_root_rect(root.id()).unwrap();
 
     text.set_text("a substantially wider retained text block").unwrap();
     ctx.update_ui(Dimensioni::new(320, 240));
-    let after = root.widget().try_read(RootChrome::rect).unwrap();
+    let after = ctx.debug_root_rect(root.id()).unwrap();
 
     assert!(after.width > before.width, "auto-width measurement must observe the typed mutation");
     assert_eq!(after.height, programmed.height);
@@ -2195,7 +2077,7 @@ fn auto_size_ignores_the_previous_rect_for_flexible_linear_and_grid_tracks() {
 
     ctx.update_and_render_ui();
 
-    let outer = root.widget().try_read(RootChrome::rect).unwrap();
+    let outer = ctx.debug_root_rect(root.id()).unwrap();
     assert!(
         outer.width < 1_000 && outer.height < 1_000,
         "AUTO_SIZE must derive both axes from content: {outer:?}"

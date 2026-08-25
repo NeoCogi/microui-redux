@@ -589,7 +589,7 @@ impl WindowMenu {
 mod tests {
     use super::*;
     use crate::test_support::{NoopRenderer, test_atlas};
-    use crate::{Dimensioni, MouseButton, RootChrome, TextBlock, TextBlockParameters, rect};
+    use crate::{Dimensioni, MouseButton, TextBlock, TextBlockParameters, rect};
 
     /// Application state for complete concrete menu behavior tests.
     struct Model {
@@ -698,7 +698,7 @@ mod tests {
         click(&mut context, &mut model, bar.x + 8, bar.y + bar.height / 2);
 
         let popup = model.menu.popup(0).unwrap().clone();
-        let popup_rect = popup.widget().try_read(|root| root.rect()).unwrap();
+        let popup_rect = context.debug_root_rect(popup.id()).unwrap();
         click(
             &mut context,
             &mut model,
@@ -708,7 +708,7 @@ mod tests {
 
         assert_eq!(model.invoked, ["New"]);
         assert!(!model.menu.is_open());
-        assert_eq!(popup.widget().try_read(RootChrome::is_visible), Some(false));
+        assert_eq!(context.debug_root_visible(popup.id()), Some(false));
     }
 
     #[test]
@@ -722,7 +722,7 @@ mod tests {
         click(&mut context, &mut model, 460, 300);
         assert!(!model.menu.is_open());
         assert_eq!(model.menu.bar.try_read(MenuBar::open_menu), Some(None));
-        assert_eq!(model.menu.popup(0).unwrap().widget().try_read(RootChrome::is_visible), Some(false),);
+        assert_eq!(context.debug_root_visible(model.menu.popup(0).unwrap().id()), Some(false));
     }
 
     #[test]
@@ -734,7 +734,7 @@ mod tests {
         // File occupies the first compact heading; the next point opens View.
         click(&mut context, &mut model, bar.x + 55, bar.y + bar.height / 2);
         let parent = model.menu.popup(1).unwrap().clone();
-        let parent_rect = parent.widget().try_read(RootChrome::rect).unwrap();
+        let parent_rect = context.debug_root_rect(parent.id()).unwrap();
         click(
             &mut context,
             &mut model,
@@ -743,10 +743,10 @@ mod tests {
         );
 
         let child = model.menu.all_popups[2].clone();
-        assert_eq!(parent.widget().try_read(RootChrome::is_visible), Some(true));
-        assert_eq!(child.widget().try_read(RootChrome::is_visible), Some(true));
+        assert_eq!(context.debug_root_visible(parent.id()), Some(true));
+        assert_eq!(context.debug_root_visible(child.id()), Some(true));
 
-        let child_rect = child.widget().try_read(RootChrome::rect).unwrap();
+        let child_rect = context.debug_root_rect(child.id()).unwrap();
         click(
             &mut context,
             &mut model,
@@ -756,7 +756,7 @@ mod tests {
 
         assert_eq!(model.invoked, ["About"]);
         assert!(!model.menu.is_open());
-        assert_eq!(parent.widget().try_read(RootChrome::is_visible), Some(false));
-        assert_eq!(child.widget().try_read(RootChrome::is_visible), Some(false));
+        assert_eq!(context.debug_root_visible(parent.id()), Some(false));
+        assert_eq!(context.debug_root_visible(child.id()), Some(false));
     }
 }

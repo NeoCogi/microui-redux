@@ -224,9 +224,10 @@ Each owning `Node` receives a private, process-unique runtime identity before mo
 node, wrapping it in an unmounted `LinearItem` or `GridItem`, and inserting it into a container
 preserve that identity; applications cannot read or construct it.
 There is no public node ID or result lookup path. Weak typed widget handles expose event endpoints
-after node erasure, while root chrome exposes its rectangle, visibility, and active mode through
-`RootHandle::widget()` or `PopupHandle::widget()` and their typed `changed` and `submitted`
-endpoints.
+after node erasure. Window chrome is manager-owned rather than represented by a retained widget;
+`RootHandle` and `PopupHandle` expose only stable identity, liveness, and their typed `changed` and
+`submitted` endpoints. Geometry and visibility changes pass through `Context` so cross-root policy
+and layout invalidation remain centralized.
 
 Registered roots can be configured with `Context::set_root_options(...)` and `WindowOption` to
 control window chrome. Root overflow does not scroll implicitly; construct a `ScrollArea` with
