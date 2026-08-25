@@ -465,19 +465,21 @@ impl WindowManager {
             }
         } else {
             self.roots[target].clear_transient_targets();
-            if kind == WindowKind::Popup {
-                // Descendants were dismissed above, so an active popup can only be the stack tail.
-                // Removing it from the chain is silent because generic hiding is not dismissal.
-                if let Some(position) = self.popup_stack.iter().position(|candidate| *candidate == root) {
-                    debug_assert_eq!(position + 1, self.popup_stack.len());
-                    self.popup_stack.truncate(position);
+            match kind {
+                WindowKind::Popup => {
+                    // Descendants were dismissed above, so an active popup can only be the stack tail.
+                    // Removing it from the chain is silent because generic hiding is not dismissal.
+                    if let Some(position) = self.popup_stack.iter().position(|candidate| *candidate == root) {
+                        debug_assert_eq!(position + 1, self.popup_stack.len());
+                        self.popup_stack.truncate(position);
+                    }
                 }
-            }
-            if self.active_root == Some(root) {
-                self.active_root = None;
-            }
-            if kind == WindowKind::Modal {
-                self.remove_modal(root);
+                WindowKind::Modal => self.remove_modal(root),
+                WindowKind::Window => {
+                    if self.active_root == Some(root) {
+                        self.active_root = None;
+                    }
+                }
             }
         }
         self.invalidate_ui_commit();
