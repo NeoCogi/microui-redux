@@ -11,8 +11,9 @@ MenuItem node / Submenu -> MenuGroup -> Menu -> MenuPanel -> WindowMenu::create 
 ```
 
 `Node` is the unique owner while the menu is being assembled. After `WindowMenu::create`, the
-`Context` owns the window tree and one popup tree per menu or submenu. `WindowMenu` is an
-application-owned coordinator containing weak widget and root handles; it does not own those roots.
+`Context` owns one logical root subtree: the menu window owns every top-level popup, and each
+submenu popup is a child of its direct parent popup. `WindowMenu` is an application-owned
+coordinator containing weak widget and root handles; it does not own those roots.
 
 ## Concrete types
 
@@ -188,11 +189,12 @@ the next layout commit.
 initially hidden, auto-sized popup root per top-level menu and submenu. Public top-level popup
 indices match heading order.
 
-Opening a heading binds its popup to the owning window's effective layer. The popup uses the
-transient tier above ordinary roots in that layer, including the menu window, but it never crosses a
-higher fixed application layer. Changing the window's fixed layer also moves any popup retaining
-that source binding. The component supplies the initiator internally; applications do not need to
-coordinate layer state for normal heading interaction.
+Each heading popup is registered with the menu window as its stable parent, and each submenu popup
+is registered under the popup containing its row. Opening supplies only the event's screen-space
+anchor. The ownership path derives the popup's effective layer and the ancestor branch that remains
+visible. Popups use the transient tier above ordinary roots in that layer, including the menu
+window, but never cross a higher fixed application layer. Changing the window's fixed layer
+propagates through the complete menu subtree.
 
 Interaction is pointer-driven:
 
@@ -216,19 +218,19 @@ programmatically opening a heading in this alpha.
 `WindowMenu::window` returns the ordinary `RootHandle`. `WindowMenu::popups` and
 `WindowMenu::popup` return typed `PopupHandle` values in heading order. These are weak handles to
 top-level roots retained by `Context`; `WindowMenu::all_popups` additionally includes every submenu
-root in parent-before-descendant order for inspection and whole-component teardown.
+root in parent-before-descendant order for inspection.
 
 Treat those handles as inspection and whole-component lifetime capabilities. Calling
 `Context::show_popup`, `Context::show_popup_at`, or the hiding form of
 `Context::set_root_visible` directly on a menu popup bypasses the coordinator and can make root
 visibility disagree with `active_menu` and the bar highlight. Generic visibility cannot show a
-popup because it lacks the required initiating root. Use the heading interaction or
+popup because anchored popup policy must reconcile the active branch. Use the heading interaction or
 `WindowMenu::close` for normal menu state changes.
 
 `WindowMenu` assumes its window, bar, and every popup remain registered. Destroying one of those
-roots and then calling component operations can panic. There is no component teardown helper in this
-alpha; to remove a menu window permanently, destroy the window and every popup root and then discard
-the `WindowMenu` without using it again.
+roots and then calling component operations can panic. To remove a menu window permanently, destroy
+the window once; Context recursively destroys every menu and submenu popup because they belong to
+that window's root subtree. Then discard the `WindowMenu` without using its expired weak handles.
 
 ## Current limitations
 

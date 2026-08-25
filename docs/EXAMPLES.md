@@ -20,7 +20,10 @@
   inherit layer 0. Left-drag an exposed part of the grid to rotate its arcball camera, use the mouse
   wheel there to zoom, or choose Grid > Reset View to restore the initial composition. Grid > Minor
   Grid Lines controls its unit-spaced divisions. Grid segments are clipped in homogeneous space so
-  rotation cannot project behind-camera endpoints into stray lines across the UI.
+  rotation cannot project behind-camera endpoints into stray lines across the UI. Each menu window
+  owns its complete popup/submenu root subtree, and the Demo Window owns its reusable file dialog
+  and composed-control popups; these relationships affect lifetime and stacking without changing
+  any root's screen-space geometry.
 
 ## Full demo
 

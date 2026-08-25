@@ -208,13 +208,12 @@ use microui_redux::prelude::*;
 
 struct Model {
     popup: PopupHandle,
-    popup_source: RootId,
 }
 
 impl Model {
     fn show_popup(&mut self, context: &mut EventContext<'_>, _: &ButtonSubmitted) {
-        // Both roots remain Context-owned. The source makes popup layer inheritance explicit.
-        context.show_popup(&self.popup, self.popup_source).unwrap();
+        // The popup's stable parent was recorded when the Context-owned root was created.
+        context.show_popup(&self.popup).unwrap();
     }
 }
 
@@ -395,8 +394,8 @@ impl Model {
         _: &ButtonSubmitted,
     ) {
         event_context
-            .show_popup(&self.popup, self.popup_source)
-            .expect("popup and its initiating root must remain registered");
+            .show_popup(&self.popup)
+            .expect("popup and its owning root must remain registered");
     }
 }
 
@@ -407,29 +406,32 @@ ctx.subscribe_context(open_button.submitted(), Model::show_popup)?;
 only after the complete retained-tree update has released its widget borrows and returned before
 the following layout. Rust therefore prevents a handler from retaining it. Windows and dialogs use
 generic visibility; a popup is shown with `show_popup` or `show_popup_at` so the same transaction
-can bind it to its initiating root's effective layer. Popup hiding remains a generic visibility
-operation. No `PopupController`, overlay registry, per-control command enum, or second root lifetime
-model is required.
+can reconcile its stable parent branch and placement. The parent supplied to `create_popup` already
+determines inherited stacking and lifetime. Popup hiding remains a generic visibility operation. No
+`PopupController`, overlay registry, per-control command enum, or second root lifetime model is
+required.
 
 The full demo composes `Combo` and its popup root entirely through typed events. `ComboSubmitted`
 carries the screen-space anchor from the update that routed the header click, so its context-aware
-handler calls `show_popup_at(&popup, source, anchor)` to bind layer inheritance, visibility, and
-placement atomically in the triggering input transaction. The target parameter accepts
-`PopupHandle`, so a window or dialog cannot accidentally enter popup placement policy; the source
-`RootId` identifies the visible window whose widget initiated it. The demo state already owns both
-retained handles: `RootSubmitted::PopupDismissed` closes the combo's shared semantic state after an
-outside press or replacement by another popup. This coordination stays with the composed-control
-owner instead of leaking popup policy into the base widget abstractions. Paint does no
+handler calls `show_popup_at(&popup, anchor)` to reconcile branch visibility and placement
+atomically in the triggering input transaction. The target parameter accepts `PopupHandle`, so a
+window or dialog cannot accidentally enter popup placement policy. The combo popup was created as a
+stable child of the Demo Window, so showing it does not restate ownership. The demo state already
+owns both retained handles: `RootSubmitted::PopupDismissed` closes the combo's shared semantic state
+after an outside press or replacement by another popup. This coordination stays with the
+composed-control owner instead of leaking popup policy into the base widget abstractions. Paint does no
 coordination, and application state performs no per-frame popup polling. The frame callback only
 synchronizes the dedicated fullscreen layer-0 grid surface with platform dimensions and produces
 the FPS diagnostic for the separate floating Demo Window.
 
 `FileDialog` remains a reusable crate component while its instance and behavior live application-side.
-The application constructs it with an accessor into its model, stores the returned value there, and
-subscribes to that instance's completion source. Opening can occur directly inside a context-aware
-application handler: it resets request-specific state and shows the existing ordinary dialog root.
+The application constructs it with the stable owner window and an accessor into its model, stores
+the returned value there, and subscribes to that instance's completion source. Opening can occur
+directly inside a context-aware application handler: it resets request-specific state and shows the
+existing dialog root.
 Acceptance or cancellation hides the root again while preserving the component, ports, and static
-widgets. Multiple component instances are independent and participate in the generic modal stack.
+widgets. Multiple component instances are independent children in the Context-owned root tree;
+explicit show order determines which visible sibling is the active modal group.
 
 `WindowMenu` uses the same application-owned component binding for a different root composition.
 Applications create and register concrete `MenuItem` event sources, then move their nodes through
@@ -463,7 +465,7 @@ impl Model {
     }
 }
 
-let file_dialog = FileDialog::new(&mut ctx, Model::file_dialog_mut);
+let file_dialog = FileDialog::new(&mut ctx, owner_window.id(), Model::file_dialog_mut);
 let completed = file_dialog.completed();
 ctx.subscribe(completed, Model::file_dialog_completed)?;
 let mut model = Model { file_dialog };

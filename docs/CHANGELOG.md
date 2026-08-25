@@ -11,22 +11,29 @@
 `0.8.0-alpha.5` adds explicit retained-root layering to the breaking 0.8 API and demonstrates the
 model with a fullscreen menu-bearing X-Y grid surface beneath independent floating windows.
 
+- [x] Unified Context-owned windows, dialogs, popups, and submenu popups in one stable ownership forest.
+    - [x] `create_child_window`, `create_dialog(parent, ...)`, and `create_popup(parent, ...)` record immutable logical parentage while preserving independent screen-space geometry and retained runtimes.
+    - [x] Hiding a root hides its complete descendant subtree; destroying it recursively releases every descendant tree and expires every weak handle.
+    - [x] Parent edges now derive inherited layers, popup ancestor branches, modal input membership, and parent-before-descendant raising without separate popup or modal ancestry stacks.
+    - [x] Popup children remain supported for cascading menus, while popup-owned windows/dialogs, stale parents, and visible children of hidden parents are rejected without partial registration.
+    - [x] The manager retains only the active popup leaf and per-dialog activation order: global popup exclusivity and sibling-dialog restoration are history, not ancestry encoded by a tree.
+
 - [x] Added sixteen fixed application layers for ordinary windows.
     - [x] Layers are numbered `0` through `15`, ordered bottom to top, and new windows retain the compatibility-preserving default layer `15`.
-    - [x] `Context::set_root_layer` and `EventContext::set_root_layer` assign `LayerBinding::Fixed(u8)`; `root_layer_binding` exposes fixed, inherited, unbound, and modal policy.
+    - [x] `Context::set_root_layer` and `EventContext::set_root_layer` assign `LayerBinding::Fixed(u8)` to independent windows; `root_layer_binding` exposes fixed, direct-parent inherited, and modal policy.
     - [x] Layout, painting, hit testing, and debug inspection share one complete stacking key, so `bring_root_to_front` and pointer activation reorder only within an effective layer.
-- [x] Bound transient roots to the layer of the root that initiated them.
-    - [x] `show_popup` and `show_popup_at` require an initiating `RootId`; the anchored API therefore gains an additional argument in this alpha.
-    - [x] A shown popup uses `LayerBinding::Inherited(source)` and a transient tier above ordinary roots in that source layer, but remains below every higher fixed layer.
-    - [x] Popup-initiated chains normalize to their non-popup source, source layer changes propagate to retained popups, and source hiding or destruction dismisses visible transients.
-    - [x] Generic `set_root_visible(popup, true)` now returns `PopupInitiatorRequired`; generic visibility remains valid for hiding a popup.
-    - [x] `WindowMenu` supplies its owning window as the initiator, keeping every menu panel in the same effective layer as its persistent bar and body.
+- [x] Bound transient roots to stable ownership instead of a show-time source argument.
+    - [x] `show_popup` and `show_popup_at` now need only the typed popup handle and optional anchor; `create_popup(parent, ...)` establishes ancestry and inheritance once.
+    - [x] A popup uses `LayerBinding::Inherited(direct_parent)` and a transient tier above ordinary roots in its effective band, but remains below every higher fixed layer.
+    - [x] Popup-parent chains retain their ancestors, parent layer changes propagate to descendants, and parent hiding or destruction recursively closes the subtree.
+    - [x] Generic `set_root_visible(popup, true)` now returns `PopupShowRequired`; generic visibility remains valid for hiding a popup.
+    - [x] `WindowMenu` registers every menu popup under its window or direct parent popup, so submenu opening supplies only placement.
 - [x] Kept modal policy structurally above the numeric application range.
     - [x] Dialogs report `LayerBinding::Modal` and reject direct fixed-layer assignment.
-    - [x] A popup initiated by the active dialog occupies the modal transient tier and joins that dialog's exclusive input group; blocked application roots cannot open popups during a modal transaction.
+    - [x] A popup owned by the active dialog subtree occupies the modal transient tier and joins that dialog's exclusive input group; blocked application roots cannot open popups during a modal transaction.
 - [x] Separated ordinary keyboard activation from visual stacking with `active_root`.
     - [x] Pressing a lower-layer window focuses it without raising it across a higher layer, while overlap hit testing continues to follow visual priority.
-    - [x] Pointer capture, popup-to-source activation, modal routing, root hiding, and destruction reconcile the active root without adding parent-window ownership.
+    - [x] Pointer capture, popup-to-owner activation, modal routing, root hiding, and destruction reconcile the active root through the ownership tree.
     - [x] Wheel input follows the topmost eligible root under the pointer independently of `active_root`, while an in-progress pointer drag remains confined to its captured root.
 - [x] Added edge-to-edge application-surface support.
     - [x] `WindowOption::NO_PADDING` removes only the root-owned content inset and preserves normal descendant style padding.

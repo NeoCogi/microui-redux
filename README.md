@@ -5,7 +5,8 @@
 `microui-redux` is a retained, backend-agnostic Rust GUI toolkit inspired by
 [rxi/microui](https://github.com/rxi/microui). It keeps microui's compact rendering model while
 using unique owning `Node` trees, typed weak widget handles, context-owned roots, and typed backend
-frames.
+frames. Context roots form stable window/dialog/popup ownership subtrees whose lifetime and stacking
+are recursive while every child keeps independent screen-space geometry.
 
 > **Alpha status:** `0.8.0-alpha.5` is the current alpha of the breaking retained-API
 > redesign. The 0.8 line is not API-compatible with 0.7 and may continue to evolve before the

@@ -25,8 +25,10 @@ Widgets record backend-neutral drawing through a framework-created `Painter`; `R
 ## Retained authoring model
 
 The supported authoring path is retained widget trees registered as context-owned roots.
-Applications call `Context::create_window(...)`, `Context::create_dialog(...)`, or
-`Context::create_popup(...)` once, mutate leaves and containers through weak
+Applications create independent windows with `Context::create_window(...)`, then create owned
+windows, dialogs, and popups with `Context::create_child_window(parent, ...)`,
+`Context::create_dialog(parent, ...)`, and `Context::create_popup(parent, ...)`. They mutate leaves
+and containers through weak
 `TypedWidgetHandle<W>` values, commit contexts without application callbacks through
 `Context::update_ui(...)` or subscriber-driven contexts through `Context::update_ui_state(...)`,
 and paint with `Context::frame(FrameInfo).render_ui()?`.
@@ -61,37 +63,70 @@ value through `MeasureCtx::style`, `ContainerLayoutCtx::style`, `WidgetUpdateCtx
 Window and dialog creation consume one persistent application `Node` and return a non-owning
 `RootHandle`; popup creation returns the more specific non-owning `PopupHandle`.
 Roots cannot be replaced while retaining their identity: mutate descendants through a container
-state's weak topology capability, or destroy and recreate the root. Visibility is controlled with
-`set_root_visible`; showing a popup is the deliberate exception because visibility alone cannot
-identify the layer it must inherit.
+state's weak topology capability, or destroy and recreate the root.
+
+### Owned root tree
+
+Context stores registered roots as an ownership forest. Independent application windows are roots;
+every child window, dialog, popup, and submenu popup has one immutable parent:
+
+```text
+independent application window
+├── independently positioned child window
+├── dialog
+│   └── dialog popup
+└── top-level menu popup
+    └── submenu popup
+```
+
+This tree is logical, not geometric. Every entry still has its own screen-space rectangle, retained
+widget runtime, layout pass, and paint pass. A parent does not offset, lay out, or clip a child.
+Ownership provides only the relationships that genuinely need ancestry:
+
+- hiding a root hides its complete descendant subtree;
+- destroying a root destroys the subtree and expires every descendant weak handle;
+- non-modal descendants inherit their stacking band through direct parents;
+- a popup parent identifies the branch retained when a submenu opens;
+- a visible dialog's subtree is its exclusive modal input group; and
+- raising a subtree preserves parent-before-descendant z-order.
+
+Parentage is fixed at creation; there is no reparenting API and therefore no runtime cycle case.
+Popups may own popup children for cascading menus. A popup cannot own an ordinary child window or
+dialog. Creating a visible child under a hidden parent is rejected. Recursive hiding preserves the
+retained trees but leaves every affected root hidden; callers explicitly show the roots they want
+to reopen. Recursive destruction is permanent.
+
+The manager retains only two small facts that ancestry cannot derive: the active popup leaf, because
+only one popup branch may be visible globally, and each dialog's last explicit activation order,
+because a tree does not encode which visible sibling dialog was shown most recently. There is no
+parallel popup ancestry list or modal stack.
 
 ### Root layers, transients, and activation
 
-Ordinary windows occupy one of sixteen fixed application layers. Layer `0` is the bottom, layer
-`15` is the top and the default, and `Context::set_root_layer(root, layer)` changes an ordinary
+Independent windows occupy one of sixteen fixed application layers. Layer `0` is the bottom, layer
+`15` is the top and the default, and `Context::set_root_layer(root, layer)` changes a top-level
 window's `LayerBinding::Fixed(u8)`. Numeric validation uses `MIN_LAYER`, `MAX_LAYER`, and
-`DEFAULT_LAYER`. Popups and dialogs reject direct assignment because the window manager owns their
-bindings.
+`DEFAULT_LAYER`. Owned windows and popups report `LayerBinding::Inherited(direct_parent)`; dialogs
+report `LayerBinding::Modal`. All owned roots reject direct layer assignment.
 
 Within a fixed layer, ordinary roots retain their usual z-order and `bring_root_to_front` raises a
 root only among peers in that layer. A root in layer `N` cannot be raised across a root in layer
 `N + 1`. Pointer hit testing and painting consume the same complete stacking key, so overlap always
 selects the root that is visually in front.
 
-A composed control opens a popup with `show_popup(&popup, initiator)` at the current pointer or
-`show_popup_at(&popup, initiator, anchor)` at an exact screen-space rectangle. Both operations name
-the root whose widget initiated the transient. The popup records `LayerBinding::Inherited(source)`
-and occupies a transient tier above all ordinary roots in that effective layer, but below the next
-fixed layer. The `PopupHandle` parameter makes ordinary windows and dialogs ineligible as targets at
-compile time; the explicit `RootId` makes inheritance authoritative. Calling
-`set_root_visible(popup.id(), true)` is rejected with `PopupInitiatorRequired`, while hiding through
-generic visibility remains supported. Per-window application menus use the anchored operation with
-their owning window as source.
+A composed control creates its popup once under a stable owner, then calls `show_popup(&popup)` at
+the current pointer or `show_popup_at(&popup, anchor)` at an exact screen-space rectangle. The
+popup's direct parent supplies its inherited band. Popup children retain their visible ancestor
+branch and replace only the previous descendants of that parent; a popup owned by a non-popup root
+starts a new globally exclusive branch. The `PopupHandle` parameter makes ordinary windows and
+dialogs ineligible as targets at compile time. Calling `set_root_visible(popup.id(), true)` is
+rejected with `PopupShowRequired`, while hiding through generic visibility remains supported.
 
-Dialogs occupy a dedicated modal band above all sixteen numeric layers. The active dialog and a
-popup it initiates form the only input-eligible modal group; that popup's transient tier is above the
-dialog itself. Other roots remain visible, laid out, and painted but cannot interact until the
-dialog is hidden or destroyed.
+Dialogs occupy a dedicated modal band above all sixteen numeric layers. The most recently shown
+visible dialog and every owned descendant form the only input-eligible modal group; popup
+descendants use the transient tier above the dialog. Other roots remain visible, laid out, and
+painted but cannot interact until the active dialog is hidden or destroyed. If an older sibling
+dialog remains visible, its recorded activation order restores it without a separate modal stack.
 
 Visual order is deliberately separate from keyboard activation. A pointer press records the
 ordinary `active_root` (or a popup's ordinary source) without moving it to a different fixed layer.
@@ -102,8 +137,8 @@ layer-0 application surface scroll or zoom even while a layer-15 floating window
 Modal policy and active pointer capture take precedence. Hiding or destroying the active root clears
 the record.
 
-A fullscreen application surface is therefore an ordinary window at layer `0`, not a special root
-kind or a parent window. Remove its chrome and outer inset, keep its rectangle synchronized with the
+A fullscreen application surface is therefore an independent window at layer `0`, not a special
+root kind. Remove its chrome and outer inset, keep its rectangle synchronized with the
 drawable viewport, and let independent windows use the default layer:
 
 ```rust,ignore
