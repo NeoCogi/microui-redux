@@ -119,7 +119,8 @@ impl FileDialogModel {
 #[test]
 fn downstream_file_dialog_completion_is_subscriber_driven_without_widget_access() {
     let mut context = context_with_state::<FileDialogModel>();
-    let mut dialog = FileDialog::new(&mut context, FileDialogModel::dialog_mut);
+    let owner = context.create_window("file-dialog owner", rect(0, 0, 1, 1), TextBlock::create(TextBlockParameters::new("")).1);
+    let mut dialog = FileDialog::new(&mut context, owner.id(), FileDialogModel::dialog_mut);
     let completed = dialog.completed();
     context.subscribe(completed, FileDialogModel::file_dialog_completed).unwrap();
     dialog.open(&mut context, FileDialogRequest::default());
@@ -184,9 +185,8 @@ fn downstream_window_menu_exposes_concrete_items_roots_and_live_state() {
 
     // Both roots remain Context-owned, but anchored placement accepts only PopupHandle. A normal
     // window handle cannot be supplied to this operation, so no runtime root-kind error is needed.
-    let initiator = menu.window().id();
     let popup = menu.popup(0).unwrap();
-    context.show_popup_at(popup, initiator, rect(40, 40, 100, 1)).unwrap();
+    context.show_popup_at(popup, rect(40, 40, 100, 1)).unwrap();
     context.set_root_visible(popup.id(), false).unwrap();
 
     let model = MenuModel {

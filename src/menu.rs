@@ -173,6 +173,8 @@ pub struct MenuPanel {
 
 /// One compiled popup tree waiting to be registered with Context.
 struct PopupDefinition {
+    /// Index of the owning popup, or `None` when the application window owns this level.
+    parent: Option<usize>,
     /// Label path used only for the diagnostic root name.
     path: String,
     /// Uniquely owned retained menu surface.
@@ -181,20 +183,26 @@ struct PopupDefinition {
 
 /// One compiled submenu row binding its parent popup to its child popup.
 struct SubmenuDefinition {
-    parent: usize,
+    /// Index of the popup opened by this submenu row.
     child: usize,
+    /// Concrete row event used to install the retained opening handler.
     submitted: WidgetEventPortHandle<MenuSubmenuSubmitted>,
 }
 
 /// Flattened retained popup definitions produced from a recursively composed menu panel.
 struct CompiledMenus {
+    /// Top-level labels mounted into the persistent menu bar.
     labels: Vec<String>,
+    /// Parent-before-child popup definitions; slots are reserved before recursive compilation.
     popups: Vec<Option<PopupDefinition>>,
+    /// Popup indices corresponding one-to-one with `labels`.
     top_level: Vec<usize>,
+    /// Retained submenu-row event sources and the child popup each row opens.
     submenus: Vec<SubmenuDefinition>,
 }
 
 impl CompiledMenus {
+    /// Consumes the public recursive menu description into directly registerable retained roots.
     fn new(panel: MenuPanel) -> Self {
         let mut compiled = Self {
             labels: Vec::new(),
@@ -205,14 +213,17 @@ impl CompiledMenus {
         for menu in panel.into_menus() {
             compiled.labels.push(menu.label.clone());
             let path = menu.label.clone();
-            let popup = compiled.push_popup(path, menu.groups);
+            // A top-level menu popup is owned directly by the application window created later.
+            let popup = compiled.push_popup(None, path, menu.groups);
             compiled.top_level.push(popup);
         }
         compiled
     }
 
-    /// Reserves the parent index before recursion so every submenu binding can name both roots.
-    fn push_popup(&mut self, path: String, groups: Vec<MenuGroup>) -> usize {
+    /// Compiles one popup and recursively appends its descendants in parent-before-child order.
+    fn push_popup(&mut self, parent: Option<usize>, path: String, groups: Vec<MenuGroup>) -> usize {
+        // Reserve the current slot before descending. This gives every child a stable parent index
+        // while preserving the registration order required by Context's owned-root API.
         let index = self.popups.len();
         self.popups.push(None);
 
@@ -230,15 +241,21 @@ impl CompiledMenus {
                     MenuEntry::Item(item) => rows.push(item),
                     MenuEntry::Submenu(submenu) => {
                         let child_path = format!("{path} {}", submenu.label);
-                        let child = self.push_popup(child_path, submenu.groups);
+                        let child = self.push_popup(Some(index), child_path, submenu.groups);
                         let (row, submitted) = MenuSubmenu::create(submenu.label);
                         rows.push(row);
-                        self.submenus.push(SubmenuDefinition { parent: index, child, submitted });
+                        self.submenus.push(SubmenuDefinition { child, submitted });
                     }
                 }
             }
         }
-        self.popups[index] = Some(PopupDefinition { path, content: MenuList::create(rows) });
+        // Fill the reserved slot after recursion. The vector order, rather than the fill order,
+        // remains parent-before-child and therefore needs no secondary tree representation.
+        self.popups[index] = Some(PopupDefinition {
+            parent,
+            path,
+            content: MenuList::create(rows),
+        });
         index
     }
 }
@@ -284,19 +301,21 @@ struct PopupBinding<State> {
 
 /// Generic submenu-row adapter kept above the concrete recursive model.
 struct SubmenuBinding<State> {
+    /// Finds the coordinating menu when this retained row submits.
     menu: WindowMenuAccessor<State>,
-    parent: usize,
+    /// Index of the popup whose stable owner is already recorded by Context.
     child: usize,
 }
 
 /// Application-owned coordinator for one concrete menu bar and its concrete popup roots.
 ///
-/// Each Menu and Submenu becomes one retained popup tree. WindowMenu stores only root and bar
+/// Each Menu and Submenu becomes one retained popup root. WindowMenu stores only root and bar
 /// handles; item state and item identity remain in the concrete widgets created by the application.
-/// [`Context`] owns the window and popup trees. Directly changing their visibility bypasses this
+/// [`Context`] owns one logical subtree rooted at the menu window: headings are direct popup
+/// children and submenus are popup descendants. Directly changing their visibility bypasses this
 /// coordinator and can desynchronize [`Self::active_menu`] from the visible root and bar highlight.
-/// Destroying any of those roots invalidates the component; discard the `WindowMenu` instead of
-/// calling it afterward.
+/// Destroying the window recursively releases every popup; discard the `WindowMenu` instead of
+/// calling it afterward. Independently destroying any descendant also invalidates the component.
 pub struct WindowMenu {
     /// Ordinary application window containing the persistent bar and caller content.
     window: RootHandle,
@@ -372,20 +391,23 @@ impl WindowMenu {
 
         // Register every popup up front. Menu surfaces own their full background, so remove the
         // generic popup content inset and let only root framing surround that color.
-        let all_popups: Vec<PopupHandle> = definitions
-            .into_iter()
-            .map(|definition| {
-                let definition = definition.expect("recursive menu compilation must fill every reserved popup");
-                let popup = context.create_popup(&format!("{name} {} Menu", definition.path), definition.content);
-                context
-                    .set_root_options(
-                        popup.id(),
-                        WindowOption::FRAME | WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE | WindowOption::NO_TITLE | WindowOption::NO_PADDING,
-                    )
-                    .expect("new window-menu popup must remain registered");
-                popup
-            })
-            .collect();
+        let mut all_popups: Vec<PopupHandle> = Vec::with_capacity(definitions.len());
+        for definition in definitions {
+            let definition = definition.expect("recursive menu compilation must fill every reserved popup");
+            // Definitions are parent-before-child. Resolve the stable owner from the roots already
+            // registered in this loop, using the application window for top-level headings.
+            let parent = definition.parent.map(|parent| all_popups[parent].id()).unwrap_or_else(|| window.id());
+            let popup = context
+                .create_popup(parent, &format!("{name} {} Menu", definition.path), definition.content)
+                .expect("new window-menu popup parent must remain registered");
+            context
+                .set_root_options(
+                    popup.id(),
+                    WindowOption::FRAME | WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE | WindowOption::NO_TITLE | WindowOption::NO_PADDING,
+                )
+                .expect("new window-menu popup must remain registered");
+            all_popups.push(popup);
+        }
         let popups = top_level.iter().map(|index| all_popups[*index].clone()).collect();
 
         let component = Self {
@@ -410,11 +432,7 @@ impl WindowMenu {
             context
                 .subscribe_context_with(
                     submenu.submitted,
-                    SubmenuBinding {
-                        menu: accessor,
-                        parent: submenu.parent,
-                        child: submenu.child,
-                    },
+                    SubmenuBinding { menu: accessor, child: submenu.child },
                     Self::dispatch_submenu::<State>,
                 )
                 .expect("new window-menu submenu source must be unsubscribed");
@@ -446,8 +464,9 @@ impl WindowMenu {
 
     /// Returns every Context-owned menu and submenu popup in parent-before-descendant order.
     ///
-    /// Use this complete view for inspection or whole-component teardown. Use [`Self::popups`] when
-    /// indices need to correspond to top-level headings.
+    /// Use this complete view for inspection. Whole-component teardown needs only the owning window
+    /// because Context recursively destroys its popup descendants. Use [`Self::popups`] when indices
+    /// need to correspond to top-level headings.
     pub fn all_popups(&self) -> &[PopupHandle] {
         &self.all_popups
     }
@@ -493,12 +512,11 @@ impl WindowMenu {
             self.finish_close();
             return;
         };
-        // The persistent bar belongs to this component's ordinary window, so that window is the
-        // authoritative layer initiator for every top-level menu popup. A low-layer application
-        // surface therefore keeps its menus below unrelated roots in higher application layers.
+        // Stable ownership already binds every top-level menu popup to this window. Opening only
+        // supplies the event's screen-space anchor; it does not rebuild menu ancestry.
         context
-            .show_popup_at(popup, self.window.id(), event.anchor)
-            .expect("window-menu popup and its initiating window must remain registered");
+            .show_popup_at(popup, event.anchor)
+            .expect("window-menu popup and its owning window must remain registered");
         self.active_menu = Some(event.index);
         self.bar
             .try_update(|bar| bar.set_open_menu(Some(event.index)))
@@ -516,16 +534,18 @@ impl WindowMenu {
     }
 
     /// Opens one child popup beside its parent while retaining the complete ancestor chain.
-    fn submenu_submitted(&mut self, context: &mut EventContext<'_>, parent: usize, child: usize, event: &MenuSubmenuSubmitted) {
+    fn submenu_submitted(&mut self, context: &mut EventContext<'_>, child: usize, event: &MenuSubmenuSubmitted) {
         if self.active_menu.is_none() {
             return;
         }
-        let (Some(parent), Some(child)) = (self.all_popups.get(parent), self.all_popups.get(child)) else {
+        let Some(child) = self.all_popups.get(child) else {
             return;
         };
+        // Context follows the child's stable parent link to retain the ancestor branch. The menu
+        // coordinator only contributes the placement captured by the concrete row event.
         context
-            .show_popup_at(child, parent.id(), event.anchor)
-            .expect("window-menu submenu and its parent popup must remain registered");
+            .show_popup_at(child, event.anchor)
+            .expect("window-menu submenu and its owning popup must remain registered");
     }
 
     /// Reconciles state after one concrete popup is dismissed by window-manager policy.
@@ -561,7 +581,7 @@ impl WindowMenu {
 
     /// Adapts one private submenu-row event to the application-owned component.
     fn dispatch_submenu<State>(state: &mut State, binding: &SubmenuBinding<State>, context: &mut EventContext<'_>, event: &MenuSubmenuSubmitted) {
-        (binding.menu)(state).submenu_submitted(context, binding.parent, binding.child, event);
+        (binding.menu)(state).submenu_submitted(context, binding.child, event);
     }
 }
 

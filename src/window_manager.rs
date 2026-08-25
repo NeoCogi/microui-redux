@@ -119,18 +119,16 @@ pub const DEFAULT_LAYER: u8 = MAX_LAYER;
 
 /// Describes how one retained root obtains its stacking layer.
 ///
-/// Ordinary windows have a [`Fixed`](Self::Fixed) application layer. A visible popup records the
-/// non-popup source of its effective layer; the active cascading order remains private.
-/// Dialogs occupy the dedicated modal layer above all sixteen application layers. Popup and modal
-/// bindings are managed by the window manager; application code changes only fixed window layers through
+/// Top-level windows have a [`Fixed`](Self::Fixed) application layer. Every owned non-modal root
+/// inherits through its stable parent, while dialogs occupy the dedicated modal layer above all
+/// sixteen application layers. The window manager derives this value from the owned-root tree;
+/// application code changes only top-level fixed window layers through
 /// [`crate::Context::set_root_layer`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum LayerBinding {
     /// A caller-selected application layer in the inclusive range [`MIN_LAYER`]..=[`MAX_LAYER`].
     Fixed(u8),
-    /// A hidden popup that has not yet been associated with an initiating root.
-    Unbound,
-    /// A popup inheriting the effective layer of the identified initiating root.
+    /// An owned root inheriting the effective layer of its direct parent.
     Inherited(RootId),
     /// A dialog in the dedicated layer above all application-selectable layers.
     Modal,
@@ -147,17 +145,12 @@ pub(crate) struct WindowManager {
     last_zindex: i32,
     /// Registered window-manager roots replayed by [`crate::ContextFrame::render_ui`].
     roots: Vec<WindowEntry>,
-    /// The one visible popup chain, ordered from its top-level popup to its deepest descendant.
+    /// Deepest visible member of the one globally active popup branch.
     ///
-    /// Popup policy is globally exclusive, so simultaneously visible popups cannot form separate
-    /// branches. Keeping that invariant here avoids distributing transient ancestry across every
-    /// registered root.
-    popup_stack: Vec<RootId>,
-    /// Visible dialogs in nesting order; the last entry owns the active modal input group.
-    ///
-    /// That group contains the dialog and any popup chain initiated by the dialog. No ordinary
-    /// application-layer root may receive input until the modal stack becomes empty.
-    modal_stack: Vec<RootId>,
+    /// Parent links reconstruct the branch when an operation must retain ancestors or dismiss a
+    /// suffix. A scalar leaf is sufficient because competing popup branches are never visible at
+    /// the same time.
+    active_popup: Option<RootId>,
     /// Last ordinary root explicitly activated by a pointer press.
     ///
     /// Activation is deliberately independent of stacking. A user can therefore focus a control
@@ -178,8 +171,7 @@ impl WindowManager {
             style,
             last_zindex: 0,
             roots: Vec::default(),
-            popup_stack: Vec::new(),
-            modal_stack: Vec::new(),
+            active_popup: None,
             active_root: None,
             next_root_id: 1,
             input: Input::default(),

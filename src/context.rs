@@ -73,23 +73,32 @@ impl<'a> EventContext<'a> {
         self.window_manager.create_window(name, rect, content)
     }
 
-    /// Creates a hidden retained dialog around one uniquely owned application node.
+    /// Creates an independently positioned child window owned by `parent`.
     ///
-    /// Show the returned root with [`Self::set_root_visible`]. A shown dialog enters the existing
-    /// modal stack before the layout immediately following this event dispatch.
-    pub fn create_dialog(&mut self, name: &str, rect: Recti, content: Node) -> RootHandle {
-        // WindowManager remains the only place that distinguishes modal root policy.
-        self.window_manager.create_dialog(name, rect, content)
+    /// The ownership edge controls lifetime and inherited stacking policy; it does not clip or lay
+    /// out the child. A stale or ineligible parent returns a checked root mutation error.
+    pub fn create_child_window(&mut self, parent: RootId, name: &str, rect: Recti, content: Node) -> Result<RootHandle, RootMutationError> {
+        // Event-time construction follows the same checked ownership path as ordinary Context use.
+        self.window_manager.create_child_window(parent, name, rect, content)
     }
 
-    /// Creates a hidden auto-sized popup around one uniquely owned application node.
+    /// Creates a hidden retained dialog owned by `parent`.
+    ///
+    /// Show the returned root with [`Self::set_root_visible`]. A shown dialog becomes the active
+    /// modal subtree before the layout immediately following this event dispatch.
+    pub fn create_dialog(&mut self, parent: RootId, name: &str, rect: Recti, content: Node) -> Result<RootHandle, RootMutationError> {
+        // WindowManager validates and records the stable ownership edge before returning the handle.
+        self.window_manager.create_dialog(parent, name, rect, content)
+    }
+
+    /// Creates a hidden auto-sized popup owned by `parent`.
     ///
     /// The operation is generic root construction; this capability has no knowledge of the button,
     /// combo, menu, or other application behavior that may later show the popup.
-    pub fn create_popup(&mut self, name: &str, content: Node) -> PopupHandle {
+    pub fn create_popup(&mut self, parent: RootId, name: &str, content: Node) -> Result<PopupHandle, RootMutationError> {
         // Register the persistent tree through the popup-only construction path so later anchored
         // placement is statically restricted to roots carrying popup policy.
-        self.window_manager.create_popup(name, content)
+        self.window_manager.create_popup(parent, name, content)
     }
 
     /// Replaces a retained root title before the next layout commit.
@@ -122,14 +131,14 @@ impl<'a> EventContext<'a> {
         self.window_manager.set_root_layer(root, layer)
     }
 
-    /// Returns the registered root's fixed, inherited, unbound, or modal layer policy.
+    /// Returns the registered root's fixed, direct-parent inherited, or modal layer policy.
     pub fn root_layer_binding(&self, root: RootId) -> Result<LayerBinding, RootMutationError> {
         self.window_manager.root_layer_binding(root)
     }
 
     /// Shows or hides a retained root while preserving its tree and concrete widget state.
     ///
-    /// Dialog modal-stack changes and popup-chain dismissal use the same policy as
+    /// Dialog activation and popup-branch dismissal use the same policy as
     /// [`Context::set_root_visible`]. Showing a popup through this generic operation is rejected
     /// because it cannot establish layer inheritance; use [`Self::show_popup`] or
     /// [`Self::show_popup_at`] instead. Hiding a popup remains supported.
@@ -139,22 +148,22 @@ impl<'a> EventContext<'a> {
         self.window_manager.set_root_visible(root, visible)
     }
 
-    /// Shows a popup at the current pointer position in its initiating root's layer.
-    pub fn show_popup(&mut self, popup: &PopupHandle, initiator: RootId) -> Result<(), RootMutationError> {
-        self.window_manager.show_popup(popup, initiator)
+    /// Shows a popup at the current pointer position under its stable owner.
+    pub fn show_popup(&mut self, popup: &PopupHandle) -> Result<(), RootMutationError> {
+        self.window_manager.show_popup(popup)
     }
 
     /// Shows a popup at an exact screen-space anchor before the following layout commit.
     ///
     /// This atomic form is intended for composed controls such as menus and combos. It applies
-    /// popup-chain replacement and replaces the popup rectangle, so no pointer-relative intermediate
-    /// placement can be observed. A popup initiator retains its visible ancestor chain; a window or
-    /// dialog initiator opens an exclusive top-level popup. The typed handle prevents passing a
-    /// window or dialog root as the popup target.
-    pub fn show_popup_at(&mut self, popup: &PopupHandle, initiator: RootId, anchor: Recti) -> Result<(), RootMutationError> {
+    /// popup-branch replacement and replaces the popup rectangle, so no pointer-relative intermediate
+    /// placement can be observed. Stable popup ownership determines whether ancestors are retained
+    /// or a new top-level popup branch opens. The typed handle prevents passing a window or dialog
+    /// root as the popup target.
+    pub fn show_popup_at(&mut self, popup: &PopupHandle, anchor: Recti) -> Result<(), RootMutationError> {
         // Delegate the complete transaction while retaining compile-time popup identity across the
         // event façade boundary.
-        self.window_manager.show_popup_at(popup, initiator, anchor)
+        self.window_manager.show_popup_at(popup, anchor)
     }
 
     /// Raises a registered root inside its effective layer and reports whether it still exists.
@@ -407,27 +416,36 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         self.window_manager.create_window(name, rect, content)
     }
 
-    /// Creates a hidden retained dialog around one uniquely owned application node.
+    /// Creates an independently positioned child window owned by `parent`.
     ///
-    /// Show it with [`Context::set_root_visible`]. A visible dialog enters the dedicated modal layer
-    /// and becomes the active modal input group. Only that dialog and a popup it initiates remain
-    /// input-eligible until the dialog is hidden or destroyed. Hiding preserves all descendant
-    /// state.
-    pub fn create_dialog(&mut self, name: &str, rect: Recti, content: Node) -> RootHandle {
-        self.window_manager.create_dialog(name, rect, content)
+    /// Ownership controls recursive lifecycle and inherited stacking policy without introducing
+    /// parent-relative layout or clipping.
+    pub fn create_child_window(&mut self, parent: RootId, name: &str, rect: Recti, content: Node) -> Result<RootHandle, RootMutationError> {
+        // Keep parent validation and reverse-edge registration inside the sole root owner.
+        self.window_manager.create_child_window(parent, name, rect, content)
     }
 
-    /// Creates a hidden auto-sized popup around one uniquely owned application node.
+    /// Creates a hidden retained dialog owned by `parent`.
     ///
-    /// Show it through [`Self::show_popup`] or [`Self::show_popup_at`], both of which require the
-    /// initiating root. A popup occupies the transient tier above ordinary roots in that source's
-    /// effective layer without crossing a higher layer. A popup initiated by the active dialog is
-    /// placed above the dialog and joins its modal input group. An outside press or another popup
-    /// request hides it and records a submission.
-    pub fn create_popup(&mut self, name: &str, content: Node) -> PopupHandle {
+    /// Show it with [`Context::set_root_visible`]. A visible dialog enters the dedicated modal layer
+    /// and its complete owned subtree becomes the active modal input group. Other roots remain
+    /// input-ineligible until the dialog is hidden or destroyed.
+    pub fn create_dialog(&mut self, parent: RootId, name: &str, rect: Recti, content: Node) -> Result<RootHandle, RootMutationError> {
+        // The manager records ownership before exposing the weak dialog handle.
+        self.window_manager.create_dialog(parent, name, rect, content)
+    }
+
+    /// Creates a hidden auto-sized popup owned by `parent`.
+    ///
+    /// Show it through [`Self::show_popup`] or [`Self::show_popup_at`]. Its stable parent determines
+    /// inherited stacking, recursive lifetime, and whether it joins an active modal subtree. A
+    /// popup occupies the transient tier above ordinary roots in its effective band without
+    /// crossing a higher fixed layer. An outside press or competing popup request hides it and
+    /// records a submission.
+    pub fn create_popup(&mut self, parent: RootId, name: &str, content: Node) -> Result<PopupHandle, RootMutationError> {
         // Return the typed weak capability created by WindowManager so callers cannot request
         // anchored popup policy for an ordinary window or dialog identifier.
-        self.window_manager.create_popup(name, content)
+        self.window_manager.create_popup(parent, name, content)
     }
 
     /// Replaces a retained root title silently.
@@ -452,8 +470,8 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
 
     /// Assigns an ordinary window to a fixed application layer in the inclusive range `0..=15`.
     ///
-    /// Newly created windows use layer 15. Popups inherit their initiating root's effective layer
-    /// when shown, and dialogs occupy the separate modal layer, so both managed root kinds reject
+    /// Newly created independent windows use layer 15. Owned windows and popups inherit through
+    /// their stable parent, and dialogs occupy the separate modal layer, so every owned root rejects
     /// direct layer assignment.
     pub fn set_root_layer(&mut self, root: RootId, layer: u8) -> Result<(), RootMutationError> {
         self.window_manager.set_root_layer(root, layer)
@@ -466,31 +484,29 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
 
     /// Shows or hides a retained root, preserving its tree and concrete widget state.
     ///
-    /// Showing a dialog pushes it onto the modal stack. Hiding the active dialog restores the
-    /// previous visible dialog, if any; otherwise ordinary cross-root routing resumes.
-    /// Showing a popup is rejected because this generic operation cannot identify the source layer;
-    /// use [`Self::show_popup`] or [`Self::show_popup_at`]. Hiding a popup remains supported.
+    /// Showing a dialog records it as the most recently activated visible modal subtree. Hiding it
+    /// restores the previous visible sibling dialog, if any; otherwise ordinary cross-root routing
+    /// resumes. Showing a popup is rejected because generic visibility cannot reconcile the active
+    /// popup branch; use [`Self::show_popup`] or [`Self::show_popup_at`]. Hiding a popup remains
+    /// supported. Hiding any root also hides every owned descendant.
     ///
     /// This is distinct from [`Context::destroy_root`], which drops the complete retained owner.
     pub fn set_root_visible(&mut self, root: RootId, visible: bool) -> Result<(), RootMutationError> {
         self.window_manager.set_root_visible(root, visible)
     }
 
-    /// Shows a popup at the current pointer position in its initiating root's layer.
-    ///
-    /// The explicit initiator makes layer inheritance authoritative even for programmatic popup
-    /// requests where pointer position or visual frontmost state cannot identify the source.
-    pub fn show_popup(&mut self, popup: &PopupHandle, initiator: RootId) -> Result<(), RootMutationError> {
-        self.window_manager.show_popup(popup, initiator)
+    /// Shows a popup at the current pointer position under its stable owner.
+    pub fn show_popup(&mut self, popup: &PopupHandle) -> Result<(), RootMutationError> {
+        self.window_manager.show_popup(popup)
     }
 
     /// Shows a popup at an exact screen-space anchor in one checked root mutation.
     ///
     /// Use this for a popup whose position belongs to the semantic event that opened it. Use
     /// [`Self::show_popup`] when the current pointer position is the desired anchor. Both forms
-    /// require the initiating root so the popup can inherit the correct layer. A popup initiator
-    /// retains its ancestor chain for cascading menus; a window or dialog initiator replaces other
-    /// visible chains. The typed parameter makes an ordinary [`RootHandle`] ineligible for
+    /// use the stable owner recorded at popup creation. A popup parent retains its ancestor branch;
+    /// a window or dialog parent replaces the previous popup branch. The typed parameter makes an
+    /// ordinary [`RootHandle`] ineligible for
     /// popup-only placement policy:
     ///
     /// ```compile_fail
@@ -501,13 +517,13 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     ///     window: &RootHandle,
     ///     anchor: Recti,
     /// ) {
-    ///     context.show_popup_at(window, window.id(), anchor);
+    ///     context.show_popup_at(window, anchor);
     /// }
     /// ```
-    pub fn show_popup_at(&mut self, popup: &PopupHandle, initiator: RootId, anchor: Recti) -> Result<(), RootMutationError> {
+    pub fn show_popup_at(&mut self, popup: &PopupHandle, anchor: Recti) -> Result<(), RootMutationError> {
         // Keep popup identity typed through the public façade; the manager still checks whether the
         // weak root remains registered and whether its widget state can be borrowed atomically.
-        self.window_manager.show_popup_at(popup, initiator, anchor)
+        self.window_manager.show_popup_at(popup, anchor)
     }
 
     /// Raises a registered root inside its effective layer and reports whether it exists.

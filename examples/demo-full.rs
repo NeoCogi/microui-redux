@@ -1649,13 +1649,17 @@ impl State {
         let demo_root = window_menu.window().clone();
         let _style_root = ctx.create_window("Style Editor", rect(350, 250, 300, 240), style_node);
         let _log_root = ctx.create_window("Log Window", rect(350, 40, 300, 200), log_node);
-        let combo_popup_root = ctx.create_popup("Combo Box Popup", combo_node);
+        let combo_popup_root = ctx
+            .create_popup(demo_root.id(), "Combo Box Popup", combo_node)
+            .expect("demo window must own the combo popup");
         ctx.set_root_options(
             combo_popup_root.id(),
             WindowOption::FRAME | WindowOption::AUTO_HEIGHT | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
         )
         .expect("combo popup root must exist");
-        let popup_root = ctx.create_popup("Test Popup", popup_node);
+        let popup_root = ctx
+            .create_popup(demo_root.id(), "Test Popup", popup_node)
+            .expect("demo window must own the test popup");
         ctx.set_root_options(
             popup_root.id(),
             WindowOption::FRAME | WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
@@ -1813,7 +1817,7 @@ impl State {
         };
         // The file picker is a library component owned by this application state. Its root and
         // controls use the same generic Context APIs and dispatcher as the rest of the demo.
-        let file_dialog = FileDialog::new(ctx, Self::file_dialog_mut);
+        let file_dialog = FileDialog::new(ctx, demo_root.id(), Self::file_dialog_mut);
         let mut state = Self {
             bg: [90.0, 95.0, 100.0],
             bg_slider_states,
@@ -1983,9 +1987,7 @@ impl State {
                 // Apply the popup request at the typed-event boundary. WindowManager owns placement,
                 // exclusivity, and the layout commit; State needs no frame-polled command flag.
                 let popup_width = (self.style.default_cell_width + self.style.padding.max(0) * 2).max(80);
-                context
-                    .show_popup(&self.popup_root, self.demo_root.id())
-                    .expect("test popup root and initiating demo window must exist");
+                context.show_popup(&self.popup_root).expect("test popup root and owning demo window must exist");
                 context
                     .set_root_size(self.popup_root.id(), Dimensioni::new(popup_width, 1))
                     .expect("test popup root must exist");
@@ -2011,8 +2013,8 @@ impl State {
             // The submission owns the geometry from the update that routed this click, so opening
             // needs neither a widget-state read nor a previous-frame anchor snapshot.
             context
-                .show_popup_at(&self.combo_popup_root, self.demo_root.id(), event.anchor)
-                .expect("combo popup root and initiating demo window must exist");
+                .show_popup_at(&self.combo_popup_root, event.anchor)
+                .expect("combo popup root and owning demo window must exist");
         } else {
             context
                 .set_root_visible(self.combo_popup_root.id(), false)

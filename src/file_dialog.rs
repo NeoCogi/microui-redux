@@ -31,9 +31,9 @@
 //!
 //! [`FileDialog`] is a library component, not a window-manager service. An application constructs
 //! and stores one alongside its own state. The component registers an ordinary hidden dialog root
-//! and binds its controls to the application's normal [`crate::Context`] dispatcher. Opening resets
-//! and shows that root; acceptance or cancellation hides it and emits [`FileDialogCompleted`] from
-//! the component-owned source.
+//! as a stable child of an application window and binds its controls to the application's normal
+//! [`crate::Context`] dispatcher. Opening resets and shows that root; acceptance or cancellation
+//! hides it and emits [`FileDialogCompleted`] from the component-owned source.
 //!
 //! Paths cross the public API as UTF-8 [`String`] values. On platforms that permit non-UTF-8 paths,
 //! directory entries are converted lossily. Accepting a typed name is lexical: the dialog does not
@@ -43,7 +43,7 @@ use std::{cell::RefCell, path::Path, rc::Rc};
 
 use crate::{
     Button, ButtonParameters, ButtonSubmitted, IconId, Linear, LinearItem, LinearParameters, ListItem, ListItemParameters, ListItemSubmitted, Node, Recti,
-    Context, EventContext, RootHandle, RootSubmitted, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Textbox, TextboxParameters, TextboxSubmitted,
+    Context, EventContext, RootHandle, RootId, RootSubmitted, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Textbox, TextboxParameters, TextboxSubmitted,
     ThemeIcons, TypedWidgetHandle, WidgetEventPortHandle, WidgetOption, WindowOption,
 };
 use crate::event::WidgetEventPort;
@@ -175,47 +175,73 @@ impl FileDialogCompleted {
 
 impl crate::WidgetEvent for FileDialogCompleted {}
 
+/// Newly built dynamic rows transferred into one retained dialog column.
 struct DialogRows {
+    /// Unique row nodes awaiting transfer into the owning `Linear` container.
     nodes: Vec<Node>,
+    /// Runtime identities paired with `nodes` for test-only geometry lookup.
     #[cfg(test)]
     ids: Vec<RuntimeNodeId>,
 }
 
+/// Test-only identities for static and dynamic dialog controls.
 #[cfg(test)]
 struct FileDialogTestFields {
+    /// Current folder-row identities in display order.
     folder_item_ids: Vec<RuntimeNodeId>,
+    /// Current file-row identities in display order.
     file_item_ids: Vec<RuntimeNodeId>,
+    /// Persistent toolbar Up button identity.
     up_button_id: RuntimeNodeId,
+    /// Persistent acceptance button identity.
     ok_button_id: RuntimeNodeId,
+    /// Persistent cancellation button identity.
     cancel_button_id: RuntimeNodeId,
 }
 
+/// Function pointer used by retained subscriptions to recover one application-owned dialog.
 type FileDialogAccessor<State> = for<'a> fn(&'a mut State) -> &'a mut FileDialog;
 
 /// Reusable retained file-picker component owned by application state.
 ///
 /// Construct it once with [`FileDialog::new`], store the returned value at the location selected by
 /// the supplied accessor, and subscribe to [`FileDialog::completed`] with the application's normal
-/// `Context` dispatcher. The window manager sees only the ordinary hidden dialog root created by
-/// this component.
+/// `Context` dispatcher. The window manager sees one hidden modal root owned by the caller-supplied
+/// application window; all file-picker behavior remains in this component.
 pub struct FileDialog {
+    /// Application-side semantic activation, synchronized with the hidden dialog root.
     active: bool,
+    /// Component-owned terminal event source retained independently of any one activation.
     completed: Rc<RefCell<WidgetEventPort<FileDialogCompleted>>>,
+    /// Weak handle to the Context-owned dialog root.
     root: RootHandle,
+    /// UTF-8 directory currently represented by the two retained list columns.
     current_working_directory: String,
+    /// Display names currently mounted in the folder column.
     folders: Vec<String>,
+    /// Display names currently mounted in the file column.
     files: Vec<String>,
+    /// Theme icon identifiers captured for rebuilding dynamic rows.
     icons: ThemeIcons,
+    /// Weak retained topology capability for replacing folder rows in place.
     folder_column: TypedWidgetHandle<Linear>,
+    /// Weak retained topology capability for replacing file rows in place.
     file_column: TypedWidgetHandle<Linear>,
+    /// Retained folder viewport state used by refresh and tests.
     #[cfg_attr(not(test), allow(dead_code))]
     folder_scroll: TypedWidgetHandle<ScrollArea>,
+    /// Retained file viewport state used by refresh and tests.
     #[cfg_attr(not(test), allow(dead_code))]
     file_scroll: TypedWidgetHandle<ScrollArea>,
+    /// Shared typed source used by every dynamically rebuilt folder row.
     folder_item_port: Rc<RefCell<WidgetEventPort<ListItemSubmitted>>>,
+    /// Shared typed source used by every dynamically rebuilt file row.
     file_item_port: Rc<RefCell<WidgetEventPort<ListItemSubmitted>>>,
+    /// Weak handle for the editable directory path.
     path_box: TypedWidgetHandle<Textbox>,
+    /// Weak handle for the accepted file name.
     file_name_box: TypedWidgetHandle<Textbox>,
+    /// Node identities used only for retained geometry and interaction tests.
     #[cfg(test)]
     test: FileDialogTestFields,
 }
@@ -223,11 +249,16 @@ pub struct FileDialog {
 impl FileDialog {
     /// Builds one hidden retained file picker and binds its controls to application state.
     ///
+    /// `parent` is the stable application window that owns the dialog. Destroying that window also
+    /// destroys the dialog, while hiding it temporarily hides the dialog without discarding its
+    /// retained controls. Ownership does not make dialog geometry parent-relative.
+    ///
     /// The accessor is stored with the component's subscriptions and is not invoked during
     /// construction. Once the returned value is placed in application state, the accessor must
     /// resolve that same `FileDialog` for the remainder of the component's lifetime.
     pub fn new<B: crate::render::RendererBackend, State: 'static>(
         ctx: &mut Context<B, State>,
+        parent: RootId,
         accessor: for<'a> fn(&'a mut State) -> &'a mut FileDialog,
     ) -> Self {
         // Start with an empty inactive model. The first activation supplies directory data, title, and
@@ -296,7 +327,11 @@ impl FileDialog {
             LinearItem::content(actions),
         ]));
 
-        let root = ctx.create_dialog(DEFAULT_FILE_DIALOG_TITLE, DEFAULT_FILE_DIALOG_RECT, shell);
+        // Register the modal surface as a stable child of the application window supplied by the
+        // caller. Construction fails only when that weak parent identifier is stale or ineligible.
+        let root = ctx
+            .create_dialog(parent, DEFAULT_FILE_DIALOG_TITLE, DEFAULT_FILE_DIALOG_RECT, shell)
+            .expect("new file-dialog parent must remain registered");
         ctx.set_root_options(root.id(), WindowOption::FRAME)
             .expect("new file-dialog root must accept options");
 
@@ -791,7 +826,10 @@ mod tests {
 
     fn context_and_model() -> (Context<NoopRenderer, Model>, Model) {
         let mut context = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions());
-        let dialog = FileDialog::new(&mut context, Model::dialog_mut);
+        // The fixture window gives the component the same stable lifetime owner required from a
+        // real application. Its geometry is unrelated to the dialog's screen-space rectangle.
+        let owner = context.create_window("file-dialog owner", rect(0, 0, 1, 1), Button::create(ButtonParameters::new("owner")).1);
+        let dialog = FileDialog::new(&mut context, owner.id(), Model::dialog_mut);
         context.subscribe(dialog.completed(), Model::completed).unwrap();
         (
             context,
@@ -988,8 +1026,9 @@ mod tests {
         }
 
         let mut context = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions());
-        let first = FileDialog::new(&mut context, DualModel::first_mut);
-        let second = FileDialog::new(&mut context, DualModel::second_mut);
+        let owner = context.create_window("file-dialog owner", rect(0, 0, 1, 1), Button::create(ButtonParameters::new("owner")).1);
+        let first = FileDialog::new(&mut context, owner.id(), DualModel::first_mut);
+        let second = FileDialog::new(&mut context, owner.id(), DualModel::second_mut);
         context.subscribe(first.completed(), DualModel::first_completed).unwrap();
         context.subscribe(second.completed(), DualModel::second_completed).unwrap();
         let mut model = DualModel {
