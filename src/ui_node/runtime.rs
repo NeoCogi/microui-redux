@@ -269,11 +269,13 @@ impl UiRuntime {
     /// Returns the current full rectangle for a retained node.
     #[cfg(test)]
     pub(crate) fn debug_node_rect(&self, roots: &[Node], id: RuntimeNodeId) -> Option<Recti> {
+        // Search each retained root with the transform committed by the latest layout pass.
         roots.iter().find_map(|root| Self::debug_node_rect_from(root, id, self.root_transform))
     }
 
     #[cfg(test)]
     fn debug_node_rect_from(current: &Node, target: RuntimeNodeId, parent: Transform) -> Option<Recti> {
+        // Resolve the first identity match; runtime node IDs are process-unique.
         if current.id() == target {
             return Some(parent.resolve(current.state.layout.allocation));
         }

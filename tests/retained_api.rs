@@ -183,11 +183,11 @@ fn downstream_window_menu_exposes_concrete_items_roots_and_live_state() {
     assert_eq!(save.is_enabled(), Some(true));
     assert_eq!(word_wrap.mark(), Some(MenuItemMark::Checked(false)));
 
-    // Both roots remain Context-owned, but anchored placement accepts only PopupHandle. A normal
-    // window handle cannot be supplied to this operation, so no runtime root-kind error is needed.
+    // The window owns the popup definition, and anchored placement accepts only PopupHandle. A
+    // normal window handle cannot be supplied, and generic root APIs cannot address the popup.
     let popup = menu.popup(0).unwrap();
     context.show_popup_at(popup, rect(40, 40, 100, 1)).unwrap();
-    context.set_root_visible(popup.id(), false).unwrap();
+    context.hide_popup(popup).unwrap();
 
     let model = MenuModel {
         menu,

@@ -1242,8 +1242,8 @@ fn grid_menu_panel(context: &mut Context<SelectedBackend, State>) -> (MenuPanel,
     WindowMenu::register_item(context, State::grid_window_menu_mut, &about_grid, State::grid_about).expect("new grid menu item must be unsubscribed");
 
     // The panel is intentionally separate from the floating demo's File/View/Help component. Its
-    // popup roots inherit layer zero from the grid surface and therefore stay below layer-15
-    // floating windows exactly like every other widget initiated by this background root.
+    // popup definitions belong to the grid window and therefore derive layer zero from that owner,
+    // staying below layer-15 floating windows.
     let panel = MenuPanel::new([
         Menu::new("Grid", [MenuGroup::new([reset_view_node]), MenuGroup::new([show_minor_lines_node])]),
         Menu::new("Help", [MenuGroup::new([about_grid_node])]),
@@ -1652,19 +1652,19 @@ impl State {
         let combo_popup_root = ctx
             .create_popup(demo_root.id(), "Combo Box Popup", combo_node)
             .expect("demo window must own the combo popup");
-        ctx.set_root_options(
-            combo_popup_root.id(),
+        ctx.set_popup_options(
+            &combo_popup_root,
             WindowOption::FRAME | WindowOption::AUTO_HEIGHT | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
         )
-        .expect("combo popup root must exist");
+        .expect("combo popup definition must exist");
         let popup_root = ctx
             .create_popup(demo_root.id(), "Test Popup", popup_node)
             .expect("demo window must own the test popup");
-        ctx.set_root_options(
-            popup_root.id(),
+        ctx.set_popup_options(
+            &popup_root,
             WindowOption::FRAME | WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
         )
-        .expect("test popup root must exist");
+        .expect("test popup definition must exist");
         let _typography_root = ctx.create_window("Typography Demo", rect(40, 500, 300, 170), typography_node);
         let _triangle_root = ctx.create_window("Triangle Window", rect(200, 100, 200, 200), triangle_node);
         let _painter_root = ctx.create_window("Painter Window", rect(820, 40, 280, 240), painter_node);
@@ -1986,11 +1986,9 @@ impl State {
             3 => {
                 // Apply the popup request at the typed-event boundary. WindowManager owns placement,
                 // exclusivity, and the layout commit; State needs no frame-polled command flag.
-                let popup_width = (self.style.default_cell_width + self.style.padding.max(0) * 2).max(80);
-                context.show_popup(&self.popup_root).expect("test popup root and owning demo window must exist");
                 context
-                    .set_root_size(self.popup_root.id(), Dimensioni::new(popup_width, 1))
-                    .expect("test popup root must exist");
+                    .show_popup(&self.popup_root)
+                    .expect("test popup definition and owning demo window must exist");
             }
             4 => self.write_log("Pressed button 4"),
             5 if !self.file_dialog.is_open() => {
@@ -2007,18 +2005,16 @@ impl State {
     }
 
     fn combo_submitted(&mut self, context: &mut EventContext<'_>, event: &ComboSubmitted) {
-        // Combo owns the semantic toggle; WindowManager owns the independently retained popup root.
+        // Combo owns the semantic toggle; its demo window owns the retained popup definition.
         // Reconcile them once, at the event boundary that joins the two application-chosen pieces.
         if event.open {
             // The submission owns the geometry from the update that routed this click, so opening
             // needs neither a widget-state read nor a previous-frame anchor snapshot.
             context
                 .show_popup_at(&self.combo_popup_root, event.anchor)
-                .expect("combo popup root and owning demo window must exist");
+                .expect("combo popup definition and owning demo window must exist");
         } else {
-            context
-                .set_root_visible(self.combo_popup_root.id(), false)
-                .expect("combo popup root must exist");
+            context.hide_popup(&self.combo_popup_root).expect("combo popup definition must exist");
         }
     }
 
@@ -2033,10 +2029,8 @@ impl State {
             .try_update(|combo| combo.select(*index, &labels))
             .expect("combo state unavailable");
         // Selection closes both authorities in the same dispatch transaction: Combo commits its
-        // semantic state above, and the context hides the retained root before the next layout.
-        context
-            .set_root_visible(self.combo_popup_root.id(), false)
-            .expect("combo popup root must exist");
+        // semantic state above, and the context hides the retained popup before the next layout.
+        context.hide_popup(&self.combo_popup_root).expect("combo popup definition must exist");
         if let Some(label) = selected {
             self.write_log(format!("Selected: {label}").as_str());
         }

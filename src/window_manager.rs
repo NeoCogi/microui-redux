@@ -61,34 +61,34 @@ use bitflags::bitflags;
 use crate::input::Input;
 use crate::render::DisplayList;
 use crate::{Dimensioni, Recti, Style, UiRuntime};
-use roots::WindowEntry;
+use roots::{PopupPath, WindowEntry};
 mod root_chrome;
 mod roots;
 
 pub use root_chrome::{RootChanged, RootHandle, RootSubmitted};
-// PopupHandle and RootMutationError belong to registry capability and policy rather than the
-// private chrome widget. Re-export both from the window-manager boundary as stable public types.
+// PopupHandle and RootMutationError describe popup identity and manager policy rather than window
+// chrome. Re-export them from this boundary with the rest of the public window API.
 pub use roots::{PopupHandle, RootMutationError};
 
 bitflags! {
     #[derive(Copy, Clone)]
-    /// Options that control a root window, dialog, or popup.
+    /// Presentation options shared by windows, dialogs, and window-owned popup surfaces.
     pub struct WindowOption : u32 {
-        /// Gives the root a Style-owned outer border and inset content area.
+        /// Gives the surface a Style-owned outer border and inset content area.
         const FRAME = 1024;
-        /// Adapts the root width to its content while retaining its programmed height.
+        /// Adapts the surface width to its content while retaining its programmed height.
         const AUTO_WIDTH = 256;
-        /// Adapts the root height to its content while retaining its programmed width.
+        /// Adapts the surface height to its content while retaining its programmed width.
         const AUTO_HEIGHT = 512;
-        /// Adapts both root axes to intrinsic content size.
+        /// Adapts both surface axes to intrinsic content size.
         const AUTO_SIZE = Self::AUTO_WIDTH.bits() | Self::AUTO_HEIGHT.bits();
         /// Hides the title bar.
         const NO_TITLE = 128;
         /// Hides the close button.
         const NO_CLOSE = 64;
-        /// Prevents the user from resizing the root.
+        /// Prevents the user from resizing the window or dialog.
         const NO_RESIZE = 16;
-        /// Removes the Style-owned inset around root content.
+        /// Removes the Style-owned inset around surface content.
         ///
         /// This is useful for edge-to-edge application surfaces whose content, such as a menu bar,
         /// already owns its internal spacing. It is independent of [`Self::FRAME`]: removing the
@@ -99,13 +99,14 @@ bitflags! {
     }
 }
 
-/// Opaque identifier for a root window, dialog, or popup registered with [`crate::Context`].
+/// Opaque identifier for a window or dialog retained by [`crate::Context`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RootId(usize);
 
 impl RootId {
     /// Wraps a raw counter value as a root identifier.
     pub(crate) const fn from_raw(raw: usize) -> Self {
+        // Only the manager allocates raw values, so public code cannot forge an identity.
         Self(raw)
     }
 }
@@ -117,19 +118,15 @@ pub const MAX_LAYER: u8 = 15;
 /// Layer assigned to newly created independent windows.
 pub const DEFAULT_LAYER: u8 = MAX_LAYER;
 
-/// Describes how one retained root obtains its stacking layer.
+/// Describes the structural stacking layer of one retained window.
 ///
-/// Top-level windows have a [`Fixed`](Self::Fixed) application layer. Every owned non-modal root
-/// inherits through its stable parent, while dialogs occupy the dedicated modal layer above all
-/// sixteen application layers. The window manager derives this value from the owned-root tree;
-/// application code changes only top-level fixed window layers through
-/// [`crate::Context::set_root_layer`].
+/// Ordinary windows use a caller-selectable fixed layer. Dialogs occupy a dedicated modal layer
+/// above every fixed value. Popups do not expose a binding because they derive their transient band
+/// directly from their owner window.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum LayerBinding {
     /// A caller-selected application layer in the inclusive range [`MIN_LAYER`]..=[`MAX_LAYER`].
     Fixed(u8),
-    /// An owned root inheriting the effective layer of its direct parent.
-    Inherited(RootId),
     /// A dialog in the dedicated layer above all application-selectable layers.
     Modal,
 }
@@ -141,10 +138,12 @@ pub(crate) struct WindowManager {
     /// Window-manager-owned style used by all roots and scroll areas.
     style: Style,
 
-    /// Highest z-index allocated to an open window-manager root.
+    /// Highest z-index allocated to a visible window or dialog.
     last_zindex: i32,
-    /// Registered window-manager roots replayed by [`crate::ContextFrame::render_ui`].
-    roots: Vec<WindowEntry>,
+    /// Flat retained ordinary windows and directly owned modal dialogs.
+    windows: Vec<WindowEntry>,
+    /// Sole semantic visibility state for all window-owned popup definitions.
+    active_popup: Option<PopupPath>,
     /// Last ordinary root explicitly activated by a pointer press.
     ///
     /// Activation is deliberately independent of stacking. A user can therefore focus a control
@@ -152,6 +151,8 @@ pub(crate) struct WindowManager {
     active_root: Option<RootId>,
     /// Next root id counter.
     next_root_id: usize,
+    /// Next window-owned popup id counter.
+    next_popup_id: usize,
     /// Ordered input state owned and consumed directly by this window manager.
     input: Input,
     /// Dimensions of the most recent complete update/layout commit.
@@ -159,88 +160,122 @@ pub(crate) struct WindowManager {
 }
 
 impl WindowManager {
+    /// Creates an empty manager with resolved style and no committed UI frame.
     pub(crate) fn new(style: Style) -> Self {
+        // Identity counters start above zero and never rewind, including after destruction.
         Self {
             display_list: DisplayList::new(),
             style,
             last_zindex: 0,
-            roots: Vec::default(),
+            windows: Vec::default(),
+            active_popup: None,
             active_root: None,
             next_root_id: 1,
+            next_popup_id: 1,
             input: Input::default(),
             ui_commit: None,
         }
     }
 
+    /// Marks the current retained layout as unavailable for rendering.
     pub(crate) fn invalidate_ui_commit(&mut self) {
+        // Every semantic or input mutation must be followed by an update before paint.
         self.ui_commit = None;
     }
 
+    /// Borrows the resolved style shared by window chrome and application trees.
     pub(crate) fn style(&self) -> &Style {
+        // The manager is the sole style owner used during retained traversal.
         &self.style
     }
 
+    /// Replaces the resolved style and invalidates geometry measured with the old value.
     pub(crate) fn set_style(&mut self, style: Style) {
+        // Install the style before invalidation so the next update observes one coherent value.
         self.style = style;
         self.invalidate_ui_commit();
     }
 
+    /// Queues one pointer-movement transition in input order.
     pub(crate) fn mousemove(&mut self, x: i32, y: i32) {
+        // Pending input makes the previous update/layout commit unrenderable.
         self.input.mousemove(x, y);
         self.invalidate_ui_commit();
     }
 
+    /// Queues one pointer-button press in input order.
     pub(crate) fn mousedown(&mut self, x: i32, y: i32, button: crate::MouseButton) {
+        // Preserve the exact call order so popup dismissal and revealed-target routing are atomic.
         self.input.mousedown(x, y, button);
         self.invalidate_ui_commit();
     }
 
+    /// Queues one pointer-button release in input order.
     pub(crate) fn mouseup(&mut self, x: i32, y: i32, button: crate::MouseButton) {
+        // Captured chrome or content consumes the release during the next retained update.
         self.input.mouseup(x, y, button);
         self.invalidate_ui_commit();
     }
 
+    /// Queues one scroll delta in input order.
     pub(crate) fn scroll(&mut self, x: i32, y: i32) {
+        // Scroll targeting depends on the layout and pointer position at this ordered transition.
         self.input.scroll(x, y);
         self.invalidate_ui_commit();
     }
 
+    /// Queues one logical modifier-key press in input order.
     pub(crate) fn keydown(&mut self, key: crate::KeyMode) {
+        // The input queue snapshots held state per event before retained routing.
         self.input.keydown(key);
         self.invalidate_ui_commit();
     }
 
+    /// Queues one logical modifier-key release in input order.
     pub(crate) fn keyup(&mut self, key: crate::KeyMode) {
+        // Releasing a held modifier changes the snapshot for every later queued event.
         self.input.keyup(key);
         self.invalidate_ui_commit();
     }
 
+    /// Queues one physical key-code press in input order.
     pub(crate) fn keydown_code(&mut self, code: crate::KeyCode) {
+        // Focus resolution remains deferred until the next complete retained update.
         self.input.keydown_code(code);
         self.invalidate_ui_commit();
     }
 
+    /// Queues one physical key-code release in input order.
     pub(crate) fn keyup_code(&mut self, code: crate::KeyCode) {
+        // Keep release ordering exact for widgets that track physical key state.
         self.input.keyup_code(code);
         self.invalidate_ui_commit();
     }
 
+    /// Queues UTF-8 text input for the current retained focus owner.
     pub(crate) fn text(&mut self, text: &str) {
+        // The input buffer copies the text, so this borrowed slice need not outlive the call.
         self.input.text(text);
         self.invalidate_ui_commit();
     }
 
+    /// Returns whether dimensions and pending-input state match the last complete update.
     pub(crate) fn can_render(&self, dimensions: Dimensioni) -> bool {
+        // Rendering is observational and therefore requires both exact dimensions and an empty FIFO.
         self.ui_commit
             .is_some_and(|committed| (committed.width, committed.height) == (dimensions.width, dimensions.height))
             && !self.input.has_pending()
     }
 
+    /// Borrows the reusable display list after retained paint has recorded it.
     pub(crate) fn display_list_mut(&mut self) -> &mut DisplayList {
+        // The Context frame executor drains this same manager-owned allocation.
         &mut self.display_list
     }
 
+    /// Clears recorded drawing when a logical frame is cancelled or backend setup fails.
     pub(crate) fn cancel_frame(&mut self) {
+        // Clearing preserves allocations while preventing stale operations from leaking forward.
         self.display_list.clear();
     }
 }

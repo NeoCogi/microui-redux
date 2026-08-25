@@ -862,11 +862,11 @@ fn context_aware_handler_creates_and_mutates_every_root_kind_before_layout() {
         Some((30, 40, 110, 75))
     );
     assert_eq!(context.debug_root_visible(dialog.id()), Some(true));
-    assert_eq!(context.debug_root_visible(popup.id()), Some(true));
-    assert_eq!(context.debug_root_rect(popup.id()).map(|rect| (rect.x, rect.y)), Some((180, 30)));
+    assert_eq!(context.debug_popup_visible(popup), Some(true));
+    assert_eq!(context.debug_popup_rect(popup).map(|rect| (rect.x, rect.y)), Some((180, 30)));
     assert!(context.debug_root_node_count(window.id()).is_some());
     assert!(context.debug_root_node_count(dialog.id()).is_some());
-    assert!(context.debug_root_node_count(popup.id()).is_some());
+    assert!(popup.is_alive());
 }
 
 #[test]
@@ -879,18 +879,17 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
 
     impl Model {
         fn combo_submitted(&mut self, context: &mut EventContext<'_>, event: &ComboSubmitted) {
-            // Compose the semantic Combo with an ordinary retained popup through the general root
-            // API; neither EventContext nor WindowManager needs to know this root belongs to a combo.
+            // Compose the semantic Combo with an ordinary window-owned popup.
             if event.open {
                 context.show_popup_at(&self.popup, event.anchor).unwrap();
             } else {
-                context.set_root_visible(self.popup.id(), false).unwrap();
+                context.hide_popup(&self.popup).unwrap();
             }
             self.submitted_anchor = Some(event.anchor);
         }
 
         fn popup_submitted(&mut self, event: &RootSubmitted) {
-            // Generic popup dismissal becomes typed application input after traversal, where the
+            // Popup dismissal becomes typed application input after traversal, where the
             // composed widget can safely reconcile its retained semantic state.
             if matches!(event, RootSubmitted::PopupDismissed) {
                 self.combo.close_popup().expect("mounted combo must remain available");
@@ -924,8 +923,8 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     context.update_ui_state(dimensions, &mut model);
 
     let anchor = model.submitted_anchor.expect("combo submission must carry its routed anchor");
-    assert_eq!(context.debug_root_visible(popup.id()), Some(true));
-    assert_eq!(context.debug_root_rect(popup.id()).map(|rect| (rect.x, rect.y)), Some((anchor.x, anchor.y)));
+    assert_eq!(context.debug_popup_visible(&popup), Some(true));
+    assert_eq!(context.debug_popup_rect(&popup).map(|rect| (rect.x, rect.y)), Some((anchor.x, anchor.y)));
     assert_eq!(combo.is_open(), Some(true));
 
     // Root chrome is outside the composed popup. Its press dismisses the popup and reconciles the
@@ -935,30 +934,30 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     let title_y = title.y + title.height / 2;
     context.mousedown(title_x, title_y, MouseButton::LEFT);
     context.update_ui_state(dimensions, &mut model);
-    assert_eq!(context.debug_root_visible(popup.id()), Some(false));
+    assert_eq!(context.debug_popup_visible(&popup), Some(false));
     assert_eq!(combo.is_open(), Some(false));
     assert_eq!(context.debug_root_moving(source.id()), Some(true));
 
     context.mousemove(title_x + 15, title_y + 10);
     context.update_ui_state(dimensions, &mut model);
     assert_eq!(context.debug_root_rect(source.id()).map(|rect| (rect.x, rect.y)), Some((25, 20)));
-    assert_eq!(context.debug_root_visible(popup.id()), Some(false));
+    assert_eq!(context.debug_popup_visible(&popup), Some(false));
     assert_eq!(combo.is_open(), Some(false));
 
-    // Reopen the composed popup, then replace it through generic popup exclusivity. The displaced
-    // root's dismissal event must close Combo's semantic state in the same update transaction.
+    // Reopen the composed popup, then replace its owner's active popup. The displaced popup's
+    // dismissal event must close Combo's semantic state in the same update transaction.
     context.mouseup(title_x + 15, title_y + 10, MouseButton::LEFT);
     context.update_ui_state(dimensions, &mut model);
     let moved_combo_rect = context.debug_root_node_rect(source.id(), combo_id).unwrap();
     context.mousedown(moved_combo_rect.x + 1, moved_combo_rect.y + 1, MouseButton::LEFT);
     context.update_ui_state(dimensions, &mut model);
-    assert_eq!(context.debug_root_visible(popup.id()), Some(true));
+    assert_eq!(context.debug_popup_visible(&popup), Some(true));
     assert_eq!(combo.is_open(), Some(true));
 
     context.show_popup(&replacement).unwrap();
     context.update_ui_state(dimensions, &mut model);
-    assert_eq!(context.debug_root_visible(popup.id()), Some(false));
-    assert_eq!(context.debug_root_visible(replacement.id()), Some(true));
+    assert_eq!(context.debug_popup_visible(&popup), Some(false));
+    assert_eq!(context.debug_popup_visible(&replacement), Some(true));
     assert_eq!(combo.is_open(), Some(false));
 }
 
@@ -1008,84 +1007,6 @@ fn creation_returns_persistent_root_handle() {
     );
     assert_eq!(ctx.debug_root_visible(root.id()), Some(true));
     assert_eq!(ctx.debug_root_node_count(root.id()), Some(1));
-}
-
-#[test]
-fn owned_roots_keep_screen_geometry_independent_and_inherit_lifecycle_recursively() {
-    let mut ctx = context();
-    let owner = ctx.create_window("owner", rect(10, 20, 120, 90), empty_content());
-    let child = ctx.create_child_window(owner.id(), "child", rect(220, 170, 80, 60), empty_content()).unwrap();
-    let dialog = ctx.create_dialog(child.id(), "dialog", rect(40, 50, 150, 100), empty_content()).unwrap();
-    let popup = ctx.create_popup(dialog.id(), "popup", empty_content()).unwrap();
-    let submenu = ctx.create_popup(popup.id(), "submenu", empty_content()).unwrap();
-
-    // Ownership affects stacking and lifetime, not coordinates. The child rectangle remains the
-    // exact screen-space rectangle supplied by the caller rather than an offset from its parent.
-    assert_eq!(
-        ctx.debug_root_rect(child.id()).map(|rect| (rect.x, rect.y, rect.width, rect.height)),
-        Some((220, 170, 80, 60))
-    );
-    assert_eq!(ctx.root_layer_binding(child.id()), Ok(LayerBinding::Inherited(owner.id())));
-    assert_eq!(ctx.root_layer_binding(dialog.id()), Ok(LayerBinding::Modal));
-    assert_eq!(ctx.root_layer_binding(popup.id()), Ok(LayerBinding::Inherited(dialog.id())));
-    assert_eq!(ctx.root_layer_binding(submenu.id()), Ok(LayerBinding::Inherited(popup.id())));
-    assert_eq!(ctx.set_root_layer(child.id(), 3), Err(RootMutationError::ManagedLayer));
-
-    // Hiding an owner closes every visible descendant in one transaction. Hidden descendants stay
-    // registered so application state and weak handles remain available for later explicit shows.
-    ctx.set_root_visible(owner.id(), false).unwrap();
-    assert_eq!(ctx.debug_root_visible(owner.id()), Some(false));
-    assert_eq!(ctx.debug_root_visible(child.id()), Some(false));
-    assert!(dialog.is_alive());
-    assert!(popup.is_alive());
-    assert!(submenu.is_alive());
-
-    // Destruction follows the same tree but releases ownership permanently, including descendants
-    // that were already hidden.
-    assert!(ctx.destroy_root(owner.id()));
-    assert!(!owner.is_alive());
-    assert!(!child.is_alive());
-    assert!(!dialog.is_alive());
-    assert!(!popup.is_alive());
-    assert!(!submenu.is_alive());
-    assert_eq!(ctx.set_root_visible(child.id(), true), Err(RootMutationError::UnknownRoot));
-}
-
-#[test]
-fn owned_root_creation_rejects_ineligible_hidden_and_stale_parents() {
-    let mut ctx = context();
-    let owner = ctx.create_window("owner", rect(0, 0, 100, 80), empty_content());
-    let popup = ctx.create_popup(owner.id(), "popup", empty_content()).unwrap();
-
-    // Popup descendants may extend the transient branch, but persistent roots cannot outlive a
-    // transient parent that dismissal hides.
-    assert!(matches!(
-        ctx.create_child_window(popup.id(), "invalid child", rect(0, 0, 10, 10), empty_content()),
-        Err(RootMutationError::InvalidRootParent)
-    ));
-    assert!(matches!(
-        ctx.create_dialog(popup.id(), "invalid dialog", rect(0, 0, 10, 10), empty_content()),
-        Err(RootMutationError::InvalidRootParent)
-    ));
-
-    let dialog = ctx.create_dialog(owner.id(), "hidden dialog", rect(10, 10, 80, 60), empty_content()).unwrap();
-    // Persistent child roots stay in ordinary window groups. Dialog descendants are limited to
-    // popups, whose input policy already follows the modal root.
-    assert!(matches!(
-        ctx.create_child_window(dialog.id(), "visible child", rect(20, 20, 30, 30), empty_content()),
-        Err(RootMutationError::InvalidRootParent)
-    ));
-    assert!(matches!(
-        ctx.create_dialog(dialog.id(), "nested dialog", rect(20, 20, 30, 30), empty_content()),
-        Err(RootMutationError::InvalidRootParent)
-    ));
-
-    let stale = owner.id();
-    assert!(ctx.destroy_root(stale));
-    assert!(matches!(
-        ctx.create_popup(stale, "orphan", empty_content()),
-        Err(RootMutationError::UnknownRoot)
-    ));
 }
 
 #[test]
@@ -1169,13 +1090,13 @@ fn showing_a_popup_atomically_hides_and_dismisses_the_previous_one() {
     let mut submissions = Vec::new();
 
     ctx.show_popup_at(&first, rect(12, 18, 90, 1)).unwrap();
-    assert_eq!(ctx.debug_root_visible(first.id()), Some(true));
+    assert_eq!(ctx.debug_popup_visible(&first), Some(true));
     ctx.show_popup_at(&second, rect(40, 55, 120, 1)).unwrap();
 
-    assert_eq!(ctx.debug_root_visible(first.id()), Some(false));
-    assert_eq!(ctx.debug_root_visible(second.id()), Some(true));
+    assert_eq!(ctx.debug_popup_visible(&first), Some(false));
+    assert_eq!(ctx.debug_popup_visible(&second), Some(true));
     assert_eq!(
-        ctx.debug_root_rect(second.id()).map(|anchor| (anchor.x, anchor.y, anchor.width, anchor.height)),
+        ctx.debug_popup_rect(&second).map(|anchor| (anchor.x, anchor.y, anchor.width, anchor.height)),
         Some((40, 55, 120, 1))
     );
     assert!(dispatcher.dispatch(&mut submissions));
@@ -1196,27 +1117,32 @@ fn hiding_a_parent_recursively_hides_its_popup_children() {
     let mut submissions = Vec::new();
 
     ctx.show_popup(&first).unwrap();
-    ctx.set_root_visible(first.id(), false).unwrap();
+    ctx.hide_popup(&first).unwrap();
     ctx.show_popup(&second).unwrap();
     ctx.set_root_visible(source.id(), false).unwrap();
 
-    assert_eq!(ctx.debug_root_visible(first.id()), Some(false));
-    assert_eq!(ctx.debug_root_visible(second.id()), Some(false));
+    assert_eq!(ctx.debug_popup_visible(&first), Some(false));
+    assert_eq!(ctx.debug_popup_visible(&second), Some(false));
     assert!(dispatcher.dispatch(&mut submissions));
     assert_eq!(submissions, [RootSubmitted::PopupDismissed]);
 }
 
 #[test]
-fn anchored_popup_operation_rejects_a_destroyed_typed_popup() {
+fn stale_popup_mutations_fail_after_owner_destruction() {
     let mut ctx = context();
     let source = ctx.create_window("source", rect(0, 0, 100, 80), empty_content());
     let popup = ctx.create_popup(source.id(), "popup", empty_content()).unwrap();
-    let popup_id = popup.id();
-    assert!(ctx.destroy_root(popup_id));
+    assert!(ctx.destroy_root(source.id()));
 
-    // PopupHandle makes ordinary windows and dialogs unrepresentable at this API boundary. The
-    // remaining identity failure is a once-valid weak popup capability whose root was destroyed.
-    assert_eq!(ctx.show_popup_at(&popup, rect(20, 30, 40, 1)), Err(RootMutationError::UnknownRoot));
+    // Popup definitions have no independent destruction operation. Destroying the owning window
+    // expires its handles and makes every typed mutation fail consistently.
+    assert_eq!(ctx.show_popup_at(&popup, rect(20, 30, 40, 1)), Err(RootMutationError::UnknownPopup));
+    assert_eq!(ctx.set_popup_options(&popup, WindowOption::FRAME), Err(RootMutationError::UnknownPopup));
+    assert_eq!(ctx.hide_popup(&popup), Err(RootMutationError::UnknownPopup));
+    assert!(matches!(
+        ctx.create_subpopup(&popup, "stale child", empty_content()),
+        Err(RootMutationError::UnknownPopup)
+    ));
     assert!(!popup.is_alive());
 }
 
@@ -1225,7 +1151,7 @@ fn outside_popup_press_hides_and_records_typed_submission() {
     let mut ctx = context();
     let source = ctx.create_window("source", rect(0, 0, 100, 80), empty_content());
     let popup = ctx.create_popup(source.id(), "popup", empty_content()).unwrap();
-    ctx.set_root_options(popup.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    ctx.set_popup_options(&popup, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     ctx.show_popup_at(&popup, rect(20, 20, 80, 60)).unwrap();
     let mut widget_event_dispatcher = crate::event::WidgetEventDispatcher::new();
@@ -1239,11 +1165,11 @@ fn outside_popup_press_hides_and_records_typed_submission() {
     ctx.mousedown(200, 180, MouseButton::LEFT);
     ctx.update_and_render_ui();
 
-    assert_eq!(ctx.debug_root_visible(popup.id()), Some(false));
+    assert_eq!(ctx.debug_popup_visible(&popup), Some(false));
     assert!(widget_event_dispatcher.dispatch(&mut submissions));
     assert_eq!(submissions, [RootSubmitted::PopupDismissed]);
     ctx.show_popup(&popup).unwrap();
-    ctx.set_root_visible(popup.id(), false).unwrap();
+    ctx.hide_popup(&popup).unwrap();
     assert!(widget_event_dispatcher.dispatch(&mut submissions));
     assert_eq!(submissions, [RootSubmitted::PopupDismissed, RootSubmitted::PopupDismissed]);
 }
@@ -1258,7 +1184,7 @@ fn outside_popup_press_dismisses_then_routes_once_to_the_revealed_root() {
     ctx.set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     let popup = ctx.create_popup(window.id(), "popup", empty_content()).unwrap();
-    ctx.set_root_options(popup.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    ctx.set_popup_options(&popup, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     ctx.show_popup_at(&popup, rect(80, 60, 60, 40)).unwrap();
     ctx.update_ui(Dimensioni::new(320, 240));
@@ -1266,7 +1192,7 @@ fn outside_popup_press_dismisses_then_routes_once_to_the_revealed_root() {
     ctx.mousedown(15, 15, MouseButton::LEFT);
     ctx.update_ui(Dimensioni::new(320, 240));
 
-    assert_eq!(ctx.debug_root_visible(popup.id()), Some(false));
+    assert_eq!(ctx.debug_popup_visible(&popup), Some(false));
     assert!(dispatcher.dispatch(&mut submissions));
     assert_eq!(submissions, 1);
 }
@@ -1321,17 +1247,14 @@ fn fronting_changes_only_cross_root_z_order() {
 fn fixed_layers_validate_and_managed_roots_reject_direct_assignment() {
     let mut ctx = context();
     let window = ctx.create_window("window", rect(0, 0, 100, 80), empty_content());
-    let popup = ctx.create_popup(window.id(), "popup", empty_content()).unwrap();
     let dialog = ctx.create_dialog(window.id(), "dialog", rect(20, 20, 100, 80), empty_content()).unwrap();
 
     assert_eq!(ctx.root_layer_binding(window.id()), Ok(LayerBinding::Fixed(DEFAULT_LAYER)));
-    assert_eq!(ctx.root_layer_binding(popup.id()), Ok(LayerBinding::Inherited(window.id())));
     assert_eq!(ctx.root_layer_binding(dialog.id()), Ok(LayerBinding::Modal));
     assert_eq!(
         ctx.set_root_layer(window.id(), MAX_LAYER + 1),
         Err(RootMutationError::InvalidLayer(MAX_LAYER + 1))
     );
-    assert_eq!(ctx.set_root_layer(popup.id(), 3), Err(RootMutationError::ManagedLayer));
     assert_eq!(ctx.set_root_layer(dialog.id(), 3), Err(RootMutationError::ManagedLayer));
 
     ctx.set_root_layer(window.id(), MIN_LAYER).unwrap();
@@ -1363,36 +1286,43 @@ fn popup_inherits_its_parent_layer_and_uses_only_that_layers_transient_tier() {
     ctx.set_root_layer(same_layer.id(), 2).unwrap();
     ctx.set_root_layer(higher.id(), 3).unwrap();
     let popup = ctx.create_popup(source.id(), "popup", empty_content()).unwrap();
-    let submenu = ctx.create_popup(popup.id(), "submenu", empty_content()).unwrap();
+    let submenu = ctx.create_subpopup(&popup, "submenu", empty_content()).unwrap();
 
-    assert_eq!(ctx.set_root_visible(popup.id(), true), Err(RootMutationError::PopupShowRequired));
     ctx.show_popup_at(&popup, rect(10, 10, 60, 40)).unwrap();
-    assert_eq!(ctx.root_layer_binding(popup.id()), Ok(LayerBinding::Inherited(source.id())));
     assert_eq!(ctx.debug_rendered_root_names(), ["source", "same layer", "popup", "higher"]);
+    assert_eq!(ctx.debug_active_popup_names(), ["popup"]);
     ctx.update_and_render_ui();
 
-    // Inheritance remains live while the popup is visible: moving the fixed source moves its
-    // complete popup subtree, including a hidden submenu that stacking has sorted before its
-    // visible parent, without giving either popup an independent layer.
+    // Window ownership remains live while the popup is visible: moving the owner moves its active
+    // popup path to that window's transient tier without giving either popup an independent layer.
     ctx.set_root_layer(source.id(), 4).unwrap();
     ctx.show_popup(&submenu).unwrap();
     assert_eq!(ctx.debug_rendered_root_names(), ["same layer", "higher", "source", "popup", "submenu"]);
+    assert_eq!(ctx.debug_active_popup_names(), ["popup", "submenu"]);
 }
 
 #[test]
-fn submenu_popup_retains_its_parent_and_exposes_the_direct_ownership_edge() {
+fn higher_layer_window_occludes_lower_popup_for_outside_dismissal() {
     let mut ctx = context();
     let source = ctx.create_window("source", rect(0, 0, 100, 80), empty_content());
-    ctx.set_root_layer(source.id(), 6).unwrap();
-    let parent = ctx.create_popup(source.id(), "parent", empty_content()).unwrap();
-    let child = ctx.create_popup(parent.id(), "child", empty_content()).unwrap();
+    let higher = ctx.create_window("higher", rect(0, 0, 100, 80), empty_content());
+    let chromeless = WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE;
+    ctx.set_root_options(source.id(), chromeless).unwrap();
+    ctx.set_root_options(higher.id(), chromeless).unwrap();
+    ctx.set_root_layer(source.id(), 2).unwrap();
+    ctx.set_root_layer(higher.id(), 3).unwrap();
+    let popup = ctx.create_popup(source.id(), "popup", empty_content()).unwrap();
+    ctx.set_popup_options(&popup, chromeless).unwrap();
+    ctx.show_popup_at(&popup, rect(10, 10, 60, 40)).unwrap();
+    ctx.update_and_render_ui();
 
-    ctx.show_popup(&parent).unwrap();
-    ctx.show_popup(&child).unwrap();
+    // The point lies inside the popup rectangle, but the higher-layer window is the visible input
+    // target there. Treating raw popup bounds as visibility would leave an occluded menu open.
+    ctx.mousedown(20, 20, MouseButton::LEFT);
+    ctx.update_and_render_ui();
 
-    assert_eq!(ctx.debug_root_visible(parent.id()), Some(true));
-    assert_eq!(ctx.debug_root_visible(child.id()), Some(true));
-    assert_eq!(ctx.root_layer_binding(child.id()), Ok(LayerBinding::Inherited(parent.id())));
+    assert_eq!(ctx.debug_popup_visible(&popup), Some(false));
+    assert_eq!(ctx.debug_active_root(), Some(higher.id()));
 }
 
 #[test]
@@ -1400,20 +1330,20 @@ fn popup_branch_replaces_only_the_stable_parents_descendants() {
     let mut ctx = context();
     let source = ctx.create_window("source", rect(0, 0, 100, 80), empty_content());
     let parent = ctx.create_popup(source.id(), "parent", empty_content()).unwrap();
-    let child = ctx.create_popup(parent.id(), "child", empty_content()).unwrap();
-    let grandchild = ctx.create_popup(child.id(), "grandchild", empty_content()).unwrap();
-    let sibling = ctx.create_popup(parent.id(), "sibling", empty_content()).unwrap();
+    let child = ctx.create_subpopup(&parent, "child", empty_content()).unwrap();
+    let grandchild = ctx.create_subpopup(&child, "grandchild", empty_content()).unwrap();
+    let sibling = ctx.create_subpopup(&parent, "sibling", empty_content()).unwrap();
 
     ctx.show_popup(&parent).unwrap();
     ctx.show_popup(&child).unwrap();
     ctx.show_popup(&grandchild).unwrap();
     ctx.show_popup(&sibling).unwrap();
 
-    assert_eq!(ctx.debug_root_visible(parent.id()), Some(true));
-    assert_eq!(ctx.debug_root_visible(child.id()), Some(false));
-    assert_eq!(ctx.debug_root_visible(grandchild.id()), Some(false));
-    assert_eq!(ctx.debug_root_visible(sibling.id()), Some(true));
-    assert_eq!(ctx.root_layer_binding(sibling.id()), Ok(LayerBinding::Inherited(parent.id())));
+    assert_eq!(ctx.debug_popup_visible(&parent), Some(true));
+    assert_eq!(ctx.debug_popup_visible(&child), Some(false));
+    assert_eq!(ctx.debug_popup_visible(&grandchild), Some(false));
+    assert_eq!(ctx.debug_popup_visible(&sibling), Some(true));
+    assert_eq!(ctx.debug_active_popup_names(), ["parent", "sibling"]);
 }
 
 #[test]
@@ -1421,10 +1351,10 @@ fn presses_inside_a_popup_ancestor_close_only_its_descendant_branch() {
     let mut ctx = context();
     let source = ctx.create_window("source", rect(0, 0, 300, 220), empty_content());
     let parent = ctx.create_popup(source.id(), "parent", empty_content()).unwrap();
-    let child = ctx.create_popup(parent.id(), "child", empty_content()).unwrap();
+    let child = ctx.create_subpopup(&parent, "child", empty_content()).unwrap();
     let fixed_popup = WindowOption::FRAME | WindowOption::NO_RESIZE | WindowOption::NO_TITLE;
-    ctx.set_root_options(parent.id(), fixed_popup).unwrap();
-    ctx.set_root_options(child.id(), fixed_popup).unwrap();
+    ctx.set_popup_options(&parent, fixed_popup).unwrap();
+    ctx.set_popup_options(&child, fixed_popup).unwrap();
 
     ctx.show_popup_at(&parent, rect(20, 20, 100, 100)).unwrap();
     ctx.show_popup_at(&child, rect(120, 20, 80, 80)).unwrap();
@@ -1432,28 +1362,31 @@ fn presses_inside_a_popup_ancestor_close_only_its_descendant_branch() {
 
     ctx.mousedown(40, 40, MouseButton::LEFT);
     ctx.update_and_render_ui();
-    assert_eq!(ctx.debug_root_visible(parent.id()), Some(true));
-    assert_eq!(ctx.debug_root_visible(child.id()), Some(false));
+    assert_eq!(ctx.debug_popup_visible(&parent), Some(true));
+    assert_eq!(ctx.debug_popup_visible(&child), Some(false));
 
     ctx.mousedown(280, 200, MouseButton::LEFT);
     ctx.update_and_render_ui();
-    assert_eq!(ctx.debug_root_visible(parent.id()), Some(false));
+    assert_eq!(ctx.debug_popup_visible(&parent), Some(false));
 }
 
 #[test]
-fn destroying_a_parent_recursively_expires_popup_descendants() {
+fn owner_destruction_expires_all_popup_handles() {
     let mut ctx = context();
     let source = ctx.create_window("source", rect(0, 0, 100, 80), empty_content());
     let popup = ctx.create_popup(source.id(), "popup", empty_content()).unwrap();
+    let submenu = ctx.create_subpopup(&popup, "submenu", empty_content()).unwrap();
 
-    // Stable ownership makes the popup part of the source's lifetime subtree even while hidden.
+    // Popup definitions remain alive while hidden and expire only with their owning window.
     ctx.show_popup(&popup).unwrap();
-    ctx.set_root_visible(popup.id(), false).unwrap();
-    assert_eq!(ctx.root_layer_binding(popup.id()), Ok(LayerBinding::Inherited(source.id())));
+    ctx.show_popup(&submenu).unwrap();
+    ctx.hide_popup(&popup).unwrap();
+    assert!(popup.is_alive());
+    assert!(submenu.is_alive());
 
     assert!(ctx.destroy_root(source.id()));
-    assert_eq!(ctx.root_layer_binding(popup.id()), Err(RootMutationError::UnknownRoot));
     assert!(!popup.is_alive());
+    assert!(!submenu.is_alive());
 }
 
 #[test]
@@ -1614,7 +1547,7 @@ fn active_dialog_accepts_only_its_own_popup_in_the_modal_input_group() {
     let mut submissions = 0;
     let dialog = ctx.create_dialog(window.id(), "dialog", rect(120, 100, 100, 80), empty_content()).unwrap();
     let popup = ctx.create_popup(dialog.id(), "popup", popup_content).unwrap();
-    ctx.set_root_options(popup.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    ctx.set_popup_options(&popup, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     ctx.set_root_options(dialog.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
@@ -1626,7 +1559,7 @@ fn active_dialog_accepts_only_its_own_popup_in_the_modal_input_group() {
     ctx.show_popup_at(&popup, rect(0, 0, 100, 80)).unwrap();
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_rendered_root_names(), ["window", "dialog", "popup"]);
-    assert_eq!(ctx.debug_root_layer_binding(popup.id()), Some(LayerBinding::Inherited(dialog.id())));
+    assert_eq!(ctx.debug_active_popup_names(), ["popup"]);
 
     ctx.mousedown(10, 10, MouseButton::LEFT);
     ctx.mouseup(10, 10, MouseButton::LEFT);
@@ -1635,7 +1568,7 @@ fn active_dialog_accepts_only_its_own_popup_in_the_modal_input_group() {
     assert_eq!(submissions, 1);
 
     ctx.set_root_visible(dialog.id(), false).unwrap();
-    assert_eq!(ctx.debug_root_visible(popup.id()), Some(false));
+    assert_eq!(ctx.debug_popup_visible(&popup), Some(false));
 }
 
 #[test]
@@ -1775,7 +1708,7 @@ fn fronting_a_dialog_closes_the_previous_modal_groups_popup() {
     // before changing modal z-order.
     ctx.bring_root_to_front(first.id()).unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(first.id()));
-    assert_eq!(ctx.debug_root_visible(popup.id()), Some(false));
+    assert_eq!(ctx.debug_popup_visible(&popup), Some(false));
 }
 
 #[test]
@@ -1922,20 +1855,18 @@ fn hiding_and_showing_root_does_not_restore_chrome_capture() {
 }
 
 #[test]
-fn chrome_geometry_exposes_one_body_and_auto_size_tracks_content() {
+fn popup_auto_size_tracks_content() {
     let mut ctx = context();
     let source = ctx.create_window("source", rect(200, 160, 100, 70), empty_content());
     let (_, text) = crate::TextBlock::create(crate::TextBlockParameters::new("window content"));
-    let root = ctx.create_popup(source.id(), "popup", text).unwrap();
-    ctx.show_popup(&root).unwrap();
+    let popup = ctx.create_popup(source.id(), "popup", text).unwrap();
+    ctx.show_popup(&popup).unwrap();
     ctx.update_and_render_ui();
 
-    let body = ctx.debug_root_body(root.id()).unwrap();
-    let content = ctx.debug_root_content_size(root.id()).unwrap();
-    let outer = ctx.debug_root_rect(root.id()).unwrap();
-    assert!(body.width > 0 && body.height > 0);
+    let content = ctx.debug_popup_content_size(&popup).unwrap();
+    let outer = ctx.debug_popup_rect(&popup).unwrap();
     assert!(content.width > 0 && content.height > 0);
-    assert!(outer.width >= body.width && outer.height >= body.height);
+    assert!(outer.width >= content.width && outer.height >= content.height);
 }
 
 #[test]
@@ -1968,26 +1899,29 @@ fn auto_height_preserves_popup_width_and_stretches_column_items() {
     let (_, content) = Linear::create(LinearParameters::vertical(items));
     let mut ctx = context();
     let source = ctx.create_window("source", rect(220, 170, 80, 50), empty_content());
-    let root = ctx.create_popup(source.id(), "combo", content).unwrap();
+    let popup = ctx.create_popup(source.id(), "combo", content).unwrap();
     let anchor = rect(20, 30, 180, 1);
-    ctx.set_root_options(
-        root.id(),
+    ctx.set_popup_options(
+        &popup,
         WindowOption::FRAME | WindowOption::AUTO_HEIGHT | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
     )
     .unwrap();
-    ctx.show_popup_at(&root, anchor).unwrap();
+    ctx.show_popup_at(&popup, anchor).unwrap();
 
     ctx.update_and_render_ui();
 
-    let outer = ctx.debug_root_rect(root.id()).unwrap();
-    let body = ctx.debug_root_body(root.id()).unwrap();
+    let outer = ctx.debug_popup_rect(&popup).unwrap();
     assert_eq!(outer.x, anchor.x);
     assert_eq!(outer.y, anchor.y);
     assert_eq!(outer.width, anchor.width, "AUTO_HEIGHT must retain the programmed width");
     assert!(outer.height > anchor.height, "popup height must still follow its items");
-    for item in item_ids {
-        let item = ctx.debug_root_node_rect(root.id(), item).unwrap();
-        assert_eq!((item.x, item.width), (body.x, body.width));
+    let item_rects = item_ids
+        .into_iter()
+        .map(|item| ctx.debug_popup_node_rect(&popup, item).unwrap())
+        .collect::<Vec<_>>();
+    let first = item_rects[0];
+    for item in item_rects {
+        assert_eq!((item.x, item.width), (first.x, first.width));
     }
 }
 
@@ -1996,18 +1930,18 @@ fn auto_width_preserves_programmed_height() {
     let (_, item) = ListItem::create(ListItemParameters::new("intrinsic width"));
     let mut ctx = context();
     let source = ctx.create_window("source", rect(220, 170, 80, 50), empty_content());
-    let root = ctx.create_popup(source.id(), "horizontal", item).unwrap();
+    let popup = ctx.create_popup(source.id(), "horizontal", item).unwrap();
     let programmed = rect(20, 30, 1, 120);
-    ctx.set_root_options(
-        root.id(),
+    ctx.set_popup_options(
+        &popup,
         WindowOption::FRAME | WindowOption::AUTO_WIDTH | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
     )
     .unwrap();
-    ctx.show_popup_at(&root, programmed).unwrap();
+    ctx.show_popup_at(&popup, programmed).unwrap();
 
     ctx.update_and_render_ui();
 
-    let outer = ctx.debug_root_rect(root.id()).unwrap();
+    let outer = ctx.debug_popup_rect(&popup).unwrap();
     assert!(outer.width > programmed.width, "AUTO_WIDTH must derive width from content");
     assert_eq!(outer.height, programmed.height, "AUTO_WIDTH must retain the programmed height");
 }
@@ -2017,21 +1951,21 @@ fn auto_width_consumes_typed_measurement_invalidation_before_intrinsic_measureme
     let (text, content) = TextBlock::create(TextBlockParameters::new("x"));
     let mut ctx = context();
     let source = ctx.create_window("source", rect(220, 170, 80, 50), empty_content());
-    let root = ctx.create_popup(source.id(), "dynamic width", content).unwrap();
+    let popup = ctx.create_popup(source.id(), "dynamic width", content).unwrap();
     let programmed = rect(20, 30, 1, 80);
-    ctx.set_root_options(
-        root.id(),
+    ctx.set_popup_options(
+        &popup,
         WindowOption::FRAME | WindowOption::AUTO_WIDTH | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
     )
     .unwrap();
-    ctx.show_popup_at(&root, programmed).unwrap();
+    ctx.show_popup_at(&popup, programmed).unwrap();
 
     ctx.update_ui(Dimensioni::new(320, 240));
-    let before = ctx.debug_root_rect(root.id()).unwrap();
+    let before = ctx.debug_popup_rect(&popup).unwrap();
 
     text.set_text("a substantially wider retained text block").unwrap();
     ctx.update_ui(Dimensioni::new(320, 240));
-    let after = ctx.debug_root_rect(root.id()).unwrap();
+    let after = ctx.debug_popup_rect(&popup).unwrap();
 
     assert!(after.width > before.width, "auto-width measurement must observe the typed mutation");
     assert_eq!(after.height, programmed.height);
@@ -2072,12 +2006,12 @@ fn auto_size_ignores_the_previous_rect_for_flexible_linear_and_grid_tracks() {
     let (_, content) = Linear::create(LinearParameters::vertical([row, grid, flexible_column]));
     let mut ctx = context();
     let source = ctx.create_window("source", rect(220, 170, 80, 50), empty_content());
-    let root = ctx.create_popup(source.id(), "intrinsic", content).unwrap();
-    ctx.show_popup_at(&root, rect(20, 30, 2_000, 3_000)).unwrap();
+    let popup = ctx.create_popup(source.id(), "intrinsic", content).unwrap();
+    ctx.show_popup_at(&popup, rect(20, 30, 2_000, 3_000)).unwrap();
 
     ctx.update_and_render_ui();
 
-    let outer = ctx.debug_root_rect(root.id()).unwrap();
+    let outer = ctx.debug_popup_rect(&popup).unwrap();
     assert!(
         outer.width < 1_000 && outer.height < 1_000,
         "AUTO_SIZE must derive both axes from content: {outer:?}"

@@ -36,11 +36,11 @@
 //! application-authored content tree.
 
 use crate::render::Painter;
-use crate::{AtlasHandle, ControlColor, Dimensioni, Recti, Style, Vec2i, WindowOption};
+use crate::{AtlasHandle, ControlColor, Dimensioni, Recti, Style, WindowOption};
 
 use super::RootId;
 
-/// Cloneable, non-owning capability for one manager-owned window-like surface.
+/// Cloneable, non-owning capability for one manager-owned window or dialog.
 ///
 /// The handle deliberately exposes identity, liveness, and semantic event ports only. Geometry and
 /// visibility mutations pass through [`crate::Context`] so every change invalidates layout and
@@ -48,36 +48,36 @@ use super::RootId;
 /// surface lifetime.
 #[derive(Clone)]
 pub struct RootHandle {
-    /// Stable identifier accepted by Context root operations.
+    /// Stable identifier accepted by Context window and dialog operations.
     id: RootId,
     /// Weak event capability for user-driven movement and resizing.
     changed: crate::WidgetEventPortHandle<RootChanged>,
-    /// Weak event capability for close and popup-dismissal submissions.
+    /// Weak event capability for user-requested window or dialog closure.
     submitted: crate::WidgetEventPortHandle<RootSubmitted>,
 }
 
 impl RootHandle {
-    /// Returns the stable registry identifier for this root.
+    /// Returns the stable manager identifier for this window or dialog.
     pub fn id(&self) -> RootId {
         // Identity remains valid only while `is_alive` is true; Context validates it on mutation.
         self.id
     }
 
-    /// Returns whether the Context still owns the referenced root.
+    /// Returns whether the Context still owns the referenced window or dialog.
     pub fn is_alive(&self) -> bool {
-        // Both event owners are stored in the same registry entry and expire with that entry.
+        // Both event owners are stored in the same window entry and expire with that entry.
         self.changed.is_alive()
     }
 
     /// Returns the native event endpoint emitted after a user move or resize.
     pub fn changed(&self) -> crate::WidgetEventPortHandle<RootChanged> {
-        // Event handles are weak and therefore expire with the same registry entry as this handle.
+        // Event handles are weak and therefore expire with the same window entry as this handle.
         self.changed.clone()
     }
 
-    /// Returns the native event endpoint emitted for close or popup dismissal.
+    /// Returns the native event endpoint emitted when window chrome requests closure.
     pub fn submitted(&self) -> crate::WidgetEventPortHandle<RootSubmitted> {
-        // Cloning the weak endpoint does not retain either the root or its event queue.
+        // Cloning the weak endpoint does not retain either the window or its event queue.
         self.submitted.clone()
     }
 }
@@ -93,79 +93,6 @@ pub(super) enum RootInteraction {
     Resizing,
 }
 
-/// Authoritative state for one window, dialog, or transitional popup root.
-///
-/// This value lives directly in the window registry. It is intentionally not a widget and has no
-/// independent reference-counted mutation path. Popup roots remain represented here temporarily;
-/// the following architecture change moves them into lightweight window-owned overlay records.
-pub(super) struct RootState {
-    /// Displayed title and diagnostic root name.
-    pub(super) name: String,
-    /// Chrome, padding, and automatic-size policy.
-    pub(super) options: WindowOption,
-    /// Authoritative outer rectangle in screen coordinates.
-    pub(super) rect: Recti,
-    /// Whether layout, input, and painting currently include this root.
-    pub(super) visible: bool,
-    /// Current manager-owned title or resize interaction.
-    pub(super) interaction: RootInteraction,
-    /// Geometry derived during the latest layout commit.
-    pub(super) geometry: RootChromeGeometry,
-}
-
-impl RootState {
-    /// Creates one manager-owned state record with no active chrome gesture.
-    pub(super) fn new(name: String, options: WindowOption, rect: Recti, visible: bool) -> Self {
-        // Geometry starts empty and is replaced before the root can receive chrome input or paint.
-        Self {
-            name,
-            options,
-            rect,
-            visible,
-            interaction: RootInteraction::None,
-            geometry: RootChromeGeometry::default(),
-        }
-    }
-
-    /// Returns whether a title move or resize gesture is active.
-    pub(super) fn is_active(&self) -> bool {
-        // Both interaction modes use the same cross-root capture policy.
-        self.interaction != RootInteraction::None
-    }
-
-    /// Replaces options and cancels any gesture disabled by the new policy.
-    pub(super) fn set_options(&mut self, options: WindowOption) {
-        // Apply the option value before testing the active gesture so later queries see one state.
-        self.options = options;
-        if (options.intersects(WindowOption::NO_TITLE) && self.interaction == RootInteraction::Moving)
-            || (options.intersects(WindowOption::NO_RESIZE | WindowOption::AUTO_SIZE) && self.interaction == RootInteraction::Resizing)
-        {
-            self.interaction = RootInteraction::None;
-        }
-    }
-
-    /// Shows or hides the surface without changing retained application content.
-    pub(super) fn set_visible(&mut self, visible: bool) {
-        // A hidden root cannot retain a chrome capture into a later activation.
-        self.visible = visible;
-        if !visible {
-            self.interaction = RootInteraction::None;
-        }
-    }
-
-    /// Clears manager-owned chrome interaction after cross-root capture revocation.
-    pub(super) fn clear_interaction(&mut self) {
-        // Content-router targets are cleared separately by the owning registry entry.
-        self.interaction = RootInteraction::None;
-    }
-
-    /// Classifies one screen-space point against the latest chrome geometry.
-    pub(super) fn chrome_part_at(&self, point: Vec2i) -> Option<RootChromePart> {
-        // `geometry` and raw input both use screen coordinates now that chrome is manager-owned.
-        self.geometry.hit_test(point)
-    }
-}
-
 /// Geometry snapshot emitted after a user-driven window move or resize.
 #[derive(Copy, Clone, Debug)]
 pub struct RootChanged {
@@ -175,24 +102,24 @@ pub struct RootChanged {
 
 impl crate::WidgetEvent for RootChanged {}
 
-/// Reason emitted when manager-owned root policy submits a lifecycle action.
+/// Reason emitted when manager-owned window or popup policy submits a lifecycle action.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum RootSubmitted {
     /// The user pressed the window close affordance.
     Close,
-    /// Popup policy dismissed a transitional popup root.
+    /// Popup policy dismissed a window-owned popup definition from the active path.
     PopupDismissed,
 }
 
 impl crate::WidgetEvent for RootSubmitted {}
 
-/// Creates the weak application handle for a newly registered root.
+/// Creates the weak application handle for a newly retained window or dialog.
 pub(super) fn root_handle(
     id: RootId,
     changed: crate::WidgetEventPortHandle<RootChanged>,
     submitted: crate::WidgetEventPortHandle<RootSubmitted>,
 ) -> RootHandle {
-    // Both event endpoints are weak, so this value cannot retain the manager-owned root.
+    // Both event endpoints are weak, so this value cannot retain the manager-owned window.
     RootHandle { id, changed, submitted }
 }
 
@@ -228,7 +155,7 @@ pub(super) struct RootChromeGeometry {
 
 impl RootChromeGeometry {
     /// Classifies a screen-space point in interaction-priority order.
-    fn hit_test(self, point: Vec2i) -> Option<RootChromePart> {
+    pub(super) fn hit_test(self, point: crate::Vec2i) -> Option<RootChromePart> {
         // Specialized controls overlap title/body geometry and therefore take priority.
         if self.close.is_some_and(|rect| rect.contains(&point)) {
             Some(RootChromePart::Close)
@@ -357,25 +284,26 @@ fn root_titlebar_height(style: &Style, atlas: &AtlasHandle) -> i32 {
 }
 
 /// Records the frame or plain background that must appear behind application content.
-pub(super) fn record_root_background(display_list: &mut crate::render::DisplayList, viewport: Recti, state: &RootState, style: &Style) {
+pub(super) fn record_root_background(display_list: &mut crate::render::DisplayList, viewport: Recti, rect: Recti, options: WindowOption, style: &Style) {
     // Chrome uses a screen-space painter because it is outside the retained application tree.
     let mut painter = Painter::screen_space(display_list, viewport);
-    if state.options.intersects(WindowOption::FRAME) {
-        crate::ui_node::frame::paint_internal_frame(
-            &mut painter,
-            state.rect,
-            Some(style.colors[ControlColor::WindowBG as usize]),
-            style.frame_border(),
-        );
+    if options.intersects(WindowOption::FRAME) {
+        crate::ui_node::frame::paint_internal_frame(&mut painter, rect, Some(style.colors[ControlColor::WindowBG as usize]), style.frame_border());
     } else {
-        painter.fill_rect(state.rect, style.colors[ControlColor::WindowBG as usize]);
+        painter.fill_rect(rect, style.colors[ControlColor::WindowBG as usize]);
     }
 }
 
 /// Records title and resize visuals that must appear above application content.
-pub(super) fn record_root_overlay(display_list: &mut crate::render::DisplayList, viewport: Recti, state: &RootState, style: &Style, atlas: &AtlasHandle) {
+pub(super) fn record_root_overlay(
+    display_list: &mut crate::render::DisplayList,
+    viewport: Recti,
+    name: &str,
+    geometry: RootChromeGeometry,
+    style: &Style,
+    atlas: &AtlasHandle,
+) {
     // Reuse committed geometry so hit-testing and painting cannot disagree within one UI commit.
-    let geometry = state.geometry;
     let mut painter = Painter::screen_space(display_list, viewport);
     if let Some(title) = geometry.title {
         painter.fill_rect(title, style.colors[ControlColor::TitleBG as usize]);
@@ -386,9 +314,8 @@ pub(super) fn record_root_overlay(display_list: &mut crate::render::DisplayList,
         }
         if text.width > 0 && text.height > 0 {
             let color = style.colors[ControlColor::TitleText as usize];
-            let position =
-                crate::ui_node::text_layout::control_text_position_with_font(style, atlas, style.title_font, &state.name, text, crate::WidgetOption::NONE);
-            painter.with_clip(text, |painter| painter.text(style.title_font, &state.name, position, color));
+            let position = crate::ui_node::text_layout::control_text_position_with_font(style, atlas, style.title_font, name, text, crate::WidgetOption::NONE);
+            painter.with_clip(text, |painter| painter.text(style.title_font, name, position, color));
         }
         if let Some(close) = geometry.close {
             // The close glyph uses the same foreground role as the title text.

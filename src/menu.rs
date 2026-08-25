@@ -171,11 +171,11 @@ pub struct MenuPanel {
     menus: Vec<Menu>,
 }
 
-/// One compiled popup tree waiting to be registered with Context.
+/// One compiled popup tree waiting to be installed under its owning window.
 struct PopupDefinition {
-    /// Index of the owning popup, or `None` when the application window owns this level.
+    /// Index of the parent popup, or `None` when the application window owns this level directly.
     parent: Option<usize>,
-    /// Label path used only for the diagnostic root name.
+    /// Label path used only for the popup's diagnostic name.
     path: String,
     /// Uniquely owned retained menu surface.
     content: Node,
@@ -202,7 +202,7 @@ struct CompiledMenus {
 }
 
 impl CompiledMenus {
-    /// Consumes the public recursive menu description into directly registerable retained roots.
+    /// Consumes the public recursive menu description into directly installable retained popups.
     fn new(panel: MenuPanel) -> Self {
         let mut compiled = Self {
             labels: Vec::new(),
@@ -223,7 +223,7 @@ impl CompiledMenus {
     /// Compiles one popup and recursively appends its descendants in parent-before-child order.
     fn push_popup(&mut self, parent: Option<usize>, path: String, groups: Vec<MenuGroup>) -> usize {
         // Reserve the current slot before descending. This gives every child a stable parent index
-        // while preserving the registration order required by Context's owned-root API.
+        // while preserving the parent-before-child order required by popup installation.
         let index = self.popups.len();
         self.popups.push(None);
 
@@ -295,7 +295,7 @@ struct MenuItemBinding<State> {
 struct PopupBinding<State> {
     /// Finds the coordinating menu in application state after popup dismissal.
     menu: WindowMenuAccessor<State>,
-    /// Top-level heading represented by this root, absent for submenu roots.
+    /// Top-level heading represented by this popup, absent for submenu popups.
     top_level: Option<usize>,
 }
 
@@ -307,19 +307,18 @@ struct SubmenuBinding<State> {
     child: usize,
 }
 
-/// Application-owned coordinator for one concrete menu bar and its concrete popup roots.
+/// Application-owned coordinator for one concrete menu bar and its window-owned popups.
 ///
-/// Each Menu and Submenu becomes one retained popup root. WindowMenu stores only root and bar
-/// handles; item state and item identity remain in the concrete widgets created by the application.
-/// [`Context`] owns one logical subtree rooted at the menu window: headings are direct popup
-/// children and submenus are popup descendants. Directly changing their visibility bypasses this
-/// coordinator and can desynchronize [`Self::active_menu`] from the visible root and bar highlight.
-/// Destroying the window recursively releases every popup; discard the `WindowMenu` instead of
-/// calling it afterward. Independently destroying any descendant also invalidates the component.
+/// Each Menu and Submenu becomes one retained popup owned by the application window. WindowMenu
+/// stores only weak window, popup, and bar handles; item state and item identity remain in the
+/// concrete widgets created by the application. Top-level menus belong directly to the window,
+/// while each submenu belongs to its parent popup. Showing or hiding these popups outside this
+/// coordinator can desynchronize [`Self::active_menu`] from the visible popup and bar highlight.
+/// Destroying the window releases every owned popup, after which this component must not be used.
 pub struct WindowMenu {
     /// Ordinary application window containing the persistent bar and caller content.
     window: RootHandle,
-    /// One hidden retained popup root for each top-level menu.
+    /// One hidden retained popup for each top-level menu.
     popups: Vec<PopupHandle>,
     /// Every top-level and cascading popup in flattened construction order.
     all_popups: Vec<PopupHandle>,
@@ -374,7 +373,7 @@ impl WindowMenu {
         State: 'static,
     {
         // Consume the concrete hierarchy once. Every menu level becomes its own retained popup, so
-        // opening either a heading or submenu only changes root visibility.
+        // opening either a heading or submenu only changes popup visibility.
         let CompiledMenus {
             labels,
             popups: definitions,
@@ -389,23 +388,26 @@ impl WindowMenu {
         let (_, shell) = Linear::create(LinearParameters::vertical([LinearItem::content(bar_node), LinearItem::flex(content, 1.0)]));
         let window = context.create_window(name, rect, shell);
 
-        // Register every popup up front. Menu surfaces own their full background, so remove the
-        // generic popup content inset and let only root framing surround that color.
+        // Install every popup up front. Menu surfaces own their full background, so remove the
+        // generic popup content inset and let only popup framing surround that color.
         let mut all_popups: Vec<PopupHandle> = Vec::with_capacity(definitions.len());
         for definition in definitions {
             let definition = definition.expect("recursive menu compilation must fill every reserved popup");
-            // Definitions are parent-before-child. Resolve the stable owner from the roots already
-            // registered in this loop, using the application window for top-level headings.
-            let parent = definition.parent.map(|parent| all_popups[parent].id()).unwrap_or_else(|| window.id());
-            let popup = context
-                .create_popup(parent, &format!("{name} {} Menu", definition.path), definition.content)
-                .expect("new window-menu popup parent must remain registered");
+            // Definitions are parent-before-child. Install a top-level popup under the window and a
+            // submenu under the already-installed popup named by its stable parent index.
+            let popup_name = format!("{name} {} Menu", definition.path);
+            let popup = if let Some(parent) = definition.parent {
+                context.create_subpopup(&all_popups[parent], &popup_name, definition.content)
+            } else {
+                context.create_popup(window.id(), &popup_name, definition.content)
+            }
+            .expect("new window-menu popup owner must remain registered");
             context
-                .set_root_options(
-                    popup.id(),
+                .set_popup_options(
+                    &popup,
                     WindowOption::FRAME | WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE | WindowOption::NO_TITLE | WindowOption::NO_PADDING,
                 )
-                .expect("new window-menu popup must remain registered");
+                .expect("new window-menu popup must remain alive");
             all_popups.push(popup);
         }
         let popups = top_level.iter().map(|index| all_popups[*index].clone()).collect();
@@ -449,24 +451,24 @@ impl WindowMenu {
         &self.window
     }
 
-    /// Returns weak typed handles to all Context-owned top-level popup roots in heading order.
+    /// Returns weak handles to all window-owned top-level popups in heading order.
     pub fn popups(&self) -> &[PopupHandle] {
-        // Expose only typed popup capabilities so callers cannot lose the root-kind proof required
-        // by Context::show_popup_at.
+        // Expose only popup capabilities so callers cannot apply window-only mutations to these
+        // transient surfaces.
         &self.popups
     }
 
-    /// Returns a weak typed handle to one top-level popup root by heading index.
+    /// Returns a weak handle to one top-level popup by heading index.
     pub fn popup(&self, index: usize) -> Option<&PopupHandle> {
-        // Preserve the typed capability when selecting one menu root by its stable heading order.
+        // Preserve the popup capability when selecting one menu by its stable heading order.
         self.popups.get(index)
     }
 
-    /// Returns every Context-owned menu and submenu popup in parent-before-descendant order.
+    /// Returns every window-owned menu and submenu popup in parent-before-descendant order.
     ///
-    /// Use this complete view for inspection. Whole-component teardown needs only the owning window
-    /// because Context recursively destroys its popup descendants. Use [`Self::popups`] when indices
-    /// need to correspond to top-level headings.
+    /// Use this complete view for inspection. Whole-component teardown needs only the owning
+    /// window, which releases all of its popups. Use [`Self::popups`] when indices need to correspond
+    /// to top-level headings.
     pub fn all_popups(&self) -> &[PopupHandle] {
         &self.all_popups
     }
@@ -485,17 +487,15 @@ impl WindowMenu {
     ///
     /// # Panics
     ///
-    /// Panics if the component's popup roots or retained menu bar were destroyed independently.
+    /// Panics if the component's popups or retained menu bar are no longer alive.
     pub fn close<B, State>(&mut self, context: &mut Context<B, State>)
     where
         B: RendererBackend,
         State: 'static,
     {
-        // Root visibility and bar presentation are reconciled as one synchronous operation.
+        // Popup visibility and bar presentation are reconciled as one synchronous operation.
         if let Some(index) = self.active_menu {
-            context
-                .set_root_visible(self.popups[index].id(), false)
-                .expect("window-menu popup must remain registered");
+            context.hide_popup(&self.popups[index]).expect("window-menu popup must remain alive");
         }
         self.finish_close();
     }
@@ -516,19 +516,17 @@ impl WindowMenu {
         // supplies the event's screen-space anchor; it does not rebuild menu ancestry.
         context
             .show_popup_at(popup, event.anchor)
-            .expect("window-menu popup and its owning window must remain registered");
+            .expect("window-menu popup and its owning window must remain alive");
         self.active_menu = Some(event.index);
         self.bar
             .try_update(|bar| bar.set_open_menu(Some(event.index)))
             .expect("window-menu bar must remain mounted");
     }
 
-    /// Closes the active popup through an event-time root mutation capability.
+    /// Closes the active popup through an event-time popup mutation capability.
     fn close_from_event(&mut self, context: &mut EventContext<'_>) {
         if let Some(index) = self.active_menu {
-            context
-                .set_root_visible(self.popups[index].id(), false)
-                .expect("window-menu popup must remain registered");
+            context.hide_popup(&self.popups[index]).expect("window-menu popup must remain alive");
         }
         self.finish_close();
     }
@@ -545,18 +543,18 @@ impl WindowMenu {
         // coordinator only contributes the placement captured by the concrete row event.
         context
             .show_popup_at(child, event.anchor)
-            .expect("window-menu submenu and its owning popup must remain registered");
+            .expect("window-menu submenu and its owning popup must remain alive");
     }
 
     /// Reconciles state after one concrete popup is dismissed by window-manager policy.
     fn popup_submitted(&mut self, top_level: Option<usize>, event: &RootSubmitted) {
         if matches!(event, RootSubmitted::PopupDismissed) && top_level.is_some_and(|index| self.active_menu == Some(index)) {
-            // The root is already hidden; only application-owned and bar state require mutation.
+            // The popup is already hidden; only application-owned and bar state require mutation.
             self.finish_close();
         }
     }
 
-    /// Clears every non-root representation of an open menu.
+    /// Clears every non-popup representation of an open menu.
     fn finish_close(&mut self) {
         self.active_menu = None;
         self.bar.try_update(|bar| bar.set_open_menu(None)).expect("window-menu bar must remain mounted");
@@ -698,7 +696,7 @@ mod tests {
         click(&mut context, &mut model, bar.x + 8, bar.y + bar.height / 2);
 
         let popup = model.menu.popup(0).unwrap().clone();
-        let popup_rect = context.debug_root_rect(popup.id()).unwrap();
+        let popup_rect = context.debug_popup_rect(&popup).unwrap();
         click(
             &mut context,
             &mut model,
@@ -708,7 +706,7 @@ mod tests {
 
         assert_eq!(model.invoked, ["New"]);
         assert!(!model.menu.is_open());
-        assert_eq!(context.debug_root_visible(popup.id()), Some(false));
+        assert_eq!(context.debug_popup_visible(&popup), Some(false));
     }
 
     #[test]
@@ -722,7 +720,7 @@ mod tests {
         click(&mut context, &mut model, 460, 300);
         assert!(!model.menu.is_open());
         assert_eq!(model.menu.bar.try_read(MenuBar::open_menu), Some(None));
-        assert_eq!(context.debug_root_visible(model.menu.popup(0).unwrap().id()), Some(false));
+        assert_eq!(context.debug_popup_visible(model.menu.popup(0).unwrap()), Some(false));
     }
 
     #[test]
@@ -734,7 +732,7 @@ mod tests {
         // File occupies the first compact heading; the next point opens View.
         click(&mut context, &mut model, bar.x + 55, bar.y + bar.height / 2);
         let parent = model.menu.popup(1).unwrap().clone();
-        let parent_rect = context.debug_root_rect(parent.id()).unwrap();
+        let parent_rect = context.debug_popup_rect(&parent).unwrap();
         click(
             &mut context,
             &mut model,
@@ -743,10 +741,10 @@ mod tests {
         );
 
         let child = model.menu.all_popups[2].clone();
-        assert_eq!(context.debug_root_visible(parent.id()), Some(true));
-        assert_eq!(context.debug_root_visible(child.id()), Some(true));
+        assert_eq!(context.debug_popup_visible(&parent), Some(true));
+        assert_eq!(context.debug_popup_visible(&child), Some(true));
 
-        let child_rect = context.debug_root_rect(child.id()).unwrap();
+        let child_rect = context.debug_popup_rect(&child).unwrap();
         click(
             &mut context,
             &mut model,
@@ -756,7 +754,7 @@ mod tests {
 
         assert_eq!(model.invoked, ["About"]);
         assert!(!model.menu.is_open());
-        assert_eq!(context.debug_root_visible(parent.id()), Some(false));
-        assert_eq!(context.debug_root_visible(child.id()), Some(false));
+        assert_eq!(context.debug_popup_visible(&parent), Some(false));
+        assert_eq!(context.debug_popup_visible(&child), Some(false));
     }
 }
