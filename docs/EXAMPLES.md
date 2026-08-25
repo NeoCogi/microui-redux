@@ -16,14 +16,15 @@
   View > Log Spacing submenu, and typed
   command dispatch into the file dialog, log, and style state. A separate titleless fullscreen root
   at layer 0 renders a perspective X-Y grid beneath the original Demo Window and every other
-  default-layer floating window. The grid surface owns an independent Grid/Help menu whose popups
-  inherit layer 0. Left-drag an exposed part of the grid to rotate its arcball camera, use the mouse
+  default-layer floating window. The grid window owns an independent Grid/Help menu; its private
+  popup definitions stack in the transient band derived from that layer-0 owner. Left-drag an
+  exposed part of the grid to rotate its arcball camera, use the mouse
   wheel there to zoom, or choose Grid > Reset View to restore the initial composition. Grid > Minor
   Grid Lines controls its unit-spaced divisions. Grid segments are clipped in homogeneous space so
-  rotation cannot project behind-camera endpoints into stray lines across the UI. Each menu window
-  owns its complete popup/submenu root subtree, and the Demo Window owns its reusable file dialog
-  and composed-control popups; these relationships affect lifetime and stacking without changing
-  any root's screen-space geometry.
+  rotation cannot project behind-camera endpoints into stray lines across the UI. Each `Window`
+  owns its menu bar and private recursive menu popups, while ordinary composed-control popups are
+  retained directly by their window or dialog owner. Popup lifetime, modal eligibility, and stacking
+  follow that owner; exact non-menu anchors remain in screen space.
 
 ## Full demo
 

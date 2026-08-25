@@ -1,58 +1,36 @@
 # Application menus
 
-Application menus are concrete retained widgets and Context-owned roots. There is no command enum,
-generic menu model, menu-specific type erasure, or copied menu specification. Each actionable item
-owns a typed event port and the application registers that exact item with its handler.
+Menus are an optional, intrinsic part of a [`Window`](../src/window_manager.rs). A window owns its
+body, persistent [`MenuBar`](../src/menu.rs), and the private popup surfaces compiled from that bar.
+Applications describe the hierarchy once and keep only the concrete `MenuItem` handles they need
+to update later.
 
-The ownership flow is:
-
-```text
-MenuItem node / Submenu -> MenuGroup -> Menu -> MenuPanel -> WindowMenu::create -> Context roots
-```
-
-`Node` is the unique owner while the menu is being assembled. After `WindowMenu::create`, the
-`Context` owns one logical root subtree: the menu window owns every top-level popup, and each
-submenu popup is a child of its direct parent popup. `WindowMenu` is an application-owned
-coordinator containing weak widget and root handles; it does not own those roots.
-
-## Concrete types
+The public composition types are deliberately small:
 
 | Type | Role |
 | --- | --- |
-| `MenuItem` | Pointer-operated leaf widget with a label, enabled state, visual mark, shortcut hint, and typed submission port. |
-| `Submenu` | Recursively composed label and groups opened beside its parent menu. |
-| `MenuGroup` | Ordered item nodes or appended submenus; empty groups are skipped during assembly. |
-| `Menu` | One top-level heading and its groups. |
-| `MenuPanel` | Ordered top-level menus consumed during window construction. |
-| `WindowMenu` | Coordinates the persistent bar, popup roots, active index, and owning window. |
+| `MenuBar` | Ordered top-level menus installed on one window. |
+| `Menu` | One heading or submenu, built with `item`, `separator`, and `submenu`. |
+| `MenuItem` | Actionable retained widget with enabled state, an optional mark and shortcut hint, and a typed submission port. |
 
-None of these types has a type parameter. `Submenu`, `MenuGroup`, `Menu`, and `MenuPanel` are one-shot
-composition values. Keep a `TypedWidgetHandle<MenuItem>` only when application code needs to read or
-change that retained item later.
+There is no public menu-popup handle, coordinator, command enum, or parallel menu model.
 
-## Construction and registration
+## Construction and events
 
-Create and register every actionable item before moving its unique node into the menu hierarchy:
+Create each concrete item, subscribe directly to its `MenuItemSubmitted` port, and move its unique
+node into the declaration. Then install the completed bar on the owning window:
 
 ```rust
 use microui_redux::prelude::*;
 
 struct Model {
-    menu: WindowMenu,
+    root: RootHandle,
     save: TypedWidgetHandle<MenuItem>,
 }
 
 impl Model {
-    fn menu_mut(state: &mut Self) -> &mut WindowMenu {
-        &mut state.menu
-    }
-
-    fn open(
-        &mut self,
-        _context: &mut EventContext<'_>,
-        _event: &MenuItemSubmitted,
-    ) {
-        // Open the document.
+    fn open(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+        // Open the selected document.
     }
 }
 
@@ -61,181 +39,76 @@ fn build_model<B: RendererBackend>(
 ) -> Result<Model, SubscribeError> {
     let (open, open_node) =
         MenuItem::create(MenuItemParameters::new("Open...").shortcut_hint("Ctrl+O"));
-    WindowMenu::register_item(
-        context,
-        Model::menu_mut,
-        &open,
-        Model::open,
-    )?;
+    context.subscribe_context(open.submitted(), Model::open)?;
 
-    // This disabled item has no handler, so it does not need a subscription.
+    let (recent, recent_node) = MenuItem::create(MenuItemParameters::new("Recent Document"));
+    context.subscribe_context(recent.submitted(), Model::open)?;
+
     let (save, save_node) = MenuItem::create(
         MenuItemParameters::new("Save")
             .shortcut_hint("Ctrl+S")
             .disabled(),
     );
-
-    let panel = MenuPanel::new([Menu::new(
-        "File",
-        [MenuGroup::new([open_node, save_node])],
-    )]);
     let body = TextBlock::create(TextBlockParameters::new("document")).1;
-    let menu = WindowMenu::create(
-        context,
-        Model::menu_mut,
-        "Document",
-        rect(20, 20, 640, 480),
-        panel,
-        body,
+    let menu_bar = MenuBar::new([
+        Menu::new("File")
+            .item(open_node)
+            .item(save_node)
+            .separator()
+            .submenu(Menu::new("Recent").item(recent_node)),
+    ]);
+    let root = context.create_window(
+        Window::new("Document", rect(20, 20, 640, 480), body).menu_bar(menu_bar),
     );
 
-    Ok(Model { menu, save })
+    Ok(Model { root, save })
 }
 ```
 
-`WindowMenu::register_item` subscribes to that item's `MenuItemSubmitted` port. When the item
-submits, the adapter closes the active popup first and then invokes the supplied application method
-with `EventContext` access. The item event carries no command value or copied menu data.
+The subscribed port identifies its concrete item; `MenuItemSubmitted` carries no copied command
+value. The manager closes an active menu before dispatch reaches the application handler. An
+enabled item without a subscriber still closes the menu when selected; its unobserved event is
+simply discarded.
 
-Store the returned `WindowMenu` where the accessor will find it before the first
-`Context::update_ui_state` call, and keep that accessor resolving to the same live coordinator while
-its subscriptions can dispatch. An item port accepts one context subscription, so do not also
-register the same port through another `Context::subscribe*` call.
-
-Disabled items never emit `MenuItemSubmitted` and may be left unregistered when they have no
-behavior. An enabled but unregistered item also has no coordinated action: its event is discarded,
-and selecting it does not close the popup. Register every enabled item that should act like a menu
-command.
-
-## Groups and separators
-
-A `MenuGroup` contains item nodes in display order. During menu assembly, empty groups are skipped
-and a retained separator is inserted between each successive non-empty group:
-
-```rust
-let file = Menu::new("File", [
-    MenuGroup::new([new_node, open_node, save_node]),
-    MenuGroup::new([]), // skipped
-    MenuGroup::new([clear_node]),
-    MenuGroup::new([exit_node]),
-]);
-```
-
-Separators are private, non-interactive widgets. Applications do not create sentinel entries or
-encode separator positions in a command list.
-
-## Cascading submenus
-
-`Submenu` uses the same groups and concrete item nodes as a top-level menu and may recursively
-contain another submenu. Add it as its own group, or append it after existing items in a group:
-
-```rust
-let view = Menu::new("View", [
-    MenuGroup::new([word_wrap_node]),
-    MenuGroup::submenu(Submenu::new("Spacing", [
-        MenuGroup::new([comfortable_node, compact_node]),
-    ])),
-]);
-```
-
-Left-pressing the submenu row opens its retained popup beside the parent. The parent and all of its
-ancestors stay visible. Opening a sibling submenu replaces only the older descendant branch;
-selecting a registered item or pressing outside the complete chain closes every level.
-
-## Menu colors
-
-`Style::menu_foreground` colors menu-bar labels, item text, marks, submenu arrows, and separators.
-`Style::menu_background` fills the persistent menu bar and every popup menu surface, including all
-cascading levels. Both fields participate in ordinary context and cascading per-node style
-resolution.
-
-## Live item state
-
-Enabled and mark state have convenience methods on the typed handle. Each operation returns `None`
-if the retained item has expired or is currently borrowed:
+Keep a `TypedWidgetHandle<MenuItem>` only for live presentation state:
 
 ```rust
 save.set_enabled(true).expect("Save item unavailable");
 auto_scroll
     .set_mark(MenuItemMark::Checked(enabled))
     .expect("Auto-scroll item unavailable");
-comfortable
-    .set_mark(MenuItemMark::Radio(selected))
-    .expect("Comfortable item unavailable");
-compact
-    .set_mark(MenuItemMark::Radio(!selected))
-    .expect("Compact item unavailable");
 ```
 
-Marks are presentation only. Selecting a checked item does not toggle it, and radio items do not
-enforce exclusivity; the application handler must update those values. State changes are silent and
-do not synthesize a submission.
+Check and radio marks are presentation only. Application handlers own toggling and radio-group
+exclusivity. Shortcut hints also draw text only; they do not register accelerators.
 
-The label and shortcut hint can be changed through the general typed mutation API:
+## Placement and interaction
 
-```rust
-save.try_update(|item| {
-    item.set_label("Save As...");
-    item.set_shortcut_hint(Some("Ctrl+Shift+S".into()));
-});
-```
+Menu topology and placement are manager-private relationships. A top-level popup is anchored below
+its retained heading. A submenu popup is anchored at the right edge of its retained submenu row.
+The manager resolves those node rectangles during layout, so open menus follow their window and
+their parent rows without application-supplied screen coordinates.
 
-Typed mutations invalidate retained measurement, so changed labels and hints are measured again at
-the next layout commit.
+The manager holds one active popup path. For menus, that means one visible
+heading-to-descendant chain:
 
-## Opening, switching, and dismissal
+- pressing a closed heading opens its popup;
+- pressing the active heading closes the path;
+- pressing another heading replaces the path;
+- pressing a submenu row appends that child while retaining its ancestors;
+- opening a sibling submenu replaces only the older descendant branch;
+- selecting an enabled item or pressing outside the chain closes the complete path.
 
-`WindowMenu::create` creates one ordinary window containing the menu bar and supplied body, plus one
-initially hidden, auto-sized popup root per top-level menu and submenu. Public top-level popup
-indices match heading order.
+A disabled `MenuItem` does not participate in hit testing, does not emit `MenuItemSubmitted`, and
+does not close the menu. Moving across headings changes hover presentation but does not open or
+switch menus.
 
-Each heading popup is registered with the menu window as its stable parent, and each submenu popup
-is registered under the popup containing its row. Opening supplies only the event's screen-space
-anchor. The ownership path derives the popup's effective layer and the ancestor branch that remains
-visible. Popups use the transient tier above ordinary roots in that layer, including the menu
-window, but never cross a higher fixed application layer. Changing the window's fixed layer
-propagates through the complete menu subtree.
+## Style and current scope
 
-Interaction is pointer-driven:
+`Style::menu_foreground` colors menu labels, item text, marks, arrows, and separators.
+`Style::menu_background` fills the persistent bar and popup surfaces. Ordinary cascading node style
+resolution still applies.
 
-- left-pressing a closed heading opens its existing popup below that heading;
-- left-pressing the active heading toggles it closed;
-- left-pressing another heading switches to that popup;
-- left-pressing a submenu row opens it beside the retained parent chain;
-- selecting a registered, enabled item closes the active popup before its handler runs;
-- an outside pointer press, replacement, or generic/recursive popup hide dismisses the active popup
-  and clears the heading highlight.
-
-Moving across headings changes hover presentation but does not switch or open menus. Opening a menu
-changes root visibility and position; it does not clone a specification or rebuild item nodes.
-
-`WindowMenu::active_menu` and `WindowMenu::is_open` report the coordinator's synchronized state.
-Use `WindowMenu::close` for programmatic closure. There is no public component-aware operation for
-programmatically opening a heading in this alpha.
-
-## Root handles and lifetime
-
-`WindowMenu::window` returns the ordinary `RootHandle`. `WindowMenu::popups` and
-`WindowMenu::popup` return typed `PopupHandle` values in heading order. These are weak handles to
-top-level roots retained by `Context`; `WindowMenu::all_popups` additionally includes every submenu
-root in parent-before-descendant order for inspection.
-
-Treat those handles as inspection and whole-component lifetime capabilities. Calling
-`Context::show_popup`, `Context::show_popup_at`, or the hiding form of
-`Context::set_root_visible` directly on a menu popup bypasses the coordinator and can make root
-visibility disagree with `active_menu` and the bar highlight. Generic visibility cannot show a
-popup because anchored popup policy must reconcile the visible branch. Use the heading interaction or
-`WindowMenu::close` for normal menu state changes.
-
-`WindowMenu` assumes its window, bar, and every popup remain registered. Destroying one of those
-roots and then calling component operations can panic. To remove a menu window permanently, destroy
-the window once; Context recursively destroys every menu and submenu popup because they belong to
-that window's root subtree. Then discard the `WindowMenu` without using its expired weak handles.
-
-## Current limitations
-
-- Menu operation is pointer-only; there is no keyboard navigation or mnemonic handling.
-- `shortcut_hint` draws text only. It does not register or dispatch an accelerator.
-- Check and radio marks are application-managed presentation, not automatic selection behavior.
-- Hovering another heading while a menu is open does not switch menus; press the heading instead.
-- The bar and items preserve the application's existing keyboard focus while pointer menus operate.
+Menu operation is currently pointer-driven. Keyboard navigation, mnemonics, and shortcut dispatch
+remain outside the menu component. The bar preserves application keyboard focus while pointer menus
+operate.

@@ -49,16 +49,17 @@ owners and names distinct makes that borrow-safe boundary explicit.
 
 ## Ownership
 
-Context owns the retained root forest and the widget-event dispatcher containing its state handlers.
-Application state may own reusable components and their semantic event sources. Neither a handle
-nor a subscription keeps a removed producer alive.
+Context owns the flat retained window collection and the widget-event dispatcher containing its
+state handlers. Each window directly owns its application tree and popup definitions; an ordinary
+window may also own modal dialogs. Application state may own reusable components and their semantic
+event sources. Neither a handle nor a subscription keeps a removed producer alive.
 
 ```text
 Context<B, State>
 │
-├── owns retained root forest
-│      ├── owns concrete application Widget
-│      │      └── owns Rc<RefCell<WidgetEventPort<E>>>
+├── owns retained windows and directly owned dialogs
+│      └── each window owns its application tree and popup definitions
+│             └── concrete Widget owns Rc<RefCell<WidgetEventPort<E>>>
 │
 └── owns WidgetEventDispatcher<State>
        └── owns Vec<Box<dyn WidgetEventDispatch<State>>>
@@ -71,13 +72,10 @@ WidgetEventPortHandle<E> ──────────────── Weak �
 dispatch boundary ── lends &mut EventContext<'_> ──> opted-in Handler
 
 Application State
-├── owns FileDialog
-│      ├── holds weak handles into its ordinary Context-owned dialog root
-│      ├── owns shared dynamic-row event ports
-│      └── owns WidgetEventPort<FileDialogCompleted>
-└── owns WindowMenu
-       ├── holds weak handles into its Context-owned window and popup roots
-       └── coordinates concrete MenuItem event registrations
+└── owns FileDialog
+       ├── holds a weak handle to its Context-owned dialog
+       ├── owns shared dynamic-row event ports
+       └── owns WidgetEventPort<FileDialogCompleted>
 ```
 
 The only strong event-port owner is its retained producer. Consequently:
@@ -212,7 +210,7 @@ struct Model {
 
 impl Model {
     fn show_popup(&mut self, context: &mut EventContext<'_>, _: &ButtonSubmitted) {
-        // The popup's stable parent was recorded when the Context-owned root was created.
+        // The popup's stable owner was recorded when its window-owned definition was created.
         context.show_popup(&self.popup).unwrap();
     }
 }
@@ -383,8 +381,8 @@ of a synchronous, context-local retained UI event mechanism.
 
 Handlers that only mutate application or widget state continue to use `Context::subscribe` and
 `Context::subscribe_with`. A handler that must create, show, hide, move, resize, raise, or destroy a
-Context-owned root uses `subscribe_context` or `subscribe_context_with` and receives a short-lived
-`EventContext<'_>`:
+Context-owned window or popup uses `subscribe_context` or `subscribe_context_with` and receives a
+short-lived `EventContext<'_>`:
 
 ```rust,ignore
 impl Model {
@@ -406,19 +404,20 @@ ctx.subscribe_context(open_button.submitted(), Model::show_popup)?;
 only after the complete retained-tree update has released its widget borrows and returned before
 the following layout. Rust therefore prevents a handler from retaining it. Windows and dialogs use
 generic visibility; a popup is shown with `show_popup` or `show_popup_at` so the same transaction
-can reconcile its stable parent branch and placement. The parent supplied to `create_popup` already
-determines inherited stacking and lifetime. Generic or recursive popup hiding emits the same
-`PopupDismissed` submission as replacement and outside-press policy. No `PopupController`, overlay
-registry, per-control command enum, or second root lifetime model is required.
+can reconcile placement and the one active popup path. The owner supplied to `create_popup` fixes
+stacking and lifetime when the definition is created. Popup hiding emits the same `PopupDismissed`
+submission as replacement and outside-press policy. Cascading menu parentage is private data compiled
+from `Menu`; it does not require a generic public subpopup API. No overlay registry, per-control
+command enum, or second root lifetime model is required.
 
-The full demo composes `Combo` and its popup root entirely through typed events. `ComboSubmitted`
+The full demo composes `Combo` and its popup definition entirely through typed events. `ComboSubmitted`
 carries the screen-space anchor from the update that routed the header click, so its context-aware
 handler calls `show_popup_at(&popup, anchor)` to reconcile branch visibility and placement
 atomically in the triggering input transaction. The target parameter accepts `PopupHandle`, so a
-window or dialog cannot accidentally enter popup placement policy. The combo popup was created as a
-stable child of the Demo Window, so showing it does not restate ownership. The demo state already
-owns both retained handles: `RootSubmitted::PopupDismissed` closes the combo's shared semantic state
-after replacement, an outside press, or root-tree hiding. This coordination stays with the
+window or dialog cannot accidentally enter popup placement policy. The combo popup is a definition
+owned directly by the Demo Window, so showing it does not restate ownership. The demo state already
+owns both weak handles: `RootSubmitted::PopupDismissed` closes the combo's shared semantic state
+after replacement, an outside press, or owner hiding. This coordination stays with the
 composed-control owner instead of leaking popup policy into the base widget abstractions. Paint does no
 coordination, and application state performs no per-frame popup polling. The frame callback only
 synchronizes the dedicated fullscreen layer-0 grid surface with platform dimensions and produces
@@ -430,15 +429,16 @@ the returned value there, and subscribes to that instance's completion source. O
 directly inside a context-aware application handler: it resets request-specific state and shows the
 existing dialog root.
 Acceptance or cancellation hides the root again while preserving the component, ports, and static
-widgets. Multiple component instances are independent children in the Context-owned root tree; the
-frontmost visible sibling in z-order is the active modal group, whether shown or explicitly raised.
+widgets. Multiple component instances are independent dialogs directly owned by their ordinary
+windows; the frontmost visible dialog is the active modal group, whether shown or explicitly raised.
 
-`WindowMenu` uses the same application-owned component binding for a different root composition.
-Applications create and register concrete `MenuItem` event sources, then move their nodes through
-concrete groups, recursive submenus, menus, and a panel. The component mounts a persistent bar,
-retains one popup root per menu level, and consumes generic popup-dismissal events internally. Item-specific handlers
-receive `MenuItemSubmitted` directly; no command payload or generic menu model intervenes. See the
-[menu guide](MENUS.md) for construction, state mutation, and current keyboard-navigation scope.
+Menus need no application-owned component binding. Applications subscribe directly to each concrete
+`MenuItemSubmitted` source, move the item nodes into recursive `Menu` values, install a `MenuBar` on
+`Window`, and retain only handles for items whose presentation changes later. The window manager
+opens and positions private menu popups from their heading or submenu-row node relationships, then
+closes the active path before dispatching an invoked item's event. No command payload, menu
+coordinator, or public menu-popup handle intervenes. See the [menu guide](MENUS.md) for construction,
+state mutation, and current keyboard-navigation scope.
 
 ```rust,ignore
 impl Model {

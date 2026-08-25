@@ -8,44 +8,35 @@
 
 ## Version 0.8.0-alpha.5
 
-`0.8.0-alpha.5` adds explicit retained-root layering to the breaking 0.8 API and demonstrates the
-model with a fullscreen menu-bearing X-Y grid surface beneath independent floating windows.
+`0.8.0-alpha.5` replaces the retained-root forest with a deliberately flat window model, makes
+menu bars intrinsic `Window` properties, and demonstrates the result with a fullscreen menu-bearing
+X-Y grid beneath independent floating windows. This is an intentional breaking simplification with
+no compatibility layer.
 
-- [x] Unified Context-owned windows, dialogs, popups, and submenu popups in one stable ownership forest.
-    - [x] `create_child_window`, `create_dialog(parent, ...)`, and `create_popup(parent, ...)` record immutable logical parentage while preserving independent screen-space geometry and retained runtimes.
-    - [x] Hiding a root hides its complete descendant subtree; destroying it recursively releases every descendant tree and expires every weak handle.
-    - [x] Parent edges now derive inherited layers, popup ancestor branches, modal input membership, and coherent owned-group raising without separate popup or modal ancestry stacks.
-    - [x] Child windows and dialogs require ordinary window parents; popup children remain supported for cascading menus, while modal/transient-owned persistent roots, stale parents, and visible children of hidden parents are rejected without partial registration.
-    - [x] Each entry stores only one topology edge, its direct parent. Subtrees are found by scanning parent links, popup branches come from visible popup ancestry, and the frontmost visible dialog is the active modal; reverse child edges, mirrored visibility, popup-leaf state, and modal activation history are unnecessary.
-
-- [x] Added sixteen fixed application layers for ordinary windows.
-    - [x] Layers are numbered `0` through `15`, ordered bottom to top, and new independent windows use the default layer `15`.
-    - [x] `Context::set_root_layer` and `EventContext::set_root_layer` assign `LayerBinding::Fixed(u8)` to independent windows; `root_layer_binding` exposes fixed, direct-parent inherited, and modal policy.
-    - [x] Layout, painting, hit testing, and debug inspection share one complete stacking key, so `bring_root_to_front` and pointer activation reorder only within an effective layer.
-    - [x] `bring_root_to_front` is a checked mutation: it reports stale roots and modal reconciliation borrow conflicts, preserves sibling order inside the raised group, and does not reorder modal descendants of an ordinary owner.
-- [x] Bound transient roots to stable ownership instead of a show-time source argument.
-    - [x] `show_popup` and `show_popup_at` now need only the typed popup handle and optional anchor; `create_popup(parent, ...)` establishes ancestry and inheritance once.
-    - [x] A popup uses `LayerBinding::Inherited(direct_parent)` and a transient tier above ordinary roots in its effective band, but remains below every higher fixed layer.
-    - [x] Popup-parent chains retain their ancestors, parent layer changes propagate to descendants, and parent hiding or destruction recursively closes the subtree.
-    - [x] Generic `set_root_visible(popup, true)` now returns `PopupShowRequired`; hiding a visible popup through generic visibility records the same dismissal as every other popup-closing path.
-    - [x] `WindowMenu` registers every menu popup under its window or direct parent popup, so submenu opening supplies only placement.
-- [x] Kept modal policy structurally above the numeric application range.
-    - [x] Dialogs report `LayerBinding::Modal` and reject direct fixed-layer assignment.
-    - [x] A popup owned by the active dialog subtree occupies the modal transient tier and joins that dialog's exclusive input group; blocked application roots cannot open popups during a modal transaction.
-    - [x] The frontmost visible dialog is active, so bringing a dialog forward activates its modal subtree, dismisses transients from the previous group, and hiding or destroying it reveals the next dialog directly from z-order.
-- [x] Separated ordinary keyboard activation from visual stacking with `active_root`.
-    - [x] Pressing a lower-layer window focuses it without raising it across a higher layer, while overlap hit testing continues to follow visual priority.
-    - [x] Pointer capture, popup-to-owner activation, modal routing, root hiding, and destruction reconcile the active root through the ownership tree.
-    - [x] Wheel input follows the topmost eligible root under the pointer independently of `active_root`, while an in-progress pointer drag remains confined to its captured root.
-- [x] Added edge-to-edge application-surface support.
-    - [x] `WindowOption::NO_PADDING` removes only the root-owned content inset and preserves normal descendant style padding.
-    - [x] `demo-full` now resizes a dedicated chromeless `WindowMenu` root to the drawable viewport at layer `0`, renders an interactive perspective X-Y grid in its body, and gives that surface its own Grid/Help menu.
-    - [x] The exposed grid supports left-drag arcball rotation, bounded wheel zoom, and menu-driven view reset; homogeneous six-plane segment clipping prevents behind-camera projections from emitting stray geometry.
-    - [x] The original movable, resizable Demo Window and all other independent windows remain at the default layer above the grid; modal dialogs remain topmost.
-- [x] Added retained and downstream tests for layer validation, bounded raising, popup inheritance and lifetime, modal popups, active-root keyboard routing, and no-padding chrome geometry.
-- [x] Added recursively composed cascading `Submenu` values and retained popup ancestor chains.
-    - [x] `Style::menu_foreground` and `Style::menu_background` consistently color menu bars, menu items, popup surfaces, and every submenu level.
-    - [x] `demo-full` exposes its spacing radio choices through View > Log Spacing and includes the two menu colors in its live style editor.
+- [x] Made windows and dialogs the only retained roots.
+    - [x] `Window::new(name, rect, body)` transfers one application tree to `Context`; optional `.menu_bar(MenuBar)` construction transfers the bar and all recursive menus with it.
+    - [x] Ordinary windows live in one flat collection. A modal dialog has one direct ordinary-window owner, while child windows and generic root ancestry no longer exist.
+    - [x] `RootId`, `RootHandle`, generic visibility, options, layering, raising, and destruction apply only to windows and dialogs.
+    - [x] `RootHandle` exposes identity, liveness, and semantic events without a public `RootChrome` widget projection, mutable chrome borrow, or style projection.
+    - [x] `WindowManager` directly owns title, rectangle, options, visibility, chrome interaction and geometry, events, and the application `WidgetTree`; layout, hit testing, input, and painting use that single state.
+- [x] Nested popup definitions directly inside their owner window or dialog.
+    - [x] `create_popup(owner, name, body)` returns a typed `PopupHandle`; popups have no `RootId`, independent root entry, layer binding, visibility flag, generic root mutation, or separate destruction operation.
+    - [x] Each owner retains its popup definitions, and one parent-to-child active popup path is the complete visibility state. Opening, replacing, hiding, outside dismissal, modal changes, owner hiding, and owner destruction truncate that path coherently.
+    - [x] Exact anchors supplied by `show_popup` or `show_popup_at` remain in screen space. Popup stacking and modal eligibility are derived from the owning window, and dismissal events are emitted deepest-first before application dispatch.
+    - [x] Popup layout, input, and painting traverse small nested surfaces in their owner's transient band without reconstructing a root forest.
+- [x] Replaced coordinated menu objects with declarative, window-owned menus.
+    - [x] `MenuBar::new` contains top-level `Menu` values; `Menu::item`, `separator`, and recursive `submenu(Menu)` calls preserve row order without group wrappers.
+    - [x] The manager compiles private heading, separator, submenu-row, and popup widgets when it consumes the `Window`; applications subscribe directly to each retained `MenuItem` event.
+    - [x] Top-level popups remain anchored below their menu-bar headings and submenus remain anchored to the right of their parent rows after window moves or relayouts.
+    - [x] One active path drives open presentation, heading toggling and switching, submenu replacement, outside dismissal, item dismissal before handlers run, and disabled-item behavior.
+    - [x] `Style::menu_foreground` and `Style::menu_background` consistently color bars, items, popup surfaces, and every submenu level.
+- [x] Retained the useful stacking and interaction policy without topology machinery.
+    - [x] Ordinary window layers remain fixed values `0` through `15`, defaulting to `15`; dialogs use the manager-controlled modal layer above them, and popups occupy their owner's transient band.
+    - [x] Layout, painting, hit testing, and raising share the same stacking order. Activation stays separate, so a lower-layer window can receive keyboard focus without crossing a higher layer.
+    - [x] Modal routing, pointer capture, popup-to-owner activation, wheel targeting, hiding, and destruction reconcile directly against flat windows and the active popup path.
+    - [x] `WindowOption::NO_PADDING` removes only the manager-owned content inset, enabling the layer-`0` fullscreen grid while preserving descendant padding.
+- [x] Removed obsolete compatibility APIs instead of retaining adapters: `create_child_window`, `LayerBinding::Inherited`, public subpopup construction, `RootChrome` projection and borrow paths, `WindowMenu`, `MenuPanel`, `MenuGroup`, and the public `Submenu` type.
+- [x] Migrated `demo-full`, file dialogs, composed-control popups, examples, and downstream retained API tests to the flat ownership and declarative menu model; the demo keeps Grid/Help and File/View/Help menus, cascading Log Spacing choices, live menu colors, arcball grid rotation, wheel zoom, and homogeneous clipping.
 
 ## Version 0.8.0-alpha.4
 

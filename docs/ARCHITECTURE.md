@@ -10,11 +10,10 @@
 - **Rendering**: widgets obtain a local `Painter` from `WidgetPaintCtx`; retained traversal owns the internal display list, and `Renderer` executes it through one exclusively borrowed `RendererBackend::Frame`. The portable target supports drawables up to 8192x8192 and geometry up to four maximum drawable spans beyond the viewport; see the [render subsystem guide](RENDER.md#supported-coordinate-domain) for the complete coordinate contract and integration API.
 - **Typography**: atlases can bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while text-bearing `*Parameters` select a per-widget font with `.font(...)`.
 - **Style overrides**: every retained node can supply a `Style` in place of its inherited style. A container passes that style to its descendants until another node replaces it. The same effective value drives measurement, placement, input localization, update, and paint.
-- **Application components**: application state may coordinate multiple ordinary retained roots and
-  widgets behind a typed semantic API. `FileDialog` owns dialog behavior; concrete `MenuItem`
-  widgets are registered before their nodes are composed through `MenuGroup`, `Menu`, and
-  `MenuPanel` into a non-generic `WindowMenu`. Context continues to own every resulting window and
-  popup tree, and the same typed event dispatcher connects item ports to application methods.
+- **Application components**: application state may coordinate multiple retained windows and
+  widgets behind a typed semantic API. `FileDialog` owns dialog behavior; a `Window` construction
+  value transfers its body and optional declarative `MenuBar` together. Concrete `MenuItem` ports
+  connect directly to the same typed application dispatcher as every other widget event.
 
 The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained concepts such as `Node`, `Children`, `Container`, `Linear`, `Disclosure`, typed widget handles, and `Context`. Low-level rendering lives under `microui_redux::render`, and atlas construction lives under `microui_redux::atlas::builder`.
 
@@ -25,10 +24,11 @@ Widgets record backend-neutral drawing through a framework-created `Painter`; `R
 ## Retained authoring model
 
 The supported authoring path is retained widget trees registered as context-owned roots.
-Applications create independent windows with `Context::create_window(...)`, then create owned
-windows, dialogs, and popups with `Context::create_child_window(parent, ...)`,
-`Context::create_dialog(parent, ...)`, and `Context::create_popup(parent, ...)`. They mutate leaves
-and containers through weak
+Applications pass `Window::new(name, rect, body)` to `Context::create_window(...)`; the optional
+`.menu_bar(MenuBar::new(...))` builder installs the bar as part of that window. An ordinary window
+may directly own dialogs created with `Context::create_dialog(parent, window)`. A window or dialog
+may retain generic popups created with `Context::create_popup(parent, name, content)`. Applications
+mutate leaves and containers through weak
 `TypedWidgetHandle<W>` values, commit contexts without application callbacks through
 `Context::update_ui(...)` or subscriber-driven contexts through `Context::update_ui_state(...)`,
 and paint with `Context::frame(FrameInfo).render_ui()?`.
@@ -60,80 +60,62 @@ mutations, call `Context::update_ui` before painting. Custom widgets can inspect
 value through `MeasureCtx::style`, `ContainerLayoutCtx::style`, `WidgetUpdateCtx::style`, and
 `WidgetPaintCtx::style`.
 
-Window and dialog creation consume one persistent application `Node` and return a non-owning
-`RootHandle`; popup creation returns the more specific non-owning `PopupHandle`.
+Window and dialog creation consume one complete `Window` and return a non-owning `RootHandle`;
+popup creation consumes one persistent application `Node` and returns the more specific non-owning
+`PopupHandle`.
 Roots cannot be replaced while retaining their identity: mutate descendants through a container
 state's weak topology capability, or destroy and recreate the root.
 
-### Owned root tree
+### Flat windows and window-owned popups
 
-Context stores registered roots as an ownership forest. Independent application windows are roots;
-every child window, dialog, popup, and submenu popup has one immutable parent:
+Context stores one flat collection of `WindowEntry` values. An entry is either an independent
+ordinary window or a modal dialog directly owned by an ordinary window. Dialog ownership controls
+show eligibility and lifetime, but does not create a general root hierarchy: there are no child
+windows, dialog nesting, reparenting, or public subpopup registration APIs.
 
-```text
-independent application window
-├── independently positioned child window
-├── dialog
-│   └── dialog popup
-└── top-level menu popup
-    └── submenu popup
-```
+Each entry owns one retained surface and all of its popup definitions. A popup therefore has no
+independent root identity, layer, visibility flag, or destruction operation. Its typed
+`PopupHandle` addresses the definition within its owner; hiding or destroying an ordinary window
+also affects its directly owned dialogs, and destroying any window drops its popup definitions.
 
-This tree is logical, not geometric. Every entry still has its own screen-space rectangle, retained
-widget runtime, layout pass, and paint pass. A parent does not offset, lay out, or clip a child.
-Ownership provides only the relationships that genuinely need ancestry:
+One `PopupPath` is the complete semantic visibility state for transients. It identifies one owner
+window entry and an ordered parent-to-child sequence of popup definitions; every prefix is visible.
+Opening another top-level popup replaces the path, opening a submenu extends or replaces its
+suffix, and outside presses or owner changes truncate it while emitting dismissal events. No
+parallel popup visibility state is mirrored on individual definitions.
 
-- hiding a root hides its complete descendant subtree;
-- destroying a root destroys the subtree and expires every descendant weak handle;
-- non-modal descendants inherit their stacking band through direct parents;
-- a popup parent identifies the branch retained when a submenu opens;
-- the frontmost visible dialog's subtree is the exclusive modal input group; and
-- raising an owned group preserves its internal visual order.
-
-Parentage is fixed at creation; there is no reparenting API and therefore no runtime cycle case.
-Ordinary child windows and dialogs require an ordinary window parent. Dialogs may own popups, and
-popups may own popup children for cascading menus, but neither can own persistent windows or
-dialogs: dismissing a transient must not leave a non-transient child beneath a hidden parent.
-Creating a visible child under any hidden parent is rejected. Recursive hiding preserves the
-retained trees but leaves every affected root hidden; every visible popup it closes records
-dismissal. Callers explicitly show the roots they want to reopen. Recursive destruction is
-permanent.
-
-Each registry entry stores only one topology edge: its direct parent. Descendants are found by
-following those parent links during the uncommon operations that need a complete subtree. The
-visible popup branch is derived from popup chrome visibility and ancestry, while the active modal
-is the frontmost visible dialog in the normal stacking order. There is no reverse child list,
-visibility mirror, active popup leaf, modal activation history, popup ancestry list, or modal stack.
-
-### Root layers, transients, and activation
+### Window bands, transients, and activation
 
 Independent windows occupy one of sixteen fixed application layers. Layer `0` is the bottom, layer
 `15` is the top and the default, and `Context::set_root_layer(root, layer)` changes a top-level
 window's `LayerBinding::Fixed(u8)`. Numeric validation uses `MIN_LAYER`, `MAX_LAYER`, and
-`DEFAULT_LAYER`. Owned windows and popups report `LayerBinding::Inherited(direct_parent)`; dialogs
-report `LayerBinding::Modal`. All owned roots reject direct layer assignment.
+`DEFAULT_LAYER`. Dialogs report `LayerBinding::Modal`; popups expose no layer binding and use their
+owner's fixed or modal band. There is no inherited `LayerBinding` variant.
 
-Within a fixed layer, ordinary roots retain their usual z-order and `bring_root_to_front` raises a
-root only among peers in that layer. A root in layer `N` cannot be raised across a root in layer
-`N + 1`. Pointer hit testing and painting consume the same complete stacking key, so overlap always
-selects the root that is visually in front.
+Within a fixed layer, ordinary windows retain their usual z-order and `bring_root_to_front` raises
+a window only among peers in that layer. It cannot cross a higher fixed layer. Pointer hit testing
+and painting consume the same complete stacking key, so overlap selects the surface visually in
+front.
 
-A composed control creates its popup once under a stable owner, then calls `show_popup(&popup)` at
-the current pointer or `show_popup_at(&popup, anchor)` at an exact screen-space rectangle. The
-popup's direct parent supplies its inherited band. Popup children retain their visible ancestor
-branch and replace only the previous descendants of that parent; a popup owned by a non-popup root
-starts a new globally exclusive branch. The `PopupHandle` parameter makes ordinary windows and
-dialogs ineligible as targets at compile time. Calling `set_root_visible(popup.id(), true)` is
-rejected with `PopupShowRequired`; hiding through generic or recursive visibility records the same
-`PopupDismissed` submission as replacement and outside-press policy.
+A composed control creates a generic popup once in its stable window owner, then calls
+`show_popup(&popup)` at the current pointer or `show_popup_at(&popup, anchor)` at an exact
+screen-space rectangle. Generic popups keep that screen anchor until explicitly shown elsewhere;
+they do not follow later owner movement. `PopupHandle` parameters keep popup operations separate
+from ordinary root operations at compile time.
+
+An intrinsic `MenuBar` is compiled with its `Window` into one persistent bar-and-body tree plus
+private popup definitions. Top-level menus retain a below-heading relation; submenus retain a
+right-of-row relation to their direct parent popup. The manager resolves these node relationships
+after each layout, so open menus follow window movement and ancestor menu geometry. `MenuItem`
+submission ports remain directly subscribable application events; no menu coordinator, public
+submenu handle, anchor cache, or second visibility model is involved.
 
 Dialogs occupy a dedicated modal band above all sixteen numeric layers. The frontmost visible
-dialog and every owned descendant form the only input-eligible modal group; popup descendants use
-the transient tier above the dialog. Other roots remain visible, laid out, and painted but cannot
-interact until no dialog remains visible. Bringing a dialog forward raises its modal subtree and
-closes transients from the previous group. Hiding the front dialog naturally reveals the next
-visible dialog in z-order. Raising an ordinary owner does not reorder dialog descendants because
-they occupy a different band.
+dialog is the only input-eligible window, and its active popup path uses the transient tier above
+that dialog. Other windows remain visible, laid out, and painted but cannot interact until no
+dialog remains visible. Bringing a dialog forward closes transients from the previous modal owner;
+hiding it reveals the next visible dialog in z-order. Raising an ordinary owner does not reorder
+its dialogs because they occupy the separate modal band.
 
 Visual order is deliberately separate from keyboard activation. A pointer press records the
 ordinary `active_root` (or a popup's ordinary source) without moving it to a different fixed layer.
@@ -188,7 +170,7 @@ let (_, tree) = Linear::create(LinearParameters::horizontal(
     ],
 ));
 
-let _root = ctx.create_window("main", rect(20, 20, 240, 120), tree);
+let _root = ctx.create_window(Window::new("main", rect(20, 20, 240, 120), tree));
 let dimensions = Dimensioni::new(800, 600);
 let info = FrameInfo::try_new(dimensions, color(20, 22, 26, 255))?;
 ctx.subscribe(name_submitted, Model::name_submitted)?;
@@ -198,7 +180,7 @@ ctx.frame(info).render_ui()?;
 ```
 
 An event-driven context is constructed as `Context::<Backend, Model>::new(backend)`. It owns the
-sole application dispatcher for its complete root forest. Each application-subscribed source queues
+sole application dispatcher for its complete retained window set. Each subscribed source queues
 its own typed payloads, and the context drains those queues into `Model` after retained widget
 borrows have ended. Library components can participate without entering the window manager:
 applications own `FileDialog` values in `Model`, while the component binds its controls through an
