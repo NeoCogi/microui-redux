@@ -321,7 +321,7 @@ fn layout_button(label: &'static str) -> (RuntimeNodeId, Node) {
 
 fn committed_rect(runtime: &UiRuntime, root: &Node, id: RuntimeNodeId) -> Recti {
     runtime
-        .debug_node_rect(std::slice::from_ref(root), id)
+        .node_rect(std::slice::from_ref(root), id)
         .expect("the characterized child must have a committed rectangle")
 }
 
@@ -817,7 +817,7 @@ fn composite_header_is_targeted_as_a_real_child_surface() {
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
 
     let disclosure_rect = runtime
-        .debug_node_rect(std::slice::from_ref(&root), disclosure_id)
+        .node_rect(std::slice::from_ref(&root), disclosure_id)
         .expect("laid-out disclosure must retain a screen allocation");
     let event = UiInputEvent::MouseMove {
         // The header is now a concrete child widget placed at the top of the allocation.

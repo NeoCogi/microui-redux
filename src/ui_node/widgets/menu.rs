@@ -27,11 +27,11 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-//! Concrete retained widgets used by application menus.
+//! Concrete retained presentation widgets used by declarative window menus.
 //!
-//! [`MenuItem`] is a public leaf widget with its own typed submission source. `MenuBar`,
-//! `MenuSubmenu`, `MenuList`, and `MenuSeparator` are private presentation details composed by
-//! [`crate::WindowMenu`].
+//! [`MenuItem`] is the sole public widget in this module and publishes its own typed command event.
+//! The remaining types are private framework surfaces: the window manager matches their retained
+//! node IDs directly and derives their open highlight from its one active popup path.
 
 use super::*;
 use std::{cell::RefCell, rc::Rc};
@@ -51,209 +51,180 @@ fn menu_row_height(style: &Style, atlas: &AtlasHandle, font: FontChoice) -> i32 
     content_height(style, atlas, font, check_height)
 }
 
-/// Event emitted by the window-local bar when one top-level heading changes open state.
-#[derive(Copy, Clone, Debug)]
-pub(crate) struct MenuBarSubmitted {
-    /// Index of the selected top-level menu in the component's authoritative specification.
-    pub(crate) index: usize,
-    /// Whether this submission requests that the indexed menu remain open.
-    pub(crate) open: bool,
-    /// One-pixel screen-space anchor immediately below the submitted heading.
-    pub(crate) anchor: Recti,
+/// Non-interactive horizontal surface that owns every top-level menu heading.
+pub(crate) struct MenuBarSurface;
+
+impl MenuBarSurface {
+    /// Transfers ordered heading nodes into one background-painting bar container.
+    pub(crate) fn create(headings: impl IntoIterator<Item = Node>) -> Node {
+        // The generic Container remains the sole strong owner; this zero-sized widget stores no
+        // duplicate label, geometry, hover, or open-menu state.
+        Node::container(Container::new(Self, headings).1)
+    }
 }
 
-impl crate::WidgetEvent for MenuBarSubmitted {}
+impl ContainerWidget for MenuBarSurface {
+    /// Measures one compact horizontal line from its concrete heading children.
+    fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: Constraints) -> Dimensioni {
+        // Each heading owns its text measurement. Summing those preferred widths removes the old
+        // bar-local label vector and manual heading-rectangle reconstruction.
+        let child_constraints = Constraints::new(AvailableSpace::Unbounded, constraints.height);
+        let mut preferred = Dimensioni::default();
+        for index in 0..ctx.child_count() {
+            let child = ctx.measure_child(index, child_constraints).unwrap_or_default();
+            preferred.width = preferred.width.saturating_add(child.width.max(0));
+            preferred.height = preferred.height.max(child.height.max(0));
+        }
+        preferred
+    }
 
-/// Retained top-level menu bar mounted as the first child of a window-content column.
-pub(crate) struct MenuBar {
-    /// Immutable top-level labels copied from the component's semantic specification.
-    labels: Vec<String>,
-    /// Heading currently rendered as open, or `None` while no panel is visible.
-    open_menu: Option<usize>,
-    /// Heading most recently reached by a routed pointer move inside this bar.
-    hovered_menu: Option<usize>,
-    /// Body font used consistently for measurement and paint.
+    /// Places headings left-to-right at their intrinsic widths across the assigned bar height.
+    fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
+        // The parent stretches the surface to the window body width. Only the occupied heading extent
+        // is published as logical content; the surface itself still paints the unoccupied remainder.
+        let constraints = Constraints::new(AvailableSpace::Unbounded, AvailableSpace::bounded(rect.height));
+        let mut x = rect.x;
+        let mut content_height = rect.height.max(0);
+        for index in 0..children.len() {
+            let preferred = ctx.measure_child(children, index, constraints).unwrap_or_default();
+            let child = Recti::new(x, rect.y, preferred.width.max(0), rect.height.max(0));
+            let _ = ctx.layout_child(children, index, child);
+            x = x.saturating_add(child.width);
+            content_height = content_height.max(preferred.height.max(0));
+        }
+        ctx.set_content_size(Dimensioni::new(x.saturating_sub(rect.x), content_height));
+    }
+}
+
+impl Widget for MenuBarSurface {
+    /// Makes the bar background transparent to routing while leaving heading children interactive.
+    fn widget_opt(&self) -> &WidgetOption {
+        // NO_INTERACT affects only this container's own surface; the router still visits its children.
+        &WidgetOption::NO_INTERACT
+    }
+
+    /// Performs no semantic update because the manager acts on routed heading node IDs directly.
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
+        // Hover and click state live on the individual heading nodes, not on their background parent.
+    }
+
+    /// Paints the complete persistent bar before its heading children paint labels and highlights.
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
+        // Filling the assigned width keeps the bar visually part of the window even after its labels end.
+        ctx.draw_rect(ctx.local_rect(), ctx.style().menu_background);
+    }
+}
+
+/// One top-level heading whose identity directly activates its compiled popup.
+pub(crate) struct MenuHeading {
+    /// Immutable user-visible label transferred from the declarative menu.
+    label: String,
+    /// Body font used consistently for preferred measurement and paint.
     font: FontChoice,
-    /// Interaction options; preserving focus keeps a menu click from stealing editor focus.
-    opt: WidgetOption,
-    /// Runtime-owned source consumed exclusively by the coordinating `WindowMenu`.
-    submitted_event: Rc<RefCell<crate::event::WidgetEventPort<MenuBarSubmitted>>>,
+    /// Paint-only highlight derived from the manager-owned active popup path.
+    open: bool,
 }
 
-impl MenuBar {
-    /// Creates the retained bar node, weak typed handle, and internal submission endpoint.
-    pub(crate) fn create(labels: Vec<String>) -> (TypedWidgetHandle<Self>, Node, WidgetEventPortHandle<MenuBarSubmitted>) {
-        // Construct the port before erasing the widget so both the component and retained producer
-        // refer to the same queue without giving either a second ownership path to the node.
-        let submitted_event = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
-        let submitted = WidgetEventPortHandle::new(&submitted_event);
-        let widget = Self {
-            labels,
-            open_menu: None,
-            hovered_menu: None,
+impl MenuHeading {
+    /// Creates one independently routed heading and a weak handle for derived highlight updates.
+    pub(crate) fn create(label: String) -> (TypedWidgetHandle<Self>, Node) {
+        // The returned node supplies stable geometry and identity; the weak handle owns no lifecycle.
+        Node::typed_widget(Self {
+            label,
             font: FontChoice::Role(FontRole::Body),
-            opt: WidgetOption::PRESERVE_FOCUS,
-            submitted_event,
-        };
-        let (handle, node) = Node::typed_widget(widget);
-        (handle, node, submitted)
+            open: false,
+        })
     }
 
-    /// Reconciles the heading highlight with the component-owned popup state.
-    pub(crate) fn set_open_menu(&mut self, open_menu: Option<usize>) {
-        // Invalid indices are normalized to closed state so replacing a specification can never
-        // leave the bar painting a heading that no longer exists.
-        self.open_menu = open_menu.filter(|index| *index < self.labels.len());
+    /// Replaces only the path-derived open presentation bit.
+    pub(crate) const fn set_open(&mut self, open: bool) {
+        // This state never decides popup visibility and therefore requires no event or reconciliation port.
+        self.open = open;
     }
 
-    /// Returns the currently open heading for component behavior tests.
+    /// Returns the derived highlight for compiler tests.
     #[cfg(test)]
-    pub(crate) const fn open_menu(&self) -> Option<usize> {
-        self.open_menu
-    }
-
-    /// Computes each heading allocation from authoritative font metrics and padding.
-    fn heading_rects(&self, bounds: Recti, style: &Style, atlas: &AtlasHandle) -> Vec<Recti> {
-        // The number of headings is normally tiny. Rebuilding this short vector during measure,
-        // input, and paint avoids retaining a geometry cache that could become stale after a style
-        // change or a new parent allocation.
-        let padding = heading_horizontal_padding(style);
-        let height = bounds.height.max(0);
-        let font = style.resolve_font_choice(self.font);
-        let mut x = bounds.x;
-        self.labels
-            .iter()
-            .map(|label| {
-                let text_width = atlas.get_text_size(font, label).width.max(0);
-                let width = text_width.saturating_add(padding.saturating_mul(2));
-                let heading = Recti::new(x, bounds.y, width, height);
-                x = x.saturating_add(width);
-                heading
-            })
-            .collect()
-    }
-
-    /// Resolves the heading under one bar-local pointer position.
-    fn heading_at(&self, bounds: Recti, style: &Style, atlas: &AtlasHandle, position: Vec2i) -> Option<usize> {
-        self.heading_rects(bounds, style, atlas).iter().position(|heading| heading.contains(&position))
-    }
-
-    /// Emits one fully owned popup request after committing the bar's semantic open state.
-    fn submit_heading(&mut self, ctx: &WidgetUpdateCtx<'_>, index: usize, heading: Recti) {
-        // Clicking an already-open heading toggles the complete menu closed; clicking a different
-        // heading switches panels without waiting for the old popup's outside-dismissal event.
-        let open = self.open_menu != Some(index);
-        self.open_menu = open.then_some(index);
-
-        // Widget input and layout are local, whereas popup roots are placed in screen coordinates.
-        // Capture the authoritative transform in the event so the later safe dispatch boundary does
-        // not need to borrow the bar or rely on previous-frame geometry.
-        let screen = ctx.screen_content_rect();
-        let anchor = Recti::new(
-            screen.x.saturating_add(heading.x),
-            screen.y.saturating_add(heading.y).saturating_add(heading.height),
-            heading.width,
-            1,
-        );
-        self.submitted_event.borrow_mut().emit(MenuBarSubmitted { index, open, anchor });
+    pub(crate) const fn is_open(&self) -> bool {
+        // Expose no production query because the window manager already owns the authoritative path.
+        self.open
     }
 }
 
-impl LeafWidget for MenuBar {
+impl LeafWidget for MenuHeading {
+    /// Measures exactly one padded label cell.
     fn measure(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
-        // The parent stretches the bar to the exact window body width. Preferred width still reports
-        // the complete heading row so auto-sized windows cannot truncate their menu labels.
+        // Per-heading measurement lets ordinary retained layout own every clickable rectangle.
         let padding = heading_horizontal_padding(style);
         let font = style.resolve_font_choice(self.font);
-        let width = self.labels.iter().fold(0i32, |width, label| {
-            width
-                .saturating_add(atlas.get_text_size(font, label).width.max(0))
-                .saturating_add(padding.saturating_mul(2))
-        });
+        let width = atlas.get_text_size(font, &self.label).width.max(0).saturating_add(padding.saturating_mul(2));
         Dimensioni::new(width, menu_row_height(style, atlas, self.font))
     }
 }
 
-impl Widget for MenuBar {
+impl Widget for MenuHeading {
+    /// Preserves the application's existing keyboard focus while operating the menu bar.
     fn widget_opt(&self) -> &WidgetOption {
-        &self.opt
+        &WidgetOption::PRESERVE_FOCUS
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
-        // Hover is a routed snapshot rather than a permanent semantic value. Clear it as soon as
-        // another node owns the pointer so paint cannot leave a stale heading highlighted.
-        if !ctx.hovered() {
-            self.hovered_menu = None;
-        }
-
-        let bounds = ctx.local_rect();
-        match input {
-            Some(UiInputEvent::MouseMove { pos, .. }) | Some(UiInputEvent::MouseDrag { pos, .. }) => {
-                self.hovered_menu = self.heading_at(bounds, ctx.style(), ctx.atlas(), *pos);
-            }
-            Some(UiInputEvent::MouseDown { pos, button }) if button.intersects(MouseButton::LEFT) => {
-                let headings = self.heading_rects(bounds, ctx.style(), ctx.atlas());
-                let Some(index) = headings.iter().position(|heading| heading.contains(pos)) else {
-                    return;
-                };
-                self.hovered_menu = Some(index);
-                self.submit_heading(ctx, index, headings[index]);
-            }
-            _ => {}
-        }
+    /// Performs no local action because the manager consumes this node's routed identity.
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
+        // Generic routing still commits hover, click, and capture snapshots used by paint and policy.
     }
 
+    /// Paints manager-derived open state, runtime hover state, and the immutable heading label.
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let bounds = ctx.local_rect();
-        ctx.draw_rect(bounds, ctx.style().menu_background);
-
-        let font = ctx.style().resolve_font_choice(self.font);
-        for (index, heading) in self.heading_rects(bounds, ctx.style(), ctx.atlas()).into_iter().enumerate() {
-            if self.open_menu == Some(index) {
-                ctx.draw_rect(heading, ctx.style().colors[ControlColor::ButtonFocus as usize]);
-            } else if self.hovered_menu == Some(index) {
-                ctx.draw_rect(heading, ctx.style().colors[ControlColor::ButtonHover as usize]);
-            }
-            ctx.draw_control_text_color_with_font(font, &self.labels[index], heading, ctx.style().menu_foreground, WidgetOption::NONE);
+        if self.open {
+            ctx.draw_rect(bounds, ctx.style().colors[ControlColor::ButtonFocus as usize]);
+        } else if ctx.hovered() || ctx.focused() {
+            ctx.draw_rect(bounds, ctx.style().colors[ControlColor::ButtonHover as usize]);
         }
+        let font = ctx.style().resolve_font_choice(self.font);
+        ctx.draw_control_text_color_with_font(font, &self.label, bounds, ctx.style().menu_foreground, WidgetOption::NONE);
     }
 }
 
-/// Event emitted by a submenu row when it requests its already-retained child popup.
-#[derive(Copy, Clone, Debug)]
-pub(crate) struct MenuSubmenuSubmitted {
-    /// One-pixel screen-space anchor immediately to the right of the submenu row.
-    pub(crate) anchor: Recti,
-}
-
-impl crate::WidgetEvent for MenuSubmenuSubmitted {}
-
-/// Private actionable row that opens one cascading submenu without representing an application
-/// command.
+/// Private relational trigger for one already-compiled child menu popup.
 pub(crate) struct MenuSubmenu {
+    /// Immutable user-visible label transferred from the recursive menu declaration.
     label: String,
+    /// Body font used consistently for preferred measurement and paint.
     font: FontChoice,
-    opt: WidgetOption,
-    submitted_event: Rc<RefCell<crate::event::WidgetEventPort<MenuSubmenuSubmitted>>>,
+    /// Paint-only highlight derived from the manager-owned active popup path.
+    open: bool,
 }
 
 impl MenuSubmenu {
-    /// Creates one retained submenu row and its internal submission endpoint.
-    pub(crate) fn create(label: String) -> (Node, WidgetEventPortHandle<MenuSubmenuSubmitted>) {
-        let submitted_event = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
-        let submitted = WidgetEventPortHandle::new(&submitted_event);
-        let widget = Self {
+    /// Creates one independently routed row and a weak handle for derived highlight updates.
+    pub(crate) fn create(label: String) -> (TypedWidgetHandle<Self>, Node) {
+        // Runtime node identity supplies both interaction matching and right-edge placement, so the
+        // widget needs no event port, screen-space anchor calculation, or popup reference.
+        Node::typed_widget(Self {
             label,
             font: FontChoice::Role(FontRole::Body),
-            opt: WidgetOption::PRESERVE_FOCUS,
-            submitted_event,
-        };
-        (Node::typed_widget(widget).1, submitted)
+            open: false,
+        })
+    }
+
+    /// Replaces only the path-derived open presentation bit.
+    pub(crate) const fn set_open(&mut self, open: bool) {
+        // The active popup path remains authoritative; this value only selects a paint color.
+        self.open = open;
+    }
+
+    /// Returns the derived highlight for compiler tests.
+    #[cfg(test)]
+    pub(crate) const fn is_open(&self) -> bool {
+        // Expose no production query because the window manager already owns the authoritative path.
+        self.open
     }
 }
 
 impl LeafWidget for MenuSubmenu {
+    /// Measures one marker-aligned label row plus its trailing expansion glyph.
     fn measure(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+        // Share the marker column with ordinary MenuItem rows so mixed popup contents align exactly.
         let padding = style.padding.max(1);
         let marker_width = atlas.get_icon_size(style.icons.check).width.max(0);
         let arrow_width = atlas.get_icon_size(style.icons.expand).width.max(0);
@@ -271,25 +242,26 @@ impl LeafWidget for MenuSubmenu {
 }
 
 impl Widget for MenuSubmenu {
+    /// Preserves the application's existing keyboard focus while operating a cascading menu.
     fn widget_opt(&self) -> &WidgetOption {
-        &self.opt
+        &WidgetOption::PRESERVE_FOCUS
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
-        if !matches!(input, Some(UiInputEvent::MouseDown { button, .. }) if button.intersects(MouseButton::LEFT)) {
-            return;
-        }
-        let row = ctx.screen_content_rect();
-        let anchor = Recti::new(row.x.saturating_add(row.width), row.y, 1, row.height);
-        self.submitted_event.borrow_mut().emit(MenuSubmenuSubmitted { anchor });
+    /// Performs no local action because the manager consumes this node's routed identity.
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
+        // Generic routing still commits hover, click, and capture snapshots used by paint and policy.
     }
 
+    /// Paints the derived open state, runtime hover state, label, and expansion glyph.
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let bounds = ctx.local_rect();
-        if ctx.hovered() || ctx.focused() {
+        if self.open {
+            ctx.draw_rect(bounds, ctx.style().colors[ControlColor::ButtonFocus as usize]);
+        } else if ctx.hovered() || ctx.focused() {
             ctx.draw_rect(bounds, ctx.style().colors[ControlColor::ButtonHover as usize]);
         }
 
+        // Retain the established marker, label, and right-arrow columns used by ordinary menu rows.
         let style = *ctx.style();
         let padding = style.padding.max(1);
         let marker_width = ctx.atlas().get_icon_size(style.icons.check).width.max(0);
@@ -314,12 +286,15 @@ pub(crate) struct MenuList;
 impl MenuList {
     /// Transfers ordered rows into one background-painting retained container.
     pub(crate) fn create(rows: impl IntoIterator<Item = Node>) -> Node {
+        // The concrete container becomes the sole strong owner of every item, separator, and trigger.
         Node::container(Container::new(Self, rows).1)
     }
 }
 
 impl ContainerWidget for MenuList {
+    /// Measures a zero-gap vertical stack at the widest row's preferred width.
     fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: Constraints) -> Dimensioni {
+        // Retain the caller's horizontal constraint but leave height unbounded so every row contributes.
         let child_constraints = Constraints::new(constraints.width, AvailableSpace::Unbounded);
         let mut preferred = Dimensioni::default();
         for index in 0..ctx.child_count() {
@@ -330,7 +305,9 @@ impl ContainerWidget for MenuList {
         preferred
     }
 
+    /// Places every row at the shared popup width in declaration order.
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
+        // Re-measure at the exact shared width so responsive rows publish authoritative heights.
         let constraints = Constraints::new(AvailableSpace::bounded(rect.width), AvailableSpace::Unbounded);
         let mut y = rect.y;
         let mut content_width = 0;
@@ -346,13 +323,19 @@ impl ContainerWidget for MenuList {
 }
 
 impl Widget for MenuList {
+    /// Makes only the list background transparent while its actionable child rows remain routable.
     fn widget_opt(&self) -> &WidgetOption {
         &WidgetOption::NO_INTERACT
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
+    /// Performs no update because row widgets and manager policy own all menu interaction.
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
+        // The list owns layout and background presentation only.
+    }
 
+    /// Paints one uninterrupted popup background before its rows paint.
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
+        // Children paint after this surface, so their hover and open highlights remain visible.
         ctx.draw_rect(ctx.local_rect(), ctx.style().menu_background);
     }
 }
@@ -456,7 +439,7 @@ pub struct MenuItem {
     shortcut_hint: Option<String>,
     /// Initialization-only font choice.
     font: FontChoice,
-    /// Preserve existing keyboard focus while operating menus.
+    /// Preserves keyboard focus and adds `NO_INTERACT` while the item is disabled.
     opt: WidgetOption,
     /// Runtime-owned source registered independently for this item.
     submitted_event: Rc<RefCell<crate::event::WidgetEventPort<MenuItemSubmitted>>>,
@@ -465,6 +448,12 @@ pub struct MenuItem {
 impl MenuItem {
     /// Constructs one retained item node and its weak typed handle.
     pub fn create(parameters: MenuItemParameters) -> (TypedWidgetHandle<Self>, Node) {
+        // Disabled state must participate in target selection, not merely suppress a late event. Store
+        // NO_INTERACT in the same options queried by the router before the node can become observable.
+        let mut opt = WidgetOption::PRESERVE_FOCUS;
+        if !parameters.enabled {
+            opt.insert(WidgetOption::NO_INTERACT);
+        }
         // The node is the sole strong owner; registration and live updates use only the weak handle.
         Node::typed_widget(Self {
             label: parameters.label,
@@ -472,7 +461,7 @@ impl MenuItem {
             mark: parameters.mark,
             shortcut_hint: parameters.shortcut_hint,
             font: parameters.font,
-            opt: WidgetOption::PRESERVE_FOCUS,
+            opt,
             submitted_event: Rc::new(RefCell::new(crate::event::WidgetEventPort::new())),
         })
     }
@@ -493,8 +482,15 @@ impl MenuItem {
     }
 
     /// Enables or disables pointer submission immediately.
-    pub const fn set_enabled(&mut self, enabled: bool) {
+    pub fn set_enabled(&mut self, enabled: bool) {
+        // Update semantic and router-visible state together so disabled rows cannot become the
+        // manager's post-update menu invocation target or retain transient hover/click snapshots.
         self.enabled = enabled;
+        if enabled {
+            self.opt.remove(WidgetOption::NO_INTERACT);
+        } else {
+            self.opt.insert(WidgetOption::NO_INTERACT);
+        }
     }
 
     /// Returns the current check or radio presentation.
@@ -577,6 +573,7 @@ impl MenuItem {
 }
 
 impl LeafWidget for MenuItem {
+    /// Measures the marker, label, optional shortcut hint, and their fixed padding columns.
     fn measure(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         // Reserve one marker column for every item so mixed marked and unmarked rows align.
         let padding = style.padding.max(1);
@@ -600,17 +597,21 @@ impl LeafWidget for MenuItem {
 }
 
 impl Widget for MenuItem {
+    /// Returns the focus-preserving options, including dynamic disabled routing policy.
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
     }
 
+    /// Emits this item's native typed event exactly once for an enabled left-button click transition.
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
-        // Disabled items retain ordinary routing for hover cleanup but never publish application work.
+        // NO_INTERACT prevents disabled routing; retain the semantic guard in case another widget
+        // disables this item after target selection but before its turn in the update traversal.
         if self.enabled && ctx.clicked() {
             self.submitted_event.borrow_mut().emit(MenuItemSubmitted);
         }
     }
 
+    /// Paints live marker, label, shortcut, enabled color, and ordinary runtime hover state.
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let bounds = ctx.local_rect();
         if self.enabled && (ctx.hovered() || ctx.focused()) {
@@ -661,33 +662,37 @@ impl TypedWidgetHandle<MenuItem> {
     }
 }
 
-/// Non-interactive rule inserted between two non-empty menu groups.
-pub(crate) struct MenuSeparator {
-    /// Separator rows never participate in input routing.
-    opt: WidgetOption,
-}
+/// Explicit non-interactive rule inserted by one declarative [`crate::Menu`].
+pub(crate) struct MenuSeparator;
 
 impl MenuSeparator {
     /// Creates one private retained separator node.
     pub(crate) fn create() -> Node {
-        // No typed handle is needed because a separator has no mutable semantic state.
-        Node::typed_widget(Self { opt: WidgetOption::NO_INTERACT }).1
+        // No typed handle or stored option is needed because a separator has no mutable state.
+        Node::typed_widget(Self).1
     }
 }
 
 impl LeafWidget for MenuSeparator {
+    /// Reserves a compact vertical gap for one centered rule.
     fn measure(&self, style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+        // Keep the rule legible even when a theme requests zero spacing.
         Dimensioni::new(0, style.spacing.max(3))
     }
 }
 
 impl Widget for MenuSeparator {
+    /// Prevents the visual rule from becoming an invocation target.
     fn widget_opt(&self) -> &WidgetOption {
-        &self.opt
+        &WidgetOption::NO_INTERACT
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
+    /// Performs no update because the separator is purely presentational.
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
+        // NO_INTERACT also guarantees the runtime never routes a concrete input event here.
+    }
 
+    /// Paints a subdued one-pixel rule centered in the assigned row.
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         // Center one rule in the allocation and leave horizontal breathing room.
         let bounds = ctx.local_rect();

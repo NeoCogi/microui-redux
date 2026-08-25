@@ -209,7 +209,7 @@ fn main() {
 
         let cube = CubeBuilder::create_widget(CubeParameters);
         let tree = Node::custom_render(cube, cube_renderer);
-        ctx.create_window("Typed backend-frame cube", rect(40, 40, 360, 360), tree);
+        ctx.create_window(Window::new("Typed backend-frame cube", rect(40, 40, 360, 360), tree));
 
         State { angle }
     })

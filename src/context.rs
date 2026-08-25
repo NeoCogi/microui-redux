@@ -36,7 +36,7 @@
 //! context-owned dispatcher only drains semantic [`crate::WidgetEvent`] ports into application
 //! state.
 
-use crate::window_manager::{LayerBinding, PopupHandle, RootHandle, RootId, RootMutationError, WindowManager, WindowOption};
+use crate::window_manager::{LayerBinding, PopupHandle, RootHandle, RootId, RootMutationError, Window, WindowManager, WindowOption};
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, FrameInfo, RenderError, Renderer, RendererBackend};
 use crate::{Dimensioni, ImageSource, KeyCode, KeyMode, MouseButton, Node, Recti, Style, TextureId};
 
@@ -64,13 +64,12 @@ impl<'a> EventContext<'a> {
         Self { window_manager }
     }
 
-    /// Creates an open retained window around one uniquely owned application node.
+    /// Creates an open retained window from one complete body and optional menu-bar definition.
     ///
     /// The returned handle is weak; the parent [`Context`] remains the sole root owner.
-    pub fn create_window(&mut self, name: &str, rect: Recti, content: Node) -> RootHandle {
-        // Delegate to the same non-generic owner used by Context::create_window so event-time and
-        // ordinary root construction have identical lifetime, z-order, and invalidation behavior.
-        self.window_manager.create_window(name, rect, content)
+    pub fn create_window(&mut self, window: Window) -> RootHandle {
+        // Transfer the complete definition to the same owner used by ordinary Context creation.
+        self.window_manager.create_window(window)
     }
 
     /// Creates a hidden retained dialog owned by `parent`.
@@ -78,9 +77,9 @@ impl<'a> EventContext<'a> {
     /// `parent` must be an ordinary window. Show the returned root with
     /// [`Self::set_root_visible`]; it becomes the front modal group before the layout immediately
     /// following this event dispatch.
-    pub fn create_dialog(&mut self, parent: RootId, name: &str, rect: Recti, content: Node) -> Result<RootHandle, RootMutationError> {
-        // WindowManager validates and records the stable ownership edge before returning the handle.
-        self.window_manager.create_dialog(parent, name, rect, content)
+    pub fn create_dialog(&mut self, parent: RootId, window: Window) -> Result<RootHandle, RootMutationError> {
+        // WindowManager validates ownership before consuming the dialog's body and optional bar.
+        self.window_manager.create_dialog(parent, window)
     }
 
     /// Creates a hidden auto-sized popup owned directly by the window identified by `parent`.
@@ -92,16 +91,6 @@ impl<'a> EventContext<'a> {
         // Register the definition under its sole window owner so stacking, modal eligibility, and
         // destruction need no generic root-parent relationship.
         self.window_manager.create_popup(parent, name, content)
-    }
-
-    /// Creates a hidden auto-sized popup anchored beneath another popup definition.
-    ///
-    /// The parent and child remain owned by the same window. Opening the child retains the active
-    /// ancestor prefix and replaces only the previous descendants of `parent`.
-    pub fn create_subpopup(&mut self, parent: &PopupHandle, name: &str, content: Node) -> Result<PopupHandle, RootMutationError> {
-        // The typed parent carries both its popup identity and window owner, so the manager can
-        // validate the direct edge without accepting an untyped root identifier.
-        self.window_manager.create_subpopup(parent, name, content)
     }
 
     /// Replaces a retained root title before the next layout commit.
@@ -172,10 +161,9 @@ impl<'a> EventContext<'a> {
 
     /// Shows a popup at an exact screen-space anchor before the following layout commit.
     ///
-    /// This atomic form is intended for composed controls such as menus and combos. It applies
-    /// popup-path replacement and replaces the popup rectangle, so no pointer-relative intermediate
-    /// placement can be observed. A top-level definition starts a new path; a subpopup retains its
-    /// declared ancestors. The typed handle prevents passing a window or dialog as the popup target.
+    /// This atomic form is intended for composed controls such as combos. It applies popup-path
+    /// replacement and replaces the popup rectangle, so no pointer-relative intermediate placement
+    /// can be observed. The typed handle prevents passing a window or dialog as the popup target.
     pub fn show_popup_at(&mut self, popup: &PopupHandle, anchor: Recti) -> Result<(), RootMutationError> {
         // Delegate the complete transaction while retaining compile-time popup identity across the
         // event façade boundary.
@@ -198,6 +186,14 @@ impl<'a> EventContext<'a> {
     pub fn destroy_root(&mut self, root: RootId) -> bool {
         // Root destruction also expires every weak application widget and root event handle owned by the removed tree.
         self.window_manager.destroy_root(root)
+    }
+
+    /// Returns the active popup names at the event-dispatch boundary for internal tests.
+    #[cfg(test)]
+    pub(crate) fn debug_active_popup_names(&self) -> Vec<String> {
+        // This observation proves ordering only: retained updates and manager menu policy have both
+        // completed before an application handler receives the item's typed submission.
+        self.window_manager.debug_active_popup_names()
     }
 
     /// Returns the resolved UI style currently used by the owning context.
@@ -429,11 +425,12 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
 // Root lifecycle façade.
 
 impl<B: RendererBackend, State: 'static> Context<B, State> {
-    /// Creates an open retained window around one uniquely owned application node.
+    /// Creates an open retained window from one complete body and optional menu-bar definition.
     ///
     /// The returned handle is weak; `Context` owns the root until explicit destruction.
-    pub fn create_window(&mut self, name: &str, rect: Recti, content: Node) -> RootHandle {
-        self.window_manager.create_window(name, rect, content)
+    pub fn create_window(&mut self, window: Window) -> RootHandle {
+        // The manager consumes the body and menu hierarchy as one retained window owner.
+        self.window_manager.create_window(window)
     }
 
     /// Creates a hidden retained dialog owned by `parent`.
@@ -442,9 +439,9 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// visible dialog occupies the dedicated modal layer; the frontmost dialog and its active
     /// window-owned popup path form the modal input group. Other windows remain input-ineligible
     /// until no dialog remains visible.
-    pub fn create_dialog(&mut self, parent: RootId, name: &str, rect: Recti, content: Node) -> Result<RootHandle, RootMutationError> {
-        // The manager records ownership before exposing the weak dialog handle.
-        self.window_manager.create_dialog(parent, name, rect, content)
+    pub fn create_dialog(&mut self, parent: RootId, window: Window) -> Result<RootHandle, RootMutationError> {
+        // The manager records ownership and compiles any intrinsic bar before exposing the handle.
+        self.window_manager.create_dialog(parent, window)
     }
 
     /// Creates a hidden auto-sized popup owned directly by the window identified by `parent`.
@@ -457,16 +454,6 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         // Return the typed weak capability created by WindowManager so callers cannot lose the
         // distinction between a flat window and one of its popup definitions.
         self.window_manager.create_popup(parent, name, content)
-    }
-
-    /// Creates a hidden auto-sized popup beneath another popup definition.
-    ///
-    /// The parent handle fixes the owning window and direct popup ancestry. Showing the returned
-    /// child retains the active path through `parent` and replaces only a competing descendant.
-    pub fn create_subpopup(&mut self, parent: &PopupHandle, name: &str, content: Node) -> Result<PopupHandle, RootMutationError> {
-        // Keep submenu construction typed so an ordinary window identifier cannot masquerade as a
-        // popup parent and no cross-window popup edge can be formed.
-        self.window_manager.create_subpopup(parent, name, content)
     }
 
     /// Replaces a retained root title silently.
@@ -540,9 +527,9 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     ///
     /// Use this for a popup whose position belongs to the semantic event that opened it. Use
     /// [`Self::show_popup`] when the current pointer position is the desired anchor. Both forms
-    /// use the stable window owner recorded at popup creation. A top-level definition replaces the
-    /// previous path, while a subpopup retains its declared ancestors. The typed parameter makes an
-    /// ordinary [`RootHandle`] ineligible for popup-only placement policy:
+    /// use the stable window owner recorded at popup creation and replace the previous active popup
+    /// path. The typed parameter makes an ordinary [`RootHandle`] ineligible for popup-only
+    /// placement policy:
     ///
     /// ```compile_fail
     /// use microui_redux::prelude::*;
@@ -557,7 +544,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// ```
     pub fn show_popup_at(&mut self, popup: &PopupHandle, anchor: Recti) -> Result<(), RootMutationError> {
         // Keep popup identity typed through the public façade; the manager checks its window owner,
-        // declared parent, active-path eligibility, and weak lifetime before placing it.
+        // active-path eligibility, and weak lifetime before placing it.
         self.window_manager.show_popup_at(popup, anchor)
     }
 
@@ -818,6 +805,24 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     pub(crate) fn debug_active_popup_names(&self) -> Vec<String> {
         // Names make path assertions readable without exposing private popup identifiers.
         self.window_manager.debug_active_popup_names()
+    }
+
+    /// Returns active popup rectangles in parent-to-child order for internal anchor tests.
+    pub(crate) fn debug_active_popup_rects(&self) -> Vec<Recti> {
+        // Geometry order matches the authoritative popup path used by layout and paint.
+        self.window_manager.debug_active_popup_rects()
+    }
+
+    /// Returns relational menu trigger rectangles in their compiled declaration order for tests.
+    pub(crate) fn debug_menu_anchor_rects(&self, root: RootId) -> Option<Vec<Option<Recti>>> {
+        // The manager resolves private trigger identities; Context exposes only copied geometry.
+        self.window_manager.debug_menu_anchor_rects(root)
+    }
+
+    /// Returns one retained node rectangle from the authoritative active popup path for tests.
+    pub(crate) fn debug_active_popup_node_rect(&self, node: crate::ui_node::RuntimeNodeId) -> Option<Recti> {
+        // Restrict lookup to visible popups so tests cannot interact through hidden definitions.
+        self.window_manager.debug_active_popup_node_rect(node)
     }
 
     /// Returns whether any manager-owned chrome gesture is active for tests.

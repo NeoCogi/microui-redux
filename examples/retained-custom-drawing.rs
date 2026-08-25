@@ -163,7 +163,7 @@ fn main() -> Result<(), String> {
     let mut ctx = Context::<_>::new(backend);
     let paint = RetainedPaintBuilder::create_widget(RetainedPaintParameters);
     let tree = Node::widget(paint);
-    ctx.create_window("retained custom drawing", rect(12, 12, 132, 84), tree);
+    ctx.create_window(Window::new("retained custom drawing", rect(12, 12, 132, 84), tree));
 
     let dimensions = Dimensioni::new(160, 100);
     let info = FrameInfo::try_new(dimensions, color(18, 20, 22, 255)).map_err(|error| error.to_string())?;

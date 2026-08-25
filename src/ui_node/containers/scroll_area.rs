@@ -761,7 +761,7 @@ mod tests {
         // interactive content allocation rather than a top-aligned intrinsic-height strip.
         runtime.begin_update();
         runtime.layout_tree_root(&mut root, &style, test_atlas(), viewport, UNCLIPPED_RECT);
-        let child_rect = runtime.debug_node_rect(std::slice::from_ref(&root), child_id).unwrap();
+        let child_rect = runtime.node_rect(std::slice::from_ref(&root), child_id).unwrap();
         assert_eq!((child_rect.width, child_rect.height), (100, 80));
         assert_eq!(
             scroll.try_read(|state| (state.geometry.viewport.width, state.geometry.viewport.height)),
@@ -826,7 +826,7 @@ mod tests {
         runtime.begin_update();
         runtime.layout_tree_root(&mut root, &style, atlas.clone(), viewport, UNCLIPPED_RECT);
         let first_id = first_id.unwrap();
-        let before = runtime.debug_node_rect(std::slice::from_ref(&root), first_id).unwrap();
+        let before = runtime.node_rect(std::slice::from_ref(&root), first_id).unwrap();
 
         runtime.begin_update();
         let allocation = AllocationMeasurement::begin();
@@ -840,7 +840,7 @@ mod tests {
         scroll.try_update(|state| state.set_offset(Vec2i::new(0, 10_000))).unwrap();
         runtime.begin_update();
         runtime.layout_tree_root(&mut root, &style, atlas, viewport, UNCLIPPED_RECT);
-        let after = runtime.debug_node_rect(std::slice::from_ref(&root), first_id).unwrap();
+        let after = runtime.node_rect(std::slice::from_ref(&root), first_id).unwrap();
         assert!(after.y < before.y);
         assert_eq!(root.debug_node_count(), 1_005);
     }
@@ -967,7 +967,7 @@ mod tests {
         runtime.layout_tree_root(&mut root, &style, test_atlas(), Recti::new(0, 0, 100, 300), UNCLIPPED_RECT);
 
         assert_eq!(scroll.try_read(|state| state.geometry.horizontal.is_none()), Some(true));
-        let text_rect = runtime.debug_node_rect(std::slice::from_ref(&root), text_id).unwrap();
+        let text_rect = runtime.node_rect(std::slice::from_ref(&root), text_id).unwrap();
         assert_eq!(text_rect.width, 56);
         assert!(text_rect.height > test_atlas().get_font_height(style.font) as i32);
     }
@@ -1037,7 +1037,7 @@ mod tests {
         runtime.begin_update();
         runtime.layout_tree_root(&mut root, &style, test_atlas(), outer, UNCLIPPED_RECT);
         let allocation_before = root.with_node(child_id, |node| node.state.layout.allocation).unwrap();
-        let screen_before = runtime.debug_node_rect(std::slice::from_ref(&root), child_id).unwrap();
+        let screen_before = runtime.node_rect(std::slice::from_ref(&root), child_id).unwrap();
         assert_eq!((allocation_before.x, allocation_before.y), (0, 0));
         assert_eq!(
             (screen_before.x, screen_before.y),
@@ -1050,7 +1050,7 @@ mod tests {
         scroll.try_update(|state| state.set_offset(Vec2i::new(0, 12))).unwrap();
         runtime.layout_tree_root(&mut root, &style, test_atlas(), outer, UNCLIPPED_RECT);
         let allocation_after = root.with_node(child_id, |node| node.state.layout.allocation).unwrap();
-        let screen_after = runtime.debug_node_rect(std::slice::from_ref(&root), child_id).unwrap();
+        let screen_after = runtime.node_rect(std::slice::from_ref(&root), child_id).unwrap();
         assert_eq!(
             (allocation_after.x, allocation_after.y, allocation_after.width, allocation_after.height),
             (allocation_before.x, allocation_before.y, allocation_before.width, allocation_before.height),

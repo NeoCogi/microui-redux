@@ -366,7 +366,7 @@ fn main() {
             LinearItem::flex(display_row, display_weight),
             LinearItem::flex(keypad_row, 1.0 - display_weight),
         ]));
-        let root = ctx.create_window("Calculator", rect(0, 0, 320, 420), tree);
+        let root = ctx.create_window(Window::new("Calculator", rect(0, 0, 320, 420), tree));
         ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_RESIZE | WindowOption::NO_TITLE)
             .expect("calculator root should remain registered");
         State {

@@ -59,8 +59,9 @@
 use bitflags::bitflags;
 
 use crate::input::Input;
+use crate::menu::MenuBar;
 use crate::render::DisplayList;
-use crate::{Dimensioni, Recti, Style, UiRuntime};
+use crate::{Dimensioni, Node, Recti, Style, UiRuntime};
 use roots::{PopupPath, WindowEntry};
 mod root_chrome;
 mod roots;
@@ -96,6 +97,47 @@ bitflags! {
         const NO_PADDING = 8;
         /// No special options.
         const NONE = 0;
+    }
+}
+
+/// Complete retained definition consumed when a window or dialog is created.
+///
+/// The optional [`MenuBar`] belongs to this value rather than to an application-side coordinator.
+/// Creation transfers the body, bar, and recursive menus to the window manager as one owner.
+pub struct Window {
+    /// Diagnostic name and visible title text.
+    name: String,
+    /// Initial outer rectangle in screen coordinates.
+    rect: Recti,
+    /// Uniquely owned application body displayed below an optional menu bar.
+    content: Node,
+    /// Declarative bar and recursive menu hierarchy installed with this window.
+    menu_bar: Option<MenuBar>,
+}
+
+impl Window {
+    /// Creates a window definition without a menu bar.
+    pub fn new(name: impl Into<String>, rect: Recti, content: Node) -> Self {
+        // Keep all construction values together so creation cannot install a detached bar later.
+        Self {
+            name: name.into(),
+            rect,
+            content,
+            menu_bar: None,
+        }
+    }
+
+    /// Installs the menu bar that will remain an intrinsic part of this window.
+    pub fn menu_bar(mut self, menu_bar: MenuBar) -> Self {
+        // A builder replacement keeps exactly one bar and consumes every menu node only once.
+        self.menu_bar = Some(menu_bar);
+        self
+    }
+
+    /// Transfers all construction values to the private manager implementation.
+    pub(crate) fn into_parts(self) -> (String, Recti, Node, Option<MenuBar>) {
+        // Destructuring makes the single ownership transfer explicit at the registration boundary.
+        (self.name, self.rect, self.content, self.menu_bar)
     }
 }
 

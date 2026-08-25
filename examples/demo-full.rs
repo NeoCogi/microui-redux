@@ -1159,20 +1159,23 @@ struct GridMenuItems {
     show_minor_lines: TypedWidgetHandle<MenuItem>,
 }
 
-/// Creates and registers one concrete item before its node enters the menu hierarchy.
+/// Creates and subscribes one concrete item before its node enters the menu hierarchy.
 fn registered_menu_item(
     context: &mut Context<SelectedBackend, State>,
     parameters: MenuItemParameters,
     handler: for<'a> fn(&mut State, &mut EventContext<'a>, &MenuItemSubmitted),
 ) -> (TypedWidgetHandle<MenuItem>, Node) {
-    // Registration binds this exact widget event source directly to its application behavior.
+    // Subscribe to the item's ordinary typed event port. The window manager owns menu visibility,
+    // so application handlers need no menu-specific coordinator or callback adapter.
     let (item, node) = MenuItem::create(parameters);
-    WindowMenu::register_item(context, State::window_menu_mut, &item, handler).expect("new menu item must be unsubscribed");
+    context
+        .subscribe_context(item.submitted(), handler)
+        .expect("new menu item must be unsubscribed");
     (item, node)
 }
 
 /// Builds the concrete retained menu hierarchy used by the main demo window.
-fn demo_menu_panel(context: &mut Context<SelectedBackend, State>) -> (MenuPanel, DemoMenuItems) {
+fn demo_menu_bar(context: &mut Context<SelectedBackend, State>) -> (MenuBar, DemoMenuItems) {
     let (new_session, new_session_node) =
         registered_menu_item(context, MenuItemParameters::new("New Session").shortcut_hint("Ctrl+N"), State::menu_new_session);
     let (open_file, open_file_node) = registered_menu_item(context, MenuItemParameters::new("Open...").shortcut_hint("Ctrl+O"), State::menu_open_file);
@@ -1194,30 +1197,28 @@ fn demo_menu_panel(context: &mut Context<SelectedBackend, State>) -> (MenuPanel,
 
     let (about, about_node) = registered_menu_item(context, MenuItemParameters::new("About microui-redux"), State::menu_about);
 
-    let panel = MenuPanel::new([
-        Menu::new(
-            "File",
-            [
-                MenuGroup::new([new_session_node, open_file_node, save_snapshot_node]),
-                MenuGroup::new([clear_log_node]),
-                MenuGroup::new([exit_node]),
-            ],
-        ),
-        Menu::new(
-            "View",
-            [
-                MenuGroup::new([auto_scroll_node]),
-                MenuGroup::submenu(Submenu::new("Log Spacing", [MenuGroup::new([comfortable_node, compact_node])])),
-            ],
-        ),
-        Menu::new("Help", [MenuGroup::new([about_node])]),
+    // Explicit separators preserve the visual groups without retaining group wrapper objects.
+    let menu_bar = MenuBar::new([
+        Menu::new("File")
+            .item(new_session_node)
+            .item(open_file_node)
+            .item(save_snapshot_node)
+            .separator()
+            .item(clear_log_node)
+            .separator()
+            .item(exit_node),
+        Menu::new("View")
+            .item(auto_scroll_node)
+            .separator()
+            .submenu(Menu::new("Log Spacing").item(comfortable_node).item(compact_node)),
+        Menu::new("Help").item(about_node),
     ]);
 
-    // Handles without live application state are intentionally dropped; their retained nodes and
-    // registered weak event ports remain owned by the Context.
+    // Handles without live presentation state are intentionally dropped. Their nodes own the
+    // concrete items, and Context retains the typed subscriptions used for application dispatch.
     drop((new_session, clear_log, about));
     (
-        panel,
+        menu_bar,
         DemoMenuItems {
             open_file,
             auto_scroll,
@@ -1228,31 +1229,27 @@ fn demo_menu_panel(context: &mut Context<SelectedBackend, State>) -> (MenuPanel,
 }
 
 /// Builds the independent menu hierarchy owned by the fullscreen X-Y grid surface.
-fn grid_menu_panel(context: &mut Context<SelectedBackend, State>) -> (MenuPanel, GridMenuItems) {
-    // Register these item ports against the grid coordinator rather than the Demo Window's menu.
-    // Each WindowMenu must close and reconcile its own popup before invoking application behavior.
-    let (reset_view, reset_view_node) = MenuItem::create(MenuItemParameters::new("Reset View"));
-    WindowMenu::register_item(context, State::grid_window_menu_mut, &reset_view, State::grid_reset_view).expect("new grid menu item must be unsubscribed");
+fn grid_menu_bar(context: &mut Context<SelectedBackend, State>) -> (MenuBar, GridMenuItems) {
+    // Grid items use the same direct typed subscriptions as the floating window's items. Popup
+    // ownership and closure follow from the MenuBar installed on the grid Window below.
+    let (reset_view, reset_view_node) = registered_menu_item(context, MenuItemParameters::new("Reset View"), State::grid_reset_view);
+    let (show_minor_lines, show_minor_lines_node) = registered_menu_item(
+        context,
+        MenuItemParameters::new("Minor Grid Lines").checked(true),
+        State::grid_toggle_minor_lines,
+    );
+    let (about_grid, about_grid_node) = registered_menu_item(context, MenuItemParameters::new("About X-Y Grid"), State::grid_about);
 
-    let (show_minor_lines, show_minor_lines_node) = MenuItem::create(MenuItemParameters::new("Minor Grid Lines").checked(true));
-    WindowMenu::register_item(context, State::grid_window_menu_mut, &show_minor_lines, State::grid_toggle_minor_lines)
-        .expect("new grid menu item must be unsubscribed");
-
-    let (about_grid, about_grid_node) = MenuItem::create(MenuItemParameters::new("About X-Y Grid"));
-    WindowMenu::register_item(context, State::grid_window_menu_mut, &about_grid, State::grid_about).expect("new grid menu item must be unsubscribed");
-
-    // The panel is intentionally separate from the floating demo's File/View/Help component. Its
-    // popup definitions belong to the grid window and therefore derive layer zero from that owner,
-    // staying below layer-15 floating windows.
-    let panel = MenuPanel::new([
-        Menu::new("Grid", [MenuGroup::new([reset_view_node]), MenuGroup::new([show_minor_lines_node])]),
-        Menu::new("Help", [MenuGroup::new([about_grid_node])]),
+    // This bar is intentionally separate from the floating demo's File/View/Help menus. Installing
+    // it on the grid Window makes every generated popup belong to the layer-zero grid root.
+    let menu_bar = MenuBar::new([
+        Menu::new("Grid").item(reset_view_node).separator().item(show_minor_lines_node),
+        Menu::new("Help").item(about_grid_node),
     ]);
 
-    // These command items need no later presentation updates; Context retains their nodes and
-    // registered event ports while this function releases its temporary strong handles.
+    // These command items need no later presentation updates; their menu nodes keep them alive.
     drop((reset_view, about_grid));
-    (panel, GridMenuItems { show_minor_lines })
+    (menu_bar, GridMenuItems { show_minor_lines })
 }
 
 fn set_slider_value(state: &TypedWidgetHandle<Slider>, value: Real) {
@@ -1324,13 +1321,11 @@ struct State {
 
     /// Shared camera and presentation state consumed by the grid widget and render callback.
     grid_3d_state: Rc<RefCell<Grid3dState>>,
-    /// Independent coordinator for the fullscreen grid surface and its retained menu popups.
-    grid_window_menu: WindowMenu,
+    /// Fullscreen layer-zero window whose rectangle follows the platform drawable area.
+    grid_root: RootHandle,
     /// Concrete checked item reflecting whether unit-spaced grid lines are enabled.
     grid_show_minor_lines_item: TypedWidgetHandle<MenuItem>,
 
-    /// Application-owned component coordinating the main window's concrete menus.
-    window_menu: WindowMenu,
     /// Concrete Open item whose enabled state follows file-dialog activity.
     menu_open_file: TypedWidgetHandle<MenuItem>,
     /// Concrete check item reflecting log auto-scroll state.
@@ -1615,23 +1610,15 @@ impl State {
             popup: popup_content,
         };
 
-        // The grid owns a separate WindowMenu and custom-render body. Its placeholder extent is
-        // replaced from real drawable dimensions by `sync_grid_surface` every frame because this
+        // The grid Window owns its menu bar and custom-render body directly. Its placeholder extent
+        // is replaced from real drawable dimensions by `sync_grid_surface` every frame because this
         // construction callback cannot yet observe the platform window size.
-        let (grid_menu_panel, grid_menu_items) = grid_menu_panel(ctx);
+        let (grid_menu_bar, grid_menu_items) = grid_menu_bar(ctx);
         let grid_node = Node::custom_render(
             Grid3dWidgetBuilder::create_widget(Grid3dWidgetParameters { data: grid_3d_state.clone() }),
             grid_renderer,
         );
-        let grid_window_menu = WindowMenu::create(
-            ctx,
-            Self::grid_window_menu_mut,
-            "X-Y Grid Surface",
-            rect(0, 0, 1, 1),
-            grid_menu_panel,
-            grid_node,
-        );
-        let grid_root = grid_window_menu.window();
+        let grid_root = ctx.create_window(Window::new("X-Y Grid Surface", rect(0, 0, 1, 1), grid_node).menu_bar(grid_menu_bar));
         // This dedicated desktop-like root is the only layer-0 window. Its menu remains visible at
         // the top edge, while the custom-render body consumes every remaining pixel below it.
         ctx.set_root_layer(grid_root.id(), MIN_LAYER)
@@ -1644,11 +1631,10 @@ impl State {
 
         // Preserve the original Demo Window as an independently movable and resizable layer-15
         // window. Its existing menu is unrelated to the fullscreen grid menu above.
-        let (menu_panel, menu_items) = demo_menu_panel(ctx);
-        let window_menu = WindowMenu::create(ctx, Self::window_menu_mut, "Demo Window", rect(40, 40, 300, 450), menu_panel, demo_node);
-        let demo_root = window_menu.window().clone();
-        let _style_root = ctx.create_window("Style Editor", rect(350, 250, 300, 240), style_node);
-        let _log_root = ctx.create_window("Log Window", rect(350, 40, 300, 200), log_node);
+        let (menu_bar, menu_items) = demo_menu_bar(ctx);
+        let demo_root = ctx.create_window(Window::new("Demo Window", rect(40, 40, 300, 450), demo_node).menu_bar(menu_bar));
+        let _style_root = ctx.create_window(Window::new("Style Editor", rect(350, 250, 300, 240), style_node));
+        let _log_root = ctx.create_window(Window::new("Log Window", rect(350, 40, 300, 200), log_node));
         let combo_popup_root = ctx
             .create_popup(demo_root.id(), "Combo Box Popup", combo_node)
             .expect("demo window must own the combo popup");
@@ -1665,13 +1651,13 @@ impl State {
             WindowOption::FRAME | WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
         )
         .expect("test popup definition must exist");
-        let _typography_root = ctx.create_window("Typography Demo", rect(40, 500, 300, 170), typography_node);
-        let _triangle_root = ctx.create_window("Triangle Window", rect(200, 100, 200, 200), triangle_node);
-        let _painter_root = ctx.create_window("Painter Window", rect(820, 40, 280, 240), painter_node);
-        let _falloff_root = ctx.create_window("Brush Falloff", rect(820, 300, 320, 260), falloff_node);
-        let _suzanne_root = ctx.create_window("Suzanne Window", rect(220, 220, 300, 300), suzanne_node);
-        let _stack_direction_root = ctx.create_window("Stack Direction Demo", rect(530, 40, 280, 220), stack_direction_node);
-        let _weight_root = ctx.create_window("Weight Demo", rect(530, 270, 280, 260), weight_node);
+        let _typography_root = ctx.create_window(Window::new("Typography Demo", rect(40, 500, 300, 170), typography_node));
+        let _triangle_root = ctx.create_window(Window::new("Triangle Window", rect(200, 100, 200, 200), triangle_node));
+        let _painter_root = ctx.create_window(Window::new("Painter Window", rect(820, 40, 280, 240), painter_node));
+        let _falloff_root = ctx.create_window(Window::new("Brush Falloff", rect(820, 300, 320, 260), falloff_node));
+        let _suzanne_root = ctx.create_window(Window::new("Suzanne Window", rect(220, 220, 300, 300), suzanne_node));
+        let _stack_direction_root = ctx.create_window(Window::new("Stack Direction Demo", rect(530, 40, 280, 220), stack_direction_node));
+        let _weight_root = ctx.create_window(Window::new("Weight Demo", rect(530, 270, 280, 260), weight_node));
         let (combo_typed_state, combo_runtime) = stateful_leaf::<ComboBuilder>(ComboParameters::new());
         let combo_submitted = combo_typed_state.submitted();
         let combo_item_pairs = [
@@ -1840,9 +1826,8 @@ impl State {
             combo_popup_root,
             popup_root,
             grid_3d_state,
-            grid_window_menu,
+            grid_root,
             grid_show_minor_lines_item: grid_menu_items.show_minor_lines,
-            window_menu,
             menu_open_file: menu_items.open_file,
             menu_auto_scroll_item: menu_items.auto_scroll,
             menu_comfortable_spacing: menu_items.comfortable_spacing,
@@ -2642,16 +2627,6 @@ impl State {
         &mut state.file_dialog
     }
 
-    /// Resolves the stable application-owned menu location for internal component subscriptions.
-    fn window_menu_mut(state: &mut Self) -> &mut WindowMenu {
-        &mut state.window_menu
-    }
-
-    /// Resolves the independent fullscreen grid menu for its internal subscriptions.
-    fn grid_window_menu_mut(state: &mut Self) -> &mut WindowMenu {
-        &mut state.grid_window_menu
-    }
-
     fn file_dialog_completed(&mut self, event: &FileDialogCompleted) {
         // Completion makes File > Open available again regardless of acceptance or cancellation.
         self.menu_open_file.set_enabled(true).expect("Open menu item unavailable");
@@ -2670,8 +2645,7 @@ impl State {
         // The platform owns drawable dimensions, while Context owns retained root geometry. Join
         // those authorities once per host frame so window resizes become visible in the second
         // update/layout commit performed by the shared example runner before painting.
-        let grid_root = self.grid_window_menu.window().id();
-        ctx.set_root_rect(grid_root, rect(0, 0, dimensions.width, dimensions.height))
+        ctx.set_root_rect(self.grid_root.id(), rect(0, 0, dimensions.width, dimensions.height))
             .expect("fullscreen grid root must remain registered");
     }
 

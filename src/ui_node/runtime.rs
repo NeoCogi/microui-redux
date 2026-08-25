@@ -266,21 +266,20 @@ impl UiRuntime {
         self.input_router.debug_discards_invalidated_capture_events()
     }
 
-    /// Returns the current full rectangle for a retained node.
-    #[cfg(test)]
-    pub(crate) fn debug_node_rect(&self, roots: &[Node], id: RuntimeNodeId) -> Option<Recti> {
+    /// Returns the current screen rectangle for a retained node after committed transforms.
+    pub(crate) fn node_rect(&self, roots: &[Node], id: RuntimeNodeId) -> Option<Recti> {
         // Search each retained root with the transform committed by the latest layout pass.
-        roots.iter().find_map(|root| Self::debug_node_rect_from(root, id, self.root_transform))
+        roots.iter().find_map(|root| Self::node_rect_from(root, id, self.root_transform))
     }
 
-    #[cfg(test)]
-    fn debug_node_rect_from(current: &Node, target: RuntimeNodeId, parent: Transform) -> Option<Recti> {
+    /// Recursively resolves one node while accumulating its parent transform.
+    fn node_rect_from(current: &Node, target: RuntimeNodeId, parent: Transform) -> Option<Recti> {
         // Resolve the first identity match; runtime node IDs are process-unique.
         if current.id() == target {
             return Some(parent.resolve(current.state.layout.allocation));
         }
         let child_parent = parent.push(current.state.layout);
-        current.with_children(|children| children.iter().find_map(|child| Self::debug_node_rect_from(child, target, child_parent)))
+        current.with_children(|children| children.iter().find_map(|child| Self::node_rect_from(child, target, child_parent)))
     }
 }
 

@@ -110,7 +110,7 @@
 //! Event-driven applications construct `Context::<B, State>::new(backend)`, register each
 //! native widget endpoint through [`Context::subscribe`] or [`Context::subscribe_with`], and call
 //! [`Context::update_ui_state`]. The context owns the only application widget-event dispatcher for
-//! its complete root forest. This semantic dispatcher is distinct from retained raw-input routing:
+//! all retained windows. This semantic dispatcher is distinct from retained raw-input routing:
 //! each retained runtime owns an input router that targets pointer, keyboard, or text input to one
 //! node, and that widget may then emit a typed event for the application dispatcher.
 //! Application-owned library components such as [`FileDialog`] bind their controls to that same
@@ -145,11 +145,11 @@
 //!     info: FrameInfo,
 //! ) -> Result<RootHandle, RenderError> {
 //!     let (_button, button_node) = Button::create(ButtonParameters::new("Save"));
-//!     let root = context.create_window(
+//!     let root = context.create_window(Window::new(
 //!         "main",
 //!         rect(20, 20, 180, 80),
 //!         button_node,
-//!     );
+//!     ));
 //!
 //!     context.update_ui(dimensions);
 //!     context.frame(info).render_ui()?;
@@ -166,9 +166,9 @@
 //! measurement results.
 //! Retained application logic uses typed weak widget handles returned beside mounted nodes.
 //! The [`retained`] module and repository examples document the 0.8 alpha retained-authoring API.
-//! This release is versioned `0.8.0-alpha.5` and adds a stable owned-root hierarchy, sixteen fixed
-//! application layers, parent-derived popup stacking, independent root activation, and fullscreen
-//! application surfaces to that redesign.
+//! This release is versioned `0.8.0-alpha.5` and uses flat retained windows, directly owned modal
+//! dialogs and popup definitions, window-intrinsic declarative menu bars, sixteen fixed application
+//! layers, independent window activation, and fullscreen application surfaces.
 //!
 //! # Rendering pipeline
 //!
@@ -213,7 +213,7 @@ mod window_manager;
 pub mod retained {
     pub use crate::event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventPortHandle};
     pub use crate::file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};
-    pub use crate::menu::{Menu, MenuGroup, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted, MenuPanel, Submenu, WindowMenu};
+    pub use crate::menu::{Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted};
     pub use crate::render::{CustomRenderArgs, CustomRenderHandle};
     pub use crate::ui_node::{
         AvailableSpace, ChildParticipation, Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, Disclosure, DisclosureParameters,
@@ -223,7 +223,7 @@ pub mod retained {
     };
     pub use crate::context::{Context, ContextFrame, EventContext};
     pub use crate::window_manager::{
-        DEFAULT_LAYER, LayerBinding, MAX_LAYER, MIN_LAYER, PopupHandle, RootChanged, RootHandle, RootId, RootMutationError, RootSubmitted, WindowOption,
+        DEFAULT_LAYER, LayerBinding, MAX_LAYER, MIN_LAYER, PopupHandle, RootChanged, RootHandle, RootId, RootMutationError, RootSubmitted, Window, WindowOption,
     };
 }
 
@@ -238,7 +238,7 @@ pub mod prelude {
         IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON,
     };
     pub use crate::file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};
-    pub use crate::menu::{Menu, MenuGroup, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted, MenuPanel, Submenu, WindowMenu};
+    pub use crate::menu::{Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted};
     pub use crate::image::{ImageSource, load_image_bytes};
     pub use crate::input::{KeyCode, KeyMode, MouseButton};
     pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame, TextureId};
@@ -248,7 +248,7 @@ pub mod prelude {
         LinearDirection, LinearItem, LinearParameters, Node, PopupHandle, RootChanged, RootHandle, MeasureCtx, RootId, RootMutationError, RootSubmitted,
         LayerBinding, DEFAULT_LAYER, MAX_LAYER, MIN_LAYER, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Scrollbar, ScrollbarAxis, ScrollbarChanged,
         ScrollbarParameters, TrackSize, LeafWidget, TextWrap, UiInputEvent, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption, WidgetOption,
-        WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx, WindowOption,
+        WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx, Window, WindowOption,
     };
     pub use crate::math::{expand_rect, rect, vec2};
     pub use crate::theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, color};
@@ -272,11 +272,11 @@ pub use atlas::{
 };
 pub use context::{Context, ContextFrame, EventContext};
 pub use window_manager::{
-    DEFAULT_LAYER, LayerBinding, MAX_LAYER, MIN_LAYER, PopupHandle, RootChanged, RootHandle, RootId, RootMutationError, RootSubmitted, WindowOption,
+    DEFAULT_LAYER, LayerBinding, MAX_LAYER, MIN_LAYER, PopupHandle, RootChanged, RootHandle, RootId, RootMutationError, RootSubmitted, Window, WindowOption,
 };
 pub use event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventPortHandle};
 pub use file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};
-pub use menu::{Menu, MenuGroup, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted, MenuPanel, Submenu, WindowMenu};
+pub use menu::{Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted};
 pub use image::{ImageSource, load_image_bytes};
 pub use input::{KeyCode, KeyMode, MouseButton};
 pub use math::{expand_rect, rect, vec2};

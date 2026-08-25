@@ -44,7 +44,7 @@ use std::{cell::RefCell, path::Path, rc::Rc};
 use crate::{
     Button, ButtonParameters, ButtonSubmitted, IconId, Linear, LinearItem, LinearParameters, ListItem, ListItemParameters, ListItemSubmitted, Node, Recti,
     Context, EventContext, RootHandle, RootId, RootSubmitted, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Textbox, TextboxParameters, TextboxSubmitted,
-    ThemeIcons, TypedWidgetHandle, WidgetEventPortHandle, WidgetOption, WindowOption,
+    ThemeIcons, TypedWidgetHandle, WidgetEventPortHandle, WidgetOption, Window, WindowOption,
 };
 use crate::event::WidgetEventPort;
 #[cfg(test)]
@@ -330,7 +330,7 @@ impl FileDialog {
         // Register the modal surface as a stable child of the application window supplied by the
         // caller. Construction fails only when that weak parent identifier is stale or ineligible.
         let root = ctx
-            .create_dialog(parent, DEFAULT_FILE_DIALOG_TITLE, DEFAULT_FILE_DIALOG_RECT, shell)
+            .create_dialog(parent, Window::new(DEFAULT_FILE_DIALOG_TITLE, DEFAULT_FILE_DIALOG_RECT, shell))
             .expect("new file-dialog parent must remain registered");
         ctx.set_root_options(root.id(), WindowOption::FRAME)
             .expect("new file-dialog root must accept options");
@@ -828,7 +828,11 @@ mod tests {
         let mut context = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions());
         // The fixture window gives the component the same stable lifetime owner required from a
         // real application. Its geometry is unrelated to the dialog's screen-space rectangle.
-        let owner = context.create_window("file-dialog owner", rect(0, 0, 1, 1), Button::create(ButtonParameters::new("owner")).1);
+        let owner = context.create_window(Window::new(
+            "file-dialog owner",
+            rect(0, 0, 1, 1),
+            Button::create(ButtonParameters::new("owner")).1,
+        ));
         let dialog = FileDialog::new(&mut context, owner.id(), Model::dialog_mut);
         context.subscribe(dialog.completed(), Model::completed).unwrap();
         (
@@ -895,7 +899,7 @@ mod tests {
         let (mut context, mut model) = context_and_model();
         let (button, node) = Button::create(ButtonParameters::new("open"));
         let button_id = node.id();
-        let window = context.create_window("window", rect(0, 0, 100, 80), node);
+        let window = context.create_window(Window::new("window", rect(0, 0, 100, 80), node));
         context.subscribe_context(button.submitted(), Model::open_from_button).unwrap();
         context.update_ui_state(dimensions(), &mut model);
 
@@ -1026,7 +1030,11 @@ mod tests {
         }
 
         let mut context = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions());
-        let owner = context.create_window("file-dialog owner", rect(0, 0, 1, 1), Button::create(ButtonParameters::new("owner")).1);
+        let owner = context.create_window(Window::new(
+            "file-dialog owner",
+            rect(0, 0, 1, 1),
+            Button::create(ButtonParameters::new("owner")).1,
+        ));
         let first = FileDialog::new(&mut context, owner.id(), DualModel::first_mut);
         let second = FileDialog::new(&mut context, owner.id(), DualModel::second_mut);
         context.subscribe(first.completed(), DualModel::first_completed).unwrap();
@@ -1054,7 +1062,7 @@ mod tests {
         let (mut context, mut model) = context_and_model();
         let (button, button_node) = Button::create(ButtonParameters::new("behind"));
         context.subscribe(button.submitted(), Model::behind_submitted).unwrap();
-        let window = context.create_window("window", rect(0, 0, 100, 80), button_node);
+        let window = context.create_window(Window::new("window", rect(0, 0, 100, 80), button_node));
         context
             .set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
             .unwrap();

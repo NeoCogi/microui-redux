@@ -33,8 +33,8 @@ use std::cell::Cell;
 use microui_redux::render::{FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex};
 use microui_redux::retained::*;
 use microui_redux::prelude::{
-    Dimensioni, EventContext, FileDialog, FileDialogRequest, FileDialogStatus, Menu, MenuGroup, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted,
-    MenuPanel, Recti, TextBlock, TextBlockParameters, TypedWidgetHandle, WindowMenu,
+    Dimensioni, EventContext, FileDialog, FileDialogRequest, FileDialogStatus, Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted,
+    Recti, TextBlock, TextBlockParameters, TypedWidgetHandle, Window,
 };
 use microui_redux::{
     color, rect, AtlasHandle, AtlasSource, Constraints, Context, Disclosure, DisclosureParameters, FontEntry, Grid, GridParameters, Linear, LinearParameters,
@@ -119,7 +119,11 @@ impl FileDialogModel {
 #[test]
 fn downstream_file_dialog_completion_is_subscriber_driven_without_widget_access() {
     let mut context = context_with_state::<FileDialogModel>();
-    let owner = context.create_window("file-dialog owner", rect(0, 0, 1, 1), TextBlock::create(TextBlockParameters::new("")).1);
+    let owner = context.create_window(Window::new(
+        "file-dialog owner",
+        rect(0, 0, 1, 1),
+        TextBlock::create(TextBlockParameters::new("")).1,
+    ));
     let mut dialog = FileDialog::new(&mut context, owner.id(), FileDialogModel::dialog_mut);
     let completed = dialog.completed();
     context.subscribe(completed, FileDialogModel::file_dialog_completed).unwrap();
@@ -134,10 +138,8 @@ fn downstream_file_dialog_completion_is_subscriber_driven_without_widget_access(
     assert!(!model.dialog.is_open());
 }
 
-/// Minimal downstream application state that owns one complete menu component.
+/// Minimal downstream application state retaining only concrete menu-item state.
 struct MenuModel {
-    /// Menu component found by its internal subscription accessor.
-    menu: WindowMenu,
     /// Live handle for an item whose enabled state changes.
     save: TypedWidgetHandle<MenuItem>,
     /// Live handle for an item whose marker changes.
@@ -147,11 +149,6 @@ struct MenuModel {
 }
 
 impl MenuModel {
-    /// Returns the stable component location required by `WindowMenu::create`.
-    fn menu_mut(state: &mut Self) -> &mut WindowMenu {
-        &mut state.menu
-    }
-
     /// Handles the concrete Open item's event source.
     fn open_submitted(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
         self.invoked.push("Open");
@@ -159,22 +156,24 @@ impl MenuModel {
 }
 
 #[test]
-fn downstream_window_menu_exposes_concrete_items_roots_and_live_state() {
+fn downstream_window_owns_declarative_menu_and_live_concrete_items() {
     let mut context = context_with_state::<MenuModel>();
     let (open, open_node) = MenuItem::create(MenuItemParameters::new("Open").shortcut_hint("Ctrl+O"));
-    WindowMenu::register_item(&mut context, MenuModel::menu_mut, &open, MenuModel::open_submitted).unwrap();
+    // Menu commands use their ordinary typed ports; intrinsic menu policy closes the popup before
+    // the application dispatcher invokes this handler.
+    context.subscribe_context(open.submitted(), MenuModel::open_submitted).unwrap();
     let (save, save_node) = MenuItem::create(MenuItemParameters::new("Save").disabled());
     let (word_wrap, word_wrap_node) = MenuItem::create(MenuItemParameters::new("Word Wrap").checked(true));
-    let panel = MenuPanel::new([
-        Menu::new("File", [MenuGroup::new([open_node, save_node])]),
-        Menu::new("View", [MenuGroup::new([word_wrap_node])]),
-    ]);
     let body = TextBlock::create(TextBlockParameters::new("body")).1;
-    let menu = WindowMenu::create(&mut context, MenuModel::menu_mut, "document", rect(20, 20, 240, 160), panel, body);
+    let window = Window::new("document", rect(20, 20, 240, 160), body).menu_bar(MenuBar::new([
+        Menu::new("File").item(open_node).item(save_node),
+        Menu::new("View").item(word_wrap_node),
+    ]));
+    let root = context.create_window(window);
     // The deliberately minimal downstream atlas contains no chrome icons, so this compile-contract
     // test removes title controls before committing the retained tree.
     context
-        .set_root_options(menu.window().id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
 
     // Public state mutations address the concrete retained items directly.
@@ -183,20 +182,11 @@ fn downstream_window_menu_exposes_concrete_items_roots_and_live_state() {
     assert_eq!(save.is_enabled(), Some(true));
     assert_eq!(word_wrap.mark(), Some(MenuItemMark::Checked(false)));
 
-    // The window owns the popup definition, and anchored placement accepts only PopupHandle. A
-    // normal window handle cannot be supplied, and generic root APIs cannot address the popup.
-    let popup = menu.popup(0).unwrap();
-    context.show_popup_at(popup, rect(40, 40, 100, 1)).unwrap();
-    context.hide_popup(popup).unwrap();
-
-    let model = MenuModel {
-        menu,
-        save,
-        word_wrap,
-        invoked: Vec::new(),
-    };
-    assert!(model.menu.window().is_alive());
-    assert!(model.menu.popup(0).unwrap().is_alive());
+    let model = MenuModel { save, word_wrap, invoked: Vec::new() };
+    // Context owns the complete window, including its bar and private popup definitions. Concrete
+    // item handles remain weak live views of the nodes transferred through the declarative menus.
+    assert!(root.is_alive());
+    assert!(open.is_alive());
     assert!(model.save.is_alive());
     assert!(model.word_wrap.is_alive());
     assert!(model.invoked.is_empty());
@@ -315,7 +305,7 @@ fn downstream_custom_container_measures_and_lays_out_through_public_scoped_apis(
     let (state, runtime) = external_container([child]);
     let node = Node::container(runtime);
     let mut ctx = context();
-    let root = ctx.create_window("external", rect(10, 20, 100, 80), node);
+    let root = ctx.create_window(Window::new("external", rect(10, 20, 100, 80), node));
     ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     let frame = FrameInfo::try_new(Dimensioni::new(320, 240), color(0, 0, 0, 255)).unwrap();
@@ -337,7 +327,7 @@ fn downstream_custom_container_measures_and_lays_out_through_public_scoped_apis(
 fn root_creation_and_lifecycle_need_no_projection_or_generated_node_identity() {
     let mut ctx = context();
     let content = Linear::create(LinearParameters::vertical(std::iter::empty::<Node>())).1;
-    let root = ctx.create_window("root", rect(10, 20, 100, 80), content);
+    let root = ctx.create_window(Window::new("root", rect(10, 20, 100, 80), content));
     let id = root.id();
 
     assert!(root.is_alive());
