@@ -159,9 +159,9 @@ impl MenuModel {
 fn downstream_window_owns_declarative_menu_and_live_concrete_items() {
     let mut context = context_with_state::<MenuModel>();
     let (open, open_item) = MenuItem::create(MenuItemParameters::new("Open").shortcut_hint("Ctrl+O"));
-    // Menu commands use their ordinary typed ports; intrinsic menu policy closes the popup before
-    // the application dispatcher invokes this handler.
-    context.subscribe_context(open.clone(), MenuModel::open_submitted).unwrap();
+    // Menu commands project their typed submission ports; intrinsic menu policy closes the popup
+    // before the application dispatcher invokes this handler.
+    context.subscribe_context(open.submitted(), MenuModel::open_submitted).unwrap();
     let (save, save_item) = MenuItem::create(MenuItemParameters::new("Save").disabled());
     let (word_wrap, word_wrap_item) = MenuItem::create(MenuItemParameters::new("Word Wrap").checked(true));
     let body = TextBlock::create(TextBlockParameters::new("body")).1;
@@ -197,20 +197,20 @@ fn downstream_window_owns_declarative_menu_and_live_concrete_items() {
 
     let model = MenuModel { save, word_wrap, invoked: Vec::new() };
     // Context owns the complete window, including its compact menu data and private surfaces.
-    // Concrete handles remain weak live views of item values moved into that declaration.
+    // Concrete handles remain non-owning live views of item values moved into that declaration.
     assert!(window.events().is_alive());
-    assert!(open.is_alive());
-    assert!(model.save.is_alive());
-    assert!(model.word_wrap.is_alive());
+    assert!(open.submitted().is_alive());
+    assert!(model.save.submitted().is_alive());
+    assert!(model.word_wrap.submitted().is_alive());
     assert!(model.invoked.is_empty());
 
     // Destroying the window releases the sole strong ownership chain for all menu items. The public
-    // handles are deliberately weak, so no handle can accidentally keep a discarded window alive.
+    // handles own only weak event endpoints, so they cannot keep a discarded window alive.
     context.ui().destroy_window(&window).unwrap();
     assert!(!window.events().is_alive());
-    assert!(!open.is_alive());
-    assert!(!model.save.is_alive());
-    assert!(!model.word_wrap.is_alive());
+    assert!(!open.submitted().is_alive());
+    assert!(!model.save.submitted().is_alive());
+    assert!(!model.word_wrap.submitted().is_alive());
 }
 
 #[test]

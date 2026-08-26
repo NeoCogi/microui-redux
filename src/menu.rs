@@ -34,7 +34,7 @@
 //! data. Menu rows are values rather than retained widget subtrees: there is no per-row container,
 //! interaction node, or three-cell presentation tree.
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, fmt, rc::Rc};
 
 use crate::ui_node::widgets::content_height;
 use crate::{
@@ -148,8 +148,31 @@ pub enum MenuItemAccessError {
     UnknownItem,
 }
 
+/// Process-unique identity for one concrete actionable menu item.
+///
+/// The value is allocated with the declaration and moves unchanged into its eventual menu surface.
+/// It is separate from submission delivery, so releasing or reusing an event-port allocation cannot
+/// redirect later presentation access through [`crate::Ui::menu_item`].
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[repr(transparent)]
+pub(crate) struct MenuItemId(
+    /// Shared non-reused value hidden behind the menu-item-specific type boundary.
+    crate::identity::RetainedObjectId,
+);
+
+impl MenuItemId {
+    /// Allocates one item key that cannot collide across Contexts or later declarations.
+    fn allocate() -> Self {
+        // Allocate before constructing either the record or handle so both receive the exact same
+        // immutable identity at their sole pairing boundary.
+        Self(crate::identity::RetainedObjectId::allocate())
+    }
+}
+
 /// Concrete semantic record owned by a declaration and then by exactly one menu surface.
 pub(crate) struct MenuItemRecord {
+    /// Process-unique identity preserved across the declaration-to-surface ownership transfer.
+    id: MenuItemId,
     /// Mutable presentation and interaction values stored without a second mirror type.
     pub(crate) parameters: MenuItemParameters,
     /// Strong source of this item's independently subscribable typed event.
@@ -166,25 +189,72 @@ pub struct MenuItem {
 }
 
 impl MenuItem {
-    /// Creates one uniquely owned item declaration and its weak application capability.
+    /// Creates one uniquely owned item declaration and its non-owning application capability.
     pub fn create(parameters: MenuItemParameters) -> (MenuItemHandle, Self) {
-        // Only the typed event queue is shared because subscriptions are weak capabilities. The
-        // semantic record itself remains a plain value throughout declaration and manager ownership.
+        // Stable identity is a plain value; only the event queue is shared because subscriptions
+        // are weak capabilities. The semantic record itself remains uniquely owned throughout.
+        let id = MenuItemId::allocate();
         let submitted_event = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
-        let handle = WidgetEventPortHandle::new(&submitted_event);
+        let handle = MenuItemHandle::new(id, WidgetEventPortHandle::new(&submitted_event));
         let item = Self {
-            record: MenuItemRecord { parameters, submitted_event },
+            record: MenuItemRecord { id, parameters, submitted_event },
         };
         (handle, item)
     }
 }
 
-/// Cloneable non-owning identity and submission endpoint for one concrete menu item.
+/// Cloneable non-owning capability for one concrete menu item.
 ///
-/// The declaration or mounted record strongly owns the corresponding event port for exactly its
-/// lifetime. This weak capability can be cloned, subscribed directly, checked for liveness, and
-/// used by [`crate::Ui::menu_item`] without mirroring any presentation state.
-pub type MenuItemHandle = WidgetEventPortHandle<MenuItemSubmitted>;
+/// The private stable ID selects presentation state through [`crate::Ui::menu_item`], while the
+/// weak typed endpoint subscribes to [`MenuItemSubmitted`]. Both describe the same uniquely owned
+/// record, but identity never depends on the endpoint's allocation address.
+pub struct MenuItemHandle {
+    /// Process-unique concrete identity used only by the owning menu surface manager.
+    id: MenuItemId,
+    /// Weak endpoint for enabled pointer submissions from this same item.
+    submitted: WidgetEventPortHandle<MenuItemSubmitted>,
+}
+
+impl MenuItemHandle {
+    /// Creates an application capability from an independently allocated identity and endpoint.
+    fn new(id: MenuItemId, submitted: WidgetEventPortHandle<MenuItemSubmitted>) -> Self {
+        // MenuItem construction establishes this pair before moving the record into any declaration
+        // hierarchy, so public code can never manufacture a mismatched handle.
+        Self { id, submitted }
+    }
+
+    /// Returns the private concrete key used for mounted presentation lookup.
+    pub(crate) const fn id(&self) -> MenuItemId {
+        // Copying identity neither inspects nor extends the weak submission endpoint lifetime.
+        self.id
+    }
+
+    /// Returns this item's weak typed submission endpoint.
+    pub fn submitted(&self) -> WidgetEventPortHandle<MenuItemSubmitted> {
+        // Clone only the weak endpoint so subscribing cannot retain the declaration or mounted menu
+        // record and does not participate in identity lookup.
+        self.submitted.clone()
+    }
+}
+
+impl Clone for MenuItemHandle {
+    /// Clones the application capability without allocating identity or retaining the item.
+    fn clone(&self) -> Self {
+        // Every clone preserves the ID/endpoint pairing established by MenuItem::create.
+        Self {
+            id: self.id,
+            submitted: self.submitted.clone(),
+        }
+    }
+}
+
+impl fmt::Debug for MenuItemHandle {
+    /// Reports endpoint liveness without exposing the private process-local identifier.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Keep the numeric identity private because it is neither forgeable nor persistent API.
+        f.debug_struct("MenuItemHandle").field("submitted", &self.submitted).finish_non_exhaustive()
+    }
+}
 
 /// Complete declarative menu bar installed intrinsically into one window.
 pub struct MenuBar {
@@ -516,18 +586,22 @@ impl MenuSurface {
         self.open_slot = slot;
     }
 
-    /// Returns a manager-owned item record through its weak typed capability.
+    /// Returns a manager-owned item record through its stable typed capability.
     pub(crate) fn item(&self, handle: &MenuItemHandle) -> Option<&MenuItemRecord> {
+        // Stable value comparison remains valid after every old event Weak has disappeared and its
+        // former allocation address becomes eligible for reuse.
         self.rows.iter().find_map(|row| match row {
-            MenuSlot::Item(item) if handle.identifies(&item.submitted_event) => Some(item),
+            MenuSlot::Item(item) if handle.id() == item.id => Some(item),
             MenuSlot::Item(_) | MenuSlot::Separator | MenuSlot::Branch { .. } => None,
         })
     }
 
-    /// Returns mutable manager-owned item state through its weak typed capability.
+    /// Returns mutable manager-owned item state through its stable typed capability.
     pub(crate) fn item_mut(&mut self, handle: &MenuItemHandle) -> Option<&mut MenuItemRecord> {
+        // The mutable path uses the same immutable ID relation as read access, so event connection
+        // state and endpoint allocation never influence which record is lent.
         self.rows.iter_mut().find_map(|row| match row {
-            MenuSlot::Item(item) if handle.identifies(&item.submitted_event) => Some(item),
+            MenuSlot::Item(item) if handle.id() == item.id => Some(item),
             MenuSlot::Item(_) | MenuSlot::Separator | MenuSlot::Branch { .. } => None,
         })
     }

@@ -213,7 +213,7 @@ pub struct FileDialog {
     active: bool,
     /// Component-owned terminal event source retained independently of any one activation.
     completed: Rc<RefCell<WidgetEventPort<FileDialogCompleted>>>,
-    /// Weak typed capability for the Context-owned dialog window.
+    /// Non-owning stable capability and event projection for the Context-owned dialog window.
     window: WindowHandle,
     /// UTF-8 directory currently represented by the two retained list columns.
     current_working_directory: String,
@@ -502,7 +502,7 @@ impl FileDialog {
     /// [`Self::open`] or [`Self::cancel`] so component activity and modal visibility stay
     /// synchronized.
     pub fn window(&self) -> &WindowHandle {
-        // Lend the weak capability without transferring ownership or exposing manager identity.
+        // Lend the aggregate capability without transferring ownership or exposing its private ID.
         &self.window
     }
 

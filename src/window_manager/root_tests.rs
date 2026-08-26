@@ -2292,8 +2292,8 @@ fn menu_items_dispatch_directly_after_close_while_disabled_items_leave_the_menu_
     let root = ctx
         .ui()
         .create_window(Window::new("menu events", rect(20, 25, 180, 120), empty_content()).menu_bar(menu_bar));
-    ctx.subscribe_context(enabled.clone(), Model::enabled_submitted).unwrap();
-    ctx.subscribe_context(disabled.clone(), Model::disabled_submitted).unwrap();
+    ctx.subscribe_context(enabled.submitted(), Model::enabled_submitted).unwrap();
+    ctx.subscribe_context(disabled.submitted(), Model::disabled_submitted).unwrap();
     let mut model = Model::default();
     ctx.update_ui_state(dimensions, &mut model);
 
@@ -2449,20 +2449,28 @@ fn auto_sized_window_includes_menu_bar_and_exposes_application_body_below_it() {
 #[test]
 fn live_but_unmounted_menu_item_is_unknown_to_ui() {
     let (handle, item) = MenuItem::create(MenuItemParameters::new("Unmounted"));
+    let destroyed_id = handle.id();
     let mut ctx = context();
 
-    assert!(handle.is_alive(), "the declaration still owns its typed event source");
+    assert!(handle.submitted().is_alive(), "the declaration still owns its typed event source");
     assert!(matches!(ctx.ui().menu_item(&handle), Err(crate::MenuItemAccessError::UnknownItem)));
     assert!(matches!(ctx.ui().menu_item_mut(&handle), Err(crate::MenuItemAccessError::UnknownItem)));
 
     drop(item);
-    assert!(!handle.is_alive(), "dropping the unmounted declaration expires its weak capability");
+    assert!(!handle.submitted().is_alive(), "dropping the unmounted declaration expires its weak capability");
+
+    // Release the final weak endpoint before creating an identical declaration. Its allocation may
+    // be reused, but the stable item identity remains retired independently of that address.
+    drop(handle);
+    let (replacement, replacement_item) = MenuItem::create(MenuItemParameters::new("Unmounted"));
+    assert_ne!(replacement.id(), destroyed_id);
+    drop(replacement_item);
 }
 
 #[test]
-fn menu_item_event_capability_cannot_resolve_another_contexts_record() {
-    let (first_handle, first_item) = MenuItem::create(MenuItemParameters::new("First"));
-    let (second_handle, second_item) = MenuItem::create(MenuItemParameters::new("Second"));
+fn menu_item_handle_cannot_resolve_another_contexts_record() {
+    let (first_handle, first_item) = MenuItem::create(MenuItemParameters::new("Same"));
+    let (second_handle, second_item) = MenuItem::create(MenuItemParameters::new("Same"));
     let mut first = context();
     let mut second = context();
     first
@@ -2472,12 +2480,53 @@ fn menu_item_event_capability_cannot_resolve_another_contexts_record() {
         .ui()
         .create_window(Window::new("second", rect(0, 0, 100, 80), empty_content()).menu_bar(MenuBar::new([Menu::new("File").item(second_item)])));
 
-    // The weak event endpoint is both the subscription capability and the item identity. Matching
-    // its allocation prevents equal presentation values from becoming cross-manager authority.
-    assert_eq!(first.ui().menu_item(&first_handle).unwrap().label, "First");
+    // Process-wide stable IDs distinguish otherwise identical records across managers. Submission
+    // endpoint allocations play no part in presentation access or cross-Context rejection.
+    assert_eq!(first.ui().menu_item(&first_handle).unwrap().label, "Same");
     assert!(matches!(first.ui().menu_item(&second_handle), Err(crate::MenuItemAccessError::UnknownItem)));
-    assert_eq!(second.ui().menu_item(&second_handle).unwrap().label, "Second");
+    assert_eq!(second.ui().menu_item(&second_handle).unwrap().label, "Same");
     assert!(matches!(second.ui().menu_item(&first_handle), Err(crate::MenuItemAccessError::UnknownItem)));
+}
+
+#[test]
+fn identical_menu_items_retain_independent_stable_identity() {
+    let (first_handle, first_item) = MenuItem::create(MenuItemParameters::new("Same"));
+    let (second_handle, second_item) = MenuItem::create(MenuItemParameters::new("Same"));
+    let menu_bar = MenuBar::new([Menu::new("File").item(first_item).item(second_item)]);
+    let mut ctx = context();
+    ctx.ui()
+        .create_window(Window::new("window", rect(0, 0, 100, 80), empty_content()).menu_bar(menu_bar));
+
+    // Mutating one ID-selected record must not depend on presentation equality, row position, or
+    // either item's independently allocated submission endpoint.
+    ctx.ui().menu_item_mut(&first_handle).unwrap().label = "First only".to_owned();
+    assert_eq!(ctx.ui().menu_item(&first_handle).unwrap().label, "First only");
+    assert_eq!(ctx.ui().menu_item(&second_handle).unwrap().label, "Same");
+}
+
+#[test]
+fn destroyed_mounted_menu_item_cannot_resolve_an_identical_replacement() {
+    let (stale, stale_item) = MenuItem::create(MenuItemParameters::new("Same"));
+    let stale_id = stale.id();
+    let mut ctx = context();
+    let window = ctx
+        .ui()
+        .create_window(Window::new("window", rect(0, 0, 100, 80), empty_content()).menu_bar(MenuBar::new([Menu::new("File").item(stale_item)])));
+    ctx.ui().destroy_window(&window).unwrap();
+
+    // Destruction removes both authoritative state and the strong endpoint owner before any new
+    // declaration exists, so stale access fails for identity rather than presentation mismatch.
+    assert!(matches!(ctx.ui().menu_item(&stale), Err(crate::MenuItemAccessError::UnknownItem)));
+    assert!(matches!(ctx.ui().menu_item_mut(&stale), Err(crate::MenuItemAccessError::UnknownItem)));
+    assert!(!stale.submitted().is_alive());
+    drop(window);
+    drop(stale);
+
+    let (replacement, replacement_item) = MenuItem::create(MenuItemParameters::new("Same"));
+    assert_ne!(replacement.id(), stale_id);
+    ctx.ui()
+        .create_window(Window::new("window", rect(0, 0, 100, 80), empty_content()).menu_bar(MenuBar::new([Menu::new("File").item(replacement_item)])));
+    assert_eq!(ctx.ui().menu_item(&replacement).unwrap().label, "Same");
 }
 
 #[test]

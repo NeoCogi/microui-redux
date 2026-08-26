@@ -1165,10 +1165,12 @@ fn registered_menu_item(
     parameters: MenuItemParameters,
     handler: for<'a> fn(&mut State, &mut Ui<'a>, &MenuItemSubmitted),
 ) -> (MenuItemHandle, MenuItem) {
-    // The handle exposes the item's typed event source and live presentation state, while the
-    // uniquely owned value carries the same item into exactly one declarative menu position.
+    // The handle keeps stable presentation identity and projects a separate weak submission
+    // endpoint, while the uniquely owned value enters exactly one declarative menu position.
     let (handle, item) = MenuItem::create(parameters);
-    context.subscribe_context(handle.clone(), handler).expect("new menu item must be unsubscribed");
+    context
+        .subscribe_context(handle.submitted(), handler)
+        .expect("new menu item must be unsubscribed");
     (handle, item)
 }
 

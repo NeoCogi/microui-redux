@@ -860,10 +860,11 @@ impl SurfaceForest {
 }
 
 impl WindowManager {
-    /// Borrows one mounted menu item's concrete public state through its typed capability.
+    /// Borrows one mounted menu item's concrete public state through its stable typed capability.
     pub(crate) fn menu_item(&self, handle: &crate::MenuItemHandle) -> Result<&crate::MenuItemParameters, crate::MenuItemAccessError> {
-        // Search authoritative bar and popup records by event-allocation identity. This authenticates
-        // the originating Context without a second item id or application-visible lookup table.
+        // Search authoritative bar and popup records by their process-unique item IDs. Forest
+        // membership rejects unmounted and foreign handles without consulting event allocations or
+        // maintaining an application-visible lookup table.
         for node in &self.surfaces.nodes {
             if let Some(item) = node.root().and_then(|root| root.menu_bar.as_ref()).and_then(|menu| menu.item(handle)) {
                 return Ok(&item.parameters);
@@ -875,7 +876,7 @@ impl WindowManager {
         Err(crate::MenuItemAccessError::UnknownItem)
     }
 
-    /// Mutably borrows one mounted menu item's concrete public state through its typed capability.
+    /// Mutably borrows one mounted menu item's concrete public state through its stable capability.
     pub(crate) fn menu_item_mut(&mut self, handle: &crate::MenuItemHandle) -> Result<&mut crate::MenuItemParameters, crate::MenuItemAccessError> {
         // Validate before changing transaction state so an unmounted or foreign handle is a true
         // no-op. The second linear scan is intentional; menu collections remain very small.

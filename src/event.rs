@@ -152,14 +152,6 @@ impl<E: WidgetEvent> WidgetEventPortHandle<E> {
         Self(Weak::new())
     }
 
-    /// Returns whether this weak capability names the supplied strong producer endpoint.
-    pub(crate) fn identifies(&self, port: &Rc<RefCell<WidgetEventPort<E>>>) -> bool {
-        // Compare allocation identity without upgrading the weak pointer or manufacturing another
-        // weak count. A stale handle keeps its former allocation reserved until the handle drops,
-        // so a later producer cannot reuse the same address while this comparison remains possible.
-        std::ptr::eq(self.0.as_ptr(), Rc::as_ptr(port))
-    }
-
     /// Returns whether the concrete retained producer still owns this event source.
     ///
     /// This is a liveness observation, not an ownership claim. The handle remains weak, and a later
