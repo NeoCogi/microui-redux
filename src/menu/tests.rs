@@ -39,7 +39,7 @@ use crate::ui_node::text_layout::control_text_position_with_font;
 fn empty_bar_has_zero_geometry() {
     // All later phases consume this same cached layout, so zero measurement also means no slot can
     // paint, hit, or anchor a popup even if the surrounding linear shell stretches horizontally.
-    let layout = layout_bar(&[], &Style::default(), &test_atlas());
+    let layout = layout_bar(&[], &Style::default(), &test_atlas(), Vec::new());
     assert_eq!((layout.size.width, layout.size.height), (0, 0));
     assert!(layout.slots.is_empty());
     assert_eq!(layout.marker_width, 0);
@@ -86,7 +86,7 @@ fn popup_text_region_separates_labels_from_shortcuts_and_submenu_arrows() {
     let style = Style::default();
     let (_, item) = MenuItem::create(MenuItemParameters::new("aaaa").shortcut_hint("bbbb"));
     let rows = vec![MenuSlot::Item(item.record), MenuSlot::Branch { label: "aaaaaa".into() }];
-    let layout = layout_popup(&rows, &style, &atlas);
+    let layout = layout_popup(&rows, &style, &atlas, Vec::new());
     let padding = style.padding.max(1);
 
     // The item label and right-aligned shortcut are positioned by the same production helper and

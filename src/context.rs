@@ -193,14 +193,14 @@ impl<'a> Ui<'a> {
 
     /// Borrows the concrete state of one mounted menu item.
     pub fn menu_item(&self, handle: &crate::MenuItemHandle) -> Result<&crate::MenuItemParameters, crate::MenuItemAccessError> {
-        // The handle supplies only private identity; all semantic ownership stays in the manager.
-        self.window_manager.menu_item(handle.id)
+        // The weak event endpoint doubles as unforgeable identity; semantic ownership stays in the manager.
+        self.window_manager.menu_item(handle)
     }
 
     /// Mutably borrows the concrete state of one mounted menu item.
     pub fn menu_item_mut(&mut self, handle: &crate::MenuItemHandle) -> Result<&mut crate::MenuItemParameters, crate::MenuItemAccessError> {
         // WindowManager invalidates layout conservatively before lending any public field mutably.
-        self.window_manager.menu_item_mut(handle.id)
+        self.window_manager.menu_item_mut(handle)
     }
 
     /// Returns the active popup names at the event-dispatch boundary for internal tests.

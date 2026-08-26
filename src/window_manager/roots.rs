@@ -33,7 +33,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use super::*;
-use crate::menu::{CompiledMenuPopup, MenuItemId, MenuPress, MenuSurface};
+use crate::menu::{CompiledMenuPopup, MenuPress, MenuSurface};
 use crate::{MouseButton, Node, RootHandle, UiInputEvent, Vec2i, rect};
 
 use super::root_chrome::{RootChromeGeometry, RootChromePart, RootInteraction, record_root_background, record_root_overlay, root_chrome_geometry, root_handle};
@@ -155,10 +155,7 @@ impl Surface {
         let auto_width = self.options.intersects(WindowOption::AUTO_WIDTH);
         let auto_height = self.options.intersects(WindowOption::AUTO_HEIGHT);
         let mut menu_bar = menu_bar;
-        let menu_size = menu_bar
-            .as_deref_mut()
-            .map(|bar| bar.measure(style, atlas, crate::Constraints::unbounded()))
-            .unwrap_or_default();
+        let menu_size = menu_bar.as_deref_mut().map(|bar| bar.measure(style, atlas)).unwrap_or_default();
         if self.options.intersects(WindowOption::AUTO_SIZE) {
             // Convert retained outer bounds to application-body bounds before asking the content
             // tree for intrinsic size. Fixed axes retain their programmed outer extent.
@@ -221,7 +218,7 @@ impl SurfaceBody {
     fn measure(&mut self, style: &Style, atlas: &crate::AtlasHandle, constraints: crate::Constraints) -> Dimensioni {
         match self {
             Self::Widgets(tree) => tree.measure(style, atlas, constraints),
-            Self::Menu(menu) => menu.measure(style, atlas, constraints),
+            Self::Menu(menu) => menu.measure(style, atlas),
         }
     }
 
@@ -919,34 +916,35 @@ impl SurfaceForest {
 }
 
 impl WindowManager {
-    /// Borrows one mounted menu item's concrete public state by private identity.
-    pub(crate) fn menu_item(&self, id: MenuItemId) -> Result<&crate::MenuItemParameters, crate::MenuItemAccessError> {
+    /// Borrows one mounted menu item's concrete public state through its typed capability.
+    pub(crate) fn menu_item(&self, handle: &crate::MenuItemHandle) -> Result<&crate::MenuItemParameters, crate::MenuItemAccessError> {
         for node in &self.surfaces.nodes {
-            if let Some(item) = node.root().and_then(|root| root.menu_bar.as_ref()).and_then(|menu| menu.item(id)) {
-                return Ok(item.parameters());
+            if let Some(item) = node.root().and_then(|root| root.menu_bar.as_ref()).and_then(|menu| menu.item(handle)) {
+                return Ok(&item.parameters);
             }
-            if let Some(item) = node.surface.body.menu().and_then(|menu| menu.item(id)) {
-                return Ok(item.parameters());
+            if let Some(item) = node.surface.body.menu().and_then(|menu| menu.item(handle)) {
+                return Ok(&item.parameters);
             }
         }
         Err(crate::MenuItemAccessError::UnknownItem)
     }
 
-    /// Mutably borrows one mounted menu item's concrete public state by private identity.
-    pub(crate) fn menu_item_mut(&mut self, id: MenuItemId) -> Result<&mut crate::MenuItemParameters, crate::MenuItemAccessError> {
-        // Invalidate before returning the reference: the caller may change any public field, and its
-        // borrow prevents a second manager call until the mutation has completed.
+    /// Mutably borrows one mounted menu item's concrete public state through its typed capability.
+    pub(crate) fn menu_item_mut(&mut self, handle: &crate::MenuItemHandle) -> Result<&mut crate::MenuItemParameters, crate::MenuItemAccessError> {
+        // Validate before changing transaction state so an unmounted or foreign handle is a true
+        // no-op. The second linear scan is intentional; menu collections remain very small.
+        self.menu_item(handle)?;
         self.invalidate_ui_commit();
         for node in &mut self.surfaces.nodes {
             match (&mut node.kind, &mut node.surface.body) {
                 (SurfaceKind::Root(root), _) => {
-                    if let Some(item) = root.menu_bar.as_mut().and_then(|menu| menu.item_mut(id)) {
-                        return Ok(item.parameters_mut());
+                    if let Some(item) = root.menu_bar.as_mut().and_then(|menu| menu.item_mut(handle)) {
+                        return Ok(&mut item.parameters);
                     }
                 }
                 (SurfaceKind::Popup(PopupState::Menu { .. }), SurfaceBody::Menu(menu)) => {
-                    if let Some(item) = menu.item_mut(id) {
-                        return Ok(item.parameters_mut());
+                    if let Some(item) = menu.item_mut(handle) {
+                        return Ok(&mut item.parameters);
                     }
                 }
                 (SurfaceKind::Popup(_), SurfaceBody::Widgets(_)) => {}
@@ -955,7 +953,7 @@ impl WindowManager {
                 }
             }
         }
-        Err(crate::MenuItemAccessError::UnknownItem)
+        unreachable!("a validated menu item must remain mounted during one exclusive manager borrow")
     }
 
     /// Registers one concrete root after validating its optional dialog parent edge.

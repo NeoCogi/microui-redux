@@ -1296,6 +1296,33 @@ fn warmed_container_measurement_and_layout_allocate_nothing() {
 }
 
 #[test]
+fn warmed_recursive_menu_layout_reuses_every_slot_and_path_allocation() {
+    let (_, recent_item) = MenuItem::create(MenuItemParameters::new("Recent project"));
+    let menu_bar = MenuBar::new([Menu::new("File").submenu(Menu::new("Recent").item(recent_item))]);
+    let mut ctx = context();
+    let root = ctx
+        .ui()
+        .create_window(Window::new("allocation menu", rect(10, 10, 300, 220), empty_content()).menu_bar(menu_bar));
+    let dimensions = Dimensioni::new(640, 480);
+
+    // Open both levels once so bar slots, popup slots, visible order, and popup-path scratch all
+    // reach their steady capacities before the allocation counter begins.
+    ctx.update_ui(dimensions);
+    let heading = ctx.debug_menu_anchor_rects(root.id()).unwrap()[0].unwrap();
+    click_rect(&mut ctx, heading);
+    let submenu = ctx.debug_active_menu_row_rects()[0][0];
+    click_rect(&mut ctx, submenu);
+    assert_eq!(ctx.debug_active_menu_row_rects().len(), 2);
+    ctx.update_ui(dimensions);
+
+    let measurement = AllocationMeasurement::begin();
+    ctx.update_ui(dimensions);
+    let allocations = measurement.finish();
+
+    assert_eq!(allocations.events, 0, "steady menu layout allocated {} bytes", allocations.bytes);
+}
+
+#[test]
 fn fronting_changes_only_cross_root_z_order() {
     let mut ctx = context();
     let first = ctx.ui().create_window(Window::new("first", rect(0, 0, 100, 80), empty_content()));
@@ -2382,6 +2409,27 @@ fn live_but_unmounted_menu_item_is_unknown_to_ui() {
 
     drop(item);
     assert!(!handle.is_alive(), "dropping the unmounted declaration expires its weak capability");
+}
+
+#[test]
+fn menu_item_event_capability_cannot_resolve_another_contexts_record() {
+    let (first_handle, first_item) = MenuItem::create(MenuItemParameters::new("First"));
+    let (second_handle, second_item) = MenuItem::create(MenuItemParameters::new("Second"));
+    let mut first = context();
+    let mut second = context();
+    first
+        .ui()
+        .create_window(Window::new("first", rect(0, 0, 100, 80), empty_content()).menu_bar(MenuBar::new([Menu::new("File").item(first_item)])));
+    second
+        .ui()
+        .create_window(Window::new("second", rect(0, 0, 100, 80), empty_content()).menu_bar(MenuBar::new([Menu::new("File").item(second_item)])));
+
+    // The weak event endpoint is both the subscription capability and the item identity. Matching
+    // its allocation prevents equal presentation values from becoming cross-manager authority.
+    assert_eq!(first.ui().menu_item(&first_handle).unwrap().label, "First");
+    assert!(matches!(first.ui().menu_item(&second_handle), Err(crate::MenuItemAccessError::UnknownItem)));
+    assert_eq!(second.ui().menu_item(&second_handle).unwrap().label, "Second");
+    assert!(matches!(second.ui().menu_item(&first_handle), Err(crate::MenuItemAccessError::UnknownItem)));
 }
 
 #[test]

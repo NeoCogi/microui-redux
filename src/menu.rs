@@ -34,17 +34,12 @@
 //! data. Menu rows are values rather than retained widget subtrees: there is no per-row container,
 //! interaction node, or three-cell presentation tree.
 
-use std::{
-    cell::RefCell,
-    num::NonZeroU64,
-    rc::Rc,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::{cell::RefCell, rc::Rc};
 
 use crate::ui_node::widgets::content_height;
 use crate::{
-    AtlasHandle, Color, Constraints, ControlColor, Dimensioni, FontChoice, FontRole, MouseButton, Recti, Style, UiInputEvent, Vec2i, WidgetEventPortHandle,
-    WidgetOption, WidgetPaintCtx,
+    AtlasHandle, Color, ControlColor, Dimensioni, FontChoice, FontRole, MouseButton, Recti, Style, UiInputEvent, Vec2i, WidgetEventPortHandle, WidgetOption,
+    WidgetPaintCtx,
 };
 
 #[cfg(test)]
@@ -52,13 +47,6 @@ mod tests;
 
 /// Smallest marker column that can contain the atlas-independent radio fallback.
 const MIN_MARKER_COLUMN_WIDTH: i32 = 3;
-
-/// Process-wide allocator for private menu-item identities created before a manager exists.
-///
-/// Relaxed ordering is sufficient because uniqueness, rather than cross-thread publication, is the
-/// only property required. The application-facing handle remains non-owning through its weak event
-/// endpoint even though its compact identifier is copied by value.
-static NEXT_MENU_ITEM_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Visual state displayed in the optional marker gutter of one menu item.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -160,44 +148,12 @@ pub enum MenuItemAccessError {
     UnknownItem,
 }
 
-/// Stable private identity assigned while an item is still an unmounted declaration.
-///
-/// Creation cannot borrow a window manager, so this process-unique value crosses the declaration
-/// boundary and later lets the concrete surface forest locate the manager-owned record directly.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub(crate) struct MenuItemId(NonZeroU64);
-
-impl MenuItemId {
-    /// Allocates an identity that is never reused during the process lifetime.
-    fn next() -> Self {
-        // Fetching the maximum value would make the following allocation wrap to zero, which cannot
-        // be represented by `NonZeroU64`; fail at the allocation site instead of aliasing an item.
-        let raw = NEXT_MENU_ITEM_ID.fetch_add(1, Ordering::Relaxed);
-        assert!(raw != u64::MAX, "menu item identity space exhausted");
-        Self(NonZeroU64::new(raw).expect("menu item identity allocator returned zero"))
-    }
-}
-
 /// Concrete semantic record owned by a declaration and then by exactly one menu surface.
 pub(crate) struct MenuItemRecord {
-    /// Stable lookup identity copied into the application-facing weak handle.
-    id: MenuItemId,
     /// Mutable presentation and interaction values stored without a second mirror type.
-    parameters: MenuItemParameters,
+    pub(crate) parameters: MenuItemParameters,
     /// Strong source of this item's independently subscribable typed event.
     submitted_event: Rc<RefCell<crate::event::WidgetEventPort<MenuItemSubmitted>>>,
-}
-
-impl MenuItemRecord {
-    /// Borrows the concrete public presentation record stored by this menu row.
-    pub(crate) fn parameters(&self) -> &MenuItemParameters {
-        &self.parameters
-    }
-
-    /// Mutably borrows the concrete public presentation record stored by this menu row.
-    pub(crate) fn parameters_mut(&mut self) -> &mut MenuItemParameters {
-        &mut self.parameters
-    }
 }
 
 /// Uniquely owned declaration value for one actionable menu row.
@@ -215,13 +171,11 @@ impl MenuItem {
         // Only the typed event queue is shared because subscriptions are weak capabilities. The
         // semantic record itself remains a plain value throughout declaration and manager ownership.
         let submitted_event = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
-        let id = MenuItemId::next();
         let handle = MenuItemHandle {
-            id,
             submitted: WidgetEventPortHandle::new(&submitted_event),
         };
         let item = Self {
-            record: MenuItemRecord { id, parameters, submitted_event },
+            record: MenuItemRecord { parameters, submitted_event },
         };
         (handle, item)
     }
@@ -230,10 +184,8 @@ impl MenuItem {
 /// Cloneable weak access to one item retained by a compiled menu.
 #[derive(Clone)]
 pub struct MenuItemHandle {
-    /// Private semantic identity resolved only through an exclusive [`Ui`](crate::Ui) façade.
-    pub(crate) id: MenuItemId,
-    /// Weak native event capability returned without borrowing semantic state.
-    submitted: WidgetEventPortHandle<MenuItemSubmitted>,
+    /// Weak native event capability used for subscription, liveness, and manager-side identity.
+    pub(crate) submitted: WidgetEventPortHandle<MenuItemSubmitted>,
 }
 
 impl MenuItemHandle {
@@ -407,13 +359,15 @@ impl MenuSurface {
     }
 
     /// Returns this surface's intrinsic menu extent and refreshes local slot geometry.
-    pub(crate) fn measure(&mut self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    pub(crate) fn measure(&mut self, style: &Style, atlas: &AtlasHandle) -> Dimensioni {
         // Menus deliberately keep intrinsic row geometry. Root layout stretches only the bar's
-        // assigned width, while popup outer auto-size consumes this exact preferred size.
+        // assigned width, while popup outer auto-size consumes this exact preferred size. Moving
+        // the old slot vector into the helper retains its allocation across committed layouts.
+        let slots = std::mem::take(&mut self.geometry.slots);
         self.geometry = if self.popup {
-            layout_popup(&self.rows, style, atlas)
+            layout_popup(&self.rows, style, atlas, slots)
         } else {
-            layout_bar(&self.rows, style, atlas)
+            layout_bar(&self.rows, style, atlas, slots)
         };
         self.geometry.size
     }
@@ -581,18 +535,18 @@ impl MenuSurface {
         self.open_slot = slot;
     }
 
-    /// Returns a manager-owned item record by stable private identity.
-    pub(crate) fn item(&self, id: MenuItemId) -> Option<&MenuItemRecord> {
+    /// Returns a manager-owned item record through its weak typed capability.
+    pub(crate) fn item(&self, handle: &MenuItemHandle) -> Option<&MenuItemRecord> {
         self.rows.iter().find_map(|row| match row {
-            MenuSlot::Item(item) if item.id == id => Some(item),
+            MenuSlot::Item(item) if handle.submitted.identifies(&item.submitted_event) => Some(item),
             MenuSlot::Item(_) | MenuSlot::Separator | MenuSlot::Branch { .. } => None,
         })
     }
 
-    /// Returns mutable manager-owned item state by stable private identity.
-    pub(crate) fn item_mut(&mut self, id: MenuItemId) -> Option<&mut MenuItemRecord> {
+    /// Returns mutable manager-owned item state through its weak typed capability.
+    pub(crate) fn item_mut(&mut self, handle: &MenuItemHandle) -> Option<&mut MenuItemRecord> {
         self.rows.iter_mut().find_map(|row| match row {
-            MenuSlot::Item(item) if item.id == id => Some(item),
+            MenuSlot::Item(item) if handle.submitted.identifies(&item.submitted_event) => Some(item),
             MenuSlot::Item(_) | MenuSlot::Separator | MenuSlot::Branch { .. } => None,
         })
     }
@@ -619,11 +573,16 @@ impl MenuRoute {
 }
 
 /// Computes horizontal heading slots for one persistent bar surface.
-fn layout_bar(headings: &[MenuSlot], style: &Style, atlas: &AtlasHandle) -> MenuSurfaceLayout {
+fn layout_bar(headings: &[MenuSlot], style: &Style, atlas: &AtlasHandle, mut slots: Vec<Recti>) -> MenuSurfaceLayout {
     // An explicitly empty bar is inert and consumes no application-content height. Keeping this
     // edge case in the shared geometry function also prevents paint and hit testing from disagreeing.
+    slots.clear();
     if headings.is_empty() {
-        return MenuSurfaceLayout::default();
+        return MenuSurfaceLayout {
+            size: Dimensioni::default(),
+            slots,
+            marker_width: 0,
+        };
     }
 
     // Headings use one body font and retain intrinsic widths even when the bar stretches.
@@ -632,7 +591,7 @@ fn layout_bar(headings: &[MenuSlot], style: &Style, atlas: &AtlasHandle) -> Menu
     let font = style.resolve_font_choice(font_choice);
     let preferred_height = content_height(style, atlas, font_choice, atlas.get_icon_size(style.icons.check).height);
     let mut x = 0_i32;
-    let mut slots = Vec::with_capacity(headings.len());
+    slots.reserve(headings.len());
     for heading in headings {
         let MenuSlot::Branch { label, .. } = heading else {
             // Construction keeps this impossible while accepting one shared compact slot type.
@@ -651,14 +610,15 @@ fn layout_bar(headings: &[MenuSlot], style: &Style, atlas: &AtlasHandle) -> Menu
 }
 
 /// Computes vertical popup rows and one shared marker/text split.
-fn layout_popup(rows: &[MenuSlot], style: &Style, atlas: &AtlasHandle) -> MenuSurfaceLayout {
+fn layout_popup(rows: &[MenuSlot], style: &Style, atlas: &AtlasHandle, mut slots: Vec<Recti>) -> MenuSurfaceLayout {
     // Measure raw glyph maxima because common control text supplies its own inner padding.
+    slots.clear();
+    slots.reserve(rows.len());
     let padding = style.padding.max(1);
     let mut label_width = 0_i32;
     let mut trailing_width = 0_i32;
     let mut marker = false;
     let mut y = 0_i32;
-    let mut slots = Vec::with_capacity(rows.len());
     for entry in rows {
         let height = match entry {
             MenuSlot::Item(item) => {
