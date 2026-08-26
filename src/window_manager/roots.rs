@@ -30,7 +30,7 @@
 
 //! Concrete retained surface ownership and cross-surface traversal policy.
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, fmt, rc::Rc};
 
 use super::*;
 use crate::menu::{MenuEntry, MenuPress, MenuSlot, MenuSurface};
@@ -68,19 +68,75 @@ pub enum PopupEvent {
 
 impl crate::WidgetEvent for PopupEvent {}
 
-/// Stable identifier for one popup definition inside its owning window.
+/// Process-unique identifier for one popup definition inside its owning window.
 ///
-/// The identifier is intentionally private. Application code proves popup identity by carrying a
-/// [`PopupHandle`], so popup definitions cannot be passed to generic window APIs.
+/// The identifier is intentionally private and allocated independently from lifecycle events.
+/// Application code proves popup identity by carrying a [`PopupHandle`], so popup definitions
+/// cannot be passed to generic window APIs.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-struct PopupId(usize);
+#[repr(transparent)]
+pub(super) struct PopupId(
+    /// Shared non-reused value hidden behind the popup-specific type boundary.
+    crate::identity::RetainedObjectId,
+);
+
+impl PopupId {
+    /// Allocates one popup key that cannot collide across Contexts or later object lifetimes.
+    fn allocate() -> Self {
+        // Menu and application popups share this concrete wrapper because both occupy popup nodes;
+        // only application popups expose a handle and event endpoint.
+        Self(crate::identity::RetainedObjectId::allocate())
+    }
+}
 
 /// Cloneable non-owning capability for one application-authored popup.
 ///
-/// This is the popup's typed dismissal endpoint itself. Its event type prevents use in window-only
-/// operations, and its weak allocation identity lets the forest authenticate the originating
-/// Context without exposing or duplicating its private `PopupId`.
-pub type PopupHandle = crate::WidgetEventPortHandle<PopupEvent>;
+/// The private stable ID selects popup mutations; the weak typed endpoint observes dismissal. The
+/// two values describe the same registered popup but neither derives identity from the other's
+/// allocation, so allocator address reuse cannot retarget a stale capability.
+pub struct PopupHandle {
+    /// Process-unique concrete identity used only by the owning window manager.
+    id: PopupId,
+    /// Weak endpoint for policy-driven dismissal observations from this same popup.
+    events: crate::WidgetEventPortHandle<PopupEvent>,
+}
+
+impl PopupHandle {
+    /// Creates an application capability from an independently allocated identity and endpoint.
+    fn new(id: PopupId, events: crate::WidgetEventPortHandle<PopupEvent>) -> Self {
+        // Registration establishes this pairing once while it owns both concrete values.
+        Self { id, events }
+    }
+
+    /// Returns the private concrete key used by popup forest traversal.
+    pub(super) const fn id(&self) -> PopupId {
+        // The typed value is copied directly without inspecting the weak event allocation.
+        self.id
+    }
+
+    /// Returns this popup's weak typed dismissal endpoint.
+    pub fn events(&self) -> crate::WidgetEventPortHandle<PopupEvent> {
+        // Subscription receives only the weak endpoint; object selection remains a separate ID
+        // operation performed by checked Ui methods.
+        self.events.clone()
+    }
+}
+
+impl Clone for PopupHandle {
+    /// Clones the application capability without allocating identity or retaining the popup.
+    fn clone(&self) -> Self {
+        // Preserve the original stable ID/endpoint association in every application-held clone.
+        Self { id: self.id, events: self.events.clone() }
+    }
+}
+
+impl fmt::Debug for PopupHandle {
+    /// Reports endpoint liveness without exposing the private process-local identifier.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Debug output intentionally describes only the observable endpoint state.
+        f.debug_struct("PopupHandle").field("events", &self.events).finish_non_exhaustive()
+    }
+}
 
 /// Storage and traversal state shared by a window body or popup body.
 ///
@@ -881,11 +937,11 @@ impl WindowManager {
             MenuSurface::new(headings, false)
         });
 
-        // One strong event owner lives with root policy; the returned handle keeps only a weak,
-        // typed capability that also authenticates its originating Context.
+        // Identity and event delivery are allocated separately, then paired once in the returned
+        // application handle. The forest owns the same ID and the only strong event endpoint.
+        let id = RootId::allocate();
         let events = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
         let event_handle = crate::WidgetEventPortHandle::new(&events);
-        let id = event_handle.id();
         self.surfaces.insert_root(SurfaceNode {
             key: SurfaceKey::Root(id),
             parent: parent.map(SurfaceKey::Root),
@@ -906,14 +962,7 @@ impl WindowManager {
         }
         self.surfaces.rebuild_visible_order();
         self.invalidate_ui_commit();
-        Ok(event_handle)
-    }
-
-    /// Allocates a popup identifier that will never be reused.
-    fn next_popup_id(&mut self) -> PopupId {
-        let id = PopupId(self.next_popup_id);
-        self.next_popup_id = self.next_popup_id.checked_add(1).expect("retained popup id counter overflowed");
-        id
+        Ok(WindowHandle::new(id, event_handle))
     }
 
     /// Creates an open ordinary window from one complete retained definition.
@@ -940,9 +989,9 @@ impl WindowManager {
 
     /// Registers one application-authored popup below an already validated root.
     fn register_application_popup(&mut self, parent: SurfaceKey, name: &str, content: Node) -> PopupHandle {
-        let id = self.next_popup_id();
-        // The forest node retains the strong lifecycle port while the returned typed capability is
-        // weak, so handle liveness and popup lifetime cannot diverge.
+        let id = PopupId::allocate();
+        // The forest node retains the strong lifecycle port while the application handle combines
+        // an independent stable ID with a weak endpoint for the same registered popup.
         let events = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
         let event_handle = crate::WidgetEventPortHandle::new(&events);
         self.surfaces.insert_popup(SurfaceNode {
@@ -952,7 +1001,7 @@ impl WindowManager {
             kind: SurfaceKind::Popup(PopupState::Application { anchor: Recti::default(), events }),
         });
         self.invalidate_ui_commit();
-        event_handle
+        PopupHandle::new(id, event_handle)
     }
 
     /// Consumes one declaration row vector directly into a concrete menu-popup forest node.
@@ -972,7 +1021,7 @@ impl WindowManager {
                 }
             }
         }
-        let id = self.next_popup_id();
+        let id = PopupId::allocate();
         self.surfaces.insert_popup(SurfaceNode {
             key: SurfaceKey::Popup(id),
             parent: Some(parent),
@@ -1205,31 +1254,26 @@ impl WindowManager {
         self.surfaces.root_node_mut(root).ok_or(SurfaceMutationError::UnknownWindow)
     }
 
-    /// Authenticates one application-facing window handle and returns its manager-local identity.
+    /// Resolves one application-facing window handle to its process-unique concrete identity.
     fn window_id(&self, window: &WindowHandle) -> Result<RootId, SurfaceMutationError> {
-        let root = self
-            .surfaces
+        // Process-wide uniqueness makes membership in this forest sufficient authentication. A
+        // stale or foreign handle cannot share its ID with any current node.
+        self.surfaces
             .root_node(window.id())
-            .and_then(|node| node.root())
-            .ok_or(SurfaceMutationError::UnknownWindow)?;
-        if !window.identifies(&root.events) {
-            return Err(SurfaceMutationError::UnknownWindow);
-        }
-        // The derived concrete identity is used only inside this manager after authentication.
-        Ok(window.id())
+            .and_then(SurfaceNode::root)
+            .map(|_| window.id())
+            .ok_or(SurfaceMutationError::UnknownWindow)
     }
 
-    /// Authenticates one application-facing popup handle and returns its manager-local identity.
+    /// Resolves one application-facing popup handle to its process-unique concrete identity.
     fn popup_id(&self, popup: &PopupHandle) -> Result<PopupId, SurfaceMutationError> {
-        // Only application popup nodes own this event type. Allocation identity therefore finds
-        // both the private concrete id and the originating Context in one scan.
+        // A menu popup can share the `PopupId` wrapper but never the same process-wide value. The
+        // role check additionally preserves the public API boundary around application popups.
         self.surfaces
-            .nodes
-            .iter()
-            .find_map(|node| match (node.key, node.popup()) {
-                (SurfaceKey::Popup(id), Some(PopupState::Application { events, .. })) if popup.identifies(events) => Some(id),
-                _ => None,
-            })
+            .popup_node(popup.id())
+            .and_then(SurfaceNode::popup)
+            .filter(|popup| matches!(popup, PopupState::Application { .. }))
+            .map(|_| popup.id())
             .ok_or(SurfaceMutationError::UnknownPopup)
     }
 

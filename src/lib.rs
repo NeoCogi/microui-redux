@@ -200,6 +200,7 @@ pub mod atlas;
 mod context;
 mod event;
 mod file_dialog;
+mod identity;
 pub mod image;
 mod input;
 mod math;

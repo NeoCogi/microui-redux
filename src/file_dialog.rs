@@ -355,7 +355,7 @@ impl FileDialog {
             .expect("new file-dialog Open event must be unsubscribed");
         ctx.subscribe_context_with(cancel_handle.submitted(), accessor, Self::dispatch_cancel::<State>)
             .expect("new file-dialog Cancel event must be unsubscribed");
-        ctx.subscribe_context_with(window.clone(), accessor, Self::dispatch_window_event::<State>)
+        ctx.subscribe_context_with(window.events(), accessor, Self::dispatch_window_event::<State>)
             .expect("new file-dialog window event must be unsubscribed");
 
         Self {
@@ -548,7 +548,7 @@ impl FileDialog {
     /// Resets activation-specific model and widget state before the dialog window is shown.
     fn prepare_open(&mut self, request: FileDialogRequest, icons: ThemeIcons) -> (String, Recti) {
         assert!(!self.active, "file dialog is already open");
-        assert!(self.window.is_alive(), "application-owned file-dialog window was destroyed");
+        assert!(self.window.events().is_alive(), "application-owned file-dialog window was destroyed");
 
         let FileDialogRequest { title, initial_directory, rect } = request;
         self.icons = icons;
@@ -908,7 +908,7 @@ mod tests {
         // Destruction expires both the component's stored handle and this clone; subsequent public
         // mutation reports the concrete window failure instead of consulting a forgeable id.
         context.ui().destroy_window(&dialog_window).unwrap();
-        assert!(!model.dialog.window().is_alive());
+        assert!(!model.dialog.window().events().is_alive());
         assert_eq!(context.ui().set_window_visible(&dialog_window, true), Err(SurfaceMutationError::UnknownWindow));
     }
 

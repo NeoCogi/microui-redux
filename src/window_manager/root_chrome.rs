@@ -35,8 +35,10 @@
 //! display list. The retained [`crate::Node`] stored for a window therefore represents only the
 //! application-authored content tree.
 
+use std::fmt;
+
 use crate::render::Painter;
-use crate::{AtlasHandle, ControlColor, Dimensioni, Recti, Style, WindowOption};
+use crate::{AtlasHandle, ControlColor, Dimensioni, Recti, Style, WidgetEventPortHandle, WindowOption};
 
 /// Active pointer gesture owned by manager-rendered window chrome.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -68,17 +70,53 @@ impl crate::WidgetEvent for WindowEvent {}
 
 /// Cloneable non-owning capability for one manager-owned window or dialog.
 ///
-/// The event payload makes this capability distinct from popup and widget handles at compile time.
-/// Its weak allocation identity also authenticates checked [`crate::Ui`] mutations without a public
-/// numeric identifier, while dropping it never affects the retained window lifetime.
-pub type WindowHandle = crate::WidgetEventPortHandle<WindowEvent>;
+/// Stable object identity and event delivery are deliberately separate fields. The private
+/// [`super::RootId`] selects checked [`crate::Ui`] mutations and is never derived from an address;
+/// the weak typed endpoint only subscribes to [`WindowEvent`] values. Cloning or dropping this
+/// aggregate application handle never changes retained window ownership.
+pub struct WindowHandle {
+    /// Process-unique concrete identity used only by the owning window manager.
+    id: super::RootId,
+    /// Weak endpoint for geometry and close-request observations from this same window.
+    events: WidgetEventPortHandle<WindowEvent>,
+}
 
 impl WindowHandle {
-    /// Derives the concrete manager-local key carried only inside retained traversal.
-    pub(crate) fn id(&self) -> super::RootId {
-        // The event allocation is created before its forest node and remains strongly owned by that
-        // node, so its process-local token is stable for the complete registered lifetime.
-        super::RootId::from_raw(self.identity_token())
+    /// Creates an application capability from an independently allocated identity and endpoint.
+    pub(super) fn new(id: super::RootId, events: WidgetEventPortHandle<WindowEvent>) -> Self {
+        // This private constructor is the sole pairing boundary. Manager registration creates both
+        // values for the same root before either becomes observable to application code.
+        Self { id, events }
+    }
+
+    /// Returns the private concrete key used by forest traversal and test diagnostics.
+    pub(crate) const fn id(&self) -> super::RootId {
+        // Copying the small typed value neither consults nor extends the event endpoint lifetime.
+        self.id
+    }
+
+    /// Returns this window's weak typed event endpoint.
+    pub fn events(&self) -> WidgetEventPortHandle<WindowEvent> {
+        // Clone only the weak endpoint so subscription remains independent from stable identity and
+        // cannot retain the manager-owned window.
+        self.events.clone()
+    }
+}
+
+impl Clone for WindowHandle {
+    /// Clones the application capability without allocating a new identity or owning the window.
+    fn clone(&self) -> Self {
+        // Every clone must preserve the original ID/endpoint pairing established at registration.
+        Self { id: self.id, events: self.events.clone() }
+    }
+}
+
+impl fmt::Debug for WindowHandle {
+    /// Reports endpoint liveness without exposing the private process-local identifier.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The numeric identity is intentionally absent because it is an implementation key rather
+        // than an application-visible or persistent window identifier.
+        f.debug_struct("WindowHandle").field("events", &self.events).finish_non_exhaustive()
     }
 }
 

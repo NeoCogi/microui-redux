@@ -198,7 +198,7 @@ fn downstream_window_owns_declarative_menu_and_live_concrete_items() {
     let model = MenuModel { save, word_wrap, invoked: Vec::new() };
     // Context owns the complete window, including its compact menu data and private surfaces.
     // Concrete handles remain weak live views of item values moved into that declaration.
-    assert!(window.is_alive());
+    assert!(window.events().is_alive());
     assert!(open.is_alive());
     assert!(model.save.is_alive());
     assert!(model.word_wrap.is_alive());
@@ -207,7 +207,7 @@ fn downstream_window_owns_declarative_menu_and_live_concrete_items() {
     // Destroying the window releases the sole strong ownership chain for all menu items. The public
     // handles are deliberately weak, so no handle can accidentally keep a discarded window alive.
     context.ui().destroy_window(&window).unwrap();
-    assert!(!window.is_alive());
+    assert!(!window.events().is_alive());
     assert!(!open.is_alive());
     assert!(!model.save.is_alive());
     assert!(!model.word_wrap.is_alive());
@@ -351,10 +351,10 @@ fn window_creation_and_lifecycle_need_no_numeric_application_identity() {
     let content = Linear::create(LinearParameters::vertical(std::iter::empty::<Node>())).1;
     let window = ctx.ui().create_window(Window::new("window", rect(10, 20, 100, 80), content));
 
-    assert!(window.is_alive());
+    assert!(window.events().is_alive());
     ctx.ui().set_window_visible(&window, false).unwrap();
-    assert!(window.is_alive(), "hiding retains the window and its application tree");
+    assert!(window.events().is_alive(), "hiding retains the window and its application tree");
     ctx.ui().destroy_window(&window).unwrap();
-    assert!(!window.is_alive());
+    assert!(!window.events().is_alive());
     assert_eq!(ctx.ui().set_window_rect(&window, rect(0, 0, 1, 1)), Err(SurfaceMutationError::UnknownWindow));
 }

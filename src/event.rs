@@ -160,14 +160,6 @@ impl<E: WidgetEvent> WidgetEventPortHandle<E> {
         std::ptr::eq(self.0.as_ptr(), Rc::as_ptr(port))
     }
 
-    /// Returns a process-local token for manager-private concrete identity.
-    pub(crate) fn identity_token(&self) -> usize {
-        // The weak allocation keeps its control block reserved until every copied token source has
-        // gone away. Consequently the address is stable and cannot identify a newer live producer
-        // while any corresponding application capability still exists.
-        self.0.as_ptr() as usize
-    }
-
     /// Returns whether the concrete retained producer still owns this event source.
     ///
     /// This is a liveness observation, not an ownership claim. The handle remains weak, and a later

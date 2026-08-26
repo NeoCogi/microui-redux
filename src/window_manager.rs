@@ -141,19 +141,24 @@ impl Window {
     }
 }
 
-/// Manager-local identity for a window or dialog retained by [`crate::Context`].
+/// Process-unique identity for a window or dialog retained by [`crate::Context`].
 ///
-/// Application code carries an authenticated [`WindowHandle`] instead. Keeping the counter private
-/// prevents a value allocated by one Context from being accepted accidentally by another Context.
+/// Application code carries a [`WindowHandle`] whose private copy selects this concrete key. A
+/// process-wide source prevents a handle created by one Context from colliding with a surface in
+/// another, while the distinct wrapper prevents popup keys from entering root-only operations.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct RootId(usize);
+#[repr(transparent)]
+pub(crate) struct RootId(
+    /// Shared non-reused value hidden behind the root-specific type boundary.
+    crate::identity::RetainedObjectId,
+);
 
 impl RootId {
-    /// Wraps one live window-event allocation token as a concrete root identifier.
-    pub(crate) const fn from_raw(raw: usize) -> Self {
-        // Only the manager can obtain the crate-private token from a typed event capability, so
-        // public code cannot forge or observe this traversal key.
-        Self(raw)
+    /// Allocates a new root identity independently from every event endpoint allocation.
+    pub(crate) fn allocate() -> Self {
+        // The concrete wrapper is retained in both the forest key and the private application
+        // handle; neither exposes the shared numeric value.
+        Self(crate::identity::RetainedObjectId::allocate())
     }
 }
 
@@ -200,8 +205,6 @@ pub(crate) struct WindowManager {
     /// Activation is deliberately independent of stacking. A user can therefore focus a control
     /// in a low layer without raising that root over windows in a higher layer.
     active_root: Option<RootId>,
-    /// Next window-owned popup id counter.
-    next_popup_id: usize,
     /// Ordered input state owned and consumed directly by this window manager.
     input: Input,
     /// Dimensions of the most recent complete update/layout commit.
@@ -211,14 +214,14 @@ pub(crate) struct WindowManager {
 impl WindowManager {
     /// Creates an empty manager with resolved style and no committed UI frame.
     pub(crate) fn new(style: Style) -> Self {
-        // Identity counters start above zero and never rewind, including after destruction.
+        // Retained identities come from the process-wide allocator, so manager construction needs
+        // no local namespace or counter that could collide with another Context.
         Self {
             display_list: DisplayList::new(),
             style,
             surfaces: SurfaceForest::new(),
             discard_pointer_capture_tail: false,
             active_root: None,
-            next_popup_id: 1,
             input: Input::default(),
             ui_commit: None,
         }

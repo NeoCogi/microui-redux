@@ -928,7 +928,7 @@ fn context_aware_handler_creates_and_mutates_every_root_kind_before_layout() {
     assert_eq!(context.debug_popup_rect(popup).map(|rect| (rect.x, rect.y)), Some((180, 30)));
     assert!(context.debug_root_node_count(window.id()).is_some());
     assert!(context.debug_root_node_count(dialog.id()).is_some());
-    assert!(popup.is_alive());
+    assert!(popup.events().is_alive());
 }
 
 #[test]
@@ -979,7 +979,7 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
         submitted_anchor: None,
     };
     context.subscribe_context(combo.submitted(), Model::combo_submitted).unwrap();
-    context.subscribe(popup.clone(), Model::popup_submitted).unwrap();
+    context.subscribe(popup.events(), Model::popup_submitted).unwrap();
     context.update_ui_state(dimensions, &mut model);
     let combo_rect = context.debug_root_node_rect(source.id(), combo_id).unwrap();
 
@@ -1064,7 +1064,7 @@ fn creation_returns_persistent_root_handle() {
     let mut ctx = context();
     let root = ctx.ui().create_window(Window::new("window", rect(20, 30, 120, 90), empty_content()));
 
-    assert!(root.is_alive());
+    assert!(root.events().is_alive());
     assert_eq!(ctx.debug_root_name(root.id()), Some("window".to_owned()));
     assert_eq!(
         ctx.debug_root_rect(root.id()).map(|rect| (rect.x, rect.y, rect.width, rect.height)),
@@ -1103,20 +1103,27 @@ fn hide_and_show_preserve_root_and_descendant_state() {
 }
 
 #[test]
-fn destroy_expires_handles_and_ids_are_never_reused() {
+fn destroy_expires_event_endpoints_and_stable_ids_survive_address_release() {
     let mut ctx = context();
     let (button, content) = button_content("button");
     let root = ctx.ui().create_window(Window::new("first", rect(0, 0, 100, 80), content));
+    let clone = root.clone();
     let destroyed_id = root.id();
 
     assert_eq!(ctx.ui().destroy_window(&root), Ok(()));
     assert_eq!(ctx.ui().destroy_window(&root), Err(SurfaceMutationError::UnknownWindow));
     assert_eq!(ctx.ui().bring_window_to_front(&root), Err(SurfaceMutationError::UnknownWindow));
     assert_eq!(ctx.ui().set_window_rect(&root, rect(1, 2, 3, 4)), Err(SurfaceMutationError::UnknownWindow));
-    assert!(!root.is_alive());
+    assert!(!root.events().is_alive());
+    assert!(!clone.events().is_alive());
+    assert_eq!(ctx.ui().set_window_visible(&clone, true), Err(SurfaceMutationError::UnknownWindow));
     assert!(!button.is_alive());
 
-    let replacement = ctx.ui().create_window(Window::new("second", rect(0, 0, 100, 80), empty_content()));
+    // Drop every weak event endpoint owner before allocating the replacement. Its Rc control block
+    // and address may now be reclaimed, but stable identity remains permanently retired.
+    drop(root);
+    drop(clone);
+    let replacement = ctx.ui().create_window(Window::new("first", rect(0, 0, 100, 80), empty_content()));
     assert_ne!(replacement.id(), destroyed_id);
 }
 
@@ -1130,9 +1137,9 @@ fn window_and_popup_capabilities_cannot_resolve_another_contexts_surfaces() {
     let second_window = second.ui().create_window(Window::new("second window", rect(0, 0, 100, 80), empty_content()));
     let second_popup = second.ui().create_popup(&second_window, "second popup", empty_content()).unwrap();
 
-    // Each manager begins its private counters at the same values, so these checks specifically
-    // prove that a capability's concrete event allocation authenticates its originating Context;
-    // comparing only the manager-local numeric ids would incorrectly accept both foreign handles.
+    // Process-wide stable IDs differ even though both managers own their first local surface.
+    // Membership checks therefore reject a foreign capability without consulting an allocation
+    // address or adding a Context pointer to the public handle.
     assert_eq!(
         second.ui().set_window_rect(&first_window, rect(1, 2, 3, 4)),
         Err(SurfaceMutationError::UnknownWindow)
@@ -1140,7 +1147,7 @@ fn window_and_popup_capabilities_cannot_resolve_another_contexts_surfaces() {
     assert_eq!(second.ui().show_popup(&first_popup), Err(SurfaceMutationError::UnknownPopup));
 
     // Rejected foreign mutations leave the local records fully usable, demonstrating that failed
-    // authentication neither selects nor partially changes the numerically colliding surface.
+    // identity validation neither selects nor partially changes the local surface.
     second.ui().set_window_rect(&second_window, rect(5, 6, 70, 60)).unwrap();
     second.ui().show_popup(&second_popup).unwrap();
     assert_eq!(
@@ -1168,7 +1175,7 @@ fn dynamic_container_root_changes_descendants_without_replacing_the_root() {
 
     assert_eq!(column.try_update(|linear: &mut Linear| linear.remove_drop(0)), Some(Some(true)));
     assert!(!button.is_alive());
-    assert!(root.is_alive());
+    assert!(root.events().is_alive());
 }
 
 #[test]
@@ -1181,7 +1188,7 @@ fn showing_a_popup_atomically_hides_and_dismisses_the_previous_one() {
     fn record(events: &mut Vec<PopupEvent>, event: &PopupEvent) {
         events.push(*event);
     }
-    dispatcher.subscribe(first.clone(), record).unwrap();
+    dispatcher.subscribe(first.events(), record).unwrap();
     let mut submissions = Vec::new();
 
     ctx.ui().show_popup_at(&first, rect(12, 18, 90, 1)).unwrap();
@@ -1208,7 +1215,7 @@ fn hiding_a_window_hides_its_active_popup() {
     fn record(events: &mut Vec<PopupEvent>, event: &PopupEvent) {
         events.push(*event);
     }
-    dispatcher.subscribe(second.clone(), record).unwrap();
+    dispatcher.subscribe(second.events(), record).unwrap();
     let mut submissions = Vec::new();
 
     ctx.ui().show_popup(&first).unwrap();
@@ -1227,6 +1234,8 @@ fn stale_popup_mutations_fail_after_owner_destruction() {
     let mut ctx = context();
     let source = ctx.ui().create_window(Window::new("source", rect(0, 0, 100, 80), empty_content()));
     let popup = ctx.ui().create_popup(&source, "popup", empty_content()).unwrap();
+    let clone = popup.clone();
+    let destroyed_id = popup.id();
     assert_eq!(ctx.ui().destroy_window(&source), Ok(()));
 
     // Popup definitions have no independent destruction operation. Destroying the owning window
@@ -1234,7 +1243,18 @@ fn stale_popup_mutations_fail_after_owner_destruction() {
     assert_eq!(ctx.ui().show_popup_at(&popup, rect(20, 30, 40, 1)), Err(SurfaceMutationError::UnknownPopup));
     assert_eq!(ctx.ui().set_popup_options(&popup, WindowOption::FRAME), Err(SurfaceMutationError::UnknownPopup));
     assert_eq!(ctx.ui().hide_popup(&popup), Err(SurfaceMutationError::UnknownPopup));
-    assert!(!popup.is_alive());
+    assert!(!popup.events().is_alive());
+    assert!(!clone.events().is_alive());
+    assert_eq!(ctx.ui().show_popup(&clone), Err(SurfaceMutationError::UnknownPopup));
+
+    // Releasing every weak endpoint allows the old allocation address to be reused without making
+    // its permanently retired stable ID eligible for a later popup.
+    drop(source);
+    drop(popup);
+    drop(clone);
+    let replacement_owner = ctx.ui().create_window(Window::new("source", rect(0, 0, 100, 80), empty_content()));
+    let replacement = ctx.ui().create_popup(&replacement_owner, "popup", empty_content()).unwrap();
+    assert_ne!(replacement.id(), destroyed_id);
 }
 
 #[test]
@@ -1250,7 +1270,7 @@ fn outside_popup_press_hides_and_records_typed_submission() {
     fn record(events: &mut Vec<PopupEvent>, event: &PopupEvent) {
         events.push(*event);
     }
-    widget_event_dispatcher.subscribe(popup.clone(), record).unwrap();
+    widget_event_dispatcher.subscribe(popup.events(), record).unwrap();
     let mut submissions = Vec::new();
     ctx.update_and_render_ui();
 
@@ -1454,10 +1474,10 @@ fn owner_destruction_expires_all_popup_handles() {
     // Popup definitions remain alive while hidden and expire only with their owning window.
     ctx.ui().show_popup(&popup).unwrap();
     ctx.ui().hide_popup(&popup).unwrap();
-    assert!(popup.is_alive());
+    assert!(popup.events().is_alive());
 
     assert_eq!(ctx.ui().destroy_window(&source), Ok(()));
-    assert!(!popup.is_alive());
+    assert!(!popup.events().is_alive());
 }
 
 #[test]
@@ -1835,7 +1855,7 @@ fn title_drag_and_close_record_typed_window_events() {
     let mut ctx = context();
     let root = ctx.ui().create_window(Window::new("window", rect(30, 30, 140, 100), empty_content()));
     let mut dispatcher = crate::event::WidgetEventDispatcher::new();
-    dispatcher.subscribe(root.clone(), record).unwrap();
+    dispatcher.subscribe(root.events(), record).unwrap();
     let mut events = Vec::new();
     ctx.update_and_render_ui();
     let (title, _, _) = ctx.debug_root_chrome(root.id()).unwrap();
@@ -2619,7 +2639,7 @@ fn body_input_falls_through_chrome_to_the_application_node() {
     let (button, content) = button_content("button");
     let root = ctx.ui().create_window(Window::new("window", rect(20, 20, 140, 100), content));
     let mut button_dispatcher = event_counter(button);
-    let mut root_dispatcher = event_counter(root.clone());
+    let mut root_dispatcher = event_counter(root.events());
     let mut button_submissions = 0;
     let mut root_submissions = 0;
     ctx.update_and_render_ui();

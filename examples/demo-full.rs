@@ -1895,10 +1895,10 @@ impl State {
         for (index, submitted) in self.combo_item_submitted.iter().enumerate() {
             context.subscribe_context_with(submitted.clone(), index, Self::combo_item).unwrap();
         }
-        context.subscribe(self.combo_popup_root.clone(), Self::combo_popup_event).unwrap();
+        context.subscribe(self.combo_popup_root.events(), Self::combo_popup_event).unwrap();
         // One concrete window event stream reports both geometry changes and close requests. The
         // floating Demo Window retains diagnostics independently of the platform-sized grid window.
-        context.subscribe_context(self.demo_root.clone(), Self::demo_window_event).unwrap();
+        context.subscribe_context(self.demo_root.events(), Self::demo_window_event).unwrap();
         for (submitted, label) in self.popup_button_submitted.iter().zip(["Hello", "World"]) {
             context.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
         }
