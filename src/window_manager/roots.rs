@@ -36,7 +36,7 @@ use super::*;
 use crate::menu::{CompiledMenuPopup, MenuPress, MenuSurface};
 use crate::{MouseButton, Node, UiInputEvent, Vec2i, rect};
 
-use super::root_chrome::{RootChromeGeometry, RootChromePart, RootInteraction, record_root_background, record_root_overlay, root_chrome_geometry, window_handle};
+use super::root_chrome::{RootChromeGeometry, RootChromePart, RootInteraction, record_root_background, record_root_overlay, root_chrome_geometry};
 
 /// Failure reported by a checked window or popup mutation.
 ///
@@ -75,45 +75,12 @@ impl crate::WidgetEvent for PopupEvent {}
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 struct PopupId(usize);
 
-/// Cloneable non-owning capability for one popup retained inside a window.
+/// Cloneable non-owning capability for one application-authored popup.
 ///
-/// A popup has no independent screen root, layer, visibility flag, or destruction operation. Its
-/// owner window retains the application tree, while the window manager derives visibility from the
-/// single active popup path. Dropping this handle never closes or destroys the popup.
-#[derive(Clone)]
-pub struct PopupHandle {
-    /// Manager-local popup identity used only after authenticating `events`.
-    id: PopupId,
-    /// Weak endpoint for policy-driven dismissal notifications.
-    events: crate::WidgetEventPortHandle<PopupEvent>,
-}
-
-impl PopupHandle {
-    /// Creates the weak capability returned for one newly retained popup.
-    fn new(id: PopupId, events: crate::WidgetEventPortHandle<PopupEvent>) -> Self {
-        // Construction stays private so callers cannot forge an internal popup identity.
-        Self { id, events }
-    }
-
-    /// Returns whether the owning window still retains this popup definition.
-    pub fn is_alive(&self) -> bool {
-        // The event owner is stored in the popup record and expires when that record is dropped.
-        self.events.is_alive()
-    }
-
-    /// Returns the weak endpoint emitted when popup policy removes this popup from the active path.
-    pub fn events(&self) -> crate::WidgetEventPortHandle<PopupEvent> {
-        // Cloning the weak endpoint does not retain the popup tree or owner window.
-        self.events.clone()
-    }
-
-    /// Returns whether this handle authenticates one manager-owned popup event allocation.
-    fn identifies(&self, events: &Rc<RefCell<crate::event::WidgetEventPort<PopupEvent>>>) -> bool {
-        // Allocation identity prevents a same-valued popup counter from another Context from being
-        // accepted by this forest.
-        self.events.identifies(events)
-    }
-}
+/// This is the popup's typed dismissal endpoint itself. Its event type prevents use in window-only
+/// operations, and its weak allocation identity lets the forest authenticate the originating
+/// Context without exposing or duplicating its private [`PopupId`].
+pub type PopupHandle = crate::WidgetEventPortHandle<PopupEvent>;
 
 /// Storage and traversal state shared by a window body or popup body.
 ///
@@ -913,7 +880,7 @@ impl WindowManager {
         // typed capability that also authenticates its originating Context.
         let events = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
         let event_handle = crate::WidgetEventPortHandle::new(&events);
-        let id = self.next_root_id();
+        let id = event_handle.id();
         self.surfaces.insert_root(SurfaceNode {
             key: SurfaceKey::Root(id),
             parent: parent.map(SurfaceKey::Root),
@@ -934,14 +901,7 @@ impl WindowManager {
         }
         self.surfaces.rebuild_visible_order();
         self.invalidate_ui_commit();
-        Ok(window_handle(id, event_handle))
-    }
-
-    /// Allocates a root identifier that will never be reused.
-    fn next_root_id(&mut self) -> RootId {
-        let id = RootId::from_raw(self.next_root_id);
-        self.next_root_id = self.next_root_id.checked_add(1).expect("retained window id counter overflowed");
-        id
+        Ok(event_handle)
     }
 
     /// Allocates a popup identifier that will never be reused.
@@ -985,7 +945,7 @@ impl WindowManager {
             kind: SurfaceKind::Popup(PopupState::Application { anchor: Recti::default(), events }),
         });
         self.invalidate_ui_commit();
-        PopupHandle::new(id, event_handle)
+        event_handle
     }
 
     /// Recursively inserts one concrete menu popup beneath its direct forest parent.
@@ -1240,15 +1200,16 @@ impl WindowManager {
 
     /// Authenticates one application-facing popup handle and returns its manager-local identity.
     fn popup_id(&self, popup: &PopupHandle) -> Result<PopupId, SurfaceMutationError> {
-        let events = match self.surfaces.popup_node(popup.id).and_then(SurfaceNode::popup) {
-            Some(PopupState::Application { events, .. }) => events,
-            _ => return Err(SurfaceMutationError::UnknownPopup),
-        };
-        if !popup.identifies(events) {
-            return Err(SurfaceMutationError::UnknownPopup);
-        }
-        // Private menu popups have no public handle and cannot pass the Application match above.
-        Ok(popup.id)
+        // Only application popup nodes own this event type. Allocation identity therefore finds
+        // both the private concrete id and the originating Context in one scan.
+        self.surfaces
+            .nodes
+            .iter()
+            .find_map(|node| match (node.key, node.popup()) {
+                (SurfaceKey::Popup(id), Some(PopupState::Application { events, .. })) if popup.identifies(events) => Some(id),
+                _ => None,
+            })
+            .ok_or(SurfaceMutationError::UnknownPopup)
     }
 
     /// Resolves a typed popup capability directly to its authenticated concrete forest node.
@@ -2048,8 +2009,8 @@ impl WindowManager {
     /// Returns whether a popup belongs to the sole active path for tests.
     #[cfg(test)]
     pub(crate) fn debug_popup_visible(&self, popup: &PopupHandle) -> Option<bool> {
-        self.popup_node(popup).ok()?;
-        Some(self.surfaces.popup_is_active(popup.id))
+        // Authentication produces the private forest key without exposing it through the handle.
+        Some(self.surfaces.popup_is_active(self.popup_id(popup).ok()?))
     }
 
     /// Returns popup content size through its typed handle for tests.

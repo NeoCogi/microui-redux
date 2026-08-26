@@ -355,7 +355,7 @@ impl FileDialog {
             .expect("new file-dialog Open event must be unsubscribed");
         ctx.subscribe_context_with(cancel_handle.submitted(), accessor, Self::dispatch_cancel::<State>)
             .expect("new file-dialog Cancel event must be unsubscribed");
-        ctx.subscribe_context_with(window.events(), accessor, Self::dispatch_window_event::<State>)
+        ctx.subscribe_context_with(window.clone(), accessor, Self::dispatch_window_event::<State>)
             .expect("new file-dialog window event must be unsubscribed");
 
         Self {

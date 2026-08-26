@@ -161,7 +161,7 @@ fn downstream_window_owns_declarative_menu_and_live_concrete_items() {
     let (open, open_item) = MenuItem::create(MenuItemParameters::new("Open").shortcut_hint("Ctrl+O"));
     // Menu commands use their ordinary typed ports; intrinsic menu policy closes the popup before
     // the application dispatcher invokes this handler.
-    context.subscribe_context(open.submitted(), MenuModel::open_submitted).unwrap();
+    context.subscribe_context(open.clone(), MenuModel::open_submitted).unwrap();
     let (save, save_item) = MenuItem::create(MenuItemParameters::new("Save").disabled());
     let (word_wrap, word_wrap_item) = MenuItem::create(MenuItemParameters::new("Word Wrap").checked(true));
     let body = TextBlock::create(TextBlockParameters::new("body")).1;

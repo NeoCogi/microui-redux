@@ -90,9 +90,9 @@ The only strong event-port owner is its retained producer. Consequently:
 - an application-owned component source remains alive for the component lifetime; and
 - the next dispatch prunes the now-dead subscription.
 
-Manager-owned chrome follows the same concrete rule. `WindowHandle::events()` exposes one
+Manager-owned chrome follows the same concrete rule. `WindowHandle` is itself one
 `WindowEvent` port whose variants are `GeometryChanged { rect }` and `CloseRequested`; combining
-them removes a second allocation without erasing the payload. `PopupHandle::events()` exposes the
+them removes a second allocation without erasing the payload. `PopupHandle` is itself the
 separate `PopupEvent::Dismissed` lifecycle stream, so popup events cannot be subscribed through a
 window capability or vice versa.
 
@@ -413,9 +413,10 @@ ctx.subscribe_context(open_button.submitted(), Model::show_popup)?;
 `Ui` owns nothing. It is an exclusive borrow of the Context-owned `WindowManager`, lent
 only after the complete retained-tree update has released its widget borrows and returned before
 the following layout. Rust therefore prevents a handler from retaining it. Window/dialog
-operations accept `&WindowHandle`; popup operations accept `&PopupHandle`. Each handle pairs a
-manager-local key with a weak typed event allocation, so the manager rejects stale capabilities and
-same-valued keys from another Context. A popup is shown with `show_popup` or `show_popup_at`; the
+operations accept `&WindowHandle`; popup operations accept `&PopupHandle`. Each handle combines a
+distinct event type with weak allocation identity, so the manager derives its private key and
+rejects stale or foreign capabilities without storing another key in the handle. A popup is shown
+with `show_popup` or `show_popup_at`; the
 same transaction reconciles placement and the deepest active popup, while parent edges derive the
 visible branch. Replacement, hiding, and outside-press policy emit `PopupEvent::Dismissed`.
 Cascading menu parentage is private forest data compiled from `Menu`; no public subpopup API,
@@ -443,14 +444,14 @@ Acceptance or cancellation hides the window again while preserving the component
 widgets. Multiple component instances are independent dialogs directly owned by their ordinary
 windows; the frontmost visible dialog is the active modal group, whether shown or explicitly raised.
 
-Menus need no application-owned component binding. Applications subscribe through each concrete
-`MenuItemHandle` to its `MenuItemSubmitted` source, move the uniquely owned `MenuItem` values into
+Menus need no application-owned component binding. Applications subscribe each concrete
+`MenuItemHandle` directly, move the uniquely owned `MenuItem` values into
 recursive `Menu` values, install a `MenuBar` on `Window`, and retain only handles for items whose
 presentation changes later. The window manager opens and positions private menu popups from logical
 heading and submenu-row slots cached by direct `MenuSurface` bodies, then closes the derived active
 branch before dispatching an invoked item's event. Item presentation is manager-owned and borrowed
-through `Ui::menu_item` or `Ui::menu_item_mut`; `MenuItemHandle` supplies identity and its typed
-submission endpoint only. No command payload, menu coordinator, or public menu-popup handle
+through `Ui::menu_item` or `Ui::menu_item_mut`; `MenuItemHandle` is both identity and its typed
+submission endpoint. No command payload, menu coordinator, or public menu-popup handle
 intervenes. See the [menu guide](MENUS.md) for construction, state mutation, and current
 keyboard-navigation scope.
 

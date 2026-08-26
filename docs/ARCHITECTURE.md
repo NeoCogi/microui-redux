@@ -153,7 +153,7 @@ menu surfaces rather than becoming retained row widgets. Top-level menus retain 
 below-heading-slot relation; submenus retain a right-of-row-slot relation to their direct parent
 popup. Each surface reuses storage for the local rectangles produced by its authoritative
 measurement, and the manager translates those slots after layout, so open menus follow window
-movement and ancestor menu geometry. `MenuItemHandle` submission ports remain directly
+movement and ancestor menu geometry. `MenuItemHandle` capabilities remain directly
 subscribable application events; no menu coordinator, public submenu handle, per-row anchor node,
 generic surface payload, or second visibility model is involved.
 
@@ -257,10 +257,10 @@ node, wrapping it in an unmounted `LinearItem` or `GridItem`, and inserting it i
 preserve that identity; applications cannot read or construct it.
 There is no public node ID or result lookup path. Weak typed widget handles expose event endpoints
 after node erasure. Window chrome is manager-owned rather than represented by a retained widget;
-`WindowHandle` and `PopupHandle` expose liveness plus distinct typed event endpoints without
-exposing their manager-local ids. `WindowHandle::events()` carries
+`WindowHandle` and `PopupHandle` are distinct typed event endpoints that expose liveness without
+exposing their manager-local ids. A cloned `WindowHandle` carries
 `WindowEvent::GeometryChanged { rect }` and `WindowEvent::CloseRequested`; the manager applies the
-new geometry or hides the window before queuing either observation. `PopupHandle::events()` carries
+new geometry or hides the window before queuing either observation. A cloned `PopupHandle` carries
 `PopupEvent::Dismissed` whenever policy removes that application popup from the active branch.
 Private menu popups instead publish their selected `MenuItem` event directly.
 
@@ -285,8 +285,8 @@ fn popup_event(&mut self, event: &PopupEvent) {
     }
 }
 
-context.subscribe_context(window.events(), Model::window_event).unwrap();
-context.subscribe(popup.events(), Model::popup_event).unwrap();
+context.subscribe_context(window.clone(), Model::window_event).unwrap();
+context.subscribe(popup.clone(), Model::popup_event).unwrap();
 context.ui().set_window_visible(&window, true).unwrap();
 context.ui().show_popup_at(&popup, anchor).unwrap();
 ```

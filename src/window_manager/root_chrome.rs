@@ -38,50 +38,6 @@
 use crate::render::Painter;
 use crate::{AtlasHandle, ControlColor, Dimensioni, Recti, Style, WindowOption};
 
-use super::RootId;
-
-/// Cloneable, non-owning capability for one manager-owned window or dialog.
-///
-/// The private identifier is intentionally paired with a weak typed event capability. Public
-/// mutations accept the complete handle, allowing the manager to authenticate both identity and
-/// originating [`crate::Context`] even though different contexts allocate overlapping numeric
-/// identifiers. Geometry and visibility remain manager-owned, and dropping this handle never
-/// affects the retained surface lifetime.
-#[derive(Clone)]
-pub struct WindowHandle {
-    /// Manager-local identity used only after the event capability has authenticated its context.
-    id: RootId,
-    /// Weak endpoint for all manager-originated events from this window or dialog.
-    events: crate::WidgetEventPortHandle<WindowEvent>,
-}
-
-impl WindowHandle {
-    /// Returns the manager-local identity for internal routing and diagnostic tests.
-    pub(crate) fn id(&self) -> RootId {
-        // Public code cannot extract or forge this value; checked mutations take the full handle.
-        self.id
-    }
-
-    /// Returns whether the Context still owns the referenced window or dialog.
-    pub fn is_alive(&self) -> bool {
-        // The sole strong event owner is stored in the same forest node and expires with that node.
-        self.events.is_alive()
-    }
-
-    /// Returns the weak endpoint for geometry changes and close requests from this window.
-    pub fn events(&self) -> crate::WidgetEventPortHandle<WindowEvent> {
-        // Cloning the weak endpoint neither retains the forest node nor duplicates pending events.
-        self.events.clone()
-    }
-
-    /// Returns whether this handle authenticates one manager-owned event allocation.
-    pub(super) fn identifies(&self, events: &std::rc::Rc<std::cell::RefCell<crate::event::WidgetEventPort<WindowEvent>>>) -> bool {
-        // Numeric ids are manager-local; allocation identity prevents a handle from another Context
-        // with the same counter value from resolving this node.
-        self.events.identifies(events)
-    }
-}
-
 /// Active pointer gesture owned by manager-rendered window chrome.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(super) enum RootInteraction {
@@ -110,10 +66,20 @@ pub enum WindowEvent {
 
 impl crate::WidgetEvent for WindowEvent {}
 
-/// Creates the weak application handle for a newly retained window or dialog.
-pub(super) fn window_handle(id: RootId, events: crate::WidgetEventPortHandle<WindowEvent>) -> WindowHandle {
-    // The event endpoint is weak, so the returned application capability cannot retain the window.
-    WindowHandle { id, events }
+/// Cloneable non-owning capability for one manager-owned window or dialog.
+///
+/// The event payload makes this capability distinct from popup and widget handles at compile time.
+/// Its weak allocation identity also authenticates checked [`crate::Ui`] mutations without a public
+/// numeric identifier, while dropping it never affects the retained window lifetime.
+pub type WindowHandle = crate::WidgetEventPortHandle<WindowEvent>;
+
+impl WindowHandle {
+    /// Derives the concrete manager-local key carried only inside retained traversal.
+    pub(crate) fn id(&self) -> super::RootId {
+        // The event allocation is created before its forest node and remains strongly owned by that
+        // node, so its process-local token is stable for the complete registered lifetime.
+        super::RootId::from_raw(self.identity_token())
+    }
 }
 
 /// Window-chrome region selected by a pointer press.

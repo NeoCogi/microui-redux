@@ -171,9 +171,7 @@ impl MenuItem {
         // Only the typed event queue is shared because subscriptions are weak capabilities. The
         // semantic record itself remains a plain value throughout declaration and manager ownership.
         let submitted_event = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
-        let handle = MenuItemHandle {
-            submitted: WidgetEventPortHandle::new(&submitted_event),
-        };
+        let handle = WidgetEventPortHandle::new(&submitted_event);
         let item = Self {
             record: MenuItemRecord { parameters, submitted_event },
         };
@@ -181,26 +179,12 @@ impl MenuItem {
     }
 }
 
-/// Cloneable weak access to one item retained by a compiled menu.
-#[derive(Clone)]
-pub struct MenuItemHandle {
-    /// Weak native event capability used for subscription, liveness, and manager-side identity.
-    pub(crate) submitted: WidgetEventPortHandle<MenuItemSubmitted>,
-}
-
-impl MenuItemHandle {
-    /// Returns whether a declaration or compiled menu still owns this item.
-    pub fn is_alive(&self) -> bool {
-        // The declaration or mounted record strongly owns this event port for exactly its lifetime.
-        self.submitted.is_alive()
-    }
-
-    /// Returns this specific item's native submission endpoint.
-    pub fn submitted(&self) -> WidgetEventPortHandle<MenuItemSubmitted> {
-        // The returned clone remains weak and preserves item ownership semantics.
-        self.submitted.clone()
-    }
-}
+/// Cloneable non-owning identity and submission endpoint for one concrete menu item.
+///
+/// The declaration or mounted record strongly owns the corresponding event port for exactly its
+/// lifetime. This weak capability can be cloned, subscribed directly, checked for liveness, and
+/// used by [`crate::Ui::menu_item`] without mirroring any presentation state.
+pub type MenuItemHandle = WidgetEventPortHandle<MenuItemSubmitted>;
 
 /// Complete declarative menu bar installed intrinsically into one window.
 pub struct MenuBar {
@@ -538,7 +522,7 @@ impl MenuSurface {
     /// Returns a manager-owned item record through its weak typed capability.
     pub(crate) fn item(&self, handle: &MenuItemHandle) -> Option<&MenuItemRecord> {
         self.rows.iter().find_map(|row| match row {
-            MenuSlot::Item(item) if handle.submitted.identifies(&item.submitted_event) => Some(item),
+            MenuSlot::Item(item) if handle.identifies(&item.submitted_event) => Some(item),
             MenuSlot::Item(_) | MenuSlot::Separator | MenuSlot::Branch { .. } => None,
         })
     }
@@ -546,7 +530,7 @@ impl MenuSurface {
     /// Returns mutable manager-owned item state through its weak typed capability.
     pub(crate) fn item_mut(&mut self, handle: &MenuItemHandle) -> Option<&mut MenuItemRecord> {
         self.rows.iter_mut().find_map(|row| match row {
-            MenuSlot::Item(item) if handle.submitted.identifies(&item.submitted_event) => Some(item),
+            MenuSlot::Item(item) if handle.identifies(&item.submitted_event) => Some(item),
             MenuSlot::Item(_) | MenuSlot::Separator | MenuSlot::Branch { .. } => None,
         })
     }

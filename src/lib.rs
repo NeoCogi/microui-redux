@@ -87,7 +87,7 @@
 //! the generic [`Container`] remains the sole strong owner of its heterogeneous children.
 //!
 //! Declarative menu items use the same non-owning capability rule without becoming widget nodes.
-//! [`MenuItemHandle`] carries stable item identity and its [`MenuItemSubmitted`] endpoint;
+//! [`MenuItemHandle`] is both stable item identity and its [`MenuItemSubmitted`] endpoint;
 //! [`Ui::menu_item`] and [`Ui::menu_item_mut`] lend the authoritative mounted
 //! [`MenuItemParameters`]. Both return [`MenuItemAccessError::UnknownItem`] for an unmounted,
 //! destroyed, or foreign item capability.

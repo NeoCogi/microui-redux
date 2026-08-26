@@ -12,7 +12,7 @@ The public composition types are deliberately small:
 | `MenuBar` | Ordered top-level menus installed on one window. |
 | `Menu` | One heading or submenu, built with `item`, `separator`, and `submenu`. |
 | `MenuItem` | Uniquely owned actionable value moved into exactly one menu position. |
-| `MenuItemHandle` | Cloneable non-owning identity plus the item's typed submission port. Mounted presentation is borrowed through `Ui`. |
+| `MenuItemHandle` | Cloneable typed submission capability that is also the item's non-owning identity. Mounted presentation is borrowed through `Ui`. |
 
 There is no public menu-popup handle, coordinator, command enum, row widget, or parallel menu model.
 
@@ -43,11 +43,11 @@ fn build_model<B: RendererBackend>(
     // The handle supplies the event port; the value moves into one menu below.
     let (open, open_item) =
         MenuItem::create(MenuItemParameters::new("Open...").shortcut_hint("Ctrl+O"));
-    context.subscribe_context(open.submitted(), Model::open)?;
+    context.subscribe_context(open.clone(), Model::open)?;
 
     // This command has the same handler but remains a distinct typed event source.
     let (recent, recent_item) = MenuItem::create(MenuItemParameters::new("Recent Document"));
-    context.subscribe_context(recent.submitted(), Model::open)?;
+    context.subscribe_context(recent.clone(), Model::open)?;
 
     // Keep this handle because application state will mutate the item after construction.
     let (save, save_item) = MenuItem::create(
@@ -112,9 +112,9 @@ submenu placement. Each popup derives its leading mark column from its direct it
 collapses completely when none of those items has a check or radio mark; otherwise every direct row
 uses the shared content offset. Nested submenu popups calculate their columns independently.
 
-Each `MenuSlot` directly owns its `MenuItemParameters` and strong submission port. The weak port in
-`MenuItemHandle` doubles as unforgeable item identity; the handle does not mirror presentation
-state. Mutation through `Ui::menu_item_mut` invalidates the owning layout transaction, ensuring
+Each `MenuSlot` directly owns its `MenuItemParameters` and strong submission port.
+`MenuItemHandle` is the corresponding weak port and therefore unforgeable item identity; it does
+not mirror presentation state. Mutation through `Ui::menu_item_mut` invalidates the owning layout transaction, ensuring
 that role and text-width changes resize and reanchor open popups correctly. Warm layout reuses the
 surface's slot-geometry vector and the forest's popup-path workspace.
 

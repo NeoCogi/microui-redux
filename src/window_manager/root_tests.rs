@@ -979,7 +979,7 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
         submitted_anchor: None,
     };
     context.subscribe_context(combo.submitted(), Model::combo_submitted).unwrap();
-    context.subscribe(popup.events(), Model::popup_submitted).unwrap();
+    context.subscribe(popup.clone(), Model::popup_submitted).unwrap();
     context.update_ui_state(dimensions, &mut model);
     let combo_rect = context.debug_root_node_rect(source.id(), combo_id).unwrap();
 
@@ -1181,7 +1181,7 @@ fn showing_a_popup_atomically_hides_and_dismisses_the_previous_one() {
     fn record(events: &mut Vec<PopupEvent>, event: &PopupEvent) {
         events.push(*event);
     }
-    dispatcher.subscribe(first.events(), record).unwrap();
+    dispatcher.subscribe(first.clone(), record).unwrap();
     let mut submissions = Vec::new();
 
     ctx.ui().show_popup_at(&first, rect(12, 18, 90, 1)).unwrap();
@@ -1208,7 +1208,7 @@ fn hiding_a_window_hides_its_active_popup() {
     fn record(events: &mut Vec<PopupEvent>, event: &PopupEvent) {
         events.push(*event);
     }
-    dispatcher.subscribe(second.events(), record).unwrap();
+    dispatcher.subscribe(second.clone(), record).unwrap();
     let mut submissions = Vec::new();
 
     ctx.ui().show_popup(&first).unwrap();
@@ -1250,7 +1250,7 @@ fn outside_popup_press_hides_and_records_typed_submission() {
     fn record(events: &mut Vec<PopupEvent>, event: &PopupEvent) {
         events.push(*event);
     }
-    widget_event_dispatcher.subscribe(popup.events(), record).unwrap();
+    widget_event_dispatcher.subscribe(popup.clone(), record).unwrap();
     let mut submissions = Vec::new();
     ctx.update_and_render_ui();
 
@@ -1835,7 +1835,7 @@ fn title_drag_and_close_record_typed_window_events() {
     let mut ctx = context();
     let root = ctx.ui().create_window(Window::new("window", rect(30, 30, 140, 100), empty_content()));
     let mut dispatcher = crate::event::WidgetEventDispatcher::new();
-    dispatcher.subscribe(root.events(), record).unwrap();
+    dispatcher.subscribe(root.clone(), record).unwrap();
     let mut events = Vec::new();
     ctx.update_and_render_ui();
     let (title, _, _) = ctx.debug_root_chrome(root.id()).unwrap();
@@ -2272,8 +2272,8 @@ fn menu_items_dispatch_directly_after_close_while_disabled_items_leave_the_menu_
     let root = ctx
         .ui()
         .create_window(Window::new("menu events", rect(20, 25, 180, 120), empty_content()).menu_bar(menu_bar));
-    ctx.subscribe_context(enabled.submitted(), Model::enabled_submitted).unwrap();
-    ctx.subscribe_context(disabled.submitted(), Model::disabled_submitted).unwrap();
+    ctx.subscribe_context(enabled.clone(), Model::enabled_submitted).unwrap();
+    ctx.subscribe_context(disabled.clone(), Model::disabled_submitted).unwrap();
     let mut model = Model::default();
     ctx.update_ui_state(dimensions, &mut model);
 
@@ -2619,7 +2619,7 @@ fn body_input_falls_through_chrome_to_the_application_node() {
     let (button, content) = button_content("button");
     let root = ctx.ui().create_window(Window::new("window", rect(20, 20, 140, 100), content));
     let mut button_dispatcher = event_counter(button);
-    let mut root_dispatcher = event_counter(root.events());
+    let mut root_dispatcher = event_counter(root.clone());
     let mut button_submissions = 0;
     let mut root_submissions = 0;
     ctx.update_and_render_ui();

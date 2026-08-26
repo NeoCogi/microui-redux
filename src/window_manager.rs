@@ -199,8 +199,6 @@ pub(crate) struct WindowManager {
     /// Activation is deliberately independent of stacking. A user can therefore focus a control
     /// in a low layer without raising that root over windows in a higher layer.
     active_root: Option<RootId>,
-    /// Next root id counter.
-    next_root_id: usize,
     /// Next window-owned popup id counter.
     next_popup_id: usize,
     /// Ordered input state owned and consumed directly by this window manager.
@@ -219,7 +217,6 @@ impl WindowManager {
             surfaces: SurfaceForest::new(),
             discard_pointer_capture_tail: false,
             active_root: None,
-            next_root_id: 1,
             next_popup_id: 1,
             input: Input::default(),
             ui_commit: None,
