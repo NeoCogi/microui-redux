@@ -14,17 +14,18 @@
   menus, dialogs, custom drawing, external textures, and custom backend rendering. Its menu shows
   grouped and disabled commands, shortcut hints, a live checked item, radio choices in a cascading
   View > Log Spacing submenu, and typed
-  command dispatch into the file dialog, log, and style state. A separate titleless fullscreen root
+  item submission events into the file dialog, log, and style state. A separate titleless fullscreen window
   at layer 0 renders a perspective X-Y grid beneath the original Demo Window and every other
   default-layer floating window. The grid window owns an independent Grid/Help menu; its private
-  popup definitions stack in the transient band derived from that layer-0 owner. Left-drag an
+  menu-popup nodes stack in the transient band derived from that layer-0 owner. Left-drag an
   exposed part of the grid to rotate its arcball camera, use the mouse
   wheel there to zoom, or choose Grid > Reset View to restore the initial composition. Grid > Minor
   Grid Lines controls its unit-spaced divisions. Grid segments are clipped in homogeneous space so
   rotation cannot project behind-camera endpoints into stray lines across the UI. Each `Window`
-  owns its menu bar and private recursive menu popups, while ordinary composed-control popups are
-  retained directly by their window or dialog owner. Popup lifetime, modal eligibility, and stacking
-  follow that owner; exact non-menu anchors remain in screen space.
+  transfers its menu bar into direct manager-owned `MenuSurface` values. Menu and ordinary
+  composed-control popups are concrete forest nodes whose sole parent edges encode lifetime,
+  modal eligibility, and stacking; exact non-menu anchors remain in screen space. Live item
+  presentation is borrowed through `Ui::menu_item` or `Ui::menu_item_mut`.
 
 ## Full demo
 

@@ -8,37 +8,35 @@
 
 ## Version 0.8.0-alpha.5
 
-`0.8.0-alpha.5` replaces the retained-root forest with a deliberately flat window model, makes
-menu bars intrinsic `Window` properties, and demonstrates the result with a fullscreen menu-bearing
-X-Y grid beneath independent floating windows. This is an intentional breaking simplification with
-no compatibility layer.
+`0.8.0-alpha.5` replaces the generic/duplicated retained-root machinery with one concrete surface
+ownership forest, makes menu bars intrinsic `Window` properties, and removes numeric identities
+from the application API. This is an intentional breaking simplification with no compatibility
+layer.
 
-- [x] Made windows and dialogs the only retained roots.
-    - [x] `Window::new(name, rect, body)` transfers one application tree to `Context`; optional `.menu_bar(MenuBar)` construction transfers the bar and all recursive menus with it.
-    - [x] Ordinary windows live in one flat collection. A modal dialog has one direct ordinary-window owner, while child windows and generic root ancestry no longer exist.
-    - [x] `RootId`, `RootHandle`, generic visibility, options, layering, raising, and destruction apply only to windows and dialogs.
-    - [x] `RootHandle` exposes identity, liveness, and semantic events without a public `RootChrome` widget projection, mutable chrome borrow, or style projection.
-    - [x] `WindowManager` directly owns title, rectangle, options, visibility, chrome interaction and geometry, events, and the application `WidgetTree`; layout, hit testing, input, and painting use that single state.
-- [x] Nested popup definitions directly inside their owner window or dialog.
-    - [x] `create_popup(owner, name, body)` returns a typed `PopupHandle`; popups have no `RootId`, independent root entry, layer binding, visibility flag, generic root mutation, or separate destruction operation.
-    - [x] Each owner retains its popup definitions, and one parent-to-child active popup path is the complete visibility state. Opening, replacing, hiding, outside dismissal, modal changes, owner hiding, and owner destruction truncate that path coherently.
-    - [x] Exact anchors supplied by `show_popup` or `show_popup_at` remain in screen space. Popup stacking and modal eligibility are derived from the owning window, and dismissal events are emitted deepest-first before application dispatch.
-    - [x] Popup layout, input, and painting traverse small nested surfaces in their owner's transient band without reconstructing a root forest.
-- [x] Replaced coordinated menu objects with declarative, window-owned menus.
-    - [x] `MenuBar::new` contains top-level `Menu` values; `Menu::item`, `separator`, and recursive `submenu(Menu)` calls preserve row order without group wrappers.
-    - [x] The manager compiles one compact `MenuSurface` leaf for the bar and one for each popup when it consumes the `Window`; items, separators, and submenu rows remain leaf-local values instead of retained row widgets.
-    - [x] `MenuItem::create` returns a uniquely owned value for one declaration position plus a weak `MenuItemHandle` exposing live presentation state and its directly subscribable typed event.
-    - [x] Top-level popups remain anchored below cached menu-bar heading slots and submenus remain anchored to cached direct-parent row slots after window moves or relayouts.
-    - [x] One active path drives open presentation, heading toggling and switching, submenu replacement, outside dismissal, item dismissal before handlers run, and disabled-item behavior.
-    - [x] `Style::menu_foreground` and `Style::menu_background` consistently color bars, items, popup surfaces, and every submenu level.
-- [x] Retained the useful stacking and interaction policy without topology machinery.
-    - [x] Ordinary window layers remain fixed values `0` through `15`, defaulting to `15`; dialogs use the manager-controlled modal layer above them, and popups occupy their owner's transient band.
-    - [x] Layout, painting, hit testing, and raising share the same stacking order. Activation stays separate, so a lower-layer window can receive keyboard focus without crossing a higher layer.
-    - [x] Modal routing, pointer capture, popup-to-owner activation, wheel targeting, hiding, and destruction reconcile directly against flat windows and the active popup path.
-    - [x] `WindowOption::NO_PADDING` removes only the manager-owned content inset, enabling the layer-`0` fullscreen grid while preserving descendant padding.
-- [x] Removed obsolete compatibility APIs instead of retaining adapters: `create_child_window`, `LayerBinding::Inherited`, public subpopup construction, `RootChrome` projection and borrow paths, `WindowMenu`, `MenuPanel`, `MenuGroup`, and the public `Submenu` type.
-- [x] Unified ordinary and event-time retained mutation behind one borrowed `Ui<'_>` façade; `Context::ui()` supplies it outside dispatch, and `FileDialog::open`/`cancel` now use the same API in both places.
-- [x] Migrated `demo-full`, file dialogs, composed-control popups, examples, and downstream retained API tests to the flat ownership and declarative menu model; the demo keeps Grid/Help and File/View/Help menus, cascading Log Spacing choices, live menu colors, arcball grid rotation, wheel zoom, and homogeneous clipping.
+- [x] Unified windows, dialogs, application popups, and menu popups in `SurfaceForest`.
+    - [x] Every `SurfaceNode` owns one concrete `SurfaceBody::{Widgets, Menu}` exactly once; widget bodies directly pair `Node` with `UiRuntime`, while menus have no widget runtime or erased payload.
+    - [x] One parent edge encodes dialog ownership, top-level popup ownership, and recursive menu-popup ancestry. Restricted public constructors prevent arbitrary hierarchy, reparenting, child windows, or public subpopup registration.
+    - [x] The forest stores only the deepest active popup and derives its visible ancestor branch by following parent edges. No popup visibility mirrors or `PopupPath` object remain.
+    - [x] One reusable visible-order vector is shared by layout, input, paint, and diagnostics.
+- [x] Made forest storage the chronological window order.
+    - [x] Showing or fronting a window moves its complete node to the storage tail; changing a fixed layer mutates only its concrete mode.
+    - [x] Removed sixteen fixed-layer vectors, the modal-order vector, stacking sequence fields/counters, and the duplicate z-index diagnostic.
+    - [x] Traversal filters the one chronology through layers `0..=15`, then the modal band, appending the derived active popup branch at its owner's tier.
+- [x] Replaced numeric root APIs with authenticated window and popup capabilities.
+    - [x] `WindowHandle` and `PopupHandle` combine a private manager-local key with a weak typed event allocation. All public mutations accept the complete handle and reject same-valued keys from another Context.
+    - [x] Removed public `RootId`, `RootHandle`, `RootChanged`, `RootSubmitted`, and `RootMutationError`. `Ui` now exposes window-named operations and `SurfaceMutationError` reports concrete window, popup, dialog-owner, and layer failures.
+    - [x] One `WindowEvent` port covers `GeometryChanged { rect }` and `CloseRequested`, eliminating the second window event allocation. `PopupEvent::Dismissed` is a separate popup-only stream.
+    - [x] `FileDialog`, examples, composed controls, and downstream tests use borrowed handles throughout; no compatibility aliases or numeric adapters remain.
+- [x] Replaced retained/coordinated menu machinery with direct concrete surfaces.
+    - [x] `MenuBar::new` contains top-level `Menu` values; `Menu::item`, `separator`, and recursive `submenu(Menu)` calls preserve declaration order.
+    - [x] The manager owns direct `MenuSurface` values and `MenuSlot` item records. Removed menu `Node`/`UiRuntime` adaptation, controllers/actions, duplicate menu ids, and runtime-node anchor identities.
+    - [x] `MenuItemHandle` now carries item identity and its typed submission endpoint only. `Ui::menu_item` and `Ui::menu_item_mut` lend the authoritative `MenuItemParameters`, returning `UnknownItem` for unmounted, destroyed, or foreign capabilities.
+    - [x] Parent edges plus trigger-slot indices anchor headings and submenus; slot geometry and popup-path storage are reused after warm-up with no layout allocation.
+    - [x] The implementation contains no `Any` payload, type inspection, or downcast path.
+- [x] Retained fixed/modal stacking, activation, capture, and fullscreen-surface policy on the new forest.
+    - [x] `WindowOption::NO_PADDING` enables the layer-`0` fullscreen grid while preserving descendant padding; floating windows remain independent at the default layer.
+    - [x] Modal routing, popup dismissal, lower-layer activation, wheel targeting, and manager chrome consume the same concrete visible traversal.
+- [x] Unified ordinary and event-time mutation behind borrowed `Ui<'_>` and updated architecture, event, menu, example, crate, and API documentation.
 
 ## Version 0.8.0-alpha.4
 

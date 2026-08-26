@@ -4,9 +4,12 @@
 
 `microui-redux` is a retained, backend-agnostic Rust GUI toolkit inspired by
 [rxi/microui](https://github.com/rxi/microui). It keeps microui's compact rendering model while
-using unique owning `Node` trees, typed weak widget handles, context-owned roots, and typed backend
-frames. Context stores flat windows, directly owned modal dialogs, and popup definitions nested in
-their owning window; one active popup path and owner-derived stacking keep cross-surface policy local.
+using unique owning `Node` trees, typed weak widget handles, and typed backend frames. A concrete
+context-owned surface forest stores every widget tree and menu surface exactly once. Sole parent
+edges encode dialog and popup ownership, chronological window order is carried by the forest
+itself, and one deepest-popup key derives the visible transient branch. Declarative menus compile
+directly into concrete `MenuSurface` values rather than a generic popup payload or a separate menu
+controller.
 
 > **Alpha status:** `0.8.0-alpha.5` is the current alpha of the breaking retained-API
 > redesign. The 0.8 line is not API-compatible with 0.7 and may continue to evolve before the
@@ -38,6 +41,38 @@ cargo run --example demo-full --features example-glow
 
 See [Examples](docs/EXAMPLES.md) for the other backends, asset requirements, and size-focused
 builds.
+
+## Retained surface API
+
+Applications borrow a short-lived `Ui<'_>` from `Context` to create or mutate surfaces. Window and
+dialog operations take a complete `WindowHandle`; popup operations take a distinct `PopupHandle`.
+The handles are weak, keep no surface alive, and authenticate the originating context through their
+typed event capability. There is no public numeric window id, and a stale or foreign handle returns
+a concrete `SurfaceMutationError`.
+
+```rust,ignore
+let main = context.ui().create_window(Window::new(
+    "main",
+    rect(20, 20, 480, 320),
+    main_content,
+));
+let dialog = context
+    .ui()
+    .create_dialog(&main, Window::new("settings", rect(80, 60, 320, 220), settings_content))?;
+let popup = context.ui().create_popup(&main, "choices", popup_content)?;
+
+context.subscribe_context(main.events(), Model::window_event)?;
+context.subscribe(popup.events(), Model::popup_event)?;
+context.ui().set_window_visible(&dialog, true)?;
+context.ui().show_popup_at(&popup, anchor)?;
+```
+
+`WindowEvent` combines `GeometryChanged { rect }` and `CloseRequested` on one window port.
+`PopupEvent::Dismissed` reports removal of an application popup from the sole active branch.
+Showing or fronting a window moves its complete forest node to the tail of the global chronology;
+its effective layer still determines the rendered tier. Changing that layer does not reactivate the
+window. The forest derives one visible order for layout, input, and paint, so those phases cannot
+disagree about which surface is in front.
 
 ## Documentation
 
