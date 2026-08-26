@@ -632,12 +632,6 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         self.window_manager.debug_rendered_root_names()
     }
 
-    /// Returns one window or dialog z-index for internal stacking tests.
-    pub(crate) fn debug_root_zindex(&self, root: RootId) -> Option<i32> {
-        // Preserve `None` for a stale identity rather than exposing manager storage indices.
-        self.window_manager.debug_root_zindex(root)
-    }
-
     /// Returns the manager-owned root name for internal behavioral tests.
     pub(crate) fn debug_root_name(&self, root: RootId) -> Option<String> {
         // Forward through the test-only façade without exposing production chrome access.

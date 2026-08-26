@@ -1326,12 +1326,11 @@ fn warmed_recursive_menu_layout_reuses_every_slot_and_path_allocation() {
 fn fronting_changes_only_cross_root_z_order() {
     let mut ctx = context();
     let first = ctx.ui().create_window(Window::new("first", rect(0, 0, 100, 80), empty_content()));
-    let second = ctx.ui().create_window(Window::new("second", rect(20, 20, 100, 80), empty_content()));
+    let _second = ctx.ui().create_window(Window::new("second", rect(20, 20, 100, 80), empty_content()));
     assert_eq!(ctx.debug_rendered_root_names(), ["first", "second"]);
 
     ctx.ui().bring_root_to_front(first.id()).unwrap();
     assert_eq!(ctx.debug_rendered_root_names(), ["second", "first"]);
-    assert!(ctx.debug_root_zindex(first.id()).unwrap() > ctx.debug_root_zindex(second.id()).unwrap());
 }
 
 #[test]
@@ -1358,7 +1357,7 @@ fn fixed_layers_validate_and_managed_roots_reject_direct_assignment() {
 #[test]
 fn raising_reorders_only_inside_a_fixed_layer() {
     let mut ctx = context();
-    let high = ctx.ui().create_window(Window::new("high", rect(0, 0, 100, 80), empty_content()));
+    let _high = ctx.ui().create_window(Window::new("high", rect(0, 0, 100, 80), empty_content()));
     let low_first = ctx.ui().create_window(Window::new("low first", rect(0, 0, 100, 80), empty_content()));
     let low_second = ctx.ui().create_window(Window::new("low second", rect(0, 0, 100, 80), empty_content()));
     ctx.ui().set_root_layer(low_first.id(), 2).unwrap();
@@ -1367,7 +1366,6 @@ fn raising_reorders_only_inside_a_fixed_layer() {
     assert_eq!(ctx.debug_rendered_root_names(), ["low first", "low second", "high"]);
     ctx.ui().bring_root_to_front(low_first.id()).unwrap();
     assert_eq!(ctx.debug_rendered_root_names(), ["low second", "low first", "high"]);
-    assert!(ctx.debug_root_zindex(low_first.id()).unwrap() > ctx.debug_root_zindex(high.id()).unwrap());
 }
 
 #[test]
@@ -1755,7 +1753,7 @@ fn fronting_a_visible_dialog_makes_it_the_active_modal() {
 
     ctx.ui().bring_root_to_front(first.id()).unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(first.id()));
-    assert!(ctx.debug_root_zindex(first.id()).unwrap() > ctx.debug_root_zindex(second.id()).unwrap());
+    assert_eq!(ctx.debug_rendered_root_names(), ["owner", "middle", "second", "first"]);
     // Raising the ordinary owner moves only its fixed-band subtree and leaves modal sibling order
     // untouched.
     ctx.ui().bring_root_to_front(owner.id()).unwrap();

@@ -1072,7 +1072,7 @@ mod tests {
         context.update_ui_state(dimensions(), &mut model);
         assert_eq!(model.behind_submissions, 0);
         assert!(model.dialog.is_open());
-        assert!(context.debug_root_zindex(model.dialog.root.id()).unwrap() > context.debug_root_zindex(window.id()).unwrap());
+        assert_eq!(context.debug_rendered_root_names(), ["file-dialog owner", "window", "Open File"]);
     }
 
     #[test]

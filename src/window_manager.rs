@@ -180,16 +180,11 @@ pub(crate) struct WindowManager {
     /// Window-manager-owned style used by all roots and scroll areas.
     style: Style,
 
-    /// Monotonic activation sequence used only when a root enters or moves within a layer.
-    ///
-    /// The forest maintains traversal order incrementally, so this value is never a per-frame sort
-    /// key. Retaining the sequence lets a root moved between fixed layers keep its chronological
-    /// position and preserves the diagnostic z-order exposed to existing tests.
-    next_front_sequence: i32,
     /// Concrete ownership forest for windows, dialogs, and popup surfaces.
     ///
     /// Every retained surface lives in one collection and has at most one parent edge. The forest
-    /// also owns the incrementally maintained fixed-layer, modal, and visible traversal orders.
+    /// uses that collection's root-node order as global activation chronology and separately caches
+    /// only the visible traversal shared by layout, input, and paint.
     surfaces: SurfaceForest,
     /// Whether drag/release events from a capture revoked with a dismissed popup must be swallowed.
     ///
@@ -218,7 +213,6 @@ impl WindowManager {
         Self {
             display_list: DisplayList::new(),
             style,
-            next_front_sequence: 0,
             surfaces: SurfaceForest::new(),
             discard_pointer_capture_tail: false,
             active_root: None,

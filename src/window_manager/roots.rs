@@ -428,9 +428,6 @@ impl WidgetTree {
     }
 }
 
-/// Number of concrete caller-controlled stacking layers retained by the forest.
-const FIXED_LAYER_COUNT: usize = MAX_LAYER as usize + 1;
-
 /// Private identity for one node in the concrete surface forest.
 ///
 /// Public code continues to carry distinct [`RootId`] and [`PopupHandle`] capabilities. Internally,
@@ -462,10 +459,6 @@ enum RootMode {
 struct RootState {
     /// Ordinary fixed-layer or manager-owned modal policy.
     mode: RootMode,
-    /// Chronological fronting sequence retained for layer moves and diagnostics.
-    ///
-    /// Traversal never sorts by this field; the layer vectors are updated when the sequence changes.
-    stacking_sequence: i32,
     /// Whether layout, input eligibility, and paint currently include this root.
     visible: bool,
     /// Manager-owned title movement or resize gesture.
@@ -638,18 +631,18 @@ impl SurfaceNode {
 
 /// Concrete ownership forest plus incrementally maintained traversal order.
 ///
-/// `nodes` owns every application tree exactly once. Layer vectors contain root identities in
-/// back-to-front order and are changed only by registration, layer mutation, fronting, or removal.
+/// `nodes` owns every application tree exactly once, and the relative order of its root nodes is the
+/// global back-to-front activation chronology. Popup nodes may be interleaved without participating
+/// in that chronology because their sole active branch is positioned from parent edges.
 /// `active_popup` stores only the deepest visible popup; its visible ancestors are derived from the
-/// parent edges. `visible_order` is the reusable back-to-front traversal consumed by layout, input,
-/// paint, and diagnostics.
+/// parent edges. `visible_order` is the reusable layered traversal consumed by layout, input, paint,
+/// and diagnostics.
 pub(super) struct SurfaceForest {
-    /// Stable retained surface storage; indices are deliberately not exposed as identity.
+    /// Retained surface storage and authoritative chronological order for root nodes.
+    ///
+    /// Indices are deliberately not exposed as identity because fronting a root moves its complete
+    /// node to this vector's tail. Stable keys and parent edges remain valid across that move.
     nodes: Vec<SurfaceNode>,
-    /// Back-to-front roots for each fixed application layer.
-    fixed_order: [Vec<RootId>; FIXED_LAYER_COUNT],
-    /// Back-to-front roots in the dedicated modal layer.
-    modal_order: Vec<RootId>,
     /// Deepest popup in the sole active branch, or no visible popup branch.
     active_popup: Option<PopupId>,
     /// Materialized back-to-front visible traversal, reused without per-frame allocation.
@@ -659,12 +652,10 @@ pub(super) struct SurfaceForest {
 }
 
 impl SurfaceForest {
-    /// Creates an empty concrete forest and one order bucket per fixed layer.
+    /// Creates an empty concrete forest with reusable visible-order workspaces.
     pub(super) fn new() -> Self {
         Self {
             nodes: Vec::new(),
-            fixed_order: std::array::from_fn(|_| Vec::new()),
-            modal_order: Vec::new(),
             active_popup: None,
             visible_order: Vec::new(),
             popup_path_scratch: Vec::new(),
@@ -717,17 +708,12 @@ impl SurfaceForest {
         self.node_mut(key).map(|node| &mut node.surface)
     }
 
-    /// Inserts a root and places its identity in the matching maintained order bucket.
+    /// Inserts a root at the newest point in global activation chronology.
     fn insert_root(&mut self, node: SurfaceNode) {
-        let SurfaceKey::Root(root) = node.key else {
-            unreachable!("root insertion requires a root identity")
-        };
-        let mode = node.root().expect("root insertion requires root policy").mode;
+        debug_assert!(matches!(node.key, SurfaceKey::Root(_)) && node.root().is_some());
+        // Registration is chronologically newest. Hidden dialogs do not participate until shown,
+        // and showing them moves the same node to the tail again.
         self.nodes.push(node);
-        match mode {
-            RootMode::Normal { layer } => self.fixed_order[layer as usize].push(root),
-            RootMode::Modal => self.modal_order.push(root),
-        }
         self.rebuild_visible_order();
     }
 
@@ -737,57 +723,37 @@ impl SurfaceForest {
         self.nodes.push(node);
     }
 
-    /// Removes a root identity from whichever maintained layer bucket contains it.
-    fn remove_root_from_order(&mut self, root: RootId) {
-        for order in &mut self.fixed_order {
-            order.retain(|candidate| *candidate != root);
-        }
-        self.modal_order.retain(|candidate| *candidate != root);
-    }
-
-    /// Moves one root to the front of its structural layer without sorting other roots.
+    /// Moves one complete root node to the newest point in global activation chronology.
     fn move_root_to_front(&mut self, root: RootId) {
-        let mode = self.root_node(root).and_then(SurfaceNode::root).map(|state| state.mode);
-        self.remove_root_from_order(root);
-        match mode.expect("fronted root must remain retained") {
-            RootMode::Normal { layer } => self.fixed_order[layer as usize].push(root),
-            RootMode::Modal => self.modal_order.push(root),
-        }
+        let index = self
+            .node_index(SurfaceKey::Root(root))
+            .filter(|index| self.nodes[*index].root().is_some())
+            .expect("fronted root must remain retained");
+        // Vec::remove performs only shallow Rust moves of the trailing records; widget allocations,
+        // event ports, stable keys, and parent edges retain their identities.
+        let node = self.nodes.remove(index);
+        self.nodes.push(node);
         self.rebuild_visible_order();
     }
 
-    /// Moves a normal root between fixed buckets while preserving its chronological sequence.
+    /// Changes one normal root's fixed layer without changing its activation chronology.
     fn set_root_layer(&mut self, root: RootId, layer: u8) {
-        self.remove_root_from_order(root);
-        let sequence = {
-            let state = self
-                .root_node_mut(root)
-                .and_then(SurfaceNode::root_mut)
-                .expect("layer mutation requires a retained root");
-            state.mode = RootMode::Normal { layer };
-            state.stacking_sequence
-        };
-        // Layer mutation does not activate a root. Insert before the first root activated later so
-        // cross-layer moves retain the same order that the former z-index sort produced.
-        let position = self.fixed_order[layer as usize]
-            .iter()
-            .position(|candidate| {
-                self.root_node(*candidate)
-                    .and_then(SurfaceNode::root)
-                    .is_some_and(|state| state.stacking_sequence > sequence)
-            })
-            .unwrap_or(self.fixed_order[layer as usize].len());
-        self.fixed_order[layer as usize].insert(position, root);
+        let state = self
+            .root_node_mut(root)
+            .and_then(SurfaceNode::root_mut)
+            .expect("layer mutation requires a retained root");
+        // The node stays at its existing chronological position; layered traversal filters that
+        // single order when rebuilding the visible cache.
+        state.mode = RootMode::Normal { layer };
         self.rebuild_visible_order();
     }
 
-    /// Returns the frontmost visible modal root from the maintained modal bucket.
+    /// Returns the newest visible modal root from global activation chronology.
     fn active_modal_root(&self) -> Option<RootId> {
-        self.modal_order
-            .iter()
-            .rev()
-            .copied()
-            .find(|root| self.root_node(*root).and_then(SurfaceNode::root).is_some_and(|state| state.visible))
+        self.nodes.iter().rev().find_map(|node| match (node.key, node.root()) {
+            (SurfaceKey::Root(root), Some(state)) if state.mode == RootMode::Modal && state.visible => Some(root),
+            _ => None,
+        })
     }
 
     /// Follows sole parent edges to the root that owns one surface.
@@ -859,7 +825,7 @@ impl SurfaceForest {
         output.reverse();
     }
 
-    /// Rebuilds the reusable visible order from maintained roots and the authoritative popup leaf.
+    /// Rebuilds layered visibility by filtering the one chronological node order.
     fn rebuild_visible_order(&mut self) {
         let active_owner = self.active_popup.and_then(|popup| self.owning_root(SurfaceKey::Popup(popup)));
         let active_mode = active_owner.and_then(|root| self.root_node(root)?.root().map(|state| state.mode));
@@ -869,9 +835,14 @@ impl SurfaceForest {
         let mut visible = std::mem::take(&mut self.visible_order);
         visible.clear();
 
+        // Sixteen fixed scans keep layer grouping explicit and allocation-free. Each scan preserves
+        // the relative order of root nodes in `nodes`; interleaved popup nodes are ignored.
         for layer in MIN_LAYER..=MAX_LAYER {
-            for root in self.fixed_order[layer as usize].iter().copied() {
-                if self.root_node(root).and_then(SurfaceNode::root).is_some_and(|state| state.visible) {
+            for node in &self.nodes {
+                if let (SurfaceKey::Root(root), Some(state)) = (node.key, node.root())
+                    && state.mode == (RootMode::Normal { layer })
+                    && state.visible
+                {
                     visible.push(SurfaceKey::Root(root));
                 }
             }
@@ -879,8 +850,12 @@ impl SurfaceForest {
                 visible.extend_from_slice(&popup_path);
             }
         }
-        for root in self.modal_order.iter().copied() {
-            if self.root_node(root).and_then(SurfaceNode::root).is_some_and(|state| state.visible) {
+        // Modal roots form the final structural tier while retaining the same global chronology.
+        for node in &self.nodes {
+            if let (SurfaceKey::Root(root), Some(state)) = (node.key, node.root())
+                && state.mode == RootMode::Modal
+                && state.visible
+            {
                 visible.push(SurfaceKey::Root(root));
             }
         }
@@ -904,10 +879,9 @@ impl SurfaceForest {
             .iter()
             .filter_map(|node| self.owning_root(node.key).filter(|owner| roots.contains(owner)).map(|_| node.key))
             .collect::<Vec<_>>();
+        // Removing complete nodes also removes them from the authoritative chronological order, so
+        // no secondary stacking structure needs reconciliation.
         self.nodes.retain(|node| !removed.contains(&node.key));
-        for root in roots {
-            self.remove_root_from_order(*root);
-        }
         if self.active_popup.is_some_and(|popup| removed.contains(&SurfaceKey::Popup(popup))) {
             self.active_popup = None;
         }
@@ -989,14 +963,12 @@ impl WindowManager {
         let changed = crate::WidgetEventPortHandle::new(&changed_event);
         let submitted = crate::WidgetEventPortHandle::new(&submitted_event);
         let id = self.next_root_id();
-        let stacking_sequence = if visible { self.next_stacking_sequence() } else { -1 };
         self.surfaces.insert_root(SurfaceNode {
             key: SurfaceKey::Root(id),
             parent: parent.map(SurfaceKey::Root),
             surface: Surface::new(name, options, rect, content),
             kind: SurfaceKind::Root(RootState {
                 mode,
-                stacking_sequence,
                 visible,
                 interaction: RootInteraction::None,
                 changed_event,
@@ -1027,12 +999,6 @@ impl WindowManager {
         let id = PopupId(self.next_popup_id);
         self.next_popup_id = self.next_popup_id.checked_add(1).expect("retained popup id counter overflowed");
         id
-    }
-
-    /// Allocates a chronological sequence for root insertion or explicit fronting.
-    fn next_stacking_sequence(&mut self) -> i32 {
-        self.next_front_sequence = self.next_front_sequence.saturating_add(1);
-        self.next_front_sequence
     }
 
     /// Creates an open ordinary window from one complete retained definition.
@@ -1384,14 +1350,10 @@ impl WindowManager {
         }
     }
 
-    /// Assigns a new activation sequence and moves a root to its bucket's front in-place.
+    /// Makes one retained root the newest entry in global activation chronology.
     fn raise_root(&mut self, root: RootId) {
-        let sequence = self.next_stacking_sequence();
-        self.surfaces
-            .root_node_mut(root)
-            .and_then(SurfaceNode::root_mut)
-            .expect("raised root must remain retained")
-            .stacking_sequence = sequence;
+        // The forest moves the complete node so layer changes can later reuse this chronology
+        // without a parallel sequence number or order index.
         self.surfaces.move_root_to_front(root);
     }
 
@@ -1977,12 +1939,6 @@ impl WindowManager {
             .iter()
             .filter_map(|key| self.surface(*key).map(|surface| surface.name.clone()))
             .collect()
-    }
-
-    /// Returns one window z-index for tests.
-    #[cfg(test)]
-    pub(crate) fn debug_root_zindex(&self, root: RootId) -> Option<i32> {
-        self.surfaces.root_node(root)?.root().map(|state| state.stacking_sequence)
     }
 
     /// Returns one window name for tests.
