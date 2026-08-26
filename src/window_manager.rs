@@ -62,7 +62,7 @@ use crate::input::Input;
 use crate::menu::MenuBar;
 use crate::render::DisplayList;
 use crate::{Dimensioni, Node, Recti, Style, UiRuntime};
-use roots::{PopupPath, WindowEntry};
+use roots::SurfaceForest;
 mod root_chrome;
 mod roots;
 
@@ -180,15 +180,20 @@ pub(crate) struct WindowManager {
     /// Window-manager-owned style used by all roots and scroll areas.
     style: Style,
 
-    /// Highest z-index allocated to a visible window or dialog.
-    last_zindex: i32,
-    /// Flat retained ordinary windows and directly owned modal dialogs.
-    windows: Vec<WindowEntry>,
-    /// Sole semantic visibility state for all window-owned popup definitions.
-    active_popup: Option<PopupPath>,
+    /// Monotonic activation sequence used only when a root enters or moves within a layer.
+    ///
+    /// The forest maintains traversal order incrementally, so this value is never a per-frame sort
+    /// key. Retaining the sequence lets a root moved between fixed layers keep its chronological
+    /// position and preserves the diagnostic z-order exposed to existing tests.
+    next_front_sequence: i32,
+    /// Concrete ownership forest for windows, dialogs, and popup surfaces.
+    ///
+    /// Every retained surface lives in one collection and has at most one parent edge. The forest
+    /// also owns the incrementally maintained fixed-layer, modal, and visible traversal orders.
+    surfaces: SurfaceForest,
     /// Whether drag/release events from a capture revoked with a dismissed popup must be swallowed.
     ///
-    /// Popup-local routers cannot consume this tail after their surface leaves `active_popup`, so
+    /// Popup-local routers cannot consume this tail after their surface leaves the active path, so
     /// the cross-surface manager retains the gesture boundary until release.
     discard_pointer_capture_tail: bool,
     /// Last ordinary root explicitly activated by a pointer press.
@@ -213,9 +218,8 @@ impl WindowManager {
         Self {
             display_list: DisplayList::new(),
             style,
-            last_zindex: 0,
-            windows: Vec::default(),
-            active_popup: None,
+            next_front_sequence: 0,
+            surfaces: SurfaceForest::new(),
             discard_pointer_capture_tail: false,
             active_root: None,
             next_root_id: 1,
