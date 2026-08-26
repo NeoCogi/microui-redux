@@ -185,7 +185,8 @@ impl<'a> Ui<'a> {
 
     /// Permanently unregisters a window or dialog and its window-owned popup definitions.
     ///
-    /// Every owned popup tree is dropped and every corresponding weak popup handle expires.
+    /// Every owned popup tree is dropped, making its stable handles stale and expiring their weak
+    /// event endpoints.
     pub fn destroy_window(&mut self, window: &WindowHandle) -> Result<(), SurfaceMutationError> {
         // Destruction also expires every weak application widget and event handle in the subtree.
         self.window_manager.destroy_window(window)

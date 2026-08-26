@@ -260,12 +260,12 @@ preserve that identity; applications cannot read or construct it.
 There is no public node ID or result lookup path. Weak typed widget handles expose event endpoints
 after node erasure.
 
-Windows, application popups, and menu items use a separate retained-object identity source. Every
-object receives a private non-zero `u64` from one process-wide monotonic allocator. Values are not
-reissued after destruction; checked advancement stops before wraparound. The IDs are process-local
-implementation keys, not persistent application identifiers. Concrete `RootId`, `PopupId`, and
-`MenuItemId` wrappers keep operations type-safe, while their shared namespace prevents collisions
-between Contexts.
+Windows and dialogs, every application or private menu popup, and menu items use a separate
+retained-object identity source. Every object receives a private non-zero `u64` from one
+process-wide monotonic allocator. Values are not reissued after destruction; checked advancement
+stops before wraparound. The IDs are process-local implementation keys, not persistent application
+identifiers. Concrete `RootId`, `PopupId`, and `MenuItemId` wrappers keep operations type-safe,
+while their shared namespace prevents collisions between Contexts.
 
 `WindowHandle`, `PopupHandle`, and `MenuItemHandle` aggregate one of those private IDs with the
 weak endpoint associated with the same object. Aggregation is only an application convenience:

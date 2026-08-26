@@ -99,7 +99,8 @@ subscribed through a window endpoint or vice versa.
 Object identity remains outside this event model. Window, popup, and menu-item handles carry a
 private process-unique stable ID beside their weak endpoint. Manager lookup compares only that ID;
 it never casts or compares an `Rc`/`Weak` pointer. Destroying an object permanently retires the ID,
-so a later port may reuse the same allocation address without inheriting any old tracking. This
+so after its weak endpoints are released, a later port may reuse the same allocation address
+without inheriting any old tracking. This
 also leaves room for one object to expose several named ports: every endpoint delivers one event
 kind, while the single object ID continues to select retained state.
 

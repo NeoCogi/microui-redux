@@ -1102,6 +1102,7 @@ fn hide_and_show_preserve_root_and_descendant_state() {
     assert!(button.is_alive());
 }
 
+/// Verifies object IDs remain retired after every weak window-event endpoint has been released.
 #[test]
 fn destroy_expires_event_endpoints_and_stable_ids_survive_address_release() {
     let mut ctx = context();
@@ -1127,6 +1128,7 @@ fn destroy_expires_event_endpoints_and_stable_ids_survive_address_release() {
     assert_ne!(replacement.id(), destroyed_id);
 }
 
+/// Verifies identical definitions in separate Contexts cannot cross stable-ID membership boundaries.
 #[test]
 fn window_and_popup_capabilities_cannot_resolve_another_contexts_surfaces() {
     let mut first = context();
@@ -1229,6 +1231,7 @@ fn hiding_a_window_hides_its_active_popup() {
     assert_eq!(submissions, [PopupEvent::Dismissed]);
 }
 
+/// Verifies popup handles become stale and their endpoints expire when their owner is destroyed.
 #[test]
 fn stale_popup_mutations_fail_after_owner_destruction() {
     let mut ctx = context();
@@ -1239,7 +1242,7 @@ fn stale_popup_mutations_fail_after_owner_destruction() {
     assert_eq!(ctx.ui().destroy_window(&source), Ok(()));
 
     // Popup definitions have no independent destruction operation. Destroying the owning window
-    // expires its handles and makes every typed mutation fail consistently.
+    // makes its handles stale, expires their endpoints, and makes every mutation fail consistently.
     assert_eq!(ctx.ui().show_popup_at(&popup, rect(20, 30, 40, 1)), Err(SurfaceMutationError::UnknownPopup));
     assert_eq!(ctx.ui().set_popup_options(&popup, WindowOption::FRAME), Err(SurfaceMutationError::UnknownPopup));
     assert_eq!(ctx.ui().hide_popup(&popup), Err(SurfaceMutationError::UnknownPopup));
@@ -1465,13 +1468,15 @@ fn higher_layer_window_occludes_lower_popup_for_outside_dismissal() {
     assert_eq!(ctx.debug_active_root(), Some(higher.id()));
 }
 
+/// Verifies hidden popup handles become stale and their event endpoints expire with their owner.
 #[test]
-fn owner_destruction_expires_all_popup_handles() {
+fn owner_destruction_stales_popup_handles_and_expires_their_endpoints() {
     let mut ctx = context();
     let source = ctx.ui().create_window(Window::new("source", rect(0, 0, 100, 80), empty_content()));
     let popup = ctx.ui().create_popup(&source, "popup", empty_content()).unwrap();
 
-    // Popup definitions remain alive while hidden and expire only with their owning window.
+    // Popup definitions and their endpoints remain alive while hidden. Owner destruction removes
+    // the definitions, makes the handles stale, and expires the endpoints.
     ctx.ui().show_popup(&popup).unwrap();
     ctx.ui().hide_popup(&popup).unwrap();
     assert!(popup.events().is_alive());
@@ -2446,6 +2451,7 @@ fn auto_sized_window_includes_menu_bar_and_exposes_application_body_below_it() {
     );
 }
 
+/// Verifies an unmounted item is never manager-addressable and its ID is not later reused.
 #[test]
 fn live_but_unmounted_menu_item_is_unknown_to_ui() {
     let (handle, item) = MenuItem::create(MenuItemParameters::new("Unmounted"));
@@ -2467,6 +2473,7 @@ fn live_but_unmounted_menu_item_is_unknown_to_ui() {
     drop(replacement_item);
 }
 
+/// Verifies equal menu values in different Contexts remain isolated by stable identity.
 #[test]
 fn menu_item_handle_cannot_resolve_another_contexts_record() {
     let (first_handle, first_item) = MenuItem::create(MenuItemParameters::new("Same"));
@@ -2488,6 +2495,7 @@ fn menu_item_handle_cannot_resolve_another_contexts_record() {
     assert!(matches!(second.ui().menu_item(&first_handle), Err(crate::MenuItemAccessError::UnknownItem)));
 }
 
+/// Verifies equal menu values within one surface remain independently addressable.
 #[test]
 fn identical_menu_items_retain_independent_stable_identity() {
     let (first_handle, first_item) = MenuItem::create(MenuItemParameters::new("Same"));
@@ -2504,6 +2512,7 @@ fn identical_menu_items_retain_independent_stable_identity() {
     assert_eq!(ctx.ui().menu_item(&second_handle).unwrap().label, "Same");
 }
 
+/// Verifies a destroyed mounted item's ID remains retired after releasing its weak endpoint.
 #[test]
 fn destroyed_mounted_menu_item_id_remains_retired_after_endpoint_release() {
     let (stale, stale_item) = MenuItem::create(MenuItemParameters::new("Same"));
@@ -2529,6 +2538,7 @@ fn destroyed_mounted_menu_item_id_remains_retired_after_endpoint_release() {
     assert_eq!(ctx.ui().menu_item(&replacement).unwrap().label, "Same");
 }
 
+/// Verifies a retained stale handle cannot address an identical replacement record.
 #[test]
 fn stale_menu_item_handle_cannot_select_an_identical_live_replacement() {
     let (stale, stale_item) = MenuItem::create(MenuItemParameters::new("Same"));

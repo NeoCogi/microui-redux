@@ -28,16 +28,17 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-//! Non-reused process-local identity for application-facing retained objects.
+//! Non-reused process-local identity for retained surfaces and menu items.
 //!
 //! Event ports describe observable behavior and lifetime; they are deliberately not object keys.
 //! This module supplies the orthogonal identity primitive wrapped by concrete window, popup, and
-//! menu-item identifier types. The raw value never crosses the public API boundary.
+//! menu-item identifier types, including popup keys used only by private menu surfaces. The raw
+//! value never crosses the public API boundary.
 
 use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Process-wide source shared by every application-facing retained object kind.
+/// Process-wide source shared by every retained surface and menu-item identity kind.
 ///
 /// Relaxed ordering is sufficient because allocation establishes uniqueness only. It neither
 /// publishes retained object memory nor synchronizes manager operations, which remain confined to
@@ -51,7 +52,7 @@ const fn advance_retained_object_id(current: u64) -> Option<u64> {
     current.checked_add(1)
 }
 
-/// Opaque process-local identity assigned once to one retained application-facing object.
+/// Opaque process-local identity assigned once to one retained surface or menu item.
 ///
 /// Concrete wrappers preserve kind safety, while the shared namespace prevents equal identities
 /// from arising in separate Contexts. This value is intentionally not a persistent identifier:

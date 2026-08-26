@@ -2062,7 +2062,7 @@ impl WindowManager {
     /// Returns whether a popup belongs to the sole active path for tests.
     #[cfg(test)]
     pub(crate) fn debug_popup_visible(&self, popup: &PopupHandle) -> Option<bool> {
-        // Authentication produces the private forest key without exposing it through the handle.
+        // Membership validation accepts the handle's private forest key without exposing it.
         Some(self.surfaces.popup_is_active(self.popup_id(popup).ok()?))
     }
 

@@ -116,7 +116,8 @@ uses the shared content offset. Nested submenu popups calculate their columns in
 Each `MenuSlot` directly owns its `MenuItemId`, `MenuItemParameters`, and strong submission port.
 `MenuItemHandle` carries the same private ID and a weak projection of that port; it does not mirror
 presentation state. IDs come from the process-wide non-reused retained-object namespace, so a
-destroyed item's endpoint allocation can be recycled without redirecting stale lookup. Mutation
+destroyed item's endpoint allocation can be recycled after its weak endpoints are released without
+redirecting stale lookup. Mutation
 through `Ui::menu_item_mut` invalidates the owning layout transaction, ensuring that role and
 text-width changes resize and reanchor open popups correctly. Warm layout reuses the surface's
 slot-geometry vector and the forest's popup-path workspace.

@@ -905,8 +905,8 @@ mod tests {
         let (mut context, model) = context_and_model();
         let dialog_window = model.dialog.window().clone();
 
-        // Destruction expires both the component's stored handle and this clone; subsequent public
-        // mutation reports the concrete window failure instead of consulting a forgeable id.
+        // Destruction makes both stable handles stale and expires their event endpoints; subsequent
+        // public mutation reports the concrete window failure instead of consulting a forgeable ID.
         context.ui().destroy_window(&dialog_window).unwrap();
         assert!(!model.dialog.window().events().is_alive());
         assert_eq!(context.ui().set_window_visible(&dialog_window, true), Err(SurfaceMutationError::UnknownWindow));
