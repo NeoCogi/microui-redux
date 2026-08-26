@@ -79,7 +79,7 @@ struct PopupId(usize);
 ///
 /// This is the popup's typed dismissal endpoint itself. Its event type prevents use in window-only
 /// operations, and its weak allocation identity lets the forest authenticate the originating
-/// Context without exposing or duplicating its private [`PopupId`].
+/// Context without exposing or duplicating its private `PopupId`.
 pub type PopupHandle = crate::WidgetEventPortHandle<PopupEvent>;
 
 /// Storage and traversal state shared by a window body or popup body.
@@ -806,6 +806,8 @@ impl SurfaceForest {
 impl WindowManager {
     /// Borrows one mounted menu item's concrete public state through its typed capability.
     pub(crate) fn menu_item(&self, handle: &crate::MenuItemHandle) -> Result<&crate::MenuItemParameters, crate::MenuItemAccessError> {
+        // Search authoritative bar and popup records by event-allocation identity. This authenticates
+        // the originating Context without a second item id or application-visible lookup table.
         for node in &self.surfaces.nodes {
             if let Some(item) = node.root().and_then(|root| root.menu_bar.as_ref()).and_then(|menu| menu.item(handle)) {
                 return Ok(&item.parameters);
@@ -939,6 +941,8 @@ impl WindowManager {
     /// Registers one application-authored popup below an already validated root.
     fn register_application_popup(&mut self, parent: SurfaceKey, name: &str, content: Node) -> PopupHandle {
         let id = self.next_popup_id();
+        // The forest node retains the strong lifecycle port while the returned typed capability is
+        // weak, so handle liveness and popup lifetime cannot diverge.
         let events = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
         let event_handle = crate::WidgetEventPortHandle::new(&events);
         self.surfaces.insert_popup(SurfaceNode {
@@ -1211,7 +1215,7 @@ impl WindowManager {
         if !window.identifies(&root.events) {
             return Err(SurfaceMutationError::UnknownWindow);
         }
-        // The numeric identity is used only inside this manager after allocation authentication.
+        // The derived concrete identity is used only inside this manager after authentication.
         Ok(window.id())
     }
 
@@ -1623,6 +1627,8 @@ impl WindowManager {
 
     /// Routes and applies one normalized event across every eligible surface.
     fn update_for_event(&mut self, atlas: &crate::AtlasHandle, event: &UiInputEvent, input: crate::input::InputSnapshot) {
+        // Resolve event-wide dismissal and menu-toggle context before selecting a recipient. An
+        // outside press may change the visible forest and must do so before hit testing below.
         let style = self.style;
         let discard_pointer = self.discard_revoked_capture_event(event);
         let menu_press = matches!(event, UiInputEvent::MouseDown { button, .. } if button.intersects(MouseButton::LEFT));
@@ -1635,6 +1641,7 @@ impl WindowManager {
             self.discard_pointer_capture_tail = false;
         }
 
+        // Select and activate the topmost eligible pointer surface from the newly visible order.
         let hover = (event.is_pointer() && !discard_pointer)
             .then(|| self.input_surface_at(input.mouse_pos))
             .flatten();
@@ -1660,6 +1667,7 @@ impl WindowManager {
         let keyboard = self.keyboard_input_surface();
         let modal = self.surfaces.active_modal_root();
 
+        // Stage pointer eligibility in every participating widget runtime before routing one target.
         for index in 0..self.surfaces.visible_order.len() {
             let key = self.surfaces.visible_order[index];
             if self.surface_is_eligible(key, modal) {
@@ -1672,6 +1680,8 @@ impl WindowManager {
             }
         }
 
+        // Captured gestures take priority; otherwise route exactly one pointer hit or keyboard
+        // target. Menu policy is staged until its concrete surface borrow has been released.
         let mut staged_menu_press = None;
         if event.is_pointer() && !discard_pointer {
             let captured = matches!(event, UiInputEvent::MouseDrag { .. } | UiInputEvent::MouseUp { .. })
@@ -1738,6 +1748,8 @@ impl WindowManager {
                 .route_focus(&style, event);
         }
 
+        // Reconcile transient state for surfaces excluded by the routed event, then update every
+        // eligible body in the shared visible order using the same immutable input snapshot.
         let modal = self.surfaces.active_modal_root();
         for index in 0..self.surfaces.nodes.len() {
             let key = self.surfaces.nodes[index].key;

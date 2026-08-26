@@ -149,9 +149,10 @@ impl Window {
 pub(crate) struct RootId(usize);
 
 impl RootId {
-    /// Wraps a raw counter value as a root identifier.
+    /// Wraps one live window-event allocation token as a concrete root identifier.
     pub(crate) const fn from_raw(raw: usize) -> Self {
-        // Only the manager allocates raw values, so public code cannot forge an identity.
+        // Only the manager can obtain the crate-private token from a typed event capability, so
+        // public code cannot forge or observe this traversal key.
         Self(raw)
     }
 }

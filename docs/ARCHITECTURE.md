@@ -258,7 +258,7 @@ preserve that identity; applications cannot read or construct it.
 There is no public node ID or result lookup path. Weak typed widget handles expose event endpoints
 after node erasure. Window chrome is manager-owned rather than represented by a retained widget;
 `WindowHandle` and `PopupHandle` are distinct typed event endpoints that expose liveness without
-exposing their manager-local ids. A cloned `WindowHandle` carries
+exposing the forest's private concrete keys. A cloned `WindowHandle` carries
 `WindowEvent::GeometryChanged { rect }` and `WindowEvent::CloseRequested`; the manager applies the
 new geometry or hides the window before queuing either observation. A cloned `PopupHandle` carries
 `PopupEvent::Dismissed` whenever policy removes that application popup from the active branch.
