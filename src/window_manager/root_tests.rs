@@ -2029,6 +2029,19 @@ fn declarative_menu_popups_follow_heading_and_submenu_edges_when_the_window_move
     assert_eq!(open_popups[1].x, recent_row.x + recent_row.width);
     assert_eq!(open_popups[1].y, recent_row.y);
 
+    // Both popup levels use the shared frame and place their compact rows directly inside it. Root
+    // padding must not create a second inset around either a top-level menu or a recursive submenu.
+    let popup_rows = ctx.debug_active_menu_row_rects();
+    let border = Style::default().frame_border().width;
+    for (popup, rows) in open_popups.iter().zip(&popup_rows) {
+        let first = rows.first().expect("each declared test menu must contain a row");
+        let last = rows.last().unwrap();
+        assert_eq!(first.x, popup.x + border);
+        assert_eq!(first.y, popup.y + border);
+        assert_eq!(first.width + border * 2, popup.width);
+        assert_eq!(last.y + last.height + border, popup.y + popup.height);
+    }
+
     // Move the owner programmatically while both levels remain open. A fresh layout must translate
     // headings, submenu rows, and both popup surfaces by the same delta while preserving the two
     // edge equations above.
