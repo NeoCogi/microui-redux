@@ -43,7 +43,7 @@ use std::{cell::RefCell, path::Path, rc::Rc};
 
 use crate::{
     Button, ButtonParameters, ButtonSubmitted, IconId, Linear, LinearItem, LinearParameters, ListItem, ListItemParameters, ListItemSubmitted, Node, Recti,
-    Context, EventContext, RootHandle, RootId, RootSubmitted, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Textbox, TextboxParameters, TextboxSubmitted,
+    Context, RootHandle, RootId, RootSubmitted, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Textbox, TextboxParameters, TextboxSubmitted, Ui,
     ThemeIcons, TypedWidgetHandle, WidgetEventPortHandle, WidgetOption, Window, WindowOption,
 };
 use crate::event::WidgetEventPort;
@@ -330,9 +330,11 @@ impl FileDialog {
         // Register the modal surface as a stable child of the application window supplied by the
         // caller. Construction fails only when that weak parent identifier is stale or ineligible.
         let root = ctx
+            .ui()
             .create_dialog(parent, Window::new(DEFAULT_FILE_DIALOG_TITLE, DEFAULT_FILE_DIALOG_RECT, shell))
             .expect("new file-dialog parent must remain registered");
-        ctx.set_root_options(root.id(), WindowOption::FRAME)
+        ctx.ui()
+            .set_root_options(root.id(), WindowOption::FRAME)
             .expect("new file-dialog root must accept options");
 
         // These sources are new and private to this component, so connection failure would indicate
@@ -496,8 +498,8 @@ impl FileDialog {
     /// Returns the ordinary retained dialog root used by this component.
     ///
     /// Its state may be inspected like any other root. Keep lifecycle changes routed through
-    /// [`Self::open`], [`Self::open_from_event`], [`Self::cancel`], or
-    /// [`Self::cancel_from_event`] so component activity and modal visibility stay synchronized.
+    /// [`Self::open`] or [`Self::cancel`] so component activity and modal visibility stay
+    /// synchronized.
     pub fn root(&self) -> &RootHandle {
         &self.root
     }
@@ -507,60 +509,37 @@ impl FileDialog {
         self.active
     }
 
-    /// Resets and shows this file picker from ordinary application code.
+    /// Resets and shows this file picker through the current retained UI transaction.
     ///
     /// Completion is emitted through [`Self::completed`] during a later retained event dispatch.
     ///
     /// # Panics
     ///
     /// Panics when the dialog is already open or its application-owned root was destroyed.
-    pub fn open<B: crate::render::RendererBackend, State: 'static>(&mut self, ctx: &mut Context<B, State>, request: FileDialogRequest) {
-        let icons = ctx.style().icons;
+    pub fn open(&mut self, ui: &mut Ui<'_>, request: FileDialogRequest) {
+        // Capture theme-owned icons before mutating the retained dialog so model reset and surface
+        // visibility remain one transaction through the shared façade.
+        let icons = ui.style().icons;
         let (title, rect) = self.prepare_open(request, icons);
-        ctx.set_root_name(self.root.id(), title)
+        ui.set_root_name(self.root.id(), title)
             .expect("application-owned file-dialog root must remain registered");
-        ctx.set_root_rect(self.root.id(), rect)
+        ui.set_root_rect(self.root.id(), rect)
             .expect("application-owned file-dialog root must remain registered");
-        ctx.set_root_visible(self.root.id(), true)
+        ui.set_root_visible(self.root.id(), true)
             .expect("application-owned file-dialog root must remain registered");
     }
 
-    /// Resets and shows this file picker from a context-aware application event handler.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the dialog is already open or its application-owned root was destroyed.
-    pub fn open_from_event(&mut self, ctx: &mut EventContext<'_>, request: FileDialogRequest) {
-        let icons = ctx.style().icons;
-        let (title, rect) = self.prepare_open(request, icons);
-        ctx.set_root_name(self.root.id(), title)
-            .expect("application-owned file-dialog root must remain registered");
-        ctx.set_root_rect(self.root.id(), rect)
-            .expect("application-owned file-dialog root must remain registered");
-        ctx.set_root_visible(self.root.id(), true)
-            .expect("application-owned file-dialog root must remain registered");
-    }
-
-    /// Cancels an open picker from ordinary application code.
+    /// Cancels an open picker through the current retained UI transaction.
     ///
     /// Returns `false` when it is already idle. A successful cancellation queues exactly one
     /// [`FileDialogCompleted`] event for the next application dispatch boundary.
-    pub fn cancel<B: crate::render::RendererBackend, State: 'static>(&mut self, ctx: &mut Context<B, State>) -> bool {
+    pub fn cancel(&mut self, ui: &mut Ui<'_>) -> bool {
         if !self.active {
             return false;
         }
-        ctx.set_root_visible(self.root.id(), false)
-            .expect("application-owned file-dialog root must remain registered");
-        self.emit_completion(FileDialogStatus::Cancelled);
-        true
-    }
-
-    /// Cancels an open picker from a context-aware application event handler.
-    pub fn cancel_from_event(&mut self, ctx: &mut EventContext<'_>) -> bool {
-        if !self.active {
-            return false;
-        }
-        self.finish(ctx, FileDialogStatus::Cancelled);
+        // Reuse the same completion path as buttons and title-bar dismissal so visibility and the
+        // component event cannot diverge.
+        self.finish(ui, FileDialogStatus::Cancelled);
         true
     }
 
@@ -710,36 +689,48 @@ impl FileDialog {
             .expect("file-dialog filename box must remain mounted");
     }
 
+    /// Ends the active request and queues its single terminal component event.
     fn emit_completion(&mut self, completion: FileDialogStatus) {
+        // Every caller checks activity before entering, keeping duplicate terminal events a debug
+        // invariant violation rather than silently changing the component state twice.
         debug_assert!(self.active);
         self.active = false;
         self.completed.borrow_mut().emit(FileDialogCompleted::new(completion));
     }
 
-    fn finish(&mut self, ctx: &mut EventContext<'_>, completion: FileDialogStatus) {
-        ctx.set_root_visible(self.root.id(), false)
+    /// Hides the modal surface before publishing one accepted or cancelled result.
+    fn finish(&mut self, ui: &mut Ui<'_>, completion: FileDialogStatus) {
+        // Hide the retained modal before publishing completion so later subscribers observe the
+        // component as idle at the same dispatch boundary.
+        ui.set_root_visible(self.root.id(), false)
             .expect("application-owned file-dialog root must remain registered");
         self.emit_completion(completion);
     }
 
-    fn accept_submitted(&mut self, ctx: &mut EventContext<'_>, _event: &ButtonSubmitted) {
+    /// Accepts the current selection when the Open button is submitted.
+    fn accept_submitted(&mut self, ui: &mut Ui<'_>, _event: &ButtonSubmitted) {
+        // An event queued before another completion may arrive after the component became idle.
         if !self.active {
             return;
         }
         if let Some(completion) = self.accepted_status() {
-            self.finish(ctx, completion);
+            self.finish(ui, completion);
         }
     }
 
-    fn cancel_submitted(&mut self, ctx: &mut EventContext<'_>, _event: &ButtonSubmitted) {
+    /// Cancels the active request when the dialog's Cancel button is submitted.
+    fn cancel_submitted(&mut self, ui: &mut Ui<'_>, _event: &ButtonSubmitted) {
+        // Ignore a stale queued button submission after another path completed the request.
         if self.active {
-            self.finish(ctx, FileDialogStatus::Cancelled);
+            self.finish(ui, FileDialogStatus::Cancelled);
         }
     }
 
-    fn root_cancelled(&mut self, ctx: &mut EventContext<'_>, _event: &RootSubmitted) {
+    /// Converts title-bar closure of the retained dialog into component cancellation.
+    fn root_cancelled(&mut self, ui: &mut Ui<'_>, _event: &RootSubmitted) {
+        // Root and button cancellation converge on the same visibility and event transaction.
         if self.active {
-            self.finish(ctx, FileDialogStatus::Cancelled);
+            self.finish(ui, FileDialogStatus::Cancelled);
         }
     }
 
@@ -767,16 +758,22 @@ impl FileDialog {
         accessor(state).file_submitted(event);
     }
 
-    fn dispatch_accept<State>(state: &mut State, accessor: &FileDialogAccessor<State>, ctx: &mut EventContext<'_>, event: &ButtonSubmitted) {
-        accessor(state).accept_submitted(ctx, event);
+    /// Resolves the application-owned component before forwarding its Open submission.
+    fn dispatch_accept<State>(state: &mut State, accessor: &FileDialogAccessor<State>, ui: &mut Ui<'_>, event: &ButtonSubmitted) {
+        // The stored accessor avoids retaining a second owner or erasing application state.
+        accessor(state).accept_submitted(ui, event);
     }
 
-    fn dispatch_cancel<State>(state: &mut State, accessor: &FileDialogAccessor<State>, ctx: &mut EventContext<'_>, event: &ButtonSubmitted) {
-        accessor(state).cancel_submitted(ctx, event);
+    /// Resolves the application-owned component before forwarding its Cancel submission.
+    fn dispatch_cancel<State>(state: &mut State, accessor: &FileDialogAccessor<State>, ui: &mut Ui<'_>, event: &ButtonSubmitted) {
+        // Forward the shared Ui borrow so event-time and direct cancellation use identical code.
+        accessor(state).cancel_submitted(ui, event);
     }
 
-    fn dispatch_root_cancel<State>(state: &mut State, accessor: &FileDialogAccessor<State>, ctx: &mut EventContext<'_>, event: &RootSubmitted) {
-        accessor(state).root_cancelled(ctx, event);
+    /// Resolves the application-owned component before forwarding title-bar closure.
+    fn dispatch_root_cancel<State>(state: &mut State, accessor: &FileDialogAccessor<State>, ui: &mut Ui<'_>, event: &RootSubmitted) {
+        // Root submission is translated only by this component, not by WindowManager policy.
+        accessor(state).root_cancelled(ui, event);
     }
 }
 
@@ -815,8 +812,8 @@ mod tests {
             self.completions.push(event.status().clone());
         }
 
-        fn open_from_button(&mut self, context: &mut EventContext<'_>, _event: &ButtonSubmitted) {
-            self.dialog.open_from_event(context, FileDialogRequest::default());
+        fn open_from_button(&mut self, ui: &mut Ui<'_>, _event: &ButtonSubmitted) {
+            self.dialog.open(ui, FileDialogRequest::default());
         }
 
         fn behind_submitted(&mut self, _event: &ButtonSubmitted) {
@@ -828,7 +825,7 @@ mod tests {
         let mut context = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions());
         // The fixture window gives the component the same stable lifetime owner required from a
         // real application. Its geometry is unrelated to the dialog's screen-space rectangle.
-        let owner = context.create_window(Window::new(
+        let owner = context.ui().create_window(Window::new(
             "file-dialog owner",
             rect(0, 0, 1, 1),
             Button::create(ButtonParameters::new("owner")).1,
@@ -882,13 +879,13 @@ mod tests {
 
         let (mut context, mut model) = context_and_model();
         let root = model.dialog.root().id();
-        model.dialog.open(&mut context, request);
+        model.dialog.open(&mut context.ui(), request);
         assert!(model.dialog.is_open());
         assert_eq!(context.debug_root_name(root).as_deref(), Some("Choose"));
         let root_rect = context.debug_root_rect(root).unwrap();
         assert_eq!((root_rect.x, root_rect.y, root_rect.width, root_rect.height), (10, 20, 400, 300));
         assert_eq!(context.debug_modal_root(), Some(root));
-        assert!(model.dialog.cancel(&mut context));
+        assert!(model.dialog.cancel(&mut context.ui()));
         context.update_ui_state(dimensions(), &mut model);
         assert_eq!(model.completions, [FileDialogStatus::Cancelled]);
         fs::remove_dir_all(dir).unwrap();
@@ -899,7 +896,7 @@ mod tests {
         let (mut context, mut model) = context_and_model();
         let (button, node) = Button::create(ButtonParameters::new("open"));
         let button_id = node.id();
-        let window = context.create_window(Window::new("window", rect(0, 0, 100, 80), node));
+        let window = context.ui().create_window(Window::new("window", rect(0, 0, 100, 80), node));
         context.subscribe_context(button.submitted(), Model::open_from_button).unwrap();
         context.update_ui_state(dimensions(), &mut model);
 
@@ -913,7 +910,7 @@ mod tests {
         let (mut context, mut model) = context_and_model();
         model
             .dialog
-            .open(&mut context, FileDialogRequest::new().with_initial_directory("/retained-test"));
+            .open(&mut context.ui(), FileDialogRequest::new().with_initial_directory("/retained-test"));
         context.update_ui_state(dimensions(), &mut model);
         model
             .dialog
@@ -938,9 +935,9 @@ mod tests {
     #[test]
     fn explicit_cancel_queues_one_completion_for_the_next_update() {
         let (mut context, mut model) = context_and_model();
-        model.dialog.open(&mut context, FileDialogRequest::default());
-        assert!(model.dialog.cancel(&mut context));
-        assert!(!model.dialog.cancel(&mut context));
+        model.dialog.open(&mut context.ui(), FileDialogRequest::default());
+        assert!(model.dialog.cancel(&mut context.ui()));
+        assert!(!model.dialog.cancel(&mut context.ui()));
         assert!(model.completions.is_empty());
 
         context.update_ui_state(dimensions(), &mut model);
@@ -961,16 +958,16 @@ mod tests {
         let scroll = model.dialog.file_scroll.clone();
 
         model.dialog.open(
-            &mut context,
+            &mut context.ui(),
             FileDialogRequest::new().with_title("First").with_initial_directory(first_dir.to_string_lossy()),
         );
         filename.try_update_with("stale.txt", |state, text| state.set_text(text)).unwrap();
         scroll.try_update(|state| state.set_offset(crate::vec2(0, 20))).unwrap();
-        assert!(model.dialog.cancel(&mut context));
+        assert!(model.dialog.cancel(&mut context.ui()));
         context.update_ui_state(dimensions(), &mut model);
 
         model.dialog.open(
-            &mut context,
+            &mut context.ui(),
             FileDialogRequest::new()
                 .with_title("Second")
                 .with_initial_directory(second_dir.to_string_lossy()),
@@ -993,9 +990,9 @@ mod tests {
     #[test]
     fn overlapping_open_panics_without_closing_the_active_component() {
         let (mut context, mut model) = context_and_model();
-        model.dialog.open(&mut context, FileDialogRequest::default());
+        model.dialog.open(&mut context.ui(), FileDialogRequest::default());
         let result = catch_unwind(AssertUnwindSafe(|| {
-            model.dialog.open(&mut context, FileDialogRequest::default());
+            model.dialog.open(&mut context.ui(), FileDialogRequest::default());
         }));
         assert!(result.is_err());
         assert!(model.dialog.is_open());
@@ -1030,7 +1027,7 @@ mod tests {
         }
 
         let mut context = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions());
-        let owner = context.create_window(Window::new(
+        let owner = context.ui().create_window(Window::new(
             "file-dialog owner",
             rect(0, 0, 1, 1),
             Button::create(ButtonParameters::new("owner")).1,
@@ -1046,11 +1043,11 @@ mod tests {
             second_completions: 0,
         };
 
-        model.first.open(&mut context, FileDialogRequest::new().with_title("First"));
-        model.second.open(&mut context, FileDialogRequest::new().with_title("Second"));
+        model.first.open(&mut context.ui(), FileDialogRequest::new().with_title("First"));
+        model.second.open(&mut context.ui(), FileDialogRequest::new().with_title("Second"));
         assert_ne!(model.first.root.id(), model.second.root.id());
         assert_eq!(context.debug_modal_root(), Some(model.second.root.id()));
-        assert!(model.second.cancel(&mut context));
+        assert!(model.second.cancel(&mut context.ui()));
         context.update_ui_state(dimensions(), &mut model);
         assert_eq!((model.first_completions, model.second_completions), (0, 1));
         assert!(model.first.is_open());
@@ -1062,11 +1059,12 @@ mod tests {
         let (mut context, mut model) = context_and_model();
         let (button, button_node) = Button::create(ButtonParameters::new("behind"));
         context.subscribe(button.submitted(), Model::behind_submitted).unwrap();
-        let window = context.create_window(Window::new("window", rect(0, 0, 100, 80), button_node));
+        let window = context.ui().create_window(Window::new("window", rect(0, 0, 100, 80), button_node));
         context
+            .ui()
             .set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
             .unwrap();
-        model.dialog.open(&mut context, FileDialogRequest::default());
+        model.dialog.open(&mut context.ui(), FileDialogRequest::default());
         context.update_ui_state(dimensions(), &mut model);
 
         context.mousedown(10, 10, MouseButton::LEFT);
@@ -1080,7 +1078,7 @@ mod tests {
     #[test]
     fn action_buttons_keep_standard_height_and_browser_absorbs_resize() {
         let (mut context, mut model) = context_and_model();
-        model.dialog.open(&mut context, FileDialogRequest::default());
+        model.dialog.open(&mut context.ui(), FileDialogRequest::default());
         context.update_ui_state(dimensions(), &mut model);
         let root = model.dialog.root.id();
         let toolbar_before = context.debug_root_node_rect(root, model.dialog.test.up_button_id).unwrap();
@@ -1091,7 +1089,7 @@ mod tests {
 
         let mut resized = context.debug_root_rect(root).unwrap();
         resized.height += 80;
-        context.set_root_rect(root, resized).unwrap();
+        context.ui().set_root_rect(root, resized).unwrap();
         context.update_ui_state(dimensions(), &mut model);
         let toolbar_after = context.debug_root_node_rect(root, model.dialog.test.up_button_id).unwrap();
         let open_after = context.debug_root_node_rect(root, model.dialog.test.ok_button_id).unwrap();
@@ -1111,7 +1109,7 @@ mod tests {
         let (mut context, mut model) = context_and_model();
         model
             .dialog
-            .open(&mut context, FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
+            .open(&mut context.ui(), FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
         context.update_ui_state(dimensions(), &mut model);
         let root = model.dialog.root.id();
         let file_node = model.dialog.test.file_item_ids[0];
@@ -1147,7 +1145,7 @@ mod tests {
     #[test]
     fn empty_accept_stays_open_and_cancel_button_completes() {
         let (mut context, mut model) = context_and_model();
-        model.dialog.open(&mut context, FileDialogRequest::default());
+        model.dialog.open(&mut context.ui(), FileDialogRequest::default());
         context.update_ui_state(dimensions(), &mut model);
         let root = model.dialog.root.id();
         let open = model.dialog.test.ok_button_id;
@@ -1165,7 +1163,7 @@ mod tests {
     #[test]
     fn title_close_cancels_and_hides_the_dialog_root() {
         let (mut context, mut model) = context_and_model();
-        model.dialog.open(&mut context, FileDialogRequest::default());
+        model.dialog.open(&mut context.ui(), FileDialogRequest::default());
         context.update_ui_state(dimensions(), &mut model);
         let root = model.dialog.root.id();
         let close = context.debug_root_chrome(root).unwrap().1.expect("dialog should have a close button");
@@ -1186,7 +1184,7 @@ mod tests {
         let (mut context, mut model) = context_and_model();
         model
             .dialog
-            .open(&mut context, FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
+            .open(&mut context.ui(), FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
         context.update_ui_state(dimensions(), &mut model);
         let index = model
             .dialog
@@ -1216,7 +1214,7 @@ mod tests {
         let (mut context, mut model) = context_and_model();
         model
             .dialog
-            .open(&mut context, FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
+            .open(&mut context.ui(), FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
         context.update_ui_state(dimensions(), &mut model);
         let path = model.dialog.path_box.clone();
         let folder_scroll = model.dialog.folder_scroll.clone();

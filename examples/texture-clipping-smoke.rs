@@ -212,8 +212,9 @@ fn main() -> Result<(), String> {
         screen_content: screen_content.clone(),
     });
     let tree = Node::widget(probe);
-    let root = ctx.create_window(Window::new("texture clipping smoke", rect(0, 0, 64, 64), tree));
-    ctx.set_root_options(root.id(), WindowOption::NO_TITLE | WindowOption::NO_CLOSE | WindowOption::NO_RESIZE)
+    let root = ctx.ui().create_window(Window::new("texture clipping smoke", rect(0, 0, 64, 64), tree));
+    ctx.ui()
+        .set_root_options(root.id(), WindowOption::NO_TITLE | WindowOption::NO_CLOSE | WindowOption::NO_RESIZE)
         .expect("root should remain registered");
 
     // Keep the root background out of the recording log so the assertions isolate the widget's

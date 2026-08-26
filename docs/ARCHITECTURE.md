@@ -135,15 +135,15 @@ root kind. Remove its chrome and outer inset, keep its rectangle synchronized wi
 drawable viewport, and let independent windows use the default layer:
 
 ```rust,ignore
-context.set_root_layer(surface.id(), MIN_LAYER)?;
-context.set_root_options(
+context.ui().set_root_layer(surface.id(), MIN_LAYER)?;
+context.ui().set_root_options(
     surface.id(),
     WindowOption::NO_TITLE
         | WindowOption::NO_CLOSE
         | WindowOption::NO_RESIZE
         | WindowOption::NO_PADDING,
 )?;
-context.set_root_rect(surface.id(), rect(0, 0, dimensions.width, dimensions.height))?;
+context.ui().set_root_rect(surface.id(), rect(0, 0, dimensions.width, dimensions.height))?;
 ```
 
 `NO_PADDING` removes only the root-owned content inset; descendant widgets still use the complete
@@ -174,7 +174,7 @@ let (_, tree) = Linear::create(LinearParameters::horizontal(
     ],
 ));
 
-let _root = ctx.create_window(Window::new("main", rect(20, 20, 240, 120), tree));
+let _root = ctx.ui().create_window(Window::new("main", rect(20, 20, 240, 120), tree));
 let dimensions = Dimensioni::new(800, 600);
 let info = FrameInfo::try_new(dimensions, color(20, 22, 26, 255))?;
 ctx.subscribe(name_submitted, Model::name_submitted)?;

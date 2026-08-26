@@ -1163,7 +1163,7 @@ struct GridMenuItems {
 fn registered_menu_item(
     context: &mut Context<SelectedBackend, State>,
     parameters: MenuItemParameters,
-    handler: for<'a> fn(&mut State, &mut EventContext<'a>, &MenuItemSubmitted),
+    handler: for<'a> fn(&mut State, &mut Ui<'a>, &MenuItemSubmitted),
 ) -> (MenuItemHandle, MenuItem) {
     // The handle exposes the item's typed event source and live presentation state, while the
     // uniquely owned value carries the same item into exactly one declarative menu position.
@@ -1620,46 +1620,58 @@ impl State {
             Grid3dWidgetBuilder::create_widget(Grid3dWidgetParameters { data: grid_3d_state.clone() }),
             grid_renderer,
         );
-        let grid_root = ctx.create_window(Window::new("X-Y Grid Surface", rect(0, 0, 1, 1), grid_node).menu_bar(grid_menu_bar));
+        let grid_root = ctx
+            .ui()
+            .create_window(Window::new("X-Y Grid Surface", rect(0, 0, 1, 1), grid_node).menu_bar(grid_menu_bar));
         // This dedicated desktop-like root is the only layer-0 window. Its menu remains visible at
         // the top edge, while the custom-render body consumes every remaining pixel below it.
-        ctx.set_root_layer(grid_root.id(), MIN_LAYER)
+        ctx.ui()
+            .set_root_layer(grid_root.id(), MIN_LAYER)
             .expect("grid root must accept the bottom application layer");
-        ctx.set_root_options(
-            grid_root.id(),
-            WindowOption::NO_TITLE | WindowOption::NO_CLOSE | WindowOption::NO_RESIZE | WindowOption::NO_PADDING,
-        )
-        .expect("grid root must accept fullscreen chrome options");
+        ctx.ui()
+            .set_root_options(
+                grid_root.id(),
+                WindowOption::NO_TITLE | WindowOption::NO_CLOSE | WindowOption::NO_RESIZE | WindowOption::NO_PADDING,
+            )
+            .expect("grid root must accept fullscreen chrome options");
 
         // Preserve the original Demo Window as an independently movable and resizable layer-15
         // window. Its existing menu is unrelated to the fullscreen grid menu above.
         let (menu_bar, menu_items) = demo_menu_bar(ctx);
-        let demo_root = ctx.create_window(Window::new("Demo Window", rect(40, 40, 300, 450), demo_node).menu_bar(menu_bar));
-        let _style_root = ctx.create_window(Window::new("Style Editor", rect(350, 250, 300, 240), style_node));
-        let _log_root = ctx.create_window(Window::new("Log Window", rect(350, 40, 300, 200), log_node));
+        let demo_root = ctx
+            .ui()
+            .create_window(Window::new("Demo Window", rect(40, 40, 300, 450), demo_node).menu_bar(menu_bar));
+        let _style_root = ctx.ui().create_window(Window::new("Style Editor", rect(350, 250, 300, 240), style_node));
+        let _log_root = ctx.ui().create_window(Window::new("Log Window", rect(350, 40, 300, 200), log_node));
         let combo_popup_root = ctx
+            .ui()
             .create_popup(demo_root.id(), "Combo Box Popup", combo_node)
             .expect("demo window must own the combo popup");
-        ctx.set_popup_options(
-            &combo_popup_root,
-            WindowOption::FRAME | WindowOption::AUTO_HEIGHT | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
-        )
-        .expect("combo popup definition must exist");
+        ctx.ui()
+            .set_popup_options(
+                &combo_popup_root,
+                WindowOption::FRAME | WindowOption::AUTO_HEIGHT | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
+            )
+            .expect("combo popup definition must exist");
         let popup_root = ctx
+            .ui()
             .create_popup(demo_root.id(), "Test Popup", popup_node)
             .expect("demo window must own the test popup");
-        ctx.set_popup_options(
-            &popup_root,
-            WindowOption::FRAME | WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
-        )
-        .expect("test popup definition must exist");
-        let _typography_root = ctx.create_window(Window::new("Typography Demo", rect(40, 500, 300, 170), typography_node));
-        let _triangle_root = ctx.create_window(Window::new("Triangle Window", rect(200, 100, 200, 200), triangle_node));
-        let _painter_root = ctx.create_window(Window::new("Painter Window", rect(820, 40, 280, 240), painter_node));
-        let _falloff_root = ctx.create_window(Window::new("Brush Falloff", rect(820, 300, 320, 260), falloff_node));
-        let _suzanne_root = ctx.create_window(Window::new("Suzanne Window", rect(220, 220, 300, 300), suzanne_node));
-        let _stack_direction_root = ctx.create_window(Window::new("Stack Direction Demo", rect(530, 40, 280, 220), stack_direction_node));
-        let _weight_root = ctx.create_window(Window::new("Weight Demo", rect(530, 270, 280, 260), weight_node));
+        ctx.ui()
+            .set_popup_options(
+                &popup_root,
+                WindowOption::FRAME | WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
+            )
+            .expect("test popup definition must exist");
+        let _typography_root = ctx.ui().create_window(Window::new("Typography Demo", rect(40, 500, 300, 170), typography_node));
+        let _triangle_root = ctx.ui().create_window(Window::new("Triangle Window", rect(200, 100, 200, 200), triangle_node));
+        let _painter_root = ctx.ui().create_window(Window::new("Painter Window", rect(820, 40, 280, 240), painter_node));
+        let _falloff_root = ctx.ui().create_window(Window::new("Brush Falloff", rect(820, 300, 320, 260), falloff_node));
+        let _suzanne_root = ctx.ui().create_window(Window::new("Suzanne Window", rect(220, 220, 300, 300), suzanne_node));
+        let _stack_direction_root = ctx
+            .ui()
+            .create_window(Window::new("Stack Direction Demo", rect(530, 40, 280, 220), stack_direction_node));
+        let _weight_root = ctx.ui().create_window(Window::new("Weight Demo", rect(530, 270, 280, 260), weight_node));
         let (combo_typed_state, combo_runtime) = stateful_leaf::<ComboBuilder>(ComboParameters::new());
         let combo_submitted = combo_typed_state.submitted();
         let combo_item_pairs = [
@@ -1965,7 +1977,7 @@ impl State {
         self.submit_log(text);
     }
 
-    fn test_button(&mut self, index: &usize, context: &mut EventContext<'_>, _: &ButtonSubmitted) {
+    fn test_button(&mut self, index: &usize, context: &mut Ui<'_>, _: &ButtonSubmitted) {
         match index {
             0 => self.write_log("Pressed button 1"),
             1 => self.write_log("Pressed button 2"),
@@ -1979,7 +1991,7 @@ impl State {
             }
             4 => self.write_log("Pressed button 4"),
             5 if !self.file_dialog.is_open() => {
-                self.file_dialog.open_from_event(context, FileDialogRequest::default());
+                self.file_dialog.open(context, FileDialogRequest::default());
                 self.write_log("Open dialog!");
             }
             5 => {}
@@ -1991,7 +2003,7 @@ impl State {
         self.write_log(label);
     }
 
-    fn combo_submitted(&mut self, context: &mut EventContext<'_>, event: &ComboSubmitted) {
+    fn combo_submitted(&mut self, context: &mut Ui<'_>, event: &ComboSubmitted) {
         // Combo owns the semantic toggle; its demo window owns the retained popup definition.
         // Reconcile them once, at the event boundary that joins the two application-chosen pieces.
         if event.open {
@@ -2005,7 +2017,7 @@ impl State {
         }
     }
 
-    fn combo_item(&mut self, index: &usize, context: &mut EventContext<'_>, _: &ListItemSubmitted) {
+    fn combo_item(&mut self, index: &usize, context: &mut Ui<'_>, _: &ListItemSubmitted) {
         let labels: Vec<String> = self
             .combo_item_states
             .iter()
@@ -2033,28 +2045,28 @@ impl State {
     }
 
     /// Starts a fresh log session for the registered New Session item.
-    fn menu_new_session(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+    fn menu_new_session(&mut self, _context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
         self.clear_log();
         self.write_log("Started a new demo session");
     }
 
     /// Opens the independent file dialog for the registered Open item.
-    fn menu_open_file(&mut self, context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+    fn menu_open_file(&mut self, context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
         if self.file_dialog.is_open() {
             return;
         }
         self.menu_open_file.set_enabled(false).expect("Open menu item unavailable");
-        self.file_dialog.open_from_event(context, FileDialogRequest::default());
+        self.file_dialog.open(context, FileDialogRequest::default());
         self.write_log("Opened the file dialog from File > Open...");
     }
 
     /// Clears log output for the registered Clear Log item.
-    fn menu_clear_log(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+    fn menu_clear_log(&mut self, _context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
         self.clear_log();
     }
 
     /// Toggles auto-scroll and updates this concrete item's check marker.
-    fn menu_toggle_auto_scroll(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+    fn menu_toggle_auto_scroll(&mut self, _context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
         self.menu_auto_scroll = !self.menu_auto_scroll;
         self.menu_auto_scroll_item
             .set_mark(MenuItemMark::Checked(self.menu_auto_scroll))
@@ -2067,22 +2079,22 @@ impl State {
     }
 
     /// Selects comfortable spacing through its registered concrete item.
-    fn menu_comfortable_spacing(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+    fn menu_comfortable_spacing(&mut self, _context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
         self.select_menu_spacing(true, 4);
     }
 
     /// Selects compact spacing through its registered concrete item.
-    fn menu_compact_spacing(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+    fn menu_compact_spacing(&mut self, _context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
         self.select_menu_spacing(false, 1);
     }
 
     /// Writes application information for the registered About item.
-    fn menu_about(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+    fn menu_about(&mut self, _context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
         self.write_log("microui-redux retained-mode full demo with per-window menus");
     }
 
     /// Restores the fullscreen grid's documented initial camera orientation and distance.
-    fn grid_reset_view(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+    fn grid_reset_view(&mut self, _context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
         // Replace the complete view rather than attempting to reverse an accumulated quaternion;
         // this also restores projection and zoom bounds-derived state in one authoritative value.
         self.grid_3d_state.borrow_mut().view_3d = create_grid_view_3d();
@@ -2090,7 +2102,7 @@ impl State {
     }
 
     /// Toggles unit-spaced geometry from the fullscreen grid's own checked menu item.
-    fn grid_toggle_minor_lines(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+    fn grid_toggle_minor_lines(&mut self, _context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
         // End the shared-state borrow before updating the item and log, keeping callback-owned data
         // independent from the rest of mutable application state.
         let show_minor_lines = {
@@ -2109,7 +2121,7 @@ impl State {
     }
 
     /// Describes the separate background root from its own Help menu.
-    fn grid_about(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+    fn grid_about(&mut self, _context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
         self.write_log("Layer-0 fullscreen X-Y grid: left-drag to orbit and use the wheel to zoom");
     }
 
@@ -2131,7 +2143,7 @@ impl State {
     }
 
     /// Reconciles diagnostics and the minimum size of the ordinary floating Demo Window.
-    fn demo_root_changed(&mut self, context: &mut EventContext<'_>, event: &RootChanged) {
+    fn demo_root_changed(&mut self, context: &mut Ui<'_>, event: &RootChanged) {
         // Root chrome emits only after a user-driven move or resize. Clamp the demo-specific
         // minimum at this event boundary without coupling it to the fullscreen grid geometry.
         let mut rect = event.rect;
@@ -2647,7 +2659,8 @@ impl State {
         // The platform owns drawable dimensions, while Context owns retained root geometry. Join
         // those authorities once per host frame so window resizes become visible in the second
         // update/layout commit performed by the shared example runner before painting.
-        ctx.set_root_rect(self.grid_root.id(), rect(0, 0, dimensions.width, dimensions.height))
+        ctx.ui()
+            .set_root_rect(self.grid_root.id(), rect(0, 0, dimensions.width, dimensions.height))
             .expect("fullscreen grid root must remain registered");
     }
 

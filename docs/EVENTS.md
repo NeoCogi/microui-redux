@@ -69,7 +69,7 @@ Context<B, State>
                                                                │
 WidgetEventPortHandle<E> ──────────────── Weak ────────────────┘
 
-dispatch boundary ── lends &mut EventContext<'_> ──> opted-in Handler
+dispatch boundary ── lends &mut Ui<'_> ──> opted-in Handler
 
 Application State
 └── owns FileDialog
@@ -165,7 +165,7 @@ WidgetEventDispatcher<State>::add
 the concrete handler. That value belongs to the subscription and lives until the context is
 dropped or the dead subscription is pruned. [`crate::Context::subscribe_context`] and
 [`crate::Context::subscribe_context_with`] use parallel typed adapters whose methods also receive
-a short-lived [`crate::EventContext`]. The dispatcher stores no context borrow; it lends the
+a short-lived [`crate::Ui`]. The dispatcher stores no context borrow; it lends the
 capability only while invoking the method at the safe boundary below.
 
 Application code therefore needs no separate dispatcher value:
@@ -209,7 +209,7 @@ struct Model {
 }
 
 impl Model {
-    fn show_popup(&mut self, context: &mut EventContext<'_>, _: &ButtonSubmitted) {
+    fn show_popup(&mut self, context: &mut Ui<'_>, _: &ButtonSubmitted) {
         // The popup's stable owner was recorded when its window-owned definition was created.
         context.show_popup(&self.popup).unwrap();
     }
@@ -256,13 +256,13 @@ Context input FIFO
              ├── update every eligible retained root
              │       └── widgets append native payloads to their own ports
              ├── dispatch application handlers with &mut State
-             │       └── opted-in handlers also receive &mut EventContext<'_>
+             │       └── opted-in handlers also receive &mut Ui<'_>
              └── commit layout before routing the next raw input event
 ```
 
 This boundary gives handlers exclusive `&mut State` without coupling widgets to `State`. Because
 the complete tree traversal has ended, the context may also lend its independent `WindowManager`
-field through [`crate::EventContext`] without aliasing a widget borrow or the event dispatcher.
+field through [`crate::Ui`] without aliasing a widget borrow or the event dispatcher.
 State-driven widget, root, or topology changes are therefore reflected by layout before the next
 input event is hit-tested.
 
@@ -382,16 +382,16 @@ of a synchronous, context-local retained UI event mechanism.
 Handlers that only mutate application or widget state continue to use `Context::subscribe` and
 `Context::subscribe_with`. A handler that must create, show, hide, move, resize, raise, or destroy a
 Context-owned window or popup uses `subscribe_context` or `subscribe_context_with` and receives a
-short-lived `EventContext<'_>`:
+short-lived `Ui<'_>`:
 
 ```rust,ignore
 impl Model {
     fn show_popup(
         &mut self,
-        event_context: &mut EventContext<'_>,
+        ui: &mut Ui<'_>,
         _: &ButtonSubmitted,
     ) {
-        event_context
+        ui
             .show_popup(&self.popup)
             .expect("popup and its owning root must remain registered");
     }
@@ -400,7 +400,7 @@ impl Model {
 ctx.subscribe_context(open_button.submitted(), Model::show_popup)?;
 ```
 
-`EventContext` owns nothing. It is an exclusive borrow of the Context-owned `WindowManager`, lent
+`Ui` owns nothing. It is an exclusive borrow of the Context-owned `WindowManager`, lent
 only after the complete retained-tree update has released its widget borrows and returned before
 the following layout. Rust therefore prevents a handler from retaining it. Windows and dialogs use
 generic visibility; a popup is shown with `show_popup` or `show_popup_at` so the same transaction
@@ -449,12 +449,12 @@ impl Model {
 
     fn show_file_dialog(
         &mut self,
-        event_context: &mut EventContext<'_>,
+        ui: &mut Ui<'_>,
         _: &ButtonSubmitted,
     ) {
         if !self.file_dialog.is_open() {
             self.file_dialog
-                .open_from_event(event_context, FileDialogRequest::default());
+                .open(ui, FileDialogRequest::default());
         }
     }
 

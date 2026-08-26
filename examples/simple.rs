@@ -70,7 +70,7 @@ fn main() {
         let (_, hello) = Button::create(ButtonParameters::with_opt("Hello World!", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
         let (_, tree) = Linear::create(LinearParameters::horizontal([LinearItem::flex(hello, 1.0)]));
         State {
-            _root: ctx.create_window(Window::new("Hello Window", rect(40, 40, 300, 450), tree)),
+            _root: ctx.ui().create_window(Window::new("Hello Window", rect(40, 40, 300, 450), tree)),
         }
     })
     .unwrap();

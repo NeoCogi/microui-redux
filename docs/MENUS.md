@@ -32,7 +32,7 @@ struct Model {
 
 impl Model {
     /// Handles the event source belonging only to the concrete Open item.
-    fn open(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+    fn open(&mut self, _context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
         // Open the selected document.
     }
 }
@@ -63,7 +63,7 @@ fn build_model<B: RendererBackend>(
             .separator()
             .submenu(Menu::new("Recent").item(recent_item)),
     ]);
-    let root = context.create_window(
+    let root = context.ui().create_window(
         Window::new("Document", rect(20, 20, 640, 480), body).menu_bar(menu_bar),
     );
 

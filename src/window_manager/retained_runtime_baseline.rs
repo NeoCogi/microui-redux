@@ -112,7 +112,7 @@ fn measure_scenario(name: &'static str, application_nodes: usize, build: impl Fn
     let mut ctx = context();
     let construction_measurement = AllocationMeasurement::begin();
     let content = build();
-    let root = ctx.create_window(Window::new(name, rect(0, 0, 600, 440), content));
+    let root = ctx.ui().create_window(Window::new(name, rect(0, 0, 600, 440), content));
     let construction = construction_measurement.finish();
 
     let total_nodes = ctx.debug_root_node_count(root.id()).expect("measured root must remain registered");
@@ -228,7 +228,7 @@ fn retained_runtime_baseline() {
     // chrome and its one application node both receive one update for each of three events.
     let mut ctx = context();
     let content = Linear::create(LinearParameters::vertical(std::iter::empty::<Node>())).1;
-    let root = ctx.create_window(Window::new("phase split", rect(0, 0, 120, 90), content));
+    let root = ctx.ui().create_window(Window::new("phase split", rect(0, 0, 120, 90), content));
     ctx.mousemove(20, 20);
     ctx.keydown(KeyMode::SHIFT);
     ctx.text("x");

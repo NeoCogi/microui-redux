@@ -118,7 +118,7 @@ let cube_renderer = ctx.register_custom_renderer({
 
 let cube = CubeBuilder::create_widget(CubeParameters);
 let tree = Node::custom_render(cube, cube_renderer);
-let _root = ctx.create_window(Window::new("Cube", rect(40, 40, 360, 360), tree));
+let _root = ctx.ui().create_window(Window::new("Cube", rect(40, 40, 360, 360), tree));
 ```
 
 `register_custom_renderer` accepts a callback valid for every frame borrow lifetime. In expanded

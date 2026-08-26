@@ -145,7 +145,7 @@
 //!     info: FrameInfo,
 //! ) -> Result<RootHandle, RenderError> {
 //!     let (_button, button_node) = Button::create(ButtonParameters::new("Save"));
-//!     let root = context.create_window(Window::new(
+//!     let root = context.ui().create_window(Window::new(
 //!         "main",
 //!         rect(20, 20, 180, 80),
 //!         button_node,
@@ -221,7 +221,7 @@ pub mod retained {
         Node, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Scrollbar, ScrollbarAxis, ScrollbarChanged, ScrollbarParameters, TrackSize, UiInputEvent,
         Widget, TextWrap, TypedWidgetHandle, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
     };
-    pub use crate::context::{Context, ContextFrame, EventContext};
+    pub use crate::context::{Context, ContextFrame, Ui};
     pub use crate::window_manager::{
         DEFAULT_LAYER, LayerBinding, MAX_LAYER, MIN_LAYER, PopupHandle, RootChanged, RootHandle, RootId, RootMutationError, RootSubmitted, Window, WindowOption,
     };
@@ -243,10 +243,10 @@ pub mod prelude {
     pub use crate::input::{KeyCode, KeyMode, MouseButton};
     pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame, TextureId};
     pub use crate::retained::{
-        ChildParticipation, Children, Container, ContainerLayoutCtx, ContainerWidget, Context, ContextFrame, EventContext, CustomRenderArgs, AvailableSpace,
-        Constraints, CustomRenderHandle, Disclosure, DisclosureParameters, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, Linear, LinearCrossSize,
-        LinearDirection, LinearItem, LinearParameters, Node, PopupHandle, RootChanged, RootHandle, MeasureCtx, RootId, RootMutationError, RootSubmitted,
-        LayerBinding, DEFAULT_LAYER, MAX_LAYER, MIN_LAYER, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Scrollbar, ScrollbarAxis, ScrollbarChanged,
+        ChildParticipation, Children, Container, ContainerLayoutCtx, ContainerWidget, Context, ContextFrame, Ui, CustomRenderArgs, AvailableSpace, Constraints,
+        CustomRenderHandle, Disclosure, DisclosureParameters, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, Linear, LinearCrossSize, LinearDirection,
+        LinearItem, LinearParameters, Node, PopupHandle, RootChanged, RootHandle, MeasureCtx, RootId, RootMutationError, RootSubmitted, LayerBinding,
+        DEFAULT_LAYER, MAX_LAYER, MIN_LAYER, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Scrollbar, ScrollbarAxis, ScrollbarChanged,
         ScrollbarParameters, TrackSize, LeafWidget, TextWrap, UiInputEvent, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption, WidgetOption,
         WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx, Window, WindowOption,
     };
@@ -270,7 +270,7 @@ pub use atlas::{
     AtlasHandle, AtlasSource, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry,
     FontId, IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON,
 };
-pub use context::{Context, ContextFrame, EventContext};
+pub use context::{Context, ContextFrame, Ui};
 pub use window_manager::{
     DEFAULT_LAYER, LayerBinding, MAX_LAYER, MIN_LAYER, PopupHandle, RootChanged, RootHandle, RootId, RootMutationError, RootSubmitted, Window, WindowOption,
 };

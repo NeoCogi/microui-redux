@@ -37,6 +37,7 @@ no compatibility layer.
     - [x] Modal routing, pointer capture, popup-to-owner activation, wheel targeting, hiding, and destruction reconcile directly against flat windows and the active popup path.
     - [x] `WindowOption::NO_PADDING` removes only the manager-owned content inset, enabling the layer-`0` fullscreen grid while preserving descendant padding.
 - [x] Removed obsolete compatibility APIs instead of retaining adapters: `create_child_window`, `LayerBinding::Inherited`, public subpopup construction, `RootChrome` projection and borrow paths, `WindowMenu`, `MenuPanel`, `MenuGroup`, and the public `Submenu` type.
+- [x] Unified ordinary and event-time retained mutation behind one borrowed `Ui<'_>` façade; `Context::ui()` supplies it outside dispatch, and `FileDialog::open`/`cancel` now use the same API in both places.
 - [x] Migrated `demo-full`, file dialogs, composed-control popups, examples, and downstream retained API tests to the flat ownership and declarative menu model; the demo keeps Grid/Help and File/View/Help menus, cascading Log Spacing choices, live menu colors, arcball grid rotation, wheel zoom, and homogeneous clipping.
 
 ## Version 0.8.0-alpha.4
@@ -80,7 +81,7 @@ removing the remaining application-level frame polling from `demo-full`.
     - [x] Context owns the ordered input FIFO, complete root forest, renderer, and application event dispatcher.
     - [x] `update_ui` and `update_ui_state` commit layout after every queued input event.
     - [x] `ContextFrame::render_ui` is paint-only and rejects missing, stale, or dimension-mismatched commits before backend acquisition.
-    - [x] `EventContext<'_>` lends safe Context-owned mutation access only after retained widget borrows end and before the next layout commit.
+    - [x] `Ui<'_>` lends safe Context-owned mutation access only after retained widget borrows end and before the next layout commit.
 - [x] Added context-owned typed application events.
     - [x] Widgets expose weak `WidgetEventHandle<E>` endpoints for their native event types.
     - [x] `Context<B, State>::subscribe` and `subscribe_with` dispatch into application state after retained widget borrows end.
@@ -98,7 +99,7 @@ removing the remaining application-level frame polling from `demo-full`.
     - [x] File-dialog acceptance and cancellation publish exactly one `FileDialogCompleted` event through a Context-lifetime source; application frame code no longer polls session status.
     - [x] Abandoned file-dialog sessions are settled after application dispatch and before layout or the next queued input; `FileDialogSession` warns when its ownership capability is ignored.
     - [x] `FileDialogStatus` represents terminal outcomes only; `FileDialogSession::status()` uses `None` for pending while completion handlers exhaustively match accepted or cancelled outcomes.
-    - [x] The general layer remains unaware of combos and file-dialog behavior: `EventContext` exposes existing root/service operations, while specialized payloads stay with their owners.
+    - [x] The general layer remains unaware of combos and file-dialog behavior: `Ui` exposes existing root/service operations, while specialized payloads stay with their owners.
 - [x] Unified rendering behind recorded painter operations and typed backend frames.
     - [x] `Painter` records backend-neutral work into the framework-owned display list.
     - [x] `RendererBackend::Frame<'a>` gives each backend one exclusive submission frame.
@@ -110,7 +111,7 @@ removing the remaining application-level frame polling from `demo-full`.
     - [x] Runtime construction, generated Rust embedding, and external PNG loading share serialized atlas metadata.
 - [x] Documented the alpha API and known limitations.
     - [x] Documented the context-owned typed-event architecture.
-    - [x] Documented event-time `EventContext` ownership, generic transient-root coordination, and subscriber-driven file-dialog completion.
+    - [x] Documented event-time `Ui` ownership, generic transient-root coordination, and subscriber-driven file-dialog completion.
     - [x] Documented UTF-8 editing, atlas glyph coverage, scalar-value fallback, and text-layout limits.
     - [x] Documented the trusted atlas-metadata contract, external-atlas workflow, and UTF-8 file-dialog path boundary.
 

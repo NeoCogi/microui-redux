@@ -33,7 +33,7 @@ use std::cell::Cell;
 use microui_redux::render::{FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex};
 use microui_redux::retained::*;
 use microui_redux::prelude::{
-    Dimensioni, EventContext, FileDialog, FileDialogRequest, FileDialogStatus, Menu, MenuBar, MenuItem, MenuItemHandle, MenuItemMark, MenuItemParameters,
+    Dimensioni, Ui, FileDialog, FileDialogRequest, FileDialogStatus, Menu, MenuBar, MenuItem, MenuItemHandle, MenuItemMark, MenuItemParameters,
     MenuItemSubmitted, Recti, TextBlock, TextBlockParameters, TypedWidgetHandle, Window,
 };
 use microui_redux::{
@@ -119,7 +119,7 @@ impl FileDialogModel {
 #[test]
 fn downstream_file_dialog_completion_is_subscriber_driven_without_widget_access() {
     let mut context = context_with_state::<FileDialogModel>();
-    let owner = context.create_window(Window::new(
+    let owner = context.ui().create_window(Window::new(
         "file-dialog owner",
         rect(0, 0, 1, 1),
         TextBlock::create(TextBlockParameters::new("")).1,
@@ -127,11 +127,11 @@ fn downstream_file_dialog_completion_is_subscriber_driven_without_widget_access(
     let mut dialog = FileDialog::new(&mut context, owner.id(), FileDialogModel::dialog_mut);
     let completed = dialog.completed();
     context.subscribe(completed, FileDialogModel::file_dialog_completed).unwrap();
-    dialog.open(&mut context, FileDialogRequest::default());
+    dialog.open(&mut context.ui(), FileDialogRequest::default());
     let mut model = FileDialogModel { dialog, completion: None };
 
     // Explicit cancellation queues one event; the retained update delivers it without frame polling.
-    assert!(model.dialog.cancel(&mut context));
+    assert!(model.dialog.cancel(&mut context.ui()));
     assert!(model.completion.is_none());
     context.update_ui_state(Dimensioni::new(320, 240), &mut model);
     assert_eq!(model.completion, Some(FileDialogStatus::Cancelled));
@@ -150,7 +150,7 @@ struct MenuModel {
 
 impl MenuModel {
     /// Handles the concrete Open item's event source.
-    fn open_submitted(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
+    fn open_submitted(&mut self, _context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
         self.invoked.push("Open");
     }
 }
@@ -169,10 +169,11 @@ fn downstream_window_owns_declarative_menu_and_live_concrete_items() {
         Menu::new("File").item(open_item).item(save_item),
         Menu::new("View").item(word_wrap_item),
     ]));
-    let root = context.create_window(window);
+    let root = context.ui().create_window(window);
     // The deliberately minimal downstream atlas contains no chrome icons, so this compile-contract
     // test removes title controls before committing the retained tree.
     context
+        .ui()
         .set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
 
@@ -201,7 +202,7 @@ fn downstream_window_owns_declarative_menu_and_live_concrete_items() {
 
     // Destroying the root releases the sole strong ownership chain for all menu items. The public
     // handles are deliberately weak, so no handle can accidentally keep a discarded window alive.
-    assert!(context.destroy_root(root.id()));
+    assert!(context.ui().destroy_root(root.id()));
     assert!(!root.is_alive());
     assert!(!open.is_alive());
     assert!(!model.save.is_alive());
@@ -321,8 +322,9 @@ fn downstream_custom_container_measures_and_lays_out_through_public_scoped_apis(
     let (state, runtime) = external_container([child]);
     let node = Node::container(runtime);
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("external", rect(10, 20, 100, 80), node));
-    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    let root = ctx.ui().create_window(Window::new("external", rect(10, 20, 100, 80), node));
+    ctx.ui()
+        .set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     let frame = FrameInfo::try_new(Dimensioni::new(320, 240), color(0, 0, 0, 255)).unwrap();
 
@@ -334,7 +336,7 @@ fn downstream_custom_container_measures_and_lays_out_through_public_scoped_apis(
     let allocated = state.try_read(|state| state.allocated_child.get()).flatten().unwrap();
     assert!(allocated.width > 12 && allocated.height > 9, "the parent rectangle must be authoritative");
     assert!(child_state.is_alive());
-    assert!(ctx.destroy_root(root.id()));
+    assert!(ctx.ui().destroy_root(root.id()));
     assert!(!state.is_alive());
     assert!(!child_state.is_alive());
 }
@@ -343,13 +345,13 @@ fn downstream_custom_container_measures_and_lays_out_through_public_scoped_apis(
 fn root_creation_and_lifecycle_need_no_projection_or_generated_node_identity() {
     let mut ctx = context();
     let content = Linear::create(LinearParameters::vertical(std::iter::empty::<Node>())).1;
-    let root = ctx.create_window(Window::new("root", rect(10, 20, 100, 80), content));
+    let root = ctx.ui().create_window(Window::new("root", rect(10, 20, 100, 80), content));
     let id = root.id();
 
     assert!(root.is_alive());
-    ctx.set_root_visible(id, false).unwrap();
+    ctx.ui().set_root_visible(id, false).unwrap();
     assert!(root.is_alive(), "hiding retains the root and its application tree");
-    assert!(ctx.destroy_root(id));
+    assert!(ctx.ui().destroy_root(id));
     assert!(!root.is_alive());
-    assert_eq!(ctx.set_root_rect(id, rect(0, 0, 1, 1)), Err(RootMutationError::UnknownRoot));
+    assert_eq!(ctx.ui().set_root_rect(id, rect(0, 0, 1, 1)), Err(RootMutationError::UnknownRoot));
 }

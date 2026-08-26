@@ -33,7 +33,7 @@ use super::*;
 use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, test_atlas};
 use crate::{
     color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Combo, ComboParameters, ComboSubmitted, Custom,
-    CustomParameters, Constraints, Context, Dimensioni, Disclosure, DisclosureParameters, EventContext, Grid, GridParameters, KeyMode, Linear, LinearItem,
+    CustomParameters, Constraints, Context, Dimensioni, Disclosure, DisclosureParameters, Ui, Grid, GridParameters, KeyMode, Linear, LinearItem,
     LinearParameters, Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted, MouseButton, Node, ScrollArea, ScrollAreaOption, ListItem,
     ListItemParameters, ScrollAreaParameters, Style, Textbox, TextboxChanged, TextBlock, TextBlockParameters, TextboxParameters, TrackSize, TypedWidgetHandle,
     UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
@@ -338,8 +338,9 @@ impl crate::LeafWidget for TopologyMutator {
 fn routed_recipient_gets_one_event_while_every_node_still_updates_in_fifo_order() {
     let (state, probe) = OrderedProbe::create(WidgetOption::NONE);
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("window", rect(10, 10, 100, 80), probe));
-    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    let root = ctx.ui().create_window(Window::new("window", rect(10, 10, 100, 80), probe));
+    ctx.ui()
+        .set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
 
     ctx.mousemove(20, 20);
@@ -385,7 +386,7 @@ fn routed_recipient_gets_one_event_while_every_node_still_updates_in_fifo_order(
 #[test]
 fn update_drains_each_input_into_one_full_update_and_one_followup_layout() {
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("window", rect(10, 10, 120, 90), empty_content()));
+    let root = ctx.ui().create_window(Window::new("window", rect(10, 10, 120, 90), empty_content()));
     let dimensions = Dimensioni::new(320, 240);
 
     ctx.mousemove(20, 20);
@@ -409,7 +410,7 @@ fn update_drains_each_input_into_one_full_update_and_one_followup_layout() {
 fn render_preflight_requires_a_matching_commit_and_never_acquires_backend_on_error() {
     let (backend, log) = recording_backend(test_atlas());
     let mut ctx = Context::<_>::new(backend);
-    let root = ctx.create_window(Window::new("window", rect(10, 10, 120, 90), empty_content()));
+    let root = ctx.ui().create_window(Window::new("window", rect(10, 10, 120, 90), empty_content()));
     let dimensions = Dimensioni::new(320, 240);
 
     assert_eq!(ctx.frame(frame_info(dimensions)).render_ui(), Err(RenderError::UiUpdateRequired));
@@ -425,7 +426,7 @@ fn render_preflight_requires_a_matching_commit_and_never_acquires_backend_on_err
     assert_eq!(ctx.frame(frame_info(other)).render_ui(), Err(RenderError::UiUpdateRequired));
     assert!(log.snapshot().is_empty());
 
-    ctx.set_root_rect(root.id(), rect(20, 20, 120, 90)).unwrap();
+    ctx.ui().set_root_rect(root.id(), rect(20, 20, 120, 90)).unwrap();
     assert_eq!(ctx.frame(frame_info(dimensions)).render_ui(), Err(RenderError::UiUpdateRequired));
     assert!(log.snapshot().is_empty());
 }
@@ -433,7 +434,7 @@ fn render_preflight_requires_a_matching_commit_and_never_acquires_backend_on_err
 #[test]
 fn invalid_update_dimensions_panic_before_dequeue_and_preserve_pending_input() {
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("window", rect(10, 10, 120, 90), empty_content()));
+    let root = ctx.ui().create_window(Window::new("window", rect(10, 10, 120, 90), empty_content()));
     ctx.text("still pending");
 
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ctx.update_ui(Dimensioni::new(0, 240)))).expect_err("invalid dimensions must panic");
@@ -452,7 +453,7 @@ fn invalid_update_dimensions_panic_before_dequeue_and_preserve_pending_input() {
 #[test]
 fn every_event_layout_commit_updates_hit_geometry_for_the_next_queued_event() {
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("window", rect(30, 30, 140, 100), empty_content()));
+    let root = ctx.ui().create_window(Window::new("window", rect(30, 30, 140, 100), empty_content()));
     let dimensions = Dimensioni::new(320, 240);
     ctx.update_ui(dimensions);
     let (title, close, _) = ctx.debug_root_chrome(root.id()).unwrap();
@@ -476,8 +477,9 @@ fn disclosure_update_commits_child_geometry_before_the_next_queued_press() {
     let mut submissions = 0;
     let (disclosure, node) = Disclosure::create(DisclosureParameters::header("section", false, [child]));
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("window", rect(0, 0, 140, 100), node));
-    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    let root = ctx.ui().create_window(Window::new("window", rect(0, 0, 140, 100), node));
+    ctx.ui()
+        .set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     let dimensions = Dimensioni::new(320, 240);
     ctx.update_ui(dimensions);
@@ -510,8 +512,9 @@ fn collapsed_disclosure_skips_descendant_phases_and_drops_targets_only_on_remova
         true,
         [LinearItem::content(probe_node), LinearItem::fixed(custom_node, 10).with_fixed_cross(20)],
     ));
-    let root = ctx.create_window(Window::new("window", rect(0, 0, 160, 140), content));
-    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    let root = ctx.ui().create_window(Window::new("window", rect(0, 0, 160, 140), content));
+    ctx.ui()
+        .set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     ctx.update_and_render_ui();
     let probe_rect = ctx.debug_root_node_rect(root.id(), probe_id).unwrap();
@@ -570,8 +573,9 @@ fn nested_scroll_bubbles_at_the_inner_boundary_and_moves_only_the_outer_area() {
     let (outer, content) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, outer_content));
 
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("window", rect(0, 0, 100, 100), content));
-    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    let root = ctx.ui().create_window(Window::new("window", rect(0, 0, 100, 100), content));
+    ctx.ui()
+        .set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     let dimensions = Dimensioni::new(320, 240);
     ctx.update_ui(dimensions);
@@ -601,8 +605,9 @@ fn intrinsic_mutation_is_laid_out_before_the_next_event_and_painted_from_that_co
     let target_id = target.id();
     let (_, content) = Linear::create(LinearParameters::vertical([growing, target]));
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("window", rect(0, 0, 140, 100), content));
-    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    let root = ctx.ui().create_window(Window::new("window", rect(0, 0, 140, 100), content));
+    ctx.ui()
+        .set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     let dimensions = Dimensioni::new(320, 240);
     ctx.update_ui(dimensions);
@@ -638,8 +643,9 @@ fn sibling_mutation_observes_parent_first_forward_traversal_without_reruns() {
     let (_late_mutator_state, late_mutator) = SiblingMutationProbe::new(0, Some((already_updated_state.clone(), 22)));
     let (_, content) = Linear::create(LinearParameters::vertical([earlier, later, already_updated, late_mutator]));
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("window", rect(0, 0, 140, 100), content));
-    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    let root = ctx.ui().create_window(Window::new("window", rect(0, 0, 140, 100), content));
+    ctx.ui()
+        .set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
 
     ctx.mousemove(5, 5);
@@ -673,8 +679,9 @@ fn topology_mutation_is_blocked_for_the_active_container_and_visible_in_a_later_
     let (outer_container, content) = Linear::create(LinearParameters::vertical([mutator, other_node]));
     *same_container.borrow_mut() = Some(outer_container.clone());
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("window", rect(0, 0, 140, 100), content));
-    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    let root = ctx.ui().create_window(Window::new("window", rect(0, 0, 140, 100), content));
+    ctx.ui()
+        .set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
 
     ctx.mousemove(5, 5);
@@ -695,8 +702,9 @@ fn programmatic_topology_mutation_needs_only_an_empty_queue_layout_commit() {
     let (_, first, _) = CommitProbe::new(10, None);
     let (column, content) = Linear::create(LinearParameters::vertical([first]));
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("window", rect(0, 0, 140, 100), content));
-    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    let root = ctx.ui().create_window(Window::new("window", rect(0, 0, 140, 100), content));
+    ctx.ui()
+        .set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     let dimensions = Dimensioni::new(320, 240);
     ctx.update_ui(dimensions);
@@ -720,8 +728,9 @@ fn programmatic_topology_mutation_needs_only_an_empty_queue_layout_commit() {
 fn traversal_reaching_widget_borrowed_by_an_access_closure_reports_the_runtime_diagnostic() {
     let (text, widget) = crate::TextBlock::create(crate::TextBlockParameters::new("borrowed"));
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("window", rect(0, 0, 140, 100), widget));
-    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    let root = ctx.ui().create_window(Window::new("window", rect(0, 0, 140, 100), widget));
+    ctx.ui()
+        .set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     let dimensions = Dimensioni::new(320, 240);
 
@@ -749,8 +758,9 @@ fn traversal_reaching_widget_borrowed_by_an_access_closure_reports_the_runtime_d
     let (checkbox, checkbox_node) = Checkbox::create(CheckboxParameters::new("checkbox", false));
     let checkbox_id = checkbox_node.id();
     let mut checkbox_ctx = context();
-    let checkbox_root = checkbox_ctx.create_window(Window::new("checkbox", rect(0, 0, 140, 100), checkbox_node));
+    let checkbox_root = checkbox_ctx.ui().create_window(Window::new("checkbox", rect(0, 0, 140, 100), checkbox_node));
     checkbox_ctx
+        .ui()
         .set_root_options(checkbox_root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     checkbox_ctx.update_ui(dimensions);
@@ -799,8 +809,9 @@ fn widget_handle_events_invoke_state_methods_without_polling() {
     let second_id = second.id();
     let (_, content) = Linear::create(LinearParameters::horizontal([LinearItem::fixed(first, 60), LinearItem::fixed(second, 60)]));
     let mut ctx: Context<NoopRenderer, Model> = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, Dimensioni::new(320, 240));
-    let root = ctx.create_window(Window::new("signal", rect(0, 0, 140, 100), content));
-    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    let root = ctx.ui().create_window(Window::new("signal", rect(0, 0, 140, 100), content));
+    ctx.ui()
+        .set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     let dimensions = Dimensioni::new(320, 240);
     let mut model = Model::default();
@@ -830,7 +841,7 @@ fn context_aware_handler_creates_and_mutates_every_root_kind_before_layout() {
     }
 
     impl Model {
-        fn create_roots(&mut self, context: &mut EventContext<'_>, _: &ButtonSubmitted) {
+        fn create_roots(&mut self, context: &mut Ui<'_>, _: &ButtonSubmitted) {
             // Construct every root kind through the same dispatch capability. The nodes move into
             // Context ownership exactly as they do through the ordinary Context façade.
             let window = context.create_window(Window::new("event window", rect(30, 40, 90, 70), empty_content()));
@@ -855,8 +866,9 @@ fn context_aware_handler_creates_and_mutates_every_root_kind_before_layout() {
     let button_id = button.id();
     let dimensions = Dimensioni::new(320, 240);
     let mut context: Context<NoopRenderer, Model> = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions);
-    let source = context.create_window(Window::new("source", rect(0, 0, 140, 100), button));
+    let source = context.ui().create_window(Window::new("source", rect(0, 0, 140, 100), button));
     context
+        .ui()
         .set_root_options(source.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     context.subscribe_context(submitted, Model::create_roots).unwrap();
@@ -891,7 +903,7 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     }
 
     impl Model {
-        fn combo_submitted(&mut self, context: &mut EventContext<'_>, event: &ComboSubmitted) {
+        fn combo_submitted(&mut self, context: &mut Ui<'_>, event: &ComboSubmitted) {
             // Compose the semantic Combo with an ordinary window-owned popup.
             if event.open {
                 context.show_popup_at(&self.popup, event.anchor).unwrap();
@@ -914,12 +926,14 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     let mut context: Context<NoopRenderer, Model> = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions);
     let (combo, combo_node) = Combo::create(ComboParameters::new());
     let combo_id = combo_node.id();
-    let source = context.create_window(Window::new("combo source", rect(10, 10, 140, 90), combo_node));
-    context.set_root_options(source.id(), WindowOption::FRAME).unwrap();
+    let source = context.ui().create_window(Window::new("combo source", rect(10, 10, 140, 90), combo_node));
+    context.ui().set_root_options(source.id(), WindowOption::FRAME).unwrap();
     let popup = context
+        .ui()
         .create_popup(source.id(), "combo choices", Node::widget(DesiredSize(Dimensioni::new(100, 60))))
         .unwrap();
     let replacement = context
+        .ui()
         .create_popup(source.id(), "replacement", Node::widget(DesiredSize(Dimensioni::new(80, 40))))
         .unwrap();
     let mut model = Model {
@@ -967,7 +981,7 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     assert_eq!(context.debug_popup_visible(&popup), Some(true));
     assert_eq!(combo.is_open(), Some(true));
 
-    context.show_popup(&replacement).unwrap();
+    context.ui().show_popup(&replacement).unwrap();
     context.update_ui_state(dimensions, &mut model);
     assert_eq!(context.debug_popup_visible(&popup), Some(false));
     assert_eq!(context.debug_popup_visible(&replacement), Some(true));
@@ -991,8 +1005,9 @@ fn textbox_handle_event_dispatches_a_complete_snapshot_to_state() {
     let changed = widget.changed();
     let node_id = node.id();
     let mut ctx: Context<NoopRenderer, Model> = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, Dimensioni::new(320, 240));
-    let root = ctx.create_window(Window::new("textbox signal", rect(0, 0, 140, 100), node));
-    ctx.set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    let root = ctx.ui().create_window(Window::new("textbox signal", rect(0, 0, 140, 100), node));
+    ctx.ui()
+        .set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     let dimensions = Dimensioni::new(320, 240);
     let mut model = Model::default();
@@ -1010,7 +1025,7 @@ fn textbox_handle_event_dispatches_a_complete_snapshot_to_state() {
 #[test]
 fn creation_returns_persistent_root_handle() {
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("window", rect(20, 30, 120, 90), empty_content()));
+    let root = ctx.ui().create_window(Window::new("window", rect(20, 30, 120, 90), empty_content()));
 
     assert!(root.is_alive());
     assert_eq!(ctx.debug_root_name(root.id()), Some("window".to_owned()));
@@ -1027,7 +1042,7 @@ fn one_child_scroll_area_retains_its_three_structural_children() {
     let child = Node::widget(Custom::create(CustomParameters::new("content")));
     let (_, content) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child));
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("scroll", rect(0, 0, 100, 80), content));
+    let root = ctx.ui().create_window(Window::new("scroll", rect(0, 0, 100, 80), content));
 
     // The application child lives below a scroll surface, beside two real scrollbar widgets.
     assert_eq!(ctx.debug_root_node_count(root.id()), Some(5));
@@ -1037,14 +1052,14 @@ fn one_child_scroll_area_retains_its_three_structural_children() {
 fn hide_and_show_preserve_root_and_descendant_state() {
     let mut ctx = context();
     let (button, content) = button_content("button");
-    let root = ctx.create_window(Window::new("window", rect(10, 10, 120, 90), content));
+    let root = ctx.ui().create_window(Window::new("window", rect(10, 10, 120, 90), content));
 
-    ctx.set_root_visible(root.id(), false).unwrap();
+    ctx.ui().set_root_visible(root.id(), false).unwrap();
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_root_visible(root.id()), Some(false));
     assert!(button.is_alive());
 
-    ctx.set_root_visible(root.id(), true).unwrap();
+    ctx.ui().set_root_visible(root.id(), true).unwrap();
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_root_visible(root.id()), Some(true));
     assert!(button.is_alive());
@@ -1054,17 +1069,17 @@ fn hide_and_show_preserve_root_and_descendant_state() {
 fn destroy_expires_handles_and_ids_are_never_reused() {
     let mut ctx = context();
     let (button, content) = button_content("button");
-    let root = ctx.create_window(Window::new("first", rect(0, 0, 100, 80), content));
+    let root = ctx.ui().create_window(Window::new("first", rect(0, 0, 100, 80), content));
     let destroyed_id = root.id();
 
-    assert!(ctx.destroy_root(destroyed_id));
-    assert!(!ctx.destroy_root(destroyed_id));
-    assert_eq!(ctx.bring_root_to_front(destroyed_id), Err(RootMutationError::UnknownRoot));
-    assert_eq!(ctx.set_root_rect(destroyed_id, rect(1, 2, 3, 4)), Err(RootMutationError::UnknownRoot));
+    assert!(ctx.ui().destroy_root(destroyed_id));
+    assert!(!ctx.ui().destroy_root(destroyed_id));
+    assert_eq!(ctx.ui().bring_root_to_front(destroyed_id), Err(RootMutationError::UnknownRoot));
+    assert_eq!(ctx.ui().set_root_rect(destroyed_id, rect(1, 2, 3, 4)), Err(RootMutationError::UnknownRoot));
     assert!(!root.is_alive());
     assert!(!button.is_alive());
 
-    let replacement = ctx.create_window(Window::new("second", rect(0, 0, 100, 80), empty_content()));
+    let replacement = ctx.ui().create_window(Window::new("second", rect(0, 0, 100, 80), empty_content()));
     assert_ne!(replacement.id(), destroyed_id);
 }
 
@@ -1073,7 +1088,7 @@ fn destroy_expires_handles_and_ids_are_never_reused() {
 fn dynamic_container_root_changes_descendants_without_replacing_the_root() {
     let mut ctx = context();
     let (column, content) = Linear::create(LinearParameters::vertical(std::iter::empty::<Node>()));
-    let root = ctx.create_window(Window::new("dynamic", rect(0, 0, 140, 100), content));
+    let root = ctx.ui().create_window(Window::new("dynamic", rect(0, 0, 140, 100), content));
     let root_id = root.id();
     let (button, widget) = Button::create(ButtonParameters::new("new child"));
 
@@ -1092,9 +1107,9 @@ fn dynamic_container_root_changes_descendants_without_replacing_the_root() {
 #[test]
 fn showing_a_popup_atomically_hides_and_dismisses_the_previous_one() {
     let mut ctx = context();
-    let source = ctx.create_window(Window::new("source", rect(0, 0, 100, 80), empty_content()));
-    let first = ctx.create_popup(source.id(), "first", empty_content()).unwrap();
-    let second = ctx.create_popup(source.id(), "second", empty_content()).unwrap();
+    let source = ctx.ui().create_window(Window::new("source", rect(0, 0, 100, 80), empty_content()));
+    let first = ctx.ui().create_popup(source.id(), "first", empty_content()).unwrap();
+    let second = ctx.ui().create_popup(source.id(), "second", empty_content()).unwrap();
     let mut dispatcher = crate::event::WidgetEventDispatcher::new();
     fn record(events: &mut Vec<RootSubmitted>, event: &RootSubmitted) {
         events.push(*event);
@@ -1102,9 +1117,9 @@ fn showing_a_popup_atomically_hides_and_dismisses_the_previous_one() {
     dispatcher.subscribe(first.submitted(), record).unwrap();
     let mut submissions = Vec::new();
 
-    ctx.show_popup_at(&first, rect(12, 18, 90, 1)).unwrap();
+    ctx.ui().show_popup_at(&first, rect(12, 18, 90, 1)).unwrap();
     assert_eq!(ctx.debug_popup_visible(&first), Some(true));
-    ctx.show_popup_at(&second, rect(40, 55, 120, 1)).unwrap();
+    ctx.ui().show_popup_at(&second, rect(40, 55, 120, 1)).unwrap();
 
     assert_eq!(ctx.debug_popup_visible(&first), Some(false));
     assert_eq!(ctx.debug_popup_visible(&second), Some(true));
@@ -1119,9 +1134,9 @@ fn showing_a_popup_atomically_hides_and_dismisses_the_previous_one() {
 #[test]
 fn hiding_a_window_hides_its_active_popup() {
     let mut ctx = context();
-    let source = ctx.create_window(Window::new("source", rect(0, 0, 100, 80), empty_content()));
-    let first = ctx.create_popup(source.id(), "first", empty_content()).unwrap();
-    let second = ctx.create_popup(source.id(), "second", empty_content()).unwrap();
+    let source = ctx.ui().create_window(Window::new("source", rect(0, 0, 100, 80), empty_content()));
+    let first = ctx.ui().create_popup(source.id(), "first", empty_content()).unwrap();
+    let second = ctx.ui().create_popup(source.id(), "second", empty_content()).unwrap();
     let mut dispatcher = crate::event::WidgetEventDispatcher::new();
     fn record(events: &mut Vec<RootSubmitted>, event: &RootSubmitted) {
         events.push(*event);
@@ -1129,10 +1144,10 @@ fn hiding_a_window_hides_its_active_popup() {
     dispatcher.subscribe(second.submitted(), record).unwrap();
     let mut submissions = Vec::new();
 
-    ctx.show_popup(&first).unwrap();
-    ctx.hide_popup(&first).unwrap();
-    ctx.show_popup(&second).unwrap();
-    ctx.set_root_visible(source.id(), false).unwrap();
+    ctx.ui().show_popup(&first).unwrap();
+    ctx.ui().hide_popup(&first).unwrap();
+    ctx.ui().show_popup(&second).unwrap();
+    ctx.ui().set_root_visible(source.id(), false).unwrap();
 
     assert_eq!(ctx.debug_popup_visible(&first), Some(false));
     assert_eq!(ctx.debug_popup_visible(&second), Some(false));
@@ -1143,26 +1158,27 @@ fn hiding_a_window_hides_its_active_popup() {
 #[test]
 fn stale_popup_mutations_fail_after_owner_destruction() {
     let mut ctx = context();
-    let source = ctx.create_window(Window::new("source", rect(0, 0, 100, 80), empty_content()));
-    let popup = ctx.create_popup(source.id(), "popup", empty_content()).unwrap();
-    assert!(ctx.destroy_root(source.id()));
+    let source = ctx.ui().create_window(Window::new("source", rect(0, 0, 100, 80), empty_content()));
+    let popup = ctx.ui().create_popup(source.id(), "popup", empty_content()).unwrap();
+    assert!(ctx.ui().destroy_root(source.id()));
 
     // Popup definitions have no independent destruction operation. Destroying the owning window
     // expires its handles and makes every typed mutation fail consistently.
-    assert_eq!(ctx.show_popup_at(&popup, rect(20, 30, 40, 1)), Err(RootMutationError::UnknownPopup));
-    assert_eq!(ctx.set_popup_options(&popup, WindowOption::FRAME), Err(RootMutationError::UnknownPopup));
-    assert_eq!(ctx.hide_popup(&popup), Err(RootMutationError::UnknownPopup));
+    assert_eq!(ctx.ui().show_popup_at(&popup, rect(20, 30, 40, 1)), Err(RootMutationError::UnknownPopup));
+    assert_eq!(ctx.ui().set_popup_options(&popup, WindowOption::FRAME), Err(RootMutationError::UnknownPopup));
+    assert_eq!(ctx.ui().hide_popup(&popup), Err(RootMutationError::UnknownPopup));
     assert!(!popup.is_alive());
 }
 
 #[test]
 fn outside_popup_press_hides_and_records_typed_submission() {
     let mut ctx = context();
-    let source = ctx.create_window(Window::new("source", rect(0, 0, 100, 80), empty_content()));
-    let popup = ctx.create_popup(source.id(), "popup", empty_content()).unwrap();
-    ctx.set_popup_options(&popup, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    let source = ctx.ui().create_window(Window::new("source", rect(0, 0, 100, 80), empty_content()));
+    let popup = ctx.ui().create_popup(source.id(), "popup", empty_content()).unwrap();
+    ctx.ui()
+        .set_popup_options(&popup, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
-    ctx.show_popup_at(&popup, rect(20, 20, 80, 60)).unwrap();
+    ctx.ui().show_popup_at(&popup, rect(20, 20, 80, 60)).unwrap();
     let mut widget_event_dispatcher = crate::event::WidgetEventDispatcher::new();
     fn record(events: &mut Vec<RootSubmitted>, event: &RootSubmitted) {
         events.push(*event);
@@ -1177,8 +1193,8 @@ fn outside_popup_press_hides_and_records_typed_submission() {
     assert_eq!(ctx.debug_popup_visible(&popup), Some(false));
     assert!(widget_event_dispatcher.dispatch(&mut submissions));
     assert_eq!(submissions, [RootSubmitted::PopupDismissed]);
-    ctx.show_popup(&popup).unwrap();
-    ctx.hide_popup(&popup).unwrap();
+    ctx.ui().show_popup(&popup).unwrap();
+    ctx.ui().hide_popup(&popup).unwrap();
     assert!(widget_event_dispatcher.dispatch(&mut submissions));
     assert_eq!(submissions, [RootSubmitted::PopupDismissed, RootSubmitted::PopupDismissed]);
 }
@@ -1189,13 +1205,15 @@ fn outside_popup_press_dismisses_then_routes_once_to_the_revealed_root() {
     let (button, content) = button_content("behind");
     let mut dispatcher = event_counter(button);
     let mut submissions = 0;
-    let window = ctx.create_window(Window::new("window", rect(0, 0, 180, 120), content));
-    ctx.set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    let window = ctx.ui().create_window(Window::new("window", rect(0, 0, 180, 120), content));
+    ctx.ui()
+        .set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
-    let popup = ctx.create_popup(window.id(), "popup", empty_content()).unwrap();
-    ctx.set_popup_options(&popup, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    let popup = ctx.ui().create_popup(window.id(), "popup", empty_content()).unwrap();
+    ctx.ui()
+        .set_popup_options(&popup, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
-    ctx.show_popup_at(&popup, rect(80, 60, 60, 40)).unwrap();
+    ctx.ui().show_popup_at(&popup, rect(80, 60, 60, 40)).unwrap();
     ctx.update_ui(Dimensioni::new(320, 240));
 
     ctx.mousedown(15, 15, MouseButton::LEFT);
@@ -1209,7 +1227,7 @@ fn outside_popup_press_dismisses_then_routes_once_to_the_revealed_root() {
 #[test]
 fn layout_only_update_and_paint_have_separate_phase_counts() {
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("window", rect(10, 10, 120, 90), empty_content()));
+    let root = ctx.ui().create_window(Window::new("window", rect(10, 10, 120, 90), empty_content()));
 
     ctx.update_and_render_ui();
     let metrics = ctx.debug_root_runtime_metrics(root.id()).unwrap();
@@ -1228,7 +1246,7 @@ fn warmed_container_measurement_and_layout_allocate_nothing() {
     let (_, scroll) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child("scroll")));
     let (_, content) = Linear::create(LinearParameters::vertical([row, grid, fixed_column, disclosure, scroll]));
     let mut ctx = context();
-    ctx.create_window(Window::new("allocation probe", rect(10, 10, 300, 220), content));
+    ctx.ui().create_window(Window::new("allocation probe", rect(10, 10, 300, 220), content));
     let dimensions = Dimensioni::new(640, 480);
 
     ctx.update_ui(dimensions);
@@ -1243,11 +1261,11 @@ fn warmed_container_measurement_and_layout_allocate_nothing() {
 #[test]
 fn fronting_changes_only_cross_root_z_order() {
     let mut ctx = context();
-    let first = ctx.create_window(Window::new("first", rect(0, 0, 100, 80), empty_content()));
-    let second = ctx.create_window(Window::new("second", rect(20, 20, 100, 80), empty_content()));
+    let first = ctx.ui().create_window(Window::new("first", rect(0, 0, 100, 80), empty_content()));
+    let second = ctx.ui().create_window(Window::new("second", rect(20, 20, 100, 80), empty_content()));
     assert_eq!(ctx.debug_rendered_root_names(), ["first", "second"]);
 
-    ctx.bring_root_to_front(first.id()).unwrap();
+    ctx.ui().bring_root_to_front(first.id()).unwrap();
     assert_eq!(ctx.debug_rendered_root_names(), ["second", "first"]);
     assert!(ctx.debug_root_zindex(first.id()).unwrap() > ctx.debug_root_zindex(second.id()).unwrap());
 }
@@ -1255,34 +1273,35 @@ fn fronting_changes_only_cross_root_z_order() {
 #[test]
 fn fixed_layers_validate_and_managed_roots_reject_direct_assignment() {
     let mut ctx = context();
-    let window = ctx.create_window(Window::new("window", rect(0, 0, 100, 80), empty_content()));
+    let window = ctx.ui().create_window(Window::new("window", rect(0, 0, 100, 80), empty_content()));
     let dialog = ctx
+        .ui()
         .create_dialog(window.id(), Window::new("dialog", rect(20, 20, 100, 80), empty_content()))
         .unwrap();
 
-    assert_eq!(ctx.root_layer_binding(window.id()), Ok(LayerBinding::Fixed(DEFAULT_LAYER)));
-    assert_eq!(ctx.root_layer_binding(dialog.id()), Ok(LayerBinding::Modal));
+    assert_eq!(ctx.ui().root_layer_binding(window.id()), Ok(LayerBinding::Fixed(DEFAULT_LAYER)));
+    assert_eq!(ctx.ui().root_layer_binding(dialog.id()), Ok(LayerBinding::Modal));
     assert_eq!(
-        ctx.set_root_layer(window.id(), MAX_LAYER + 1),
+        ctx.ui().set_root_layer(window.id(), MAX_LAYER + 1),
         Err(RootMutationError::InvalidLayer(MAX_LAYER + 1))
     );
-    assert_eq!(ctx.set_root_layer(dialog.id(), 3), Err(RootMutationError::ManagedLayer));
+    assert_eq!(ctx.ui().set_root_layer(dialog.id(), 3), Err(RootMutationError::ManagedLayer));
 
-    ctx.set_root_layer(window.id(), MIN_LAYER).unwrap();
-    assert_eq!(ctx.root_layer_binding(window.id()), Ok(LayerBinding::Fixed(MIN_LAYER)));
+    ctx.ui().set_root_layer(window.id(), MIN_LAYER).unwrap();
+    assert_eq!(ctx.ui().root_layer_binding(window.id()), Ok(LayerBinding::Fixed(MIN_LAYER)));
 }
 
 #[test]
 fn raising_reorders_only_inside_a_fixed_layer() {
     let mut ctx = context();
-    let high = ctx.create_window(Window::new("high", rect(0, 0, 100, 80), empty_content()));
-    let low_first = ctx.create_window(Window::new("low first", rect(0, 0, 100, 80), empty_content()));
-    let low_second = ctx.create_window(Window::new("low second", rect(0, 0, 100, 80), empty_content()));
-    ctx.set_root_layer(low_first.id(), 2).unwrap();
-    ctx.set_root_layer(low_second.id(), 2).unwrap();
+    let high = ctx.ui().create_window(Window::new("high", rect(0, 0, 100, 80), empty_content()));
+    let low_first = ctx.ui().create_window(Window::new("low first", rect(0, 0, 100, 80), empty_content()));
+    let low_second = ctx.ui().create_window(Window::new("low second", rect(0, 0, 100, 80), empty_content()));
+    ctx.ui().set_root_layer(low_first.id(), 2).unwrap();
+    ctx.ui().set_root_layer(low_second.id(), 2).unwrap();
 
     assert_eq!(ctx.debug_rendered_root_names(), ["low first", "low second", "high"]);
-    ctx.bring_root_to_front(low_first.id()).unwrap();
+    ctx.ui().bring_root_to_front(low_first.id()).unwrap();
     assert_eq!(ctx.debug_rendered_root_names(), ["low second", "low first", "high"]);
     assert!(ctx.debug_root_zindex(low_first.id()).unwrap() > ctx.debug_root_zindex(high.id()).unwrap());
 }
@@ -1290,22 +1309,22 @@ fn raising_reorders_only_inside_a_fixed_layer() {
 #[test]
 fn popup_inherits_its_parent_layer_and_uses_only_that_layers_transient_tier() {
     let mut ctx = context();
-    let source = ctx.create_window(Window::new("source", rect(0, 0, 100, 80), empty_content()));
-    let same_layer = ctx.create_window(Window::new("same layer", rect(0, 0, 100, 80), empty_content()));
-    let higher = ctx.create_window(Window::new("higher", rect(0, 0, 100, 80), empty_content()));
-    ctx.set_root_layer(source.id(), 2).unwrap();
-    ctx.set_root_layer(same_layer.id(), 2).unwrap();
-    ctx.set_root_layer(higher.id(), 3).unwrap();
-    let popup = ctx.create_popup(source.id(), "popup", empty_content()).unwrap();
+    let source = ctx.ui().create_window(Window::new("source", rect(0, 0, 100, 80), empty_content()));
+    let same_layer = ctx.ui().create_window(Window::new("same layer", rect(0, 0, 100, 80), empty_content()));
+    let higher = ctx.ui().create_window(Window::new("higher", rect(0, 0, 100, 80), empty_content()));
+    ctx.ui().set_root_layer(source.id(), 2).unwrap();
+    ctx.ui().set_root_layer(same_layer.id(), 2).unwrap();
+    ctx.ui().set_root_layer(higher.id(), 3).unwrap();
+    let popup = ctx.ui().create_popup(source.id(), "popup", empty_content()).unwrap();
 
-    ctx.show_popup_at(&popup, rect(10, 10, 60, 40)).unwrap();
+    ctx.ui().show_popup_at(&popup, rect(10, 10, 60, 40)).unwrap();
     assert_eq!(ctx.debug_rendered_root_names(), ["source", "same layer", "popup", "higher"]);
     assert_eq!(ctx.debug_active_popup_names(), ["popup"]);
     ctx.update_and_render_ui();
 
     // Window ownership remains live while the popup is visible: moving the owner moves its active
     // popup to that window's transient tier without giving it an independent layer.
-    ctx.set_root_layer(source.id(), 4).unwrap();
+    ctx.ui().set_root_layer(source.id(), 4).unwrap();
     assert_eq!(ctx.debug_rendered_root_names(), ["same layer", "higher", "source", "popup"]);
     assert_eq!(ctx.debug_active_popup_names(), ["popup"]);
 }
@@ -1313,16 +1332,16 @@ fn popup_inherits_its_parent_layer_and_uses_only_that_layers_transient_tier() {
 #[test]
 fn higher_layer_window_occludes_lower_popup_for_outside_dismissal() {
     let mut ctx = context();
-    let source = ctx.create_window(Window::new("source", rect(0, 0, 100, 80), empty_content()));
-    let higher = ctx.create_window(Window::new("higher", rect(0, 0, 100, 80), empty_content()));
+    let source = ctx.ui().create_window(Window::new("source", rect(0, 0, 100, 80), empty_content()));
+    let higher = ctx.ui().create_window(Window::new("higher", rect(0, 0, 100, 80), empty_content()));
     let chromeless = WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE;
-    ctx.set_root_options(source.id(), chromeless).unwrap();
-    ctx.set_root_options(higher.id(), chromeless).unwrap();
-    ctx.set_root_layer(source.id(), 2).unwrap();
-    ctx.set_root_layer(higher.id(), 3).unwrap();
-    let popup = ctx.create_popup(source.id(), "popup", empty_content()).unwrap();
-    ctx.set_popup_options(&popup, chromeless).unwrap();
-    ctx.show_popup_at(&popup, rect(10, 10, 60, 40)).unwrap();
+    ctx.ui().set_root_options(source.id(), chromeless).unwrap();
+    ctx.ui().set_root_options(higher.id(), chromeless).unwrap();
+    ctx.ui().set_root_layer(source.id(), 2).unwrap();
+    ctx.ui().set_root_layer(higher.id(), 3).unwrap();
+    let popup = ctx.ui().create_popup(source.id(), "popup", empty_content()).unwrap();
+    ctx.ui().set_popup_options(&popup, chromeless).unwrap();
+    ctx.ui().show_popup_at(&popup, rect(10, 10, 60, 40)).unwrap();
     ctx.update_and_render_ui();
 
     // The point lies inside the popup rectangle, but the higher-layer window is the visible input
@@ -1337,15 +1356,15 @@ fn higher_layer_window_occludes_lower_popup_for_outside_dismissal() {
 #[test]
 fn owner_destruction_expires_all_popup_handles() {
     let mut ctx = context();
-    let source = ctx.create_window(Window::new("source", rect(0, 0, 100, 80), empty_content()));
-    let popup = ctx.create_popup(source.id(), "popup", empty_content()).unwrap();
+    let source = ctx.ui().create_window(Window::new("source", rect(0, 0, 100, 80), empty_content()));
+    let popup = ctx.ui().create_popup(source.id(), "popup", empty_content()).unwrap();
 
     // Popup definitions remain alive while hidden and expire only with their owning window.
-    ctx.show_popup(&popup).unwrap();
-    ctx.hide_popup(&popup).unwrap();
+    ctx.ui().show_popup(&popup).unwrap();
+    ctx.ui().hide_popup(&popup).unwrap();
     assert!(popup.is_alive());
 
-    assert!(ctx.destroy_root(source.id()));
+    assert!(ctx.ui().destroy_root(source.id()));
     assert!(!popup.is_alive());
 }
 
@@ -1353,9 +1372,9 @@ fn owner_destruction_expires_all_popup_handles() {
 fn active_root_routes_keyboard_without_crossing_layer_boundaries() {
     let (low_state, low_content) = OrderedProbe::create(WidgetOption::HOLD_FOCUS);
     let mut ctx = context();
-    let low = ctx.create_window(Window::new("low", rect(0, 0, 100, 80), low_content));
-    let _high = ctx.create_window(Window::new("high", rect(160, 120, 100, 80), empty_content()));
-    ctx.set_root_layer(low.id(), 0).unwrap();
+    let low = ctx.ui().create_window(Window::new("low", rect(0, 0, 100, 80), low_content));
+    let _high = ctx.ui().create_window(Window::new("high", rect(160, 120, 100, 80), empty_content()));
+    ctx.ui().set_root_layer(low.id(), 0).unwrap();
     ctx.update_and_render_ui();
     let low_body = ctx.debug_root_body(low.id()).unwrap();
 
@@ -1377,10 +1396,11 @@ fn active_root_routes_keyboard_without_crossing_layer_boundaries() {
 fn blank_root_press_confines_drag_to_the_pressed_root() {
     let (probe_state, probe) = OrderedProbe::create(WidgetOption::NONE);
     let mut ctx = context();
-    let first = ctx.create_window(Window::new("first", rect(0, 0, 100, 80), empty_content()));
-    let second = ctx.create_window(Window::new("second", rect(160, 120, 100, 80), probe));
+    let first = ctx.ui().create_window(Window::new("first", rect(0, 0, 100, 80), empty_content()));
+    let second = ctx.ui().create_window(Window::new("second", rect(160, 120, 100, 80), probe));
     for root in [first.id(), second.id()] {
-        ctx.set_root_options(root, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        ctx.ui()
+            .set_root_options(root, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
             .unwrap();
     }
     ctx.update_and_render_ui();
@@ -1403,13 +1423,14 @@ fn blank_root_press_confines_drag_to_the_pressed_root() {
 fn scroll_and_new_press_reach_a_hovered_lower_layer_independently_of_activation() {
     let (probe_state, probe) = OrderedProbe::create(WidgetOption::GRAB_SCROLL);
     let mut ctx = context();
-    let first = ctx.create_window(Window::new("first", rect(0, 0, 100, 80), empty_content()));
-    let second = ctx.create_window(Window::new("second", rect(160, 120, 100, 80), probe));
+    let first = ctx.ui().create_window(Window::new("first", rect(0, 0, 100, 80), empty_content()));
+    let second = ctx.ui().create_window(Window::new("second", rect(160, 120, 100, 80), probe));
     for root in [first.id(), second.id()] {
-        ctx.set_root_options(root, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        ctx.ui()
+            .set_root_options(root, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
             .unwrap();
     }
-    ctx.set_root_layer(second.id(), MIN_LAYER).unwrap();
+    ctx.ui().set_root_layer(second.id(), MIN_LAYER).unwrap();
     ctx.update_and_render_ui();
 
     let first_body = ctx.debug_root_body(first.id()).unwrap();
@@ -1433,8 +1454,8 @@ fn scroll_and_new_press_reach_a_hovered_lower_layer_independently_of_activation(
 fn pointer_captured_root_remains_the_keyboard_and_text_input_root() {
     let (probe_state, probe) = OrderedProbe::create(WidgetOption::NONE);
     let mut ctx = context();
-    let first = ctx.create_window(Window::new("first", rect(0, 0, 100, 80), probe));
-    let second = ctx.create_window(Window::new("second", rect(160, 120, 100, 80), empty_content()));
+    let first = ctx.ui().create_window(Window::new("first", rect(0, 0, 100, 80), probe));
+    let second = ctx.ui().create_window(Window::new("second", rect(160, 120, 100, 80), empty_content()));
     ctx.update_and_render_ui();
 
     let first_body = ctx.debug_root_body(first.id()).unwrap();
@@ -1442,7 +1463,7 @@ fn pointer_captured_root_remains_the_keyboard_and_text_input_root() {
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_root_has_pointer_capture(first.id()), Some(true));
 
-    ctx.bring_root_to_front(second.id()).unwrap();
+    ctx.ui().bring_root_to_front(second.id()).unwrap();
     ctx.keydown(KeyMode::SHIFT);
     ctx.text("captured");
     ctx.update_and_render_ui();
@@ -1455,18 +1476,21 @@ fn visible_dialog_is_the_sole_pointer_root_and_remains_frontmost() {
     let (behind_button, behind_content) = button_content("behind");
     let mut behind_dispatcher = event_counter(behind_button);
     let mut behind_submissions = 0;
-    let window = ctx.create_window(Window::new("window", rect(0, 0, 100, 80), behind_content));
-    ctx.set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    let window = ctx.ui().create_window(Window::new("window", rect(0, 0, 100, 80), behind_content));
+    ctx.ui()
+        .set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     let (dialog_button, dialog_content) = button_content("dialog");
     let mut dialog_dispatcher = event_counter(dialog_button);
     let mut dialog_submissions = 0;
     let dialog = ctx
+        .ui()
         .create_dialog(window.id(), Window::new("dialog", rect(120, 100, 100, 80), dialog_content))
         .unwrap();
-    ctx.set_root_options(dialog.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    ctx.ui()
+        .set_root_options(dialog.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
-    ctx.set_root_visible(dialog.id(), true).unwrap();
+    ctx.ui().set_root_visible(dialog.id(), true).unwrap();
     ctx.update_and_render_ui();
 
     assert_eq!(ctx.debug_modal_root(), Some(dialog.id()));
@@ -1483,14 +1507,14 @@ fn visible_dialog_is_the_sole_pointer_root_and_remains_frontmost() {
     assert!(dialog_dispatcher.dispatch(&mut dialog_submissions));
     assert_eq!(dialog_submissions, 1);
 
-    ctx.bring_root_to_front(window.id()).unwrap();
-    ctx.set_root_visible(window.id(), true).unwrap();
+    ctx.ui().bring_root_to_front(window.id()).unwrap();
+    ctx.ui().set_root_visible(window.id(), true).unwrap();
     assert_eq!(ctx.debug_rendered_root_names(), ["window", "dialog"]);
     // Numeric z-indices are local ordering values; the modal band remains structurally above the
     // fixed band even after the ordinary window receives the newer number.
     assert_eq!(ctx.debug_modal_root(), Some(dialog.id()));
 
-    ctx.set_root_visible(dialog.id(), false).unwrap();
+    ctx.ui().set_root_visible(dialog.id(), false).unwrap();
     assert_eq!(ctx.debug_modal_root(), None);
     ctx.mousedown(10, 10, MouseButton::LEFT);
     ctx.mouseup(10, 10, MouseButton::LEFT);
@@ -1502,25 +1526,28 @@ fn visible_dialog_is_the_sole_pointer_root_and_remains_frontmost() {
 #[test]
 fn active_dialog_accepts_only_its_own_popup_in_the_modal_input_group() {
     let mut ctx = context();
-    let window = ctx.create_window(Window::new("window", rect(0, 0, 100, 80), empty_content()));
-    let window_popup = ctx.create_popup(window.id(), "window popup", empty_content()).unwrap();
+    let window = ctx.ui().create_window(Window::new("window", rect(0, 0, 100, 80), empty_content()));
+    let window_popup = ctx.ui().create_popup(window.id(), "window popup", empty_content()).unwrap();
     let (popup_button, popup_content) = button_content("popup");
     let mut dispatcher = event_counter(popup_button);
     let mut submissions = 0;
     let dialog = ctx
+        .ui()
         .create_dialog(window.id(), Window::new("dialog", rect(120, 100, 100, 80), empty_content()))
         .unwrap();
-    let popup = ctx.create_popup(dialog.id(), "popup", popup_content).unwrap();
-    ctx.set_popup_options(&popup, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    let popup = ctx.ui().create_popup(dialog.id(), "popup", popup_content).unwrap();
+    ctx.ui()
+        .set_popup_options(&popup, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
-    ctx.set_root_options(dialog.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    ctx.ui()
+        .set_root_options(dialog.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
-    ctx.set_root_visible(dialog.id(), true).unwrap();
+    ctx.ui().set_root_visible(dialog.id(), true).unwrap();
     ctx.mousemove(10, 10);
     ctx.update_and_render_ui();
 
-    assert_eq!(ctx.show_popup(&window_popup), Err(RootMutationError::InvalidPopupParent));
-    ctx.show_popup_at(&popup, rect(0, 0, 100, 80)).unwrap();
+    assert_eq!(ctx.ui().show_popup(&window_popup), Err(RootMutationError::InvalidPopupParent));
+    ctx.ui().show_popup_at(&popup, rect(0, 0, 100, 80)).unwrap();
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_rendered_root_names(), ["window", "dialog", "popup"]);
     assert_eq!(ctx.debug_active_popup_names(), ["popup"]);
@@ -1531,7 +1558,7 @@ fn active_dialog_accepts_only_its_own_popup_in_the_modal_input_group() {
     assert!(dispatcher.dispatch(&mut submissions));
     assert_eq!(submissions, 1);
 
-    ctx.set_root_visible(dialog.id(), false).unwrap();
+    ctx.ui().set_root_visible(dialog.id(), false).unwrap();
     assert_eq!(ctx.debug_popup_visible(&popup), Some(false));
 }
 
@@ -1539,13 +1566,16 @@ fn active_dialog_accepts_only_its_own_popup_in_the_modal_input_group() {
 fn modal_activation_clears_underlying_focus_and_blocks_keyboard_input() {
     let (state, probe) = OrderedProbe::create(WidgetOption::HOLD_FOCUS);
     let mut ctx = context();
-    let window = ctx.create_window(Window::new("window", rect(0, 0, 100, 80), probe));
-    ctx.set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    let window = ctx.ui().create_window(Window::new("window", rect(0, 0, 100, 80), probe));
+    ctx.ui()
+        .set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     let dialog = ctx
+        .ui()
         .create_dialog(window.id(), Window::new("dialog", rect(120, 100, 100, 80), empty_content()))
         .unwrap();
-    ctx.set_root_options(dialog.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+    ctx.ui()
+        .set_root_options(dialog.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
 
     ctx.mousedown(10, 10, MouseButton::LEFT);
@@ -1553,7 +1583,7 @@ fn modal_activation_clears_underlying_focus_and_blocks_keyboard_input() {
     ctx.update_ui(Dimensioni::new(320, 240));
     assert_eq!(state.try_read(|state| state.events.clone()), Some(vec!["down", "up"]));
 
-    ctx.set_root_visible(dialog.id(), true).unwrap();
+    ctx.ui().set_root_visible(dialog.id(), true).unwrap();
     let updates_before_modal_input = state.try_read(|state| state.updates).unwrap();
     ctx.keydown(KeyMode::SHIFT);
     ctx.text("blocked");
@@ -1562,7 +1592,7 @@ fn modal_activation_clears_underlying_focus_and_blocks_keyboard_input() {
     assert_eq!(state.try_read(|state| state.updates), Some(updates_before_modal_input));
     assert_eq!(state.try_read(|state| state.events.clone()), Some(vec!["down", "up"]));
 
-    ctx.set_root_visible(dialog.id(), false).unwrap();
+    ctx.ui().set_root_visible(dialog.id(), false).unwrap();
     ctx.text("still unfocused");
     ctx.update_ui(Dimensioni::new(320, 240));
     assert_eq!(state.try_read(|state| state.events.clone()), Some(vec!["down", "up"]));
@@ -1576,8 +1606,9 @@ fn modal_activation_clears_underlying_focus_and_blocks_keyboard_input() {
 #[test]
 fn modal_routing_revokes_underlying_chrome_capture_before_drag_continues() {
     let mut ctx = context();
-    let window = ctx.create_window(Window::new("window", rect(30, 30, 140, 100), empty_content()));
+    let window = ctx.ui().create_window(Window::new("window", rect(30, 30, 140, 100), empty_content()));
     let dialog = ctx
+        .ui()
         .create_dialog(window.id(), Window::new("dialog", rect(170, 120, 100, 80), empty_content()))
         .unwrap();
     ctx.update_and_render_ui();
@@ -1589,7 +1620,7 @@ fn modal_routing_revokes_underlying_chrome_capture_before_drag_continues() {
     assert_eq!(ctx.debug_root_moving(window.id()), Some(true));
     let before = ctx.debug_root_rect(window.id()).unwrap();
 
-    ctx.set_root_visible(dialog.id(), true).unwrap();
+    ctx.ui().set_root_visible(dialog.id(), true).unwrap();
     ctx.mousemove(title.x + 20, title.y + 20);
     ctx.mouseup(title.x + 20, title.y + 20, MouseButton::LEFT);
     ctx.update_and_render_ui();
@@ -1604,22 +1635,24 @@ fn modal_routing_revokes_underlying_chrome_capture_before_drag_continues() {
 #[test]
 fn hiding_or_destroying_the_front_dialog_reveals_the_next_visible_dialog() {
     let mut ctx = context();
-    let owner = ctx.create_window(Window::new("owner", rect(0, 0, 10, 10), empty_content()));
+    let owner = ctx.ui().create_window(Window::new("owner", rect(0, 0, 10, 10), empty_content()));
     let first = ctx
+        .ui()
         .create_dialog(owner.id(), Window::new("first", rect(20, 20, 120, 90), empty_content()))
         .unwrap();
     let second = ctx
+        .ui()
         .create_dialog(owner.id(), Window::new("second", rect(40, 40, 120, 90), empty_content()))
         .unwrap();
 
-    ctx.set_root_visible(first.id(), true).unwrap();
+    ctx.ui().set_root_visible(first.id(), true).unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(first.id()));
-    ctx.set_root_visible(second.id(), true).unwrap();
+    ctx.ui().set_root_visible(second.id(), true).unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(second.id()));
 
-    ctx.set_root_visible(second.id(), false).unwrap();
+    ctx.ui().set_root_visible(second.id(), false).unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(first.id()));
-    ctx.set_root_visible(second.id(), true).unwrap();
+    ctx.ui().set_root_visible(second.id(), true).unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(second.id()));
 
     ctx.update_and_render_ui();
@@ -1629,66 +1662,71 @@ fn hiding_or_destroying_the_front_dialog_reveals_the_next_visible_dialog() {
     assert_eq!(ctx.debug_root_visible(second.id()), Some(false));
     assert_eq!(ctx.debug_modal_root(), Some(first.id()));
 
-    ctx.set_root_visible(second.id(), true).unwrap();
-    assert!(ctx.destroy_root(second.id()));
+    ctx.ui().set_root_visible(second.id(), true).unwrap();
+    assert!(ctx.ui().destroy_root(second.id()));
     assert_eq!(ctx.debug_modal_root(), Some(first.id()));
-    assert!(ctx.destroy_root(first.id()));
+    assert!(ctx.ui().destroy_root(first.id()));
     assert_eq!(ctx.debug_modal_root(), None);
 }
 
 #[test]
 fn fronting_a_visible_dialog_makes_it_the_active_modal() {
     let mut ctx = context();
-    let owner = ctx.create_window(Window::new("owner", rect(0, 0, 10, 10), empty_content()));
+    let owner = ctx.ui().create_window(Window::new("owner", rect(0, 0, 10, 10), empty_content()));
     let first = ctx
+        .ui()
         .create_dialog(owner.id(), Window::new("first", rect(20, 20, 120, 90), empty_content()))
         .unwrap();
     let middle = ctx
+        .ui()
         .create_dialog(owner.id(), Window::new("middle", rect(30, 30, 120, 90), empty_content()))
         .unwrap();
     let second = ctx
+        .ui()
         .create_dialog(owner.id(), Window::new("second", rect(40, 40, 120, 90), empty_content()))
         .unwrap();
-    ctx.set_root_visible(first.id(), true).unwrap();
-    ctx.set_root_visible(middle.id(), true).unwrap();
-    ctx.set_root_visible(second.id(), true).unwrap();
+    ctx.ui().set_root_visible(first.id(), true).unwrap();
+    ctx.ui().set_root_visible(middle.id(), true).unwrap();
+    ctx.ui().set_root_visible(second.id(), true).unwrap();
 
-    ctx.bring_root_to_front(first.id()).unwrap();
+    ctx.ui().bring_root_to_front(first.id()).unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(first.id()));
     assert!(ctx.debug_root_zindex(first.id()).unwrap() > ctx.debug_root_zindex(second.id()).unwrap());
     // Raising the ordinary owner moves only its fixed-band subtree and leaves modal sibling order
     // untouched.
-    ctx.bring_root_to_front(owner.id()).unwrap();
+    ctx.ui().bring_root_to_front(owner.id()).unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(first.id()));
 
-    ctx.set_root_visible(first.id(), false).unwrap();
+    ctx.ui().set_root_visible(first.id(), false).unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(second.id()));
-    ctx.set_root_visible(second.id(), false).unwrap();
+    ctx.ui().set_root_visible(second.id(), false).unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(middle.id()));
-    ctx.set_root_visible(second.id(), true).unwrap();
+    ctx.ui().set_root_visible(second.id(), true).unwrap();
 
-    ctx.bring_root_to_front(second.id()).unwrap();
+    ctx.ui().bring_root_to_front(second.id()).unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(second.id()));
 }
 
 #[test]
 fn fronting_a_dialog_closes_the_previous_modal_groups_popup() {
     let mut ctx = context();
-    let owner = ctx.create_window(Window::new("owner", rect(0, 0, 10, 10), empty_content()));
+    let owner = ctx.ui().create_window(Window::new("owner", rect(0, 0, 10, 10), empty_content()));
     let first = ctx
+        .ui()
         .create_dialog(owner.id(), Window::new("first", rect(20, 20, 120, 90), empty_content()))
         .unwrap();
     let second = ctx
+        .ui()
         .create_dialog(owner.id(), Window::new("second", rect(40, 40, 120, 90), empty_content()))
         .unwrap();
-    ctx.set_root_visible(first.id(), true).unwrap();
-    ctx.set_root_visible(second.id(), true).unwrap();
-    let popup = ctx.create_popup(second.id(), "popup", empty_content()).unwrap();
-    ctx.show_popup_at(&popup, rect(50, 50, 40, 30)).unwrap();
+    ctx.ui().set_root_visible(first.id(), true).unwrap();
+    ctx.ui().set_root_visible(second.id(), true).unwrap();
+    let popup = ctx.ui().create_popup(second.id(), "popup", empty_content()).unwrap();
+    ctx.ui().show_popup_at(&popup, rect(50, 50, 40, 30)).unwrap();
 
     // Switching dialog groups dismisses the transient that belonged to the previously active group
     // before changing modal z-order.
-    ctx.bring_root_to_front(first.id()).unwrap();
+    ctx.ui().bring_root_to_front(first.id()).unwrap();
     assert_eq!(ctx.debug_modal_root(), Some(first.id()));
     assert_eq!(ctx.debug_popup_visible(&popup), Some(false));
 }
@@ -1710,7 +1748,7 @@ fn title_drag_and_close_record_typed_root_events() {
     }
 
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("window", rect(30, 30, 140, 100), empty_content()));
+    let root = ctx.ui().create_window(Window::new("window", rect(30, 30, 140, 100), empty_content()));
     let mut dispatcher = crate::event::WidgetEventDispatcher::new();
     dispatcher.subscribe(root.changed(), record_changed).unwrap();
     dispatcher.subscribe(root.submitted(), record_submitted).unwrap();
@@ -1749,7 +1787,7 @@ fn title_drag_and_close_record_typed_root_events() {
 fn resize_overlay_preempts_content_where_the_grip_overlaps_the_root_body() {
     let (probe_state, probe) = OrderedProbe::create(WidgetOption::NONE);
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("window", rect(30, 30, 140, 100), probe));
+    let root = ctx.ui().create_window(Window::new("window", rect(30, 30, 140, 100), probe));
     ctx.update_and_render_ui();
 
     let resize = ctx.debug_root_chrome(root.id()).unwrap().2.unwrap();
@@ -1787,7 +1825,7 @@ fn resize_overlay_preempts_content_where_the_grip_overlaps_the_root_body() {
 fn content_capture_remains_exclusive_while_dragging_across_root_chrome() {
     let (probe_state, probe) = OrderedProbe::create(WidgetOption::NONE);
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("window", rect(30, 30, 140, 100), probe));
+    let root = ctx.ui().create_window(Window::new("window", rect(30, 30, 140, 100), probe));
     ctx.update_and_render_ui();
 
     let body = ctx.debug_root_body(root.id()).unwrap();
@@ -1817,7 +1855,7 @@ fn content_capture_remains_exclusive_while_dragging_across_root_chrome() {
 #[test]
 fn hiding_and_showing_root_does_not_restore_chrome_capture() {
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("window", rect(30, 30, 140, 100), empty_content()));
+    let root = ctx.ui().create_window(Window::new("window", rect(30, 30, 140, 100), empty_content()));
     ctx.update_and_render_ui();
     let title = ctx.debug_root_chrome(root.id()).unwrap().0.unwrap();
 
@@ -1826,11 +1864,11 @@ fn hiding_and_showing_root_does_not_restore_chrome_capture() {
     assert_eq!(ctx.debug_root_has_pointer_capture(root.id()), Some(true));
     assert_eq!(ctx.debug_root_moving(root.id()), Some(true));
 
-    ctx.set_root_visible(root.id(), false).unwrap();
+    ctx.ui().set_root_visible(root.id(), false).unwrap();
     assert_eq!(ctx.debug_root_has_pointer_capture(root.id()), Some(false));
     assert_eq!(ctx.debug_root_active(root.id()), Some(false));
 
-    ctx.set_root_visible(root.id(), true).unwrap();
+    ctx.ui().set_root_visible(root.id(), true).unwrap();
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_root_has_pointer_capture(root.id()), Some(false));
     assert_eq!(ctx.debug_root_active(root.id()), Some(false));
@@ -1849,7 +1887,9 @@ fn declarative_menu_popups_follow_heading_and_submenu_edges_when_the_window_move
         Menu::new("Edit").item(copy_item),
     ]);
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("menu geometry", rect(30, 25, 190, 140), empty_content()).menu_bar(menu_bar));
+    let root = ctx
+        .ui()
+        .create_window(Window::new("menu geometry", rect(30, 25, 190, 140), empty_content()).menu_bar(menu_bar));
     ctx.update_and_render_ui();
 
     // The first compiled relationship belongs to File. Opening it must use the current heading
@@ -1877,16 +1917,17 @@ fn declarative_menu_popups_follow_heading_and_submenu_edges_when_the_window_move
     // edge equations above.
     let delta = crate::vec2(37, 29);
     let original_window = ctx.debug_root_rect(root.id()).unwrap();
-    ctx.set_root_rect(
-        root.id(),
-        Recti::new(
-            original_window.x + delta.x,
-            original_window.y + delta.y,
-            original_window.width,
-            original_window.height,
-        ),
-    )
-    .unwrap();
+    ctx.ui()
+        .set_root_rect(
+            root.id(),
+            Recti::new(
+                original_window.x + delta.x,
+                original_window.y + delta.y,
+                original_window.width,
+                original_window.height,
+            ),
+        )
+        .unwrap();
     ctx.update_and_render_ui();
 
     let moved_anchors = ctx.debug_menu_anchor_rects(root.id()).unwrap();
@@ -1915,7 +1956,9 @@ fn changing_item_marker_role_reflows_parent_and_reanchors_open_child() {
     let (_, child_item) = MenuItem::create(MenuItemParameters::new("Child action"));
     let menu_bar = MenuBar::new([Menu::new("File").item(direct_item).submenu(Menu::new("Child").item(child_item))]);
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("live marker geometry", rect(24, 20, 220, 150), empty_content()).menu_bar(menu_bar));
+    let root = ctx
+        .ui()
+        .create_window(Window::new("live marker geometry", rect(24, 20, 220, 150), empty_content()).menu_bar(menu_bar));
     ctx.update_and_render_ui();
 
     // Open both levels and retain their unmarked baseline. The child begins exactly at the parent
@@ -1988,7 +2031,9 @@ fn menu_heading_clicks_toggle_and_switch_the_single_active_popup_path() {
     let (_, undo_item) = MenuItem::create(MenuItemParameters::new("Undo"));
     let menu_bar = MenuBar::new([Menu::new("File").item(new_item), Menu::new("Edit").item(undo_item)]);
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("menu switching", rect(15, 20, 180, 120), empty_content()).menu_bar(menu_bar));
+    let root = ctx
+        .ui()
+        .create_window(Window::new("menu switching", rect(15, 20, 180, 120), empty_content()).menu_bar(menu_bar));
     ctx.update_and_render_ui();
     let anchors = ctx.debug_menu_anchor_rects(root.id()).unwrap();
     let file_heading = anchors[0].unwrap();
@@ -2024,7 +2069,9 @@ fn opening_sibling_submenu_replaces_the_complete_descendant_suffix() {
         .submenu(Menu::new("Alpha").submenu(Menu::new("Deep").item(alpha_leaf)))
         .submenu(Menu::new("Beta").item(beta_leaf))]);
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("submenu switching", rect(20, 20, 220, 150), empty_content()).menu_bar(menu_bar));
+    let root = ctx
+        .ui()
+        .create_window(Window::new("submenu switching", rect(20, 20, 220, 150), empty_content()).menu_bar(menu_bar));
     ctx.update_and_render_ui();
 
     // Open File, then follow Alpha into Deep. Row rectangles come from the active compact menu
@@ -2058,7 +2105,9 @@ fn menu_pointer_operations_preserve_preexisting_application_keyboard_focus() {
     let (_, invoke_item) = MenuItem::create(MenuItemParameters::new("Invoke"));
     let menu_bar = MenuBar::new([Menu::new("Actions").submenu(Menu::new("More").item(invoke_item))]);
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("menu focus", rect(20, 20, 220, 150), body).menu_bar(menu_bar));
+    let root = ctx
+        .ui()
+        .create_window(Window::new("menu focus", rect(20, 20, 220, 150), body).menu_bar(menu_bar));
     ctx.update_and_render_ui();
 
     // Establish application focus before any menu becomes visible, then verify the bar press leaves
@@ -2106,7 +2155,7 @@ fn menu_items_dispatch_directly_after_close_while_disabled_items_leave_the_menu_
 
     impl Model {
         /// Records the enabled item and inspects ordering through the safe event capability.
-        fn enabled_submitted(&mut self, context: &mut EventContext<'_>, _: &MenuItemSubmitted) {
+        fn enabled_submitted(&mut self, context: &mut Ui<'_>, _: &MenuItemSubmitted) {
             // The surface records an invocation and manager policy closes the path before the
             // item's typed event reaches application dispatch. The handler therefore sees no popup
             // without issuing a separate close command.
@@ -2115,7 +2164,7 @@ fn menu_items_dispatch_directly_after_close_while_disabled_items_leave_the_menu_
         }
 
         /// Records any erroneous event emitted by the disabled concrete item.
-        fn disabled_submitted(&mut self, _context: &mut EventContext<'_>, _: &MenuItemSubmitted) {
+        fn disabled_submitted(&mut self, _context: &mut Ui<'_>, _: &MenuItemSubmitted) {
             // The surface routes the row but resolves its disabled item to no invocation action.
             self.disabled_submissions += 1;
         }
@@ -2128,7 +2177,9 @@ fn menu_items_dispatch_directly_after_close_while_disabled_items_leave_the_menu_
     let menu_bar = MenuBar::new([Menu::new("Actions").item(enabled_item).item(disabled_item)]);
     let dimensions = Dimensioni::new(320, 240);
     let mut ctx: Context<NoopRenderer, Model> = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions);
-    let root = ctx.create_window(Window::new("menu events", rect(20, 25, 180, 120), empty_content()).menu_bar(menu_bar));
+    let root = ctx
+        .ui()
+        .create_window(Window::new("menu events", rect(20, 25, 180, 120), empty_content()).menu_bar(menu_bar));
     ctx.subscribe_context(enabled.submitted(), Model::enabled_submitted).unwrap();
     ctx.subscribe_context(disabled.submitted(), Model::disabled_submitted).unwrap();
     let mut model = Model::default();
@@ -2181,7 +2232,9 @@ fn menu_item_dismissal_swallows_the_invalidated_popup_capture_tail() {
     let (_, invoke_item) = MenuItem::create(MenuItemParameters::new("Invoke"));
     let menu_bar = MenuBar::new([Menu::new("Actions").item(invoke_item)]);
     let mut ctx = context();
-    let root = ctx.create_window(Window::new("capture tail", rect(20, 25, 220, 160), body).menu_bar(menu_bar));
+    let root = ctx
+        .ui()
+        .create_window(Window::new("capture tail", rect(20, 25, 220, 160), body).menu_bar(menu_bar));
     ctx.update_and_render_ui();
 
     // Opening the popup completes the heading's independent captured gesture. Pressing its sole
@@ -2216,17 +2269,17 @@ fn menu_item_dismissal_swallows_the_invalidated_popup_capture_tail() {
 fn generic_screen_anchored_popup_does_not_follow_its_moved_owner() {
     // This popup deliberately uses the public generic API rather than a declarative menu relation.
     let mut ctx = context();
-    let source = ctx.create_window(Window::new("source", rect(20, 30, 120, 90), empty_content()));
-    let popup = ctx.create_popup(source.id(), "screen popup", desired_size_node(70, 45)).unwrap();
+    let source = ctx.ui().create_window(Window::new("source", rect(20, 30, 120, 90), empty_content()));
+    let popup = ctx.ui().create_popup(source.id(), "screen popup", desired_size_node(70, 45)).unwrap();
     let explicit_anchor = rect(210, 35, 1, 1);
-    ctx.show_popup_at(&popup, explicit_anchor).unwrap();
+    ctx.ui().show_popup_at(&popup, explicit_anchor).unwrap();
     ctx.update_and_render_ui();
     let before_move = ctx.debug_popup_rect(&popup).unwrap();
     assert_eq!((before_move.x, before_move.y), (explicit_anchor.x, explicit_anchor.y));
 
     // Moving the owner changes stacking ownership only; the exact screen anchor and auto-sized
     // popup extent remain unchanged across the following layout.
-    ctx.set_root_rect(source.id(), rect(85, 95, 120, 90)).unwrap();
+    ctx.ui().set_root_rect(source.id(), rect(85, 95, 120, 90)).unwrap();
     ctx.update_and_render_ui();
     let after_move = ctx.debug_popup_rect(&popup).unwrap();
     assert_eq!(
@@ -2239,10 +2292,10 @@ fn generic_screen_anchored_popup_does_not_follow_its_moved_owner() {
 #[test]
 fn popup_auto_size_tracks_content() {
     let mut ctx = context();
-    let source = ctx.create_window(Window::new("source", rect(200, 160, 100, 70), empty_content()));
+    let source = ctx.ui().create_window(Window::new("source", rect(200, 160, 100, 70), empty_content()));
     let (_, text) = crate::TextBlock::create(crate::TextBlockParameters::new("window content"));
-    let popup = ctx.create_popup(source.id(), "popup", text).unwrap();
-    ctx.show_popup(&popup).unwrap();
+    let popup = ctx.ui().create_popup(source.id(), "popup", text).unwrap();
+    ctx.ui().show_popup(&popup).unwrap();
     ctx.update_and_render_ui();
 
     let content = ctx.debug_popup_content_size(&popup).unwrap();
@@ -2255,8 +2308,9 @@ fn popup_auto_size_tracks_content() {
 fn no_padding_option_makes_chromeless_root_content_edge_to_edge() {
     let mut ctx = context();
     let outer = rect(0, 0, 320, 240);
-    let root = ctx.create_window(Window::new("surface", outer, empty_content()));
-    ctx.set_root_options(root.id(), WindowOption::NO_TITLE | WindowOption::NO_RESIZE | WindowOption::NO_PADDING)
+    let root = ctx.ui().create_window(Window::new("surface", outer, empty_content()));
+    ctx.ui()
+        .set_root_options(root.id(), WindowOption::NO_TITLE | WindowOption::NO_RESIZE | WindowOption::NO_PADDING)
         .unwrap();
 
     ctx.update_and_render_ui();
@@ -2280,15 +2334,16 @@ fn auto_height_preserves_popup_width_and_stretches_column_items() {
         .collect::<Vec<_>>();
     let (_, content) = Linear::create(LinearParameters::vertical(items));
     let mut ctx = context();
-    let source = ctx.create_window(Window::new("source", rect(220, 170, 80, 50), empty_content()));
-    let popup = ctx.create_popup(source.id(), "combo", content).unwrap();
+    let source = ctx.ui().create_window(Window::new("source", rect(220, 170, 80, 50), empty_content()));
+    let popup = ctx.ui().create_popup(source.id(), "combo", content).unwrap();
     let anchor = rect(20, 30, 180, 1);
-    ctx.set_popup_options(
-        &popup,
-        WindowOption::FRAME | WindowOption::AUTO_HEIGHT | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
-    )
-    .unwrap();
-    ctx.show_popup_at(&popup, anchor).unwrap();
+    ctx.ui()
+        .set_popup_options(
+            &popup,
+            WindowOption::FRAME | WindowOption::AUTO_HEIGHT | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
+        )
+        .unwrap();
+    ctx.ui().show_popup_at(&popup, anchor).unwrap();
 
     ctx.update_and_render_ui();
 
@@ -2311,15 +2366,16 @@ fn auto_height_preserves_popup_width_and_stretches_column_items() {
 fn auto_width_preserves_programmed_height() {
     let (_, item) = ListItem::create(ListItemParameters::new("intrinsic width"));
     let mut ctx = context();
-    let source = ctx.create_window(Window::new("source", rect(220, 170, 80, 50), empty_content()));
-    let popup = ctx.create_popup(source.id(), "horizontal", item).unwrap();
+    let source = ctx.ui().create_window(Window::new("source", rect(220, 170, 80, 50), empty_content()));
+    let popup = ctx.ui().create_popup(source.id(), "horizontal", item).unwrap();
     let programmed = rect(20, 30, 1, 120);
-    ctx.set_popup_options(
-        &popup,
-        WindowOption::FRAME | WindowOption::AUTO_WIDTH | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
-    )
-    .unwrap();
-    ctx.show_popup_at(&popup, programmed).unwrap();
+    ctx.ui()
+        .set_popup_options(
+            &popup,
+            WindowOption::FRAME | WindowOption::AUTO_WIDTH | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
+        )
+        .unwrap();
+    ctx.ui().show_popup_at(&popup, programmed).unwrap();
 
     ctx.update_and_render_ui();
 
@@ -2332,15 +2388,16 @@ fn auto_width_preserves_programmed_height() {
 fn auto_width_consumes_typed_measurement_invalidation_before_intrinsic_measurement() {
     let (text, content) = TextBlock::create(TextBlockParameters::new("x"));
     let mut ctx = context();
-    let source = ctx.create_window(Window::new("source", rect(220, 170, 80, 50), empty_content()));
-    let popup = ctx.create_popup(source.id(), "dynamic width", content).unwrap();
+    let source = ctx.ui().create_window(Window::new("source", rect(220, 170, 80, 50), empty_content()));
+    let popup = ctx.ui().create_popup(source.id(), "dynamic width", content).unwrap();
     let programmed = rect(20, 30, 1, 80);
-    ctx.set_popup_options(
-        &popup,
-        WindowOption::FRAME | WindowOption::AUTO_WIDTH | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
-    )
-    .unwrap();
-    ctx.show_popup_at(&popup, programmed).unwrap();
+    ctx.ui()
+        .set_popup_options(
+            &popup,
+            WindowOption::FRAME | WindowOption::AUTO_WIDTH | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
+        )
+        .unwrap();
+    ctx.ui().show_popup_at(&popup, programmed).unwrap();
 
     ctx.update_ui(Dimensioni::new(320, 240));
     let before = ctx.debug_popup_rect(&popup).unwrap();
@@ -2387,9 +2444,9 @@ fn auto_size_ignores_the_previous_rect_for_flexible_linear_and_grid_tracks() {
     ]));
     let (_, content) = Linear::create(LinearParameters::vertical([row, grid, flexible_column]));
     let mut ctx = context();
-    let source = ctx.create_window(Window::new("source", rect(220, 170, 80, 50), empty_content()));
-    let popup = ctx.create_popup(source.id(), "intrinsic", content).unwrap();
-    ctx.show_popup_at(&popup, rect(20, 30, 2_000, 3_000)).unwrap();
+    let source = ctx.ui().create_window(Window::new("source", rect(220, 170, 80, 50), empty_content()));
+    let popup = ctx.ui().create_popup(source.id(), "intrinsic", content).unwrap();
+    ctx.ui().show_popup_at(&popup, rect(20, 30, 2_000, 3_000)).unwrap();
 
     ctx.update_and_render_ui();
 
@@ -2404,7 +2461,7 @@ fn auto_size_ignores_the_previous_rect_for_flexible_linear_and_grid_tracks() {
 fn body_input_falls_through_chrome_to_the_application_node() {
     let mut ctx = context();
     let (button, content) = button_content("button");
-    let root = ctx.create_window(Window::new("window", rect(20, 20, 140, 100), content));
+    let root = ctx.ui().create_window(Window::new("window", rect(20, 20, 140, 100), content));
     let mut button_dispatcher = event_counter(button);
     let mut root_dispatcher = event_counter(root.submitted());
     let mut button_submissions = 0;
@@ -2426,7 +2483,7 @@ fn post_tree_chrome_overlay_is_submitted_after_custom_descendant_rendering() {
     let mut ctx = Context::new_test(backend, Dimensioni::new(320, 240));
     let custom = ctx.register_custom_renderer(|frame, _args| frame.record_marker("application content")).unwrap();
     let content = Node::custom_render(Custom::create(CustomParameters::new("custom")), custom);
-    let _root = ctx.create_window(Window::new("window", rect(20, 20, 140, 100), content));
+    let _root = ctx.ui().create_window(Window::new("window", rect(20, 20, 140, 100), content));
 
     ctx.update_and_render_ui();
     let events = log.snapshot();
