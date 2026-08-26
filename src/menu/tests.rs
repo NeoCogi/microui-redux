@@ -27,7 +27,7 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 // POSSIBILITY OF SUCH DAMAGE.
 
-//! Structural and geometry regressions for the compact menu compiler.
+//! Structural and geometry regressions for compact menu surfaces.
 
 use super::*;
 
@@ -43,38 +43,6 @@ fn empty_bar_has_zero_geometry() {
     assert_eq!((layout.size.width, layout.size.height), (0, 0));
     assert!(layout.slots.is_empty());
     assert_eq!(layout.marker_width, 0);
-}
-
-/// Proves that compilation retains recursive concrete surfaces without row nodes or identity maps.
-#[test]
-fn nested_declarations_compile_as_recursive_concrete_surfaces() {
-    // Keep weak handles to items at two hierarchy depths so the final lifetime assertion covers
-    // both nested and top-level popup ownership.
-    let (deep_handle, deep_item) = MenuItem::create(MenuItemParameters::new("Deep action"));
-    let (edit_handle, edit_item) = MenuItem::create(MenuItemParameters::new("Edit action"));
-    let menu = MenuBar::new([
-        Menu::new("File").submenu(Menu::new("Recent").submenu(Menu::new("Deep").item(deep_item))),
-        Menu::new("Edit").item(edit_item),
-    ]);
-
-    let compiled = menu.compile();
-
-    // The bar has two headings. File owns Recent, Recent owns Deep, and Edit is a sibling; no flat
-    // vector or parent index is required to recover this declaration topology.
-    assert_eq!(compiled.bar.rows.len(), 2);
-    assert_eq!(compiled.popups.len(), 2);
-    assert_eq!(compiled.popups[0].trigger_slot, 0);
-    assert_eq!(compiled.popups[0].children.len(), 1);
-    assert_eq!(compiled.popups[0].children[0].children.len(), 1);
-    assert_eq!(compiled.popups[0].children[0].children[0].surface.rows.len(), 1);
-    assert_eq!(compiled.popups[1].trigger_slot, 1);
-    assert_eq!(compiled.popups[1].surface.rows.len(), 1);
-    assert!(deep_handle.is_alive() && edit_handle.is_alive(), "compiled surfaces own their item records");
-
-    // Dropping every compiled output removes all strong owners. Application handles and event
-    // endpoints are deliberately weak, so neither can extend a destroyed menu's lifetime.
-    drop(compiled);
-    assert!(!deep_handle.is_alive() && !edit_handle.is_alive());
 }
 
 /// Proves that the shared popup text region reserves unclipped, non-overlapping trailing content.

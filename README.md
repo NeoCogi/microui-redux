@@ -7,9 +7,9 @@
 using unique owning `Node` trees, typed weak widget handles, and typed backend frames. A concrete
 context-owned surface forest stores every widget tree and menu surface exactly once. Sole parent
 edges encode dialog and popup ownership, chronological window order is carried by the forest
-itself, and one deepest-popup key derives the visible transient branch. Declarative menus compile
-directly into concrete `MenuSurface` values rather than a generic popup payload or a separate menu
-controller.
+itself, and one deepest-popup key derives the visible transient branch. Declarative menus are
+consumed directly into concrete `MenuSurface` values rather than a generic popup payload, a
+temporary menu tree, or a separate controller.
 
 > **Alpha status:** `0.8.0-alpha.5` is the current alpha of the breaking retained-API
 > redesign. The 0.8 line is not API-compatible with 0.7 and may continue to evolve before the

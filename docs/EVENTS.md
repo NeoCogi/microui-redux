@@ -419,7 +419,7 @@ rejects stale or foreign capabilities without storing another key in the handle.
 with `show_popup` or `show_popup_at`; the
 same transaction reconciles placement and the deepest active popup, while parent edges derive the
 visible branch. Replacement, hiding, and outside-press policy emit `PopupEvent::Dismissed`.
-Cascading menu parentage is private forest data compiled from `Menu`; no public subpopup API,
+Cascading menu parentage is private forest data consumed directly from `Menu`; no public subpopup API,
 overlay registry, per-control command enum, or second surface lifetime model is required.
 
 The full demo composes `Combo` and its popup definition entirely through typed events. `ComboSubmitted`

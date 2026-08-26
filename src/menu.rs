@@ -29,7 +29,7 @@
 
 //! Compact declarative window menus.
 //!
-//! A menu bar compiles to one manager-owned surface for the bar and one surface for each popup.
+//! A menu bar is consumed into one manager-owned surface for the bar and one surface for each popup.
 //! Each surface measures, hit-tests, anchors, and paints all logical slots from the same concrete
 //! data. Menu rows are values rather than retained widget subtrees: there is no per-row container,
 //! interaction node, or three-cell presentation tree.
@@ -159,10 +159,10 @@ pub(crate) struct MenuItemRecord {
 /// Uniquely owned declaration value for one actionable menu row.
 ///
 /// Move this value into [`Menu::item`]. Keep the separately returned [`MenuItemHandle`] when the
-/// application needs to subscribe or change live presentation state after compilation into a leaf.
+/// application needs to subscribe or change live presentation state after mounting into a surface.
 pub struct MenuItem {
     /// Sole semantic owner until this declaration moves into a manager-owned menu surface.
-    record: MenuItemRecord,
+    pub(crate) record: MenuItemRecord,
 }
 
 impl MenuItem {
@@ -195,25 +195,15 @@ pub struct MenuBar {
 impl MenuBar {
     /// Creates a bar from uniquely owned top-level menu descriptions.
     pub fn new(menus: impl IntoIterator<Item = Menu>) -> Self {
-        // Collect once at the ownership boundary; compilation consumes this vector without clones.
+        // Collect once at the ownership boundary; registration consumes this vector without clones.
         Self { menus: menus.into_iter().collect() }
     }
 
-    /// Compiles declarations into one concrete bar and recursive popup transport values.
-    pub(crate) fn compile(self) -> CompiledMenu {
-        // Preserve declaration topology instead of manufacturing a parallel `MenuId` namespace.
-        // The manager consumes each child recursively and makes the forest parent edge authoritative.
-        let mut headings = Vec::with_capacity(self.menus.len());
-        let mut popups = Vec::with_capacity(self.menus.len());
-        for (slot, menu) in self.menus.into_iter().enumerate() {
-            let (label, popup) = CompiledMenuPopup::from_declaration(menu, slot);
-            headings.push(MenuSlot::Branch { label });
-            popups.push(popup);
-        }
-        CompiledMenu {
-            bar: MenuSurface::new(headings, false),
-            popups,
-        }
+    /// Transfers the uniquely owned top-level declarations to window registration.
+    pub(crate) fn into_menus(self) -> Vec<Menu> {
+        // The manager consumes this vector directly into forest nodes without an intermediate
+        // compiled hierarchy or numeric menu namespace.
+        self.menus
     }
 }
 
@@ -228,7 +218,7 @@ pub struct Menu {
 impl Menu {
     /// Creates an empty menu with the supplied user-visible label.
     pub fn new(label: impl Into<String>) -> Self {
-        // Entries remain declaration data until a window compiles the complete bar.
+        // Entries remain declaration data until a window consumes the complete bar.
         Self { label: label.into(), entries: Vec::new() }
     }
 
@@ -241,7 +231,7 @@ impl Menu {
 
     /// Appends one explicit non-interactive separator row.
     pub fn separator(mut self) -> Self {
-        // Preserve exact declaration order; compilation performs no implicit grouping.
+        // Preserve exact declaration order; registration performs no implicit grouping.
         self.entries.push(MenuEntry::Separator);
         self
     }
@@ -252,10 +242,17 @@ impl Menu {
         self.entries.push(MenuEntry::Submenu(submenu));
         self
     }
+
+    /// Separates the parent-facing label from the rows consumed by one popup surface.
+    pub(crate) fn into_parts(self) -> (String, Vec<MenuEntry>) {
+        // Moving both values lets the manager install labels and rows without cloning declaration
+        // strings or retaining a second recursive topology.
+        (self.label, self.entries)
+    }
 }
 
 /// One ordered logical row in a declarative menu.
-enum MenuEntry {
+pub(crate) enum MenuEntry {
     /// Application-authored actionable item.
     Item(MenuItem),
     /// Explicit visual rule.
@@ -328,7 +325,7 @@ pub(crate) struct MenuSurface {
 
 impl MenuSurface {
     /// Creates one compact concrete presentation surface.
-    fn new(rows: Vec<MenuSlot>, popup: bool) -> Self {
+    pub(crate) fn new(rows: Vec<MenuSlot>, popup: bool) -> Self {
         // Geometry and transient pointer state begin empty and become authoritative during layout.
         Self {
             rows,
@@ -736,50 +733,4 @@ fn paint_separator(ctx: &mut WidgetPaintCtx<'_>, row: Recti) {
     let mut color = ctx.style().menu_foreground;
     color.a = ((u16::from(color.a) * 45) / 100).max(1) as u8;
     ctx.draw_rect(rule, color);
-}
-
-/// Complete concrete menu transport consumed at one root-registration boundary.
-pub(crate) struct CompiledMenu {
-    /// Persistent bar retained directly on the root policy.
-    pub(crate) bar: MenuSurface,
-    /// Top-level popup declarations in heading order.
-    pub(crate) popups: Vec<CompiledMenuPopup>,
-}
-
-/// One recursively owned menu popup ready to become a forest child.
-pub(crate) struct CompiledMenuPopup {
-    /// Heading or parent-row index whose forest edge opens this popup.
-    pub(crate) trigger_slot: usize,
-    /// Sole concrete surface presenting every direct row.
-    pub(crate) surface: MenuSurface,
-    /// Direct submenu declarations in row order.
-    pub(crate) children: Vec<CompiledMenuPopup>,
-}
-
-impl CompiledMenuPopup {
-    /// Converts one recursive declaration and returns its uniquely owned parent-facing label.
-    fn from_declaration(menu: Menu, trigger_slot: usize) -> (String, Self) {
-        let Menu { label, entries } = menu;
-        let mut rows = Vec::with_capacity(entries.len());
-        let mut children = Vec::new();
-        for (slot, entry) in entries.into_iter().enumerate() {
-            match entry {
-                MenuEntry::Item(item) => rows.push(MenuSlot::Item(item.record)),
-                MenuEntry::Separator => rows.push(MenuSlot::Separator),
-                MenuEntry::Submenu(child) => {
-                    let (label, child) = Self::from_declaration(child, slot);
-                    rows.push(MenuSlot::Branch { label });
-                    children.push(child);
-                }
-            }
-        }
-        (
-            label,
-            Self {
-                trigger_slot,
-                surface: MenuSurface::new(rows, true),
-                children,
-            },
-        )
-    }
 }

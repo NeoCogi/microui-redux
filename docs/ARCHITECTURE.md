@@ -146,7 +146,7 @@ screen-space rectangle. Generic popups keep that screen anchor until explicitly 
 they do not follow later owner movement. `PopupHandle` parameters keep popup operations separate
 from window operations at compile time.
 
-An intrinsic `MenuBar` is compiled with its `Window` into one compact concrete `MenuSurface` for the
+An intrinsic `MenuBar` is consumed with its `Window` into one compact concrete `MenuSurface` for the
 bar and one directly owned `MenuSurface` body for each private popup definition. These are not
 retained widget leaves and do not own `UiRuntime` values. Logical entries remain values inside the
 menu surfaces rather than becoming retained row widgets. Top-level menus retain a
@@ -155,7 +155,7 @@ popup. Each surface reuses storage for the local rectangles produced by its auth
 measurement, and the manager translates those slots after layout, so open menus follow window
 movement and ancestor menu geometry. `MenuItemHandle` capabilities remain directly
 subscribable application events; no menu coordinator, public submenu handle, per-row anchor node,
-generic surface payload, or second visibility model is involved.
+generic surface payload, temporary recursive menu tree, or second visibility model is involved.
 
 Dialogs occupy a dedicated modal band above all sixteen numeric layers. The frontmost visible
 dialog is the only input-eligible window, and its active popup path uses the transient tier above

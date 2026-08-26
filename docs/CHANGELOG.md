@@ -32,6 +32,7 @@ layer.
     - [x] The manager owns direct `MenuSurface` values and `MenuSlot` item records. Removed menu `Node`/`UiRuntime` adaptation, controllers/actions, duplicate menu ids, and runtime-node anchor identities.
     - [x] `MenuItemHandle` is the item's typed submission capability itself. `Ui::menu_item` and `Ui::menu_item_mut` use its allocation identity to lend the authoritative `MenuItemParameters`, returning `UnknownItem` for unmounted, destroyed, or foreign capabilities.
     - [x] Parent edges plus trigger-slot indices anchor headings and submenus; slot geometry and popup-path storage are reused after warm-up with no layout allocation.
+    - [x] Window registration consumes declarations directly into forest nodes; no temporary recursive compiled-menu tree mirrors the final ownership hierarchy.
     - [x] The implementation contains no `Any` payload, type inspection, or downcast path.
 - [x] Retained fixed/modal stacking, activation, capture, and fullscreen-surface policy on the new forest.
     - [x] `WindowOption::NO_PADDING` enables the layer-`0` fullscreen grid while preserving descendant padding; floating windows remain independent at the default layer.

@@ -33,7 +33,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use super::*;
-use crate::menu::{CompiledMenuPopup, MenuPress, MenuSurface};
+use crate::menu::{MenuEntry, MenuPress, MenuSlot, MenuSurface};
 use crate::{MouseButton, Node, UiInputEvent, Vec2i, rect};
 
 use super::root_chrome::{RootChromeGeometry, RootChromePart, RootInteraction, record_root_background, record_root_overlay, root_chrome_geometry};
@@ -869,12 +869,20 @@ impl WindowManager {
         }
 
         let (name, rect, content, menu_bar) = window.into_parts();
-        // Compile before mounting the root, retaining recursive popup ownership until each direct
-        // forest parent has been inserted. No numeric menu namespace or topology translation exists.
-        let (menu_bar, menu_popups) = match menu_bar.map(crate::MenuBar::compile) {
-            Some(menu) => (Some(menu.bar), menu.popups),
-            None => (None, Vec::new()),
-        };
+        // Move top-level labels into the bar while retaining only their row vectors until the root
+        // exists. This flat transfer avoids constructing a recursive hierarchy beside the forest.
+        let mut menu_popups = Vec::new();
+        let menu_bar = menu_bar.map(|bar| {
+            let menus = bar.into_menus();
+            let mut headings = Vec::with_capacity(menus.len());
+            menu_popups.reserve(menus.len());
+            for menu in menus {
+                let (label, entries) = menu.into_parts();
+                headings.push(MenuSlot::Branch { label });
+                menu_popups.push(entries);
+            }
+            MenuSurface::new(headings, false)
+        });
 
         // One strong event owner lives with root policy; the returned handle keeps only a weak,
         // typed capability that also authenticates its originating Context.
@@ -894,10 +902,10 @@ impl WindowManager {
             }),
         });
 
-        // Each recursive transport value becomes one direct child edge. Branch labels remain in the
-        // parent surface, so release builds allocate no separate diagnostic popup names.
-        for popup in menu_popups {
-            self.register_menu_popup(SurfaceKey::Root(id), popup);
+        // Each row vector becomes a direct child edge; recursion consumes only one parent's pending
+        // children at a time, so no second menu tree coexists with the authoritative forest.
+        for (trigger_slot, entries) in menu_popups.into_iter().enumerate() {
+            self.register_menu_popup(SurfaceKey::Root(id), trigger_slot, entries);
         }
         self.surfaces.rebuild_visible_order();
         self.invalidate_ui_commit();
@@ -920,7 +928,7 @@ impl WindowManager {
 
     /// Creates a hidden modal dialog directly owned by an ordinary window.
     pub fn create_dialog(&mut self, owner: &WindowHandle, window: Window) -> Result<WindowHandle, SurfaceMutationError> {
-        // Authenticate before compiling or mounting the supplied dialog definition.
+        // Authenticate before consuming or mounting the supplied dialog definition.
         let owner = self.window_id(owner)?;
         self.register_window(RootMode::Modal, Some(owner), window, WindowOption::FRAME, false)
     }
@@ -948,19 +956,33 @@ impl WindowManager {
         event_handle
     }
 
-    /// Recursively inserts one concrete menu popup beneath its direct forest parent.
-    fn register_menu_popup(&mut self, parent: SurfaceKey, popup: CompiledMenuPopup) {
-        let CompiledMenuPopup { trigger_slot, surface, children } = popup;
+    /// Consumes one declaration row vector directly into a concrete menu-popup forest node.
+    fn register_menu_popup(&mut self, parent: SurfaceKey, trigger_slot: usize, entries: Vec<MenuEntry>) {
+        let mut rows = Vec::with_capacity(entries.len());
+        let mut children = Vec::new();
+        for (slot, entry) in entries.into_iter().enumerate() {
+            match entry {
+                MenuEntry::Item(item) => rows.push(MenuSlot::Item(item.record)),
+                MenuEntry::Separator => rows.push(MenuSlot::Separator),
+                MenuEntry::Submenu(menu) => {
+                    // A branch label stays in this parent surface; only its owned row vector waits
+                    // until the parent forest node exists and can become the child's sole edge.
+                    let (label, entries) = menu.into_parts();
+                    rows.push(MenuSlot::Branch { label });
+                    children.push((slot, entries));
+                }
+            }
+        }
         let id = self.next_popup_id();
         self.surfaces.insert_popup(SurfaceNode {
             key: SurfaceKey::Popup(id),
             parent: Some(parent),
-            surface: Surface::menu(surface),
+            surface: Surface::menu(MenuSurface::new(rows, true)),
             kind: SurfaceKind::Popup(PopupState::Menu { trigger_slot }),
         });
         // The parent is retained before recursion, satisfying the forest's sole structural invariant.
-        for child in children {
-            self.register_menu_popup(SurfaceKey::Popup(id), child);
+        for (trigger_slot, entries) in children {
+            self.register_menu_popup(SurfaceKey::Popup(id), trigger_slot, entries);
         }
     }
 
