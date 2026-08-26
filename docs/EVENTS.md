@@ -432,13 +432,14 @@ Acceptance or cancellation hides the root again while preserving the component, 
 widgets. Multiple component instances are independent dialogs directly owned by their ordinary
 windows; the frontmost visible dialog is the active modal group, whether shown or explicitly raised.
 
-Menus need no application-owned component binding. Applications subscribe directly to each concrete
-`MenuItemSubmitted` source, move the item nodes into recursive `Menu` values, install a `MenuBar` on
-`Window`, and retain only handles for items whose presentation changes later. The window manager
-opens and positions private menu popups from their heading or submenu-row node relationships, then
-closes the active path before dispatching an invoked item's event. No command payload, menu
-coordinator, or public menu-popup handle intervenes. See the [menu guide](MENUS.md) for construction,
-state mutation, and current keyboard-navigation scope.
+Menus need no application-owned component binding. Applications subscribe through each concrete
+`MenuItemHandle` to its `MenuItemSubmitted` source, move the uniquely owned `MenuItem` values into
+recursive `Menu` values, install a `MenuBar` on `Window`, and retain only handles for items whose
+presentation changes later. The window manager opens and positions private menu popups from logical
+heading and submenu-row slots cached by their compact `MenuSurface` leaves, then closes the active
+path before dispatching an invoked item's event. No command payload, menu coordinator, or public
+menu-popup handle intervenes. See the [menu guide](MENUS.md) for construction, state mutation, and
+current keyboard-navigation scope.
 
 ```rust,ignore
 impl Model {

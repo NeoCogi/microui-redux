@@ -819,10 +819,10 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         self.window_manager.debug_menu_anchor_rects(root)
     }
 
-    /// Returns one retained node rectangle from the authoritative active popup path for tests.
-    pub(crate) fn debug_active_popup_node_rect(&self, node: crate::ui_node::RuntimeNodeId) -> Option<Recti> {
-        // Restrict lookup to visible popups so tests cannot interact through hidden definitions.
-        self.window_manager.debug_active_popup_node_rect(node)
+    /// Returns active compact menu rows in parent-to-child popup order for tests.
+    pub(crate) fn debug_active_menu_row_rects(&self) -> Vec<Vec<Recti>> {
+        // Logical declaration slots replace the removed per-row RuntimeNodeId identities.
+        self.window_manager.debug_active_menu_row_rects()
     }
 
     /// Returns whether any manager-owned chrome gesture is active for tests.

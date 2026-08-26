@@ -34,7 +34,7 @@ use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, reco
 use crate::{
     color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Combo, ComboParameters, ComboSubmitted, Custom,
     CustomParameters, Constraints, Context, Dimensioni, Disclosure, DisclosureParameters, EventContext, Grid, GridParameters, KeyMode, Linear, LinearItem,
-    LinearParameters, Menu, MenuBar, MenuItem, MenuItemParameters, MenuItemSubmitted, MouseButton, Node, ScrollArea, ScrollAreaOption, ListItem,
+    LinearParameters, Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted, MouseButton, Node, ScrollArea, ScrollAreaOption, ListItem,
     ListItemParameters, ScrollAreaParameters, Style, Textbox, TextboxChanged, TextBlock, TextBlockParameters, TextboxParameters, TrackSize, TypedWidgetHandle,
     UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
 };
@@ -1836,7 +1836,7 @@ fn hiding_and_showing_root_does_not_restore_chrome_capture() {
     assert_eq!(ctx.debug_root_active(root.id()), Some(false));
 }
 
-/// Verifies that menu placement remains a live retained-node relationship after owner movement.
+/// Verifies that menu placement remains a live surface-slot relationship after owner movement.
 #[test]
 fn declarative_menu_popups_follow_heading_and_submenu_edges_when_the_window_moves() {
     // A nested File menu exercises both relationship variants. Edit supplies another top-level
@@ -1852,22 +1852,22 @@ fn declarative_menu_popups_follow_heading_and_submenu_edges_when_the_window_move
     let root = ctx.create_window(Window::new("menu geometry", rect(30, 25, 190, 140), empty_content()).menu_bar(menu_bar));
     ctx.update_and_render_ui();
 
-    // The first compiled anchor belongs to File. Opening it must use the heading's exact left and
-    // bottom edges rather than a caller-computed or creation-time screen rectangle.
+    // The first compiled relationship belongs to File. Opening it must use the current heading
+    // slot's exact left and bottom edges, not a caller-computed or creation-time screen rectangle.
     let anchors = ctx.debug_menu_anchor_rects(root.id()).unwrap();
     assert_eq!(anchors.len(), 3);
-    let file_heading = anchors[0].expect("the mounted File heading must have committed geometry");
+    let file_heading = anchors[0].expect("the bar surface's File slot must have committed geometry");
     click_rect(&mut ctx, file_heading);
     assert_eq!(ctx.debug_active_popup_names(), ["menu geometry File Menu"]);
     let file_popup = ctx.debug_active_popup_rects()[0];
     assert_eq!(file_popup.x, file_heading.x);
     assert_eq!(file_popup.y, file_heading.y + file_heading.height);
 
-    // The parent popup layout commits the Recent row. Opening that row must place the child at its
-    // exact right edge and preserve its y coordinate.
-    let recent_row = ctx.debug_menu_anchor_rects(root.id()).unwrap()[1].expect("an active parent menu must lay out its submenu trigger");
+    // The parent popup surface commits the Recent row slot. Opening that row must place the child
+    // at its exact right edge and preserve its y coordinate.
+    let recent_row = ctx.debug_menu_anchor_rects(root.id()).unwrap()[1].expect("an active parent surface must lay out its submenu slot");
     click_rect(&mut ctx, recent_row);
-    assert_eq!(ctx.debug_active_popup_names(), ["menu geometry File Menu", "menu geometry File Recent Menu"]);
+    assert_eq!(ctx.debug_active_popup_names(), ["menu geometry File Menu", "menu geometry Recent Menu"]);
     let open_popups = ctx.debug_active_popup_rects();
     assert_eq!(open_popups[1].x, recent_row.x + recent_row.width);
     assert_eq!(open_popups[1].y, recent_row.y);
@@ -1906,6 +1906,80 @@ fn declarative_menu_popups_follow_heading_and_submenu_edges_when_the_window_move
     assert_eq!(moved_popups[1].y, moved_recent_row.y);
 }
 
+/// Verifies that live marker-role changes remeasure only their owning menu surface.
+#[test]
+fn changing_item_marker_role_reflows_parent_and_reanchors_open_child() {
+    // Keep the mutable item in the parent while the child owns an unrelated fixed-size item. The
+    // application retains only the weak handle needed to change the parent's shared marker gutter.
+    let (item, direct_item) = MenuItem::create(MenuItemParameters::new("Direct action"));
+    let (_, child_item) = MenuItem::create(MenuItemParameters::new("Child action"));
+    let menu_bar = MenuBar::new([Menu::new("File").item(direct_item).submenu(Menu::new("Child").item(child_item))]);
+    let mut ctx = context();
+    let root = ctx.create_window(Window::new("live marker geometry", rect(24, 20, 220, 150), empty_content()).menu_bar(menu_bar));
+    ctx.update_and_render_ui();
+
+    // Open both levels and retain their unmarked baseline. The child begins exactly at the parent
+    // menu surface's right edge inside its one-pixel popup frame, which distinguishes resizing
+    // from stale anchoring without conflating content geometry with window chrome.
+    let heading = ctx.debug_menu_anchor_rects(root.id()).unwrap()[0].unwrap();
+    click_rect(&mut ctx, heading);
+    let child_trigger = ctx.debug_active_menu_row_rects()[0][1];
+    click_rect(&mut ctx, child_trigger);
+    assert_eq!(
+        ctx.debug_active_popup_names(),
+        ["live marker geometry File Menu", "live marker geometry Child Menu"]
+    );
+    let baseline_popups = ctx.debug_active_popup_rects();
+    let baseline_rows = ctx.debug_active_menu_row_rects();
+    // Recti intentionally has no equality implementation. Compare compact scalar snapshots when a
+    // phase requires exact geometry rather than one relational edge assertion.
+    let popup_geometry = |rects: &[Recti]| rects.iter().map(|rect| (rect.x, rect.y, rect.width, rect.height)).collect::<Vec<_>>();
+    let row_geometry = |surfaces: &[Vec<Recti>]| {
+        surfaces
+            .iter()
+            .map(|rows| rows.iter().map(|rect| (rect.x, rect.y, rect.width, rect.height)).collect::<Vec<_>>())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(baseline_popups[1].x, baseline_rows[0][1].x + baseline_rows[0][1].width);
+    assert_eq!(baseline_popups[1].y, baseline_rows[0][1].y);
+
+    // Introducing an unchecked role must still allocate the shared marker gutter. A normal update
+    // remeasures the parent, widens every parent row, and repositions the already-open child from
+    // the freshly committed submenu slot without altering the child's own intrinsic dimensions.
+    assert_eq!(item.set_mark(MenuItemMark::Checked(false)), Some(()));
+    ctx.update_and_render_ui();
+    let unchecked_popups = ctx.debug_active_popup_rects();
+    let unchecked_rows = ctx.debug_active_menu_row_rects();
+    assert!(unchecked_popups[0].width > baseline_popups[0].width);
+    assert_eq!(unchecked_popups[0].height, baseline_popups[0].height);
+    assert!(unchecked_rows[0][0].width > baseline_rows[0][0].width);
+    assert!(unchecked_rows[0][1].width > baseline_rows[0][1].width);
+    assert_eq!(unchecked_popups[1].x, unchecked_rows[0][1].x + unchecked_rows[0][1].width);
+    assert_eq!(unchecked_popups[1].y, unchecked_rows[0][1].y);
+    assert_eq!(
+        (unchecked_popups[1].width, unchecked_popups[1].height),
+        (baseline_popups[1].width, baseline_popups[1].height)
+    );
+
+    // Toggling only the boolean paints a check but preserves its role, so no geometry on either
+    // surface may move. This guards against measuring marker visibility instead of marker role.
+    assert_eq!(item.set_mark(MenuItemMark::Checked(true)), Some(()));
+    ctx.update_and_render_ui();
+    assert_eq!(popup_geometry(&ctx.debug_active_popup_rects()), popup_geometry(&unchecked_popups));
+    assert_eq!(row_geometry(&ctx.debug_active_menu_row_rects()), row_geometry(&unchecked_rows));
+
+    // Removing the role releases the gutter. The parent and child must return to their exact
+    // baseline rectangles while the open path remains intact and the child keeps its own size.
+    assert_eq!(item.set_mark(MenuItemMark::None), Some(()));
+    ctx.update_and_render_ui();
+    assert_eq!(popup_geometry(&ctx.debug_active_popup_rects()), popup_geometry(&baseline_popups));
+    assert_eq!(row_geometry(&ctx.debug_active_menu_row_rects()), row_geometry(&baseline_rows));
+    assert_eq!(
+        ctx.debug_active_popup_names(),
+        ["live marker geometry File Menu", "live marker geometry Child Menu"]
+    );
+}
+
 /// Verifies that a heading toggles its own menu and switches directly to a sibling heading.
 #[test]
 fn menu_heading_clicks_toggle_and_switch_the_single_active_popup_path() {
@@ -1938,6 +2012,84 @@ fn menu_heading_clicks_toggle_and_switch_the_single_active_popup_path() {
     assert!(ctx.debug_active_popup_names().is_empty());
 }
 
+/// Verifies that choosing a sibling submenu removes every deeper popup from the old branch.
+#[test]
+fn opening_sibling_submenu_replaces_the_complete_descendant_suffix() {
+    // Alpha owns a second descendant level so replacing it exercises more than the immediate child.
+    // Concrete leaf items keep both terminal popup surfaces measurable without contributing row
+    // nodes to the retained tree.
+    let (_, alpha_leaf) = MenuItem::create(MenuItemParameters::new("Alpha leaf"));
+    let (_, beta_leaf) = MenuItem::create(MenuItemParameters::new("Beta leaf"));
+    let menu_bar = MenuBar::new([Menu::new("File")
+        .submenu(Menu::new("Alpha").submenu(Menu::new("Deep").item(alpha_leaf)))
+        .submenu(Menu::new("Beta").item(beta_leaf))]);
+    let mut ctx = context();
+    let root = ctx.create_window(Window::new("submenu switching", rect(20, 20, 220, 150), empty_content()).menu_bar(menu_bar));
+    ctx.update_and_render_ui();
+
+    // Open File, then follow Alpha into Deep. Row rectangles come from the active compact menu
+    // surfaces in parent-first order, while each inner vector preserves declaration order.
+    let file_heading = ctx.debug_menu_anchor_rects(root.id()).unwrap()[0].unwrap();
+    click_rect(&mut ctx, file_heading);
+    let alpha_row = ctx.debug_active_menu_row_rects()[0][0];
+    click_rect(&mut ctx, alpha_row);
+    let deep_row = ctx.debug_active_menu_row_rects()[1][0];
+    click_rect(&mut ctx, deep_row);
+    assert_eq!(
+        ctx.debug_active_popup_names(),
+        ["submenu switching File Menu", "submenu switching Alpha Menu", "submenu switching Deep Menu",]
+    );
+
+    // Beta is a sibling of Alpha in the still-open File surface. Its press must replace both Alpha
+    // and Deep atomically, leaving the common File prefix followed only by the new Beta branch.
+    let beta_row = ctx.debug_active_menu_row_rects()[0][1];
+    click_rect(&mut ctx, beta_row);
+    assert_eq!(ctx.debug_active_popup_names(), ["submenu switching File Menu", "submenu switching Beta Menu"]);
+    assert_eq!(ctx.debug_active_menu_row_rects().len(), 2);
+}
+
+/// Verifies that menu bar, submenu, and item presses preserve application keyboard focus.
+#[test]
+fn menu_pointer_operations_preserve_preexisting_application_keyboard_focus() {
+    // HOLD_FOCUS gives the application body a persistent keyboard target. Every menu surface uses
+    // PRESERVE_FOCUS, so its independent pointer capture must never replace this retained identity.
+    let (probe, body) = OrderedProbe::create(WidgetOption::HOLD_FOCUS);
+    let body_id = body.id();
+    let (_, invoke_item) = MenuItem::create(MenuItemParameters::new("Invoke"));
+    let menu_bar = MenuBar::new([Menu::new("Actions").submenu(Menu::new("More").item(invoke_item))]);
+    let mut ctx = context();
+    let root = ctx.create_window(Window::new("menu focus", rect(20, 20, 220, 150), body).menu_bar(menu_bar));
+    ctx.update_and_render_ui();
+
+    // Establish application focus before any menu becomes visible, then verify the bar press leaves
+    // text routing on that body even while the top-level popup is active.
+    let body_rect = ctx.debug_root_node_rect(root.id(), body_id).unwrap();
+    click_rect(&mut ctx, body_rect);
+    assert_eq!(probe.try_read(|state| state.events.clone()), Some(vec!["down", "up"]));
+    let heading = ctx.debug_menu_anchor_rects(root.id()).unwrap()[0].unwrap();
+    click_rect(&mut ctx, heading);
+    ctx.text("after heading");
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_popup_names(), ["menu focus Actions Menu"]);
+
+    // Opening a nested popup exercises pointer capture on a popup-local MenuSurface. Keyboard input
+    // must still bypass both menu surfaces and reach the original application focus owner.
+    let submenu_row = ctx.debug_active_menu_row_rects()[0][0];
+    click_rect(&mut ctx, submenu_row);
+    ctx.text("after submenu");
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_popup_names(), ["menu focus Actions Menu", "menu focus More Menu"]);
+
+    // Invoking the leaf dismisses the complete popup path during MouseDown. Neither dismissal nor
+    // the swallowed release tail may clear the application focus used by the following text event.
+    let item_row = ctx.debug_active_menu_row_rects()[1][0];
+    click_rect(&mut ctx, item_row);
+    ctx.text("after item");
+    ctx.update_and_render_ui();
+    assert!(ctx.debug_active_popup_names().is_empty());
+    assert_eq!(probe.try_read(|state| state.events.clone()), Some(vec!["down", "up", "text", "text", "text"]));
+}
+
 /// Verifies direct item events, dispatch ordering, and disabled-row menu policy together.
 #[test]
 fn menu_items_dispatch_directly_after_close_while_disabled_items_leave_the_menu_open() {
@@ -1955,26 +2107,25 @@ fn menu_items_dispatch_directly_after_close_while_disabled_items_leave_the_menu_
     impl Model {
         /// Records the enabled item and inspects ordering through the safe event capability.
         fn enabled_submitted(&mut self, context: &mut EventContext<'_>, _: &MenuItemSubmitted) {
-            // Menu policy runs after the retained item emits but before application dispatch, so the
-            // handler must observe no active popup without issuing a separate close command.
+            // The surface records an invocation and manager policy closes the path before the
+            // item's typed event reaches application dispatch. The handler therefore sees no popup
+            // without issuing a separate close command.
             self.enabled_submissions += 1;
             self.enabled_observed_closed_menu = context.debug_active_popup_names().is_empty();
         }
 
         /// Records any erroneous event emitted by the disabled concrete item.
         fn disabled_submitted(&mut self, _context: &mut EventContext<'_>, _: &MenuItemSubmitted) {
-            // Router-visible disabled state should make this handler unreachable.
+            // The surface routes the row but resolves its disabled item to no invocation action.
             self.disabled_submissions += 1;
         }
     }
 
-    // Preserve node identities only for test geometry lookup; the Window remains their sole strong
-    // owner after the declarative menu consumes both nodes.
-    let (enabled, enabled_node) = MenuItem::create(MenuItemParameters::new("Run"));
-    let enabled_node_id = enabled_node.id();
-    let (disabled, disabled_node) = MenuItem::create(MenuItemParameters::new("Unavailable").disabled());
-    let disabled_node_id = disabled_node.id();
-    let menu_bar = MenuBar::new([Menu::new("Actions").item(enabled_node).item(disabled_node)]);
+    // Each uniquely owned value moves into the compact menu data, while its handle remains with the
+    // test so subscriptions can address the item's concrete event source after that move.
+    let (enabled, enabled_item) = MenuItem::create(MenuItemParameters::new("Run"));
+    let (disabled, disabled_item) = MenuItem::create(MenuItemParameters::new("Unavailable").disabled());
+    let menu_bar = MenuBar::new([Menu::new("Actions").item(enabled_item).item(disabled_item)]);
     let dimensions = Dimensioni::new(320, 240);
     let mut ctx: Context<NoopRenderer, Model> = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions);
     let root = ctx.create_window(Window::new("menu events", rect(20, 25, 180, 120), empty_content()).menu_bar(menu_bar));
@@ -1991,7 +2142,9 @@ fn menu_items_dispatch_directly_after_close_while_disabled_items_leave_the_menu_
     ctx.update_ui_state(dimensions, &mut model);
     ctx.mouseup(heading_point.x, heading_point.y, MouseButton::LEFT);
     ctx.update_ui_state(dimensions, &mut model);
-    let enabled_rect = ctx.debug_active_popup_node_rect(enabled_node_id).unwrap();
+    // Rows no longer have RuntimeNodeIds. The test-only accessor exposes the same rectangles used
+    // by the active popup surface for hit testing, indexed in declaration order.
+    let enabled_rect = ctx.debug_active_menu_row_rects()[0][0];
     let enabled_point = crate::vec2(enabled_rect.x + enabled_rect.width / 2, enabled_rect.y + enabled_rect.height / 2);
     ctx.mousedown(enabled_point.x, enabled_point.y, MouseButton::LEFT);
     ctx.update_ui_state(dimensions, &mut model);
@@ -2001,13 +2154,13 @@ fn menu_items_dispatch_directly_after_close_while_disabled_items_leave_the_menu_
     assert!(model.enabled_observed_closed_menu);
     assert!(ctx.debug_active_popup_names().is_empty());
 
-    // Reopen Actions and press the disabled row. NO_INTERACT prevents both its typed event and the
-    // manager's generic actionable-menu-target close rule, leaving the active popup intact.
+    // Reopen Actions and press the disabled row. The compact surface produces no invocation action,
+    // so neither a typed event nor the manager's close policy runs and the popup remains active.
     ctx.mousedown(heading_point.x, heading_point.y, MouseButton::LEFT);
     ctx.update_ui_state(dimensions, &mut model);
     ctx.mouseup(heading_point.x, heading_point.y, MouseButton::LEFT);
     ctx.update_ui_state(dimensions, &mut model);
-    let disabled_rect = ctx.debug_active_popup_node_rect(disabled_node_id).unwrap();
+    let disabled_rect = ctx.debug_active_menu_row_rects()[0][1];
     let disabled_point = crate::vec2(disabled_rect.x + disabled_rect.width / 2, disabled_rect.y + disabled_rect.height / 2);
     ctx.mousedown(disabled_point.x, disabled_point.y, MouseButton::LEFT);
     ctx.update_ui_state(dimensions, &mut model);
@@ -2016,6 +2169,46 @@ fn menu_items_dispatch_directly_after_close_while_disabled_items_leave_the_menu_
     assert_eq!(model.enabled_submissions, 1);
     assert_eq!(model.disabled_submissions, 0);
     assert_eq!(ctx.debug_active_popup_names(), ["menu events Actions Menu"]);
+}
+
+/// Verifies that closing a menu cannot redirect the remainder of its pointer gesture.
+#[test]
+fn menu_item_dismissal_swallows_the_invalidated_popup_capture_tail() {
+    // Place an event-recording application surface directly beneath the menu popup. This makes a
+    // stale drag or release observable instead of relying on a Button, which would usually ignore
+    // an unmatched release and conceal the cross-surface routing error.
+    let (body_state, body) = OrderedProbe::create(WidgetOption::NONE);
+    let (_, invoke_item) = MenuItem::create(MenuItemParameters::new("Invoke"));
+    let menu_bar = MenuBar::new([Menu::new("Actions").item(invoke_item)]);
+    let mut ctx = context();
+    let root = ctx.create_window(Window::new("capture tail", rect(20, 25, 220, 160), body).menu_bar(menu_bar));
+    ctx.update_and_render_ui();
+
+    // Opening the popup completes the heading's independent captured gesture. Pressing its sole
+    // enabled row then closes the popup during MouseDown, while that now-inactive surface still
+    // owns the physical gesture that began the invocation.
+    let heading = ctx.debug_menu_anchor_rects(root.id()).unwrap()[0].unwrap();
+    click_rect(&mut ctx, heading);
+    let row = ctx.debug_active_menu_row_rects()[0][0];
+    let point = crate::vec2(row.x + row.width / 2, row.y + row.height / 2);
+    ctx.mousedown(point.x, point.y, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert!(ctx.debug_active_popup_names().is_empty());
+    assert_eq!(body_state.try_read(|state| state.events.clone()), Some(Vec::new()));
+
+    // Neither a drag nor the final release may fall through to the newly revealed body. The
+    // suppression ends with that release, so the following fresh click must route normally.
+    ctx.mousemove(point.x + 1, point.y + 1);
+    ctx.update_and_render_ui();
+    ctx.mouseup(point.x + 1, point.y + 1, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(body_state.try_read(|state| state.events.clone()), Some(Vec::new()));
+
+    ctx.mousedown(point.x, point.y, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    ctx.mouseup(point.x, point.y, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(body_state.try_read(|state| state.events.clone()), Some(vec!["down", "up"]));
 }
 
 /// Verifies that ordinary programmatic popups retain explicit screen-space placement semantics.

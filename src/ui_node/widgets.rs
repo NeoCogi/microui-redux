@@ -69,7 +69,6 @@ mod control;
 mod custom;
 mod list_box;
 mod list_item;
-mod menu;
 mod number;
 mod numeric_edit;
 mod scrollbar;
@@ -79,7 +78,9 @@ mod text_block;
 mod text_edit;
 mod textbox;
 
-use control::{content_height, inline_content_size, place_inline_content, place_scaled_visual_content, scaled_visual_content_size, text_size, widget_fill_color};
+// Menus reuse the same intrinsic-height policy as ordinary controls without duplicating code.
+pub(crate) use control::content_height;
+use control::{inline_content_size, place_inline_content, place_scaled_visual_content, scaled_visual_content_size, text_size, widget_fill_color};
 
 pub use button::{Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonSubmitted};
 pub use checkbox::{Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters};
@@ -88,8 +89,6 @@ pub use combo::{Combo, ComboBuilder, ComboChanged, ComboParameters, ComboSubmitt
 pub use custom::{Custom, CustomBuilder, CustomParameters};
 pub use list_box::{ListBox, ListBoxBuilder, ListBoxParameters, ListBoxSubmitted};
 pub use list_item::{ListItem, ListItemBuilder, ListItemParameters, ListItemSubmitted};
-pub(crate) use menu::{MenuBarSurface, MenuHeading, MenuList, MenuSeparator, MenuSubmenu};
-pub use menu::{MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted};
 pub use number::{Number, NumberBuilder, NumberChanged, NumberParameters};
 pub use scrollbar::{Scrollbar, ScrollbarAxis, ScrollbarChanged, ScrollbarParameters};
 pub use slider::{Slider, SliderBuilder, SliderChanged, SliderParameters};

@@ -12,8 +12,9 @@
 - **Style overrides**: every retained node can supply a `Style` in place of its inherited style. A container passes that style to its descendants until another node replaces it. The same effective value drives measurement, placement, input localization, update, and paint.
 - **Application components**: application state may coordinate multiple retained windows and
   widgets behind a typed semantic API. `FileDialog` owns dialog behavior; a `Window` construction
-  value transfers its body and optional declarative `MenuBar` together. Concrete `MenuItem` ports
-  connect directly to the same typed application dispatcher as every other widget event.
+  value transfers its body and optional declarative `MenuBar` together. Each `MenuItemHandle`
+  exposes its concrete item's port to the same typed application dispatcher as every other widget
+  event.
 
 The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained concepts such as `Node`, `Children`, `Container`, `Linear`, `Disclosure`, typed widget handles, and `Context`. Low-level rendering lives under `microui_redux::render`, and atlas construction lives under `microui_redux::atlas::builder`.
 
@@ -103,12 +104,15 @@ screen-space rectangle. Generic popups keep that screen anchor until explicitly 
 they do not follow later owner movement. `PopupHandle` parameters keep popup operations separate
 from ordinary root operations at compile time.
 
-An intrinsic `MenuBar` is compiled with its `Window` into one persistent bar-and-body tree plus
-private popup definitions. Top-level menus retain a below-heading relation; submenus retain a
-right-of-row relation to their direct parent popup. The manager resolves these node relationships
-after each layout, so open menus follow window movement and ancestor menu geometry. `MenuItem`
-submission ports remain directly subscribable application events; no menu coordinator, public
-submenu handle, anchor cache, or second visibility model is involved.
+An intrinsic `MenuBar` is compiled with its `Window` into one compact retained leaf for the bar, one
+leaf for each private popup definition, and the ordinary application body. Logical entries remain
+values inside those `MenuSurface` leaves rather than becoming retained row widgets. Top-level menus
+retain a below-heading-slot relation; submenus retain a right-of-row-slot relation to their direct
+parent popup. Each surface caches the local rectangles produced by its authoritative measurement,
+and the manager translates those slots after layout, so open menus follow window movement and
+ancestor menu geometry. `MenuItemHandle` submission ports remain directly subscribable application
+events; no menu coordinator, public submenu handle, per-row anchor node, or second visibility model
+is involved.
 
 Dialogs occupy a dedicated modal band above all sixteen numeric layers. The frontmost visible
 dialog is the only input-eligible window, and its active popup path uses the transient tier above

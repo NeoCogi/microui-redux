@@ -1144,78 +1144,79 @@ fn centered_button(label: impl Into<String>) -> (WidgetEventPortHandle<ButtonSub
 /// Concrete menu item handles retained only where application state mutates live presentation.
 struct DemoMenuItems {
     /// Open is disabled while the independent file dialog is active.
-    open_file: TypedWidgetHandle<MenuItem>,
+    open_file: MenuItemHandle,
     /// Auto-scroll reflects the current log-following state.
-    auto_scroll: TypedWidgetHandle<MenuItem>,
+    auto_scroll: MenuItemHandle,
     /// Comfortable is one half of the spacing radio pair.
-    comfortable_spacing: TypedWidgetHandle<MenuItem>,
+    comfortable_spacing: MenuItemHandle,
     /// Compact is the other half of the spacing radio pair.
-    compact_spacing: TypedWidgetHandle<MenuItem>,
+    compact_spacing: MenuItemHandle,
 }
 
 /// Concrete item handles whose presentation mirrors the fullscreen grid state.
 struct GridMenuItems {
     /// Checked item controlling whether the renderer includes unit-spaced grid lines.
-    show_minor_lines: TypedWidgetHandle<MenuItem>,
+    show_minor_lines: MenuItemHandle,
 }
 
-/// Creates and subscribes one concrete item before its node enters the menu hierarchy.
+/// Creates and subscribes one concrete item before its value enters the menu hierarchy.
 fn registered_menu_item(
     context: &mut Context<SelectedBackend, State>,
     parameters: MenuItemParameters,
     handler: for<'a> fn(&mut State, &mut EventContext<'a>, &MenuItemSubmitted),
-) -> (TypedWidgetHandle<MenuItem>, Node) {
-    // Subscribe to the item's ordinary typed event port. The window manager owns menu visibility,
-    // so application handlers need no menu-specific coordinator or callback adapter.
-    let (item, node) = MenuItem::create(parameters);
+) -> (MenuItemHandle, MenuItem) {
+    // The handle exposes the item's typed event source and live presentation state, while the
+    // uniquely owned value carries the same item into exactly one declarative menu position.
+    let (handle, item) = MenuItem::create(parameters);
     context
-        .subscribe_context(item.submitted(), handler)
+        .subscribe_context(handle.submitted(), handler)
         .expect("new menu item must be unsubscribed");
-    (item, node)
+    (handle, item)
 }
 
-/// Builds the concrete retained menu hierarchy used by the main demo window.
+/// Builds the compact declarative menu hierarchy used by the main demo window.
 fn demo_menu_bar(context: &mut Context<SelectedBackend, State>) -> (MenuBar, DemoMenuItems) {
-    let (new_session, new_session_node) =
+    let (new_session, new_session_item) =
         registered_menu_item(context, MenuItemParameters::new("New Session").shortcut_hint("Ctrl+N"), State::menu_new_session);
-    let (open_file, open_file_node) = registered_menu_item(context, MenuItemParameters::new("Open...").shortcut_hint("Ctrl+O"), State::menu_open_file);
-    let (_, save_snapshot_node) = MenuItem::create(MenuItemParameters::new("Save Snapshot").shortcut_hint("Ctrl+S").disabled());
-    let (clear_log, clear_log_node) = registered_menu_item(context, MenuItemParameters::new("Clear Log"), State::menu_clear_log);
-    let (_, exit_node) = MenuItem::create(MenuItemParameters::new("Exit").disabled());
+    let (open_file, open_file_item) = registered_menu_item(context, MenuItemParameters::new("Open...").shortcut_hint("Ctrl+O"), State::menu_open_file);
+    let (_, save_snapshot_item) = MenuItem::create(MenuItemParameters::new("Save Snapshot").shortcut_hint("Ctrl+S").disabled());
+    let (clear_log, clear_log_item) = registered_menu_item(context, MenuItemParameters::new("Clear Log"), State::menu_clear_log);
+    let (_, exit_item) = MenuItem::create(MenuItemParameters::new("Exit").disabled());
 
-    let (auto_scroll, auto_scroll_node) = registered_menu_item(
+    let (auto_scroll, auto_scroll_item) = registered_menu_item(
         context,
         MenuItemParameters::new("Auto-scroll Log").checked(true),
         State::menu_toggle_auto_scroll,
     );
-    let (comfortable_spacing, comfortable_node) = registered_menu_item(
+    let (comfortable_spacing, comfortable_item) = registered_menu_item(
         context,
         MenuItemParameters::new("Comfortable Spacing").radio(true),
         State::menu_comfortable_spacing,
     );
-    let (compact_spacing, compact_node) = registered_menu_item(context, MenuItemParameters::new("Compact Spacing").radio(false), State::menu_compact_spacing);
+    let (compact_spacing, compact_item) = registered_menu_item(context, MenuItemParameters::new("Compact Spacing").radio(false), State::menu_compact_spacing);
 
-    let (about, about_node) = registered_menu_item(context, MenuItemParameters::new("About microui-redux"), State::menu_about);
+    let (about, about_item) = registered_menu_item(context, MenuItemParameters::new("About microui-redux"), State::menu_about);
 
-    // Explicit separators preserve the visual groups without retaining group wrapper objects.
+    // Items move directly into the compact declaration. No row nodes, cell nodes, or per-item
+    // presentation widgets are retained solely to express this hierarchy.
     let menu_bar = MenuBar::new([
         Menu::new("File")
-            .item(new_session_node)
-            .item(open_file_node)
-            .item(save_snapshot_node)
+            .item(new_session_item)
+            .item(open_file_item)
+            .item(save_snapshot_item)
             .separator()
-            .item(clear_log_node)
+            .item(clear_log_item)
             .separator()
-            .item(exit_node),
+            .item(exit_item),
         Menu::new("View")
-            .item(auto_scroll_node)
+            .item(auto_scroll_item)
             .separator()
-            .submenu(Menu::new("Log Spacing").item(comfortable_node).item(compact_node)),
-        Menu::new("Help").item(about_node),
+            .submenu(Menu::new("Log Spacing").item(comfortable_item).item(compact_item)),
+        Menu::new("Help").item(about_item),
     ]);
 
-    // Handles without live presentation state are intentionally dropped. Their nodes own the
-    // concrete items, and Context retains the typed subscriptions used for application dispatch.
+    // Handles without later presentation changes are intentionally dropped. The moved `MenuItem`
+    // values own their state, while Context retains the typed subscriptions used for dispatch.
     drop((new_session, clear_log, about));
     (
         menu_bar,
@@ -1228,26 +1229,27 @@ fn demo_menu_bar(context: &mut Context<SelectedBackend, State>) -> (MenuBar, Dem
     )
 }
 
-/// Builds the independent menu hierarchy owned by the fullscreen X-Y grid surface.
+/// Builds the independent compact menu hierarchy owned by the fullscreen X-Y grid surface.
 fn grid_menu_bar(context: &mut Context<SelectedBackend, State>) -> (MenuBar, GridMenuItems) {
     // Grid items use the same direct typed subscriptions as the floating window's items. Popup
     // ownership and closure follow from the MenuBar installed on the grid Window below.
-    let (reset_view, reset_view_node) = registered_menu_item(context, MenuItemParameters::new("Reset View"), State::grid_reset_view);
-    let (show_minor_lines, show_minor_lines_node) = registered_menu_item(
+    let (reset_view, reset_view_item) = registered_menu_item(context, MenuItemParameters::new("Reset View"), State::grid_reset_view);
+    let (show_minor_lines, show_minor_lines_item) = registered_menu_item(
         context,
         MenuItemParameters::new("Minor Grid Lines").checked(true),
         State::grid_toggle_minor_lines,
     );
-    let (about_grid, about_grid_node) = registered_menu_item(context, MenuItemParameters::new("About X-Y Grid"), State::grid_about);
+    let (about_grid, about_grid_item) = registered_menu_item(context, MenuItemParameters::new("About X-Y Grid"), State::grid_about);
 
     // This bar is intentionally separate from the floating demo's File/View/Help menus. Installing
     // it on the grid Window makes every generated popup belong to the layer-zero grid root.
     let menu_bar = MenuBar::new([
-        Menu::new("Grid").item(reset_view_node).separator().item(show_minor_lines_node),
-        Menu::new("Help").item(about_grid_node),
+        Menu::new("Grid").item(reset_view_item).separator().item(show_minor_lines_item),
+        Menu::new("Help").item(about_grid_item),
     ]);
 
-    // These command items need no later presentation updates; their menu nodes keep them alive.
+    // These command handles need no later presentation updates; their moved item values stay alive
+    // in the bar's compact menu data and continue to feed the already-subscribed event sources.
     drop((reset_view, about_grid));
     (menu_bar, GridMenuItems { show_minor_lines })
 }
@@ -1324,16 +1326,16 @@ struct State {
     /// Fullscreen layer-zero window whose rectangle follows the platform drawable area.
     grid_root: RootHandle,
     /// Concrete checked item reflecting whether unit-spaced grid lines are enabled.
-    grid_show_minor_lines_item: TypedWidgetHandle<MenuItem>,
+    grid_show_minor_lines_item: MenuItemHandle,
 
     /// Concrete Open item whose enabled state follows file-dialog activity.
-    menu_open_file: TypedWidgetHandle<MenuItem>,
+    menu_open_file: MenuItemHandle,
     /// Concrete check item reflecting log auto-scroll state.
-    menu_auto_scroll_item: TypedWidgetHandle<MenuItem>,
+    menu_auto_scroll_item: MenuItemHandle,
     /// First concrete item in the spacing radio pair.
-    menu_comfortable_spacing: TypedWidgetHandle<MenuItem>,
+    menu_comfortable_spacing: MenuItemHandle,
     /// Second concrete item in the spacing radio pair.
-    menu_compact_spacing: TypedWidgetHandle<MenuItem>,
+    menu_compact_spacing: MenuItemHandle,
     /// Whether log writes should keep the newest output visible.
     menu_auto_scroll: bool,
     file_dialog: FileDialog,

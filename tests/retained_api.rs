@@ -33,8 +33,8 @@ use std::cell::Cell;
 use microui_redux::render::{FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex};
 use microui_redux::retained::*;
 use microui_redux::prelude::{
-    Dimensioni, EventContext, FileDialog, FileDialogRequest, FileDialogStatus, Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted,
-    Recti, TextBlock, TextBlockParameters, TypedWidgetHandle, Window,
+    Dimensioni, EventContext, FileDialog, FileDialogRequest, FileDialogStatus, Menu, MenuBar, MenuItem, MenuItemHandle, MenuItemMark, MenuItemParameters,
+    MenuItemSubmitted, Recti, TextBlock, TextBlockParameters, TypedWidgetHandle, Window,
 };
 use microui_redux::{
     color, rect, AtlasHandle, AtlasSource, Constraints, Context, Disclosure, DisclosureParameters, FontEntry, Grid, GridParameters, Linear, LinearParameters,
@@ -141,9 +141,9 @@ fn downstream_file_dialog_completion_is_subscriber_driven_without_widget_access(
 /// Minimal downstream application state retaining only concrete menu-item state.
 struct MenuModel {
     /// Live handle for an item whose enabled state changes.
-    save: TypedWidgetHandle<MenuItem>,
+    save: MenuItemHandle,
     /// Live handle for an item whose marker changes.
-    word_wrap: TypedWidgetHandle<MenuItem>,
+    word_wrap: MenuItemHandle,
     /// Item-specific application effects observed through concrete ports.
     invoked: Vec<&'static str>,
 }
@@ -158,16 +158,16 @@ impl MenuModel {
 #[test]
 fn downstream_window_owns_declarative_menu_and_live_concrete_items() {
     let mut context = context_with_state::<MenuModel>();
-    let (open, open_node) = MenuItem::create(MenuItemParameters::new("Open").shortcut_hint("Ctrl+O"));
+    let (open, open_item) = MenuItem::create(MenuItemParameters::new("Open").shortcut_hint("Ctrl+O"));
     // Menu commands use their ordinary typed ports; intrinsic menu policy closes the popup before
     // the application dispatcher invokes this handler.
     context.subscribe_context(open.submitted(), MenuModel::open_submitted).unwrap();
-    let (save, save_node) = MenuItem::create(MenuItemParameters::new("Save").disabled());
-    let (word_wrap, word_wrap_node) = MenuItem::create(MenuItemParameters::new("Word Wrap").checked(true));
+    let (save, save_item) = MenuItem::create(MenuItemParameters::new("Save").disabled());
+    let (word_wrap, word_wrap_item) = MenuItem::create(MenuItemParameters::new("Word Wrap").checked(true));
     let body = TextBlock::create(TextBlockParameters::new("body")).1;
     let window = Window::new("document", rect(20, 20, 240, 160), body).menu_bar(MenuBar::new([
-        Menu::new("File").item(open_node).item(save_node),
-        Menu::new("View").item(word_wrap_node),
+        Menu::new("File").item(open_item).item(save_item),
+        Menu::new("View").item(word_wrap_item),
     ]));
     let root = context.create_window(window);
     // The deliberately minimal downstream atlas contains no chrome icons, so this compile-contract
@@ -176,20 +176,36 @@ fn downstream_window_owns_declarative_menu_and_live_concrete_items() {
         .set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
 
-    // Public state mutations address the concrete retained items directly.
+    // Public state mutations address the concrete retained items directly. Text getters return
+    // owned snapshots, while setters update the compact surface without exposing its private node.
+    assert_eq!(open.label().as_deref(), Some("Open"));
+    assert_eq!(open.shortcut_hint().flatten().as_deref(), Some("Ctrl+O"));
+    assert_eq!(save.shortcut_hint(), Some(None));
+    assert_eq!(save.set_label("Save As"), Some(()));
+    assert_eq!(save.set_shortcut_hint(Some("Ctrl+Shift+S".into())), Some(()));
     assert_eq!(save.set_enabled(true), Some(()));
     assert_eq!(word_wrap.set_mark(MenuItemMark::Checked(false)), Some(()));
+    assert_eq!(save.label().as_deref(), Some("Save As"));
+    assert_eq!(save.shortcut_hint().flatten().as_deref(), Some("Ctrl+Shift+S"));
     assert_eq!(save.is_enabled(), Some(true));
     assert_eq!(word_wrap.mark(), Some(MenuItemMark::Checked(false)));
 
     let model = MenuModel { save, word_wrap, invoked: Vec::new() };
-    // Context owns the complete window, including its bar and private popup definitions. Concrete
-    // item handles remain weak live views of the nodes transferred through the declarative menus.
+    // Context owns the complete window, including its compact menu data and private surfaces.
+    // Concrete handles remain weak live views of item values moved into that declaration.
     assert!(root.is_alive());
     assert!(open.is_alive());
     assert!(model.save.is_alive());
     assert!(model.word_wrap.is_alive());
     assert!(model.invoked.is_empty());
+
+    // Destroying the root releases the sole strong ownership chain for all menu items. The public
+    // handles are deliberately weak, so no handle can accidentally keep a discarded window alive.
+    assert!(context.destroy_root(root.id()));
+    assert!(!root.is_alive());
+    assert!(!open.is_alive());
+    assert!(!model.save.is_alive());
+    assert!(!model.word_wrap.is_alive());
 }
 
 #[test]

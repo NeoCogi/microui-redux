@@ -26,8 +26,9 @@ no compatibility layer.
     - [x] Popup layout, input, and painting traverse small nested surfaces in their owner's transient band without reconstructing a root forest.
 - [x] Replaced coordinated menu objects with declarative, window-owned menus.
     - [x] `MenuBar::new` contains top-level `Menu` values; `Menu::item`, `separator`, and recursive `submenu(Menu)` calls preserve row order without group wrappers.
-    - [x] The manager compiles private heading, separator, submenu-row, and popup widgets when it consumes the `Window`; applications subscribe directly to each retained `MenuItem` event.
-    - [x] Top-level popups remain anchored below their menu-bar headings and submenus remain anchored to the right of their parent rows after window moves or relayouts.
+    - [x] The manager compiles one compact `MenuSurface` leaf for the bar and one for each popup when it consumes the `Window`; items, separators, and submenu rows remain leaf-local values instead of retained row widgets.
+    - [x] `MenuItem::create` returns a uniquely owned value for one declaration position plus a weak `MenuItemHandle` exposing live presentation state and its directly subscribable typed event.
+    - [x] Top-level popups remain anchored below cached menu-bar heading slots and submenus remain anchored to cached direct-parent row slots after window moves or relayouts.
     - [x] One active path drives open presentation, heading toggling and switching, submenu replacement, outside dismissal, item dismissal before handlers run, and disabled-item behavior.
     - [x] `Style::menu_foreground` and `Style::menu_background` consistently color bars, items, popup surfaces, and every submenu level.
 - [x] Retained the useful stacking and interaction policy without topology machinery.

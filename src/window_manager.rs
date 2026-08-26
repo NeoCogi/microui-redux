@@ -186,6 +186,11 @@ pub(crate) struct WindowManager {
     windows: Vec<WindowEntry>,
     /// Sole semantic visibility state for all window-owned popup definitions.
     active_popup: Option<PopupPath>,
+    /// Whether drag/release events from a capture revoked with a dismissed popup must be swallowed.
+    ///
+    /// Popup-local routers cannot consume this tail after their surface leaves `active_popup`, so
+    /// the cross-surface manager retains the gesture boundary until release.
+    discard_pointer_capture_tail: bool,
     /// Last ordinary root explicitly activated by a pointer press.
     ///
     /// Activation is deliberately independent of stacking. A user can therefore focus a control
@@ -211,6 +216,7 @@ impl WindowManager {
             last_zindex: 0,
             windows: Vec::default(),
             active_popup: None,
+            discard_pointer_capture_tail: false,
             active_root: None,
             next_root_id: 1,
             next_popup_id: 1,

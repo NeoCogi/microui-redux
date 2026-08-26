@@ -62,7 +62,8 @@ pub(super) fn text_size(style: &Style, atlas: &AtlasHandle, font: FontChoice, te
 }
 
 /// Computes a control height that can fit both text and an optional visual element.
-pub(super) fn content_height(style: &Style, atlas: &AtlasHandle, font: FontChoice, visual_height: i32) -> i32 {
+pub(crate) fn content_height(style: &Style, atlas: &AtlasHandle, font: FontChoice, visual_height: i32) -> i32 {
+    // Fit whichever visual is taller, then apply the theme's compact vertical breathing room.
     let font_height = atlas.get_font_height(style.resolve_font_choice(font)) as i32;
     let vertical_pad = (style.padding / 2).max(1);
     (font_height.max(visual_height) + vertical_pad * 2).max(0)

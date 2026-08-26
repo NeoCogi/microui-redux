@@ -33,7 +33,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use super::*;
-use crate::menu::{CompiledMenuBar, MenuAnchor};
+use crate::menu::{MenuAction, MenuAnchor, MenuController};
 use crate::{MouseButton, Node, RootHandle, UiInputEvent, Vec2i, rect};
 
 use super::root_chrome::{RootChromeGeometry, RootChromePart, RootInteraction, record_root_background, record_root_overlay, root_chrome_geometry, root_handle};
@@ -368,6 +368,8 @@ pub(super) struct WindowEntry {
     changed_event: Rc<RefCell<crate::event::WidgetEventPort<crate::RootChanged>>>,
     /// Strong owner of window close submissions.
     submitted_event: Rc<RefCell<crate::event::WidgetEventPort<crate::RootSubmitted>>>,
+    /// Optional compact action controller; its MenuIds index the leading popup definitions.
+    menu: Option<MenuController>,
     /// Popup definitions whose lifetime is exactly this window's lifetime.
     popups: Vec<Popup>,
 }
@@ -467,12 +469,12 @@ impl WindowManager {
         let (name, rect, content, menu_bar) = window.into_parts();
         // Compile an optional bar before mounting the sole window tree. The resulting popup list is
         // parent-before-child and remains owned by the WindowEntry created below.
-        let (content, menu_popups) = match menu_bar {
+        let (content, menu_popups, menu_controller) = match menu_bar {
             Some(menu_bar) => {
-                let CompiledMenuBar { content, popups } = menu_bar.compile(&name, content);
-                (content, popups)
+                let (content, popups, controller) = menu_bar.compile(&name, content);
+                (content, popups, Some(controller))
             }
-            None => (content, Vec::new()),
+            None => (content, Vec::new(), None),
         };
 
         // Event owners live in the flat entry; returned handles retain neither them nor the tree.
@@ -491,16 +493,16 @@ impl WindowManager {
             surface: Surface::new(name, options, rect, content),
             changed_event,
             submitted_event,
+            menu: menu_controller,
             popups: Vec::new(),
         });
 
-        // Translate short compilation indices to private popup IDs only after the owner exists.
+        // Menu popups are the owner's leading definitions in exact MenuId order. Parent-first
+        // compilation therefore translates a parent index directly through the already-built prefix.
         let owner_index = self.windows.len() - 1;
-        let mut popup_ids = Vec::with_capacity(menu_popups.len());
         for popup in menu_popups {
-            let parent = popup.parent.map(|parent| popup_ids[parent]);
-            let handle = self.register_popup_with_anchor(owner_index, parent, &popup.name, popup.content, PopupAnchor::Menu(popup.anchor));
-            popup_ids.push(handle.id);
+            let parent = popup.parent.map(|parent| self.windows[owner_index].popups[parent].id);
+            self.register_popup_with_anchor(owner_index, parent, &popup.name, popup.content, PopupAnchor::Menu(popup.anchor));
         }
         self.invalidate_ui_commit();
         Ok(root_handle(id, changed, submitted))
@@ -556,7 +558,7 @@ impl WindowManager {
             PopupAnchor::Menu(_) => Recti::default(),
         };
         let options = if matches!(&anchor, PopupAnchor::Menu(_)) {
-            // MenuList paints edge-to-edge background; only the popup frame surrounds that surface.
+            // The compact menu leaf paints edge-to-edge; only the popup frame surrounds it.
             Self::default_popup_options() | WindowOption::NO_PADDING
         } else {
             Self::default_popup_options()
@@ -826,13 +828,18 @@ impl WindowManager {
         let Some(mut path) = self.active_popup.take() else { return };
         let keep = keep.min(path.popups.len());
         let removed = path.popups.split_off(keep);
+        let mut revoked_capture = false;
         for id in removed.into_iter().rev() {
             if let Ok(owner) = self.window_index(path.owner)
                 && let Some(popup) = self.windows[owner].popups.iter_mut().find(|popup| popup.id == id)
             {
+                // Remember capture before `dismiss` clears the popup-local runtime. Once this popup
+                // leaves the active path, only the manager can intercept the gesture's remaining tail.
+                revoked_capture |= popup.surface.tree.has_capture();
                 popup.dismiss();
             }
         }
+        self.discard_pointer_capture_tail |= revoked_capture;
         if !path.popups.is_empty() {
             self.active_popup = Some(path);
         }
@@ -842,6 +849,24 @@ impl WindowManager {
     /// Dismisses the complete active popup branch.
     fn dismiss_active_popups(&mut self) {
         self.truncate_active_popup_path(0);
+    }
+
+    /// Returns whether one pointer event belongs to a capture revoked with a dismissed popup.
+    fn discard_revoked_capture_event(&mut self, event: &UiInputEvent) -> bool {
+        // A fresh press always starts a new gesture and cancels any stale suppression. Drag remains
+        // swallowed while armed; the terminal release is swallowed once and clears the boundary.
+        match event {
+            UiInputEvent::MouseDown { .. } => {
+                self.discard_pointer_capture_tail = false;
+                false
+            }
+            UiInputEvent::MouseDrag { .. } => self.discard_pointer_capture_tail,
+            UiInputEvent::MouseUp { .. } if self.discard_pointer_capture_tail => {
+                self.discard_pointer_capture_tail = false;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Raises one window without changing its band.
@@ -963,20 +988,22 @@ impl WindowManager {
         match &definition.anchor {
             PopupAnchor::Screen(rect) => Some(*rect),
             PopupAnchor::Menu(anchor) => {
-                // Top headings live in the window tree; submenu rows live in the already-laid-out
-                // direct parent popup. Parent-first active traversal makes both geometries current.
-                let source = if anchor.is_below() {
-                    self.windows[owner_index].surface.tree.node_rect(anchor.node())?
+                // The source node is the single bar or parent-popup leaf. Resolve its current screen
+                // origin first, then translate the compact trigger slot cached by that same leaf.
+                let below = definition.parent.is_none();
+                let source_surface = if below {
+                    self.windows[owner_index].surface.tree.node_rect(anchor.node)?
                 } else {
                     let parent = definition.parent?;
                     let parent = self.windows[owner_index].popups.iter().find(|popup| popup.id == parent)?;
-                    parent.surface.tree.node_rect(anchor.node())?
+                    parent.surface.tree.node_rect(anchor.node)?
                 };
+                let trigger = anchor.trigger_rect(source_surface)?;
                 let current = definition.surface.rect;
-                let (x, y) = if anchor.is_below() {
-                    (source.x, source.y.saturating_add(source.height))
+                let (x, y) = if below {
+                    (trigger.x, trigger.y.saturating_add(trigger.height))
                 } else {
-                    (source.x.saturating_add(source.width), source.y)
+                    (trigger.x.saturating_add(trigger.width), trigger.y)
                 };
                 Some(Recti::new(x, y, current.width, current.height))
             }
@@ -1016,46 +1043,41 @@ impl WindowManager {
         }
     }
 
-    /// Finds the relational menu popup opened by one routed heading or submenu row.
-    fn menu_popup_for_target(&self, surface: SurfaceId, node: crate::ui_node::RuntimeNodeId) -> Option<(RootId, PopupId)> {
-        let (owner, parent) = match surface {
-            SurfaceId::Window(owner) => (owner, None),
-            SurfaceId::Popup(owner, parent) => (owner, Some(parent)),
+    /// Applies the compact action staged by a routed menu surface after widget update.
+    fn apply_menu_action(&mut self, surface: SurfaceId, previous_top: Option<(RootId, PopupId)>) {
+        // Every surface belonging to a window shares one controller. Taking the action ends the
+        // controller borrow before popup-path mutation or item-event emission begins.
+        let owner = match surface {
+            SurfaceId::Window(owner) | SurfaceId::Popup(owner, _) => owner,
         };
-        let owner_index = self.window_index(owner).ok()?;
-        self.windows[owner_index].popups.iter().find_map(|popup| {
-            if popup.parent != parent {
-                return None;
-            }
-            let PopupAnchor::Menu(anchor) = &popup.anchor else { return None };
-            let direction_matches = match surface {
-                SurfaceId::Window(_) => anchor.is_below(),
-                SurfaceId::Popup(_, _) => !anchor.is_below(),
-            };
-            (direction_matches && anchor.node() == node).then_some((owner, popup.id))
-        })
-    }
+        let Ok(owner_index) = self.window_index(owner) else { return };
+        let action = self.windows[owner_index].menu.as_ref().and_then(MenuController::take_action);
+        let Some(action) = action else { return };
 
-    /// Applies one menu action after the routed widget tree has consumed the pointer press.
-    fn apply_menu_target(&mut self, surface: SurfaceId, node: crate::ui_node::RuntimeNodeId, previous_top: Option<(RootId, PopupId)>) {
-        if let Some(target) = self.menu_popup_for_target(surface, node) {
-            // Outside-dismissal already closed the previous path before routing. Suppress reopening
-            // only when the user clicked the heading for that same formerly open top-level popup.
-            if matches!(surface, SurfaceId::Window(_)) && previous_top == Some(target) {
-                return;
+        match action {
+            MenuAction::Open(menu_id) => {
+                // Translate the compiled-popup index only at this manager ownership boundary.
+                let target = self.windows[owner_index]
+                    .popups
+                    .get(menu_id)
+                    .filter(|popup| matches!(&popup.anchor, PopupAnchor::Menu(_)))
+                    .map(|popup| popup.id)
+                    .expect("a compiled MenuId must retain one registered popup");
+                let target = (owner, target);
+                // Outside dismissal already closed the old path before this bar press reached the
+                // window. A repeated heading press therefore toggles closed instead of reopening.
+                if matches!(surface, SurfaceId::Window(_)) && previous_top == Some(target) {
+                    return;
+                }
+                self.open_popup_id(target.0, target.1)
+                    .expect("a staged menu action must retain an eligible declared popup");
             }
-            self.open_popup_id(target.0, target.1)
-                .expect("routed menu target must retain an eligible owner and declared parent");
-            return;
-        }
-
-        if let SurfaceId::Popup(owner, popup) = surface
-            && let Ok((owner, popup)) = self.popup_indices(owner, popup)
-            && matches!(&self.windows[owner].popups[popup].anchor, PopupAnchor::Menu(_))
-        {
-            // Every other interactive target inside a relational menu popup is an application item.
-            // Its widget emitted first during update; close before Context dispatches that event.
-            self.dismiss_active_popups();
+            MenuAction::Invoke(submitted) => {
+                // Close and revoke popup capture before queuing the typed application event. Event
+                // subscribers consequently observe final menu visibility at their safe boundary.
+                self.dismiss_active_popups();
+                submitted.borrow_mut().emit(crate::MenuItemSubmitted);
+            }
         }
     }
 
@@ -1188,6 +1210,7 @@ impl WindowManager {
     /// Routes and applies one normalized event across every eligible surface.
     fn update_for_event(&mut self, atlas: &crate::AtlasHandle, event: &UiInputEvent, input: crate::input::InputSnapshot) {
         let style = self.style;
+        let discard_pointer = self.discard_revoked_capture_event(event);
         let menu_press = matches!(event, UiInputEvent::MouseDown { button, .. } if button.intersects(MouseButton::LEFT));
         let previous_top = menu_press
             .then(|| {
@@ -1199,9 +1222,14 @@ impl WindowManager {
         if matches!(event, UiInputEvent::MouseDown { .. }) {
             // Dismiss before target resolution so the same outside press reaches the revealed surface.
             self.dismiss_outside_popup(input.mouse_pos);
+            // Any capture revoked by outside dismissal belonged to an older gesture. This fresh
+            // press is intentionally routed to the revealed surface and owns its own later tail.
+            self.discard_pointer_capture_tail = false;
         }
 
-        let hover = event.is_pointer().then(|| self.input_surface_at(input.mouse_pos)).flatten();
+        let hover = (event.is_pointer() && !discard_pointer)
+            .then(|| self.input_surface_at(input.mouse_pos))
+            .flatten();
         if matches!(event, UiInputEvent::MouseDown { .. })
             && let Some(surface) = hover
         {
@@ -1213,7 +1241,7 @@ impl WindowManager {
             self.clear_other_captures(surface);
         }
 
-        let drag = self.drag_input_surface();
+        let drag = (!discard_pointer).then(|| self.drag_input_surface()).flatten();
         let pointer = match event {
             UiInputEvent::MouseDrag { .. } => drag,
             _ => hover,
@@ -1237,7 +1265,7 @@ impl WindowManager {
         }
 
         let mut routed_pointer = None;
-        if event.is_pointer() {
+        if event.is_pointer() && !discard_pointer {
             let captured = matches!(event, UiInputEvent::MouseDrag { .. } | UiInputEvent::MouseUp { .. })
                 .then(|| self.captured_input_surface())
                 .flatten();
@@ -1309,9 +1337,9 @@ impl WindowManager {
         if self.active_root.is_some_and(|root| !self.root_is_visible(root)) {
             self.active_root = None;
         }
-        if menu_press && let Some((surface, node)) = routed_pointer {
-            // Widgets have now emitted their typed events and released every retained borrow.
-            self.apply_menu_target(surface, node, previous_top);
+        if menu_press && let Some((surface, _)) = routed_pointer {
+            // Widget update has staged an action and released every retained borrow.
+            self.apply_menu_action(surface, previous_top);
         }
     }
 
@@ -1690,8 +1718,8 @@ impl WindowManager {
     /// Returns each relational menu trigger rectangle in declaration order for tests.
     #[cfg(test)]
     pub(crate) fn debug_menu_anchor_rects(&self, root: RootId) -> Option<Vec<Option<Recti>>> {
-        // Resolve headings from the persistent window tree and submenu rows from their direct parent
-        // popup. Hidden submenu trees legitimately have no committed row geometry and report `None`.
+        // Resolve each source leaf first, then reuse production anchor translation for its logical
+        // slot. Hidden parent popups have no committed source geometry and therefore report `None`.
         let window = self.windows.iter().find(|window| window.id == root)?;
         Some(
             window
@@ -1699,27 +1727,41 @@ impl WindowManager {
                 .iter()
                 .filter_map(|popup| {
                     let PopupAnchor::Menu(anchor) = &popup.anchor else { return None };
-                    let rect = if anchor.is_below() {
-                        window.surface.tree.node_rect(anchor.node())
+                    let source = if popup.parent.is_none() {
+                        window.surface.tree.node_rect(anchor.node)
                     } else {
                         popup
                             .parent
                             .and_then(|parent| window.popups.iter().find(|popup| popup.id == parent))
-                            .and_then(|parent| parent.surface.tree.node_rect(anchor.node()))
+                            .and_then(|parent| parent.surface.tree.node_rect(anchor.node))
                     };
-                    Some(rect)
+                    Some(source.and_then(|source| anchor.trigger_rect(source)))
                 })
                 .collect(),
         )
     }
 
-    /// Returns one retained node rectangle from the current active popup path for tests.
+    /// Returns active compact menu row rectangles in parent-to-child popup order for tests.
     #[cfg(test)]
-    pub(crate) fn debug_active_popup_node_rect(&self, node: crate::ui_node::RuntimeNodeId) -> Option<Recti> {
-        // Search only the authoritative path so geometry from an inactive retained definition cannot
-        // accidentally satisfy an interaction assertion.
+    pub(crate) fn debug_active_menu_row_rects(&self) -> Vec<Vec<Recti>> {
+        // Map private PopupIds back to stable MenuIds, then translate each popup leaf's cached local
+        // slots through its current root-node origin. Generic popups are intentionally omitted.
         self.active_popup_surfaces()
             .into_iter()
-            .find_map(|popup| self.surface(popup)?.tree.node_rect(node))
+            .filter_map(|surface| {
+                let SurfaceId::Popup(owner, popup_id) = surface else { return None };
+                let owner_index = self.window_index(owner).ok()?;
+                let window = &self.windows[owner_index];
+                let menu = window.menu.as_ref()?;
+                let menu_id = window.popups.iter().position(|popup| popup.id == popup_id)?;
+                let popup = &window.popups[menu_id];
+                if !matches!(&popup.anchor, PopupAnchor::Menu(_)) {
+                    return None;
+                }
+                let node = menu.popup_node(menu_id)?;
+                let source = popup.surface.tree.node_rect(node)?;
+                menu.popup_slot_rects(menu_id, source)
+            })
+            .collect()
     }
 }

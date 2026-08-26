@@ -1,9 +1,9 @@
 # Application menus
 
 Menus are an optional, intrinsic part of a [`Window`](../src/window_manager.rs). A window owns its
-body, persistent [`MenuBar`](../src/menu.rs), and the private popup surfaces compiled from that bar.
-Applications describe the hierarchy once and keep only the concrete `MenuItem` handles they need
-to update later.
+body, compact [`MenuBar`](../src/menu.rs) data, and the private surfaces that present that data.
+Applications describe the hierarchy once and keep only the `MenuItemHandle`s needed for later state
+changes.
 
 The public composition types are deliberately small:
 
@@ -11,24 +11,27 @@ The public composition types are deliberately small:
 | --- | --- |
 | `MenuBar` | Ordered top-level menus installed on one window. |
 | `Menu` | One heading or submenu, built with `item`, `separator`, and `submenu`. |
-| `MenuItem` | Actionable retained widget with enabled state, an optional mark and shortcut hint, and a typed submission port. |
+| `MenuItem` | Uniquely owned actionable value moved into exactly one menu position. |
+| `MenuItemHandle` | Cloneable live access to an item's label, shortcut hint, enabled state, mark, and typed submission port. |
 
-There is no public menu-popup handle, coordinator, command enum, or parallel menu model.
+There is no public menu-popup handle, coordinator, command enum, row widget, or parallel menu model.
 
 ## Construction and events
 
-Create each concrete item, subscribe directly to its `MenuItemSubmitted` port, and move its unique
-node into the declaration. Then install the completed bar on the owning window:
+`MenuItem::create` returns a handle and a uniquely owned item value. Subscribe through the handle,
+move the value into the declaration, and install the completed bar on its owning window:
 
 ```rust
 use microui_redux::prelude::*;
 
 struct Model {
     root: RootHandle,
-    save: TypedWidgetHandle<MenuItem>,
+    /// Retained because Save becomes enabled after a document has changed.
+    save: MenuItemHandle,
 }
 
 impl Model {
+    /// Handles the event source belonging only to the concrete Open item.
     fn open(&mut self, _context: &mut EventContext<'_>, _event: &MenuItemSubmitted) {
         // Open the selected document.
     }
@@ -37,14 +40,17 @@ impl Model {
 fn build_model<B: RendererBackend>(
     context: &mut Context<B, Model>,
 ) -> Result<Model, SubscribeError> {
-    let (open, open_node) =
+    // The handle supplies the event port; the value moves into one menu below.
+    let (open, open_item) =
         MenuItem::create(MenuItemParameters::new("Open...").shortcut_hint("Ctrl+O"));
     context.subscribe_context(open.submitted(), Model::open)?;
 
-    let (recent, recent_node) = MenuItem::create(MenuItemParameters::new("Recent Document"));
+    // This command has the same handler but remains a distinct typed event source.
+    let (recent, recent_item) = MenuItem::create(MenuItemParameters::new("Recent Document"));
     context.subscribe_context(recent.submitted(), Model::open)?;
 
-    let (save, save_node) = MenuItem::create(
+    // Keep this handle because application state will mutate the item after construction.
+    let (save, save_item) = MenuItem::create(
         MenuItemParameters::new("Save")
             .shortcut_hint("Ctrl+S")
             .disabled(),
@@ -52,10 +58,10 @@ fn build_model<B: RendererBackend>(
     let body = TextBlock::create(TextBlockParameters::new("document")).1;
     let menu_bar = MenuBar::new([
         Menu::new("File")
-            .item(open_node)
-            .item(save_node)
+            .item(open_item)
+            .item(save_item)
             .separator()
-            .submenu(Menu::new("Recent").item(recent_node)),
+            .submenu(Menu::new("Recent").item(recent_item)),
     ]);
     let root = context.create_window(
         Window::new("Document", rect(20, 20, 640, 480), body).menu_bar(menu_bar),
@@ -65,15 +71,23 @@ fn build_model<B: RendererBackend>(
 }
 ```
 
+Consuming `MenuItem` in `Menu::item` makes the relationship unforgeable: a value can occupy only
+one declaration position, and a caller cannot accidentally pair one item's visible state with a
+different item's submission handle.
+
 The subscribed port identifies its concrete item; `MenuItemSubmitted` carries no copied command
 value. The manager closes an active menu before dispatch reaches the application handler. An
 enabled item without a subscriber still closes the menu when selected; its unobserved event is
 simply discarded.
 
-Keep a `TypedWidgetHandle<MenuItem>` only for live presentation state:
+Keep a `MenuItemHandle` only for live presentation state:
 
 ```rust
+// Mutations return `None` after destruction of the window that owns the item.
 save.set_enabled(true).expect("Save item unavailable");
+save.set_label("Save document").expect("Save item unavailable");
+save.set_shortcut_hint(Some("Ctrl+Shift+S".into()))
+    .expect("Save item unavailable");
 auto_scroll
     .set_mark(MenuItemMark::Checked(enabled))
     .expect("Auto-scroll item unavailable");
@@ -82,12 +96,30 @@ auto_scroll
 Check and radio marks are presentation only. Application handlers own toggling and radio-group
 exclusivity. Shortcut hints also draw text only; they do not register accelerators.
 
+## Compact retained architecture
+
+Menu entries are data, not retained widget nodes. The private architecture uses one menu surface
+for the persistent bar and one surface for each popup. A surface measures, hit-tests, and paints all
+of its headings or rows directly. Consequently, adding an item does not add a retained item, icon,
+label, shortcut, separator, or submenu-row node, and there is no dedicated `MenuContainer`.
+
+One geometry calculation supplies the rectangles used by measurement, hit testing, painting, and
+submenu placement. Each popup derives its leading mark column from its direct items. The column
+collapses completely when none of those items has a check or radio mark; otherwise every direct row
+uses the shared content offset. Nested submenu popups calculate their columns independently.
+
+Live item state is shared with its `MenuItemHandle`, so changing its label, shortcut hint, enabled
+state, or mark immediately invalidates the surface that presents it. All four operations use the
+same conservative measurement path; this keeps the implementation small while guaranteeing that
+role and text-width changes resize and reanchor open popups correctly.
+
 ## Placement and interaction
 
-Menu topology and placement are manager-private relationships. A top-level popup is anchored below
-its retained heading. A submenu popup is anchored at the right edge of its retained submenu row.
-The manager resolves those node rectangles during layout, so open menus follow their window and
-their parent rows without application-supplied screen coordinates.
+Menu topology and placement remain manager-private. A top-level popup is anchored below its heading
+slot in the bar surface. A submenu popup is anchored at the right edge of its row slot in its parent
+surface. The manager resolves these relationships from current surface geometry, so open menus
+follow their window and parent rows without application-supplied screen coordinates or one retained
+anchor node per relationship.
 
 The manager holds one active popup path. For menus, that means one visible
 heading-to-descendant chain:
@@ -99,15 +131,16 @@ heading-to-descendant chain:
 - opening a sibling submenu replaces only the older descendant branch;
 - selecting an enabled item or pressing outside the chain closes the complete path.
 
-A disabled `MenuItem` does not participate in hit testing, does not emit `MenuItemSubmitted`, and
-does not close the menu. Moving across headings changes hover presentation but does not open or
-switch menus.
+A disabled item cannot be invoked: it emits no `MenuItemSubmitted` event and does not close the
+menu. The popup remains one retained input surface, so disabled rows and separators still occlude
+content behind it while resolving to no menu action. Moving across headings changes hover
+presentation but does not open or switch menus.
 
 ## Style and current scope
 
 `Style::menu_foreground` colors menu labels, item text, marks, arrows, and separators.
 `Style::menu_background` fills the persistent bar and popup surfaces. Ordinary cascading node style
-resolution still applies.
+resolution still applies at each surface.
 
 Menu operation is currently pointer-driven. Keyboard navigation, mnemonics, and shortcut dispatch
 remain outside the menu component. The bar preserves application keyboard focus while pointer menus
