@@ -141,7 +141,7 @@ fn measure_scenario(name: &'static str, application_nodes: usize, build: impl Fn
         .debug_root_runtime_metrics(root.id())
         .expect("measured root must expose test metrics")
         .paints;
-    assert!(painted_nodes > 0, "each visible root must paint at least its chrome");
+    assert!(painted_nodes > 0, "each visible widget body must paint at least its application root");
     assert!(
         painted_nodes <= total_nodes as u64,
         "paint traversal cannot visit more nodes than the retained tree contains"
@@ -220,12 +220,16 @@ fn retained_runtime_baseline() {
         assert_eq!(result.rendered_metrics.tree_layouts, 1);
     }
 
-    assert_eq!((one.application_nodes, one.total_nodes), (1, 2));
-    assert_eq!((hundred.application_nodes, hundred.total_nodes), (100, 101));
-    assert_eq!((scroll.application_nodes, scroll.total_nodes), (22, 26));
+    // Manager chrome and menu presentation are concrete surface state rather than retained widget
+    // nodes. Only structural nodes intrinsic to a composite, such as ScrollArea scrollbars, add to
+    // the application-authored count.
+    assert_eq!((one.application_nodes, one.total_nodes), (1, 1));
+    assert_eq!((hundred.application_nodes, hundred.total_nodes), (100, 100));
+    assert_eq!((scroll.application_nodes, scroll.total_nodes), (22, 25));
 
-    // Repeat the ordered transaction boundary in the same release-mode evidence run. The root
-    // chrome and its one application node both receive one update for each of three events.
+    // Repeat the ordered transaction boundary in the same release-mode evidence run. Manager
+    // chrome remains outside retained metrics; the application tree records every routed and
+    // synchronization update performed for the three-event transaction.
     let mut ctx = context();
     let content = Linear::create(LinearParameters::vertical(std::iter::empty::<Node>())).1;
     let root = ctx.ui().create_window(Window::new("phase split", rect(0, 0, 120, 90), content));
@@ -235,13 +239,13 @@ fn retained_runtime_baseline() {
     ctx.update_ui(dimensions());
     let committed = ctx.debug_root_runtime_metrics(root.id()).unwrap();
     assert_eq!(committed.tree_layouts, 4);
-    assert_eq!(committed.updates, 6);
+    assert_eq!(committed.updates, 3);
     assert_eq!(committed.paints, 0);
     ctx.frame(frame_info()).render_ui().unwrap();
     let rendered = ctx.debug_root_runtime_metrics(root.id()).unwrap();
     assert_eq!(rendered.tree_layouts, 4);
-    assert_eq!(rendered.updates, 6);
-    assert_eq!(rendered.paints, 2);
+    assert_eq!(rendered.updates, 3);
+    assert_eq!(rendered.paints, 1);
     println!("| phase | queued events | tree layouts | widget updates | paints |");
     println!("| --- | ---: | ---: | ---: | ---: |");
     println!("| update_ui | 3 | {} | {} | {} |", committed.tree_layouts, committed.updates, committed.paints);
