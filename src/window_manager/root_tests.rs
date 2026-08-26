@@ -1130,12 +1130,12 @@ fn destroy_expires_event_endpoints_and_stable_ids_survive_address_release() {
 #[test]
 fn window_and_popup_capabilities_cannot_resolve_another_contexts_surfaces() {
     let mut first = context();
-    let first_window = first.ui().create_window(Window::new("first window", rect(0, 0, 100, 80), empty_content()));
-    let first_popup = first.ui().create_popup(&first_window, "first popup", empty_content()).unwrap();
+    let first_window = first.ui().create_window(Window::new("same window", rect(0, 0, 100, 80), empty_content()));
+    let first_popup = first.ui().create_popup(&first_window, "same popup", empty_content()).unwrap();
 
     let mut second = context();
-    let second_window = second.ui().create_window(Window::new("second window", rect(0, 0, 100, 80), empty_content()));
-    let second_popup = second.ui().create_popup(&second_window, "second popup", empty_content()).unwrap();
+    let second_window = second.ui().create_window(Window::new("same window", rect(0, 0, 100, 80), empty_content()));
+    let second_popup = second.ui().create_popup(&second_window, "same popup", empty_content()).unwrap();
 
     // Process-wide stable IDs differ even though both managers own their first local surface.
     // Membership checks therefore reject a foreign capability without consulting an allocation
@@ -2505,7 +2505,7 @@ fn identical_menu_items_retain_independent_stable_identity() {
 }
 
 #[test]
-fn destroyed_mounted_menu_item_cannot_resolve_an_identical_replacement() {
+fn destroyed_mounted_menu_item_id_remains_retired_after_endpoint_release() {
     let (stale, stale_item) = MenuItem::create(MenuItemParameters::new("Same"));
     let stale_id = stale.id();
     let mut ctx = context();
@@ -2526,6 +2526,26 @@ fn destroyed_mounted_menu_item_cannot_resolve_an_identical_replacement() {
     assert_ne!(replacement.id(), stale_id);
     ctx.ui()
         .create_window(Window::new("window", rect(0, 0, 100, 80), empty_content()).menu_bar(MenuBar::new([Menu::new("File").item(replacement_item)])));
+    assert_eq!(ctx.ui().menu_item(&replacement).unwrap().label, "Same");
+}
+
+#[test]
+fn stale_menu_item_handle_cannot_select_an_identical_live_replacement() {
+    let (stale, stale_item) = MenuItem::create(MenuItemParameters::new("Same"));
+    let mut ctx = context();
+    let old_window = ctx
+        .ui()
+        .create_window(Window::new("window", rect(0, 0, 100, 80), empty_content()).menu_bar(MenuBar::new([Menu::new("File").item(stale_item)])));
+    ctx.ui().destroy_window(&old_window).unwrap();
+
+    let (replacement, replacement_item) = MenuItem::create(MenuItemParameters::new("Same"));
+    ctx.ui()
+        .create_window(Window::new("window", rect(0, 0, 100, 80), empty_content()).menu_bar(MenuBar::new([Menu::new("File").item(replacement_item)])));
+
+    // Keep the stale handle and its expired Weak endpoint alive while an identical record is
+    // mounted. Stable ID membership must reject it and still select the replacement exactly.
+    assert!(matches!(ctx.ui().menu_item(&stale), Err(crate::MenuItemAccessError::UnknownItem)));
+    assert!(matches!(ctx.ui().menu_item_mut(&stale), Err(crate::MenuItemAccessError::UnknownItem)));
     assert_eq!(ctx.ui().menu_item(&replacement).unwrap().label, "Same");
 }
 
