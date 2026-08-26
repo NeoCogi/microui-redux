@@ -437,17 +437,25 @@ fn invalid_update_dimensions_panic_before_dequeue_and_preserve_pending_input() {
     let root = ctx.ui().create_window(Window::new("window", rect(10, 10, 120, 90), empty_content()));
     ctx.text("still pending");
 
-    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ctx.update_ui(Dimensioni::new(0, 240)))).expect_err("invalid dimensions must panic");
-    let message = panic
-        .downcast_ref::<&str>()
-        .copied()
-        .or_else(|| panic.downcast_ref::<String>().map(String::as_str));
-    assert_eq!(message, Some("update_ui dimensions must be positive"));
+    // Catch only to keep exercising the same context after the rejected commit; the companion
+    // `should_panic` test below verifies the diagnostic without inspecting an erased payload.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ctx.update_ui(Dimensioni::new(0, 240));
+    }));
+    assert!(result.is_err(), "invalid dimensions must panic");
 
     ctx.update_ui(Dimensioni::new(320, 240));
     let metrics = ctx.debug_root_runtime_metrics(root.id()).unwrap();
     assert_eq!(metrics.tree_layouts, 2);
     assert_eq!(metrics.updates, 1, "the event queued before the panic must still be drained");
+}
+
+#[test]
+#[should_panic(expected = "update_ui dimensions must be positive")]
+fn invalid_update_dimensions_reports_the_expected_diagnostic() {
+    // Drive the public commit entry point directly so `should_panic` checks the emitted text while
+    // keeping the test independent of panic-payload representation.
+    context().update_ui(Dimensioni::new(0, 240));
 }
 
 #[test]
@@ -725,7 +733,7 @@ fn programmatic_topology_mutation_needs_only_an_empty_queue_layout_commit() {
 }
 
 #[test]
-fn traversal_reaching_widget_borrowed_by_an_access_closure_reports_the_runtime_diagnostic() {
+fn traversal_recovers_after_widget_access_closure_borrows_are_released() {
     let (text, widget) = crate::TextBlock::create(crate::TextBlockParameters::new("borrowed"));
     let mut ctx = context();
     let root = ctx.ui().create_window(Window::new("window", rect(0, 0, 140, 100), widget));
@@ -734,22 +742,19 @@ fn traversal_reaching_widget_borrowed_by_an_access_closure_reports_the_runtime_d
         .unwrap();
     let dimensions = Dimensioni::new(320, 240);
 
-    let update_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    // Catch only so this test can prove the context remains usable after the diagnostic. Dedicated
+    // `should_panic` tests below verify the diagnostic text without examining an erased payload.
+    let update_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         text.try_update(|_| ctx.update_ui(dimensions));
-    }))
-    .expect_err("layout must diagnose the active TextBlock borrow");
-    let update_message = panic_message(update_panic.as_ref());
-    assert!(update_message.contains("retained widget invariant violated"));
-    assert!(update_message.contains("typed access closure must finish before runtime traversal"));
+    }));
+    assert!(update_result.is_err(), "layout must diagnose the active TextBlock borrow");
 
     // Once the access closure has unwound and released its borrow, the same commit is valid.
     ctx.update_ui(dimensions);
-    let paint_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let paint_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         text.try_update(|_| ctx.frame(frame_info(dimensions)).render_ui().unwrap());
-    }))
-    .expect_err("paint must diagnose the active TextBlock borrow");
-    let paint_message = panic_message(paint_panic.as_ref());
-    assert!(paint_message.contains("retained widget invariant violated"));
+    }));
+    assert!(paint_result.is_err(), "paint must diagnose the active TextBlock borrow");
 
     ctx.frame(frame_info(dimensions)).render_ui().unwrap();
 
@@ -766,21 +771,53 @@ fn traversal_reaching_widget_borrowed_by_an_access_closure_reports_the_runtime_d
     checkbox_ctx.update_ui(dimensions);
     let checkbox_rect = checkbox_ctx.debug_root_node_rect(checkbox_root.id(), checkbox_id).unwrap();
     checkbox_ctx.mousedown(checkbox_rect.x + 1, checkbox_rect.y + 1, MouseButton::LEFT);
-    let read_panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let read_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         checkbox.try_read(|_| checkbox_ctx.update_ui(dimensions));
-    }))
-    .expect_err("Checkbox::update must diagnose the active shared Checkbox borrow");
-    let read_message = panic_message(read_panic.as_ref());
-    assert!(read_message.contains("retained widget invariant violated"));
-    assert!(read_message.contains("typed access closure must finish before runtime traversal"));
+    }));
+    assert!(read_result.is_err(), "Checkbox::update must diagnose the active shared Checkbox borrow");
 }
 
-fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
-    payload
-        .downcast_ref::<&str>()
-        .copied()
-        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-        .unwrap_or("non-string panic payload")
+#[test]
+#[should_panic(expected = "typed access closure must finish before runtime traversal")]
+fn update_traversal_reports_an_active_typed_access_closure() {
+    // Hold the concrete widget's mutable access guard across update traversal to provoke the
+    // invariant diagnostic at the same boundary used by applications.
+    let (text, widget) = crate::TextBlock::create(crate::TextBlockParameters::new("borrowed"));
+    let mut ctx = context();
+    ctx.ui().create_window(Window::new("window", rect(0, 0, 140, 100), widget));
+    text.try_update(|_| ctx.update_ui(Dimensioni::new(320, 240)));
+}
+
+#[test]
+#[should_panic(expected = "retained widget invariant violated")]
+fn paint_traversal_reports_an_active_typed_access_closure() {
+    // Commit once before holding the concrete widget's mutable access guard across paint traversal,
+    // ensuring the panic comes from painting rather than update preflight.
+    let (text, widget) = crate::TextBlock::create(crate::TextBlockParameters::new("borrowed"));
+    let mut ctx = context();
+    ctx.ui().create_window(Window::new("window", rect(0, 0, 140, 100), widget));
+    let dimensions = Dimensioni::new(320, 240);
+    ctx.update_ui(dimensions);
+    text.try_update(|_| ctx.frame(frame_info(dimensions)).render_ui().unwrap());
+}
+
+#[test]
+#[should_panic(expected = "typed access closure must finish before runtime traversal")]
+fn routed_update_reports_an_active_shared_access_closure() {
+    // Queue a routed checkbox event, then retain a concrete shared access guard while update needs
+    // mutable access to that same widget state.
+    let (checkbox, checkbox_node) = Checkbox::create(CheckboxParameters::new("checkbox", false));
+    let checkbox_id = checkbox_node.id();
+    let mut ctx = context();
+    let root = ctx.ui().create_window(Window::new("checkbox", rect(0, 0, 140, 100), checkbox_node));
+    ctx.ui()
+        .set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+    let dimensions = Dimensioni::new(320, 240);
+    ctx.update_ui(dimensions);
+    let checkbox_rect = ctx.debug_root_node_rect(root.id(), checkbox_id).unwrap();
+    ctx.mousedown(checkbox_rect.x + 1, checkbox_rect.y + 1, MouseButton::LEFT);
+    checkbox.try_read(|_| ctx.update_ui(dimensions));
 }
 
 fn button_content(label: &str) -> (crate::WidgetEventPortHandle<ButtonSubmitted>, Node) {
