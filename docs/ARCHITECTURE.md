@@ -18,8 +18,8 @@
 - **Application components**: application state may coordinate multiple retained windows and
   widgets behind a typed semantic API. `FileDialog` owns dialog behavior; a `Window` construction
   value transfers its body and optional declarative `MenuBar` together. Each `MenuItemHandle`
-  exposes its concrete item's port to the same typed application dispatcher as every other widget
-  event.
+  carries private stable identity and projects its concrete item's submission port to the same
+  typed application dispatcher as every other widget event.
 
 The public API is intentionally centered on `microui_redux::prelude` for applications and `microui_redux::retained` for retained concepts such as `Node`, `Children`, `Container`, `Linear`, `Disclosure`, typed widget handles, and `Context`. Low-level rendering lives under `microui_redux::render`, and atlas construction lives under `microui_redux::atlas::builder`.
 
@@ -70,8 +70,9 @@ value through `MeasureCtx::style`, `ContainerLayoutCtx::style`, `WidgetUpdateCtx
 Window and dialog creation consume one complete `Window` and return a non-owning `WindowHandle`;
 popup creation consumes one persistent application `Node` and returns the distinct non-owning
 `PopupHandle`. There is no public numeric window or popup identifier. Every checked `Ui` surface
-operation accepts the complete handle, whose private weak event capability authenticates both the
-retained surface and its originating `Context`. A stale or foreign window handle returns
+operation accepts the complete handle, whose private process-unique ID must belong to the receiving
+forest. Event endpoints remain separate weak subscription capabilities and are never used as
+object keys. A stale or foreign window handle returns
 `SurfaceMutationError::UnknownWindow`; popup-only operations analogously return
 `SurfaceMutationError::UnknownPopup`. The same concrete error type reports ownership and policy
 failures as `InvalidDialogOwner`, `InvalidPopupParent`, `InvalidLayer`, or `ManagedLayer`.
@@ -154,7 +155,8 @@ below-heading-slot relation; submenus retain a right-of-row-slot relation to the
 popup. Each surface reuses storage for the local rectangles produced by its authoritative
 measurement, and the manager translates those slots after layout, so open menus follow window
 movement and ancestor menu geometry. `MenuItemHandle` capabilities remain directly
-subscribable application events; no menu coordinator, public submenu handle, per-row anchor node,
+addressable through `Ui` and project a separate `submitted()` event endpoint; no menu coordinator,
+public submenu handle, per-row anchor node,
 generic surface payload, temporary recursive menu tree, or second visibility model is involved.
 
 Dialogs occupy a dedicated modal band above all sixteen numeric layers. The frontmost visible
@@ -250,24 +252,40 @@ payloads, and the typed handle projects the corresponding weak `WidgetEventPortH
 exposing or owning the erased node. Disclosure headers remain real addressable leaf children, while
 the concrete `Disclosure` widget owns expansion state and the weak body-topology capability.
 
-## Retained node identity
+## Retained identity and event endpoints
 
 Each owning `Node` receives a private, process-unique runtime identity before mounting. Moving a
 node, wrapping it in an unmounted `LinearItem` or `GridItem`, and inserting it into a container
 preserve that identity; applications cannot read or construct it.
 There is no public node ID or result lookup path. Weak typed widget handles expose event endpoints
-after node erasure. Window chrome is manager-owned rather than represented by a retained widget;
-`WindowHandle` and `PopupHandle` are distinct typed event endpoints that expose liveness without
-exposing the forest's private concrete keys. A cloned `WindowHandle` carries
-`WindowEvent::GeometryChanged { rect }` and `WindowEvent::CloseRequested`; the manager applies the
-new geometry or hides the window before queuing either observation. A cloned `PopupHandle` carries
-`PopupEvent::Dismissed` whenever policy removes that application popup from the active branch.
-Private menu popups instead publish their selected `MenuItem` event directly.
+after node erasure.
 
-The same handles authenticate mutations through the short-lived `Ui<'_>` façade returned by
+Windows, application popups, and menu items use a separate retained-object identity source. Every
+object receives a private non-zero `u64` from one process-wide monotonic allocator. Values are not
+reissued after destruction; checked advancement stops before wraparound. The IDs are process-local
+implementation keys, not persistent application identifiers. Concrete `RootId`, `PopupId`, and
+`MenuItemId` wrappers keep operations type-safe, while their shared namespace prevents collisions
+between Contexts.
+
+`WindowHandle`, `PopupHandle`, and `MenuItemHandle` aggregate one of those private IDs with the
+weak endpoint associated with the same object. Aggregation is only an application convenience:
+forest and menu lookup compares the ID, while `events()` or `submitted()` clones only the endpoint.
+No code casts, stores, or compares an event-port pointer as object identity. A retained object
+strongly owns its ports for the appropriate lifetime, so endpoint liveness normally follows object
+liveness without defining it. If an object later exposes several ports, each remains a separately
+named endpoint beside the same stable object ID.
+
+Window chrome is manager-owned rather than represented by a retained widget. `WindowHandle::events`
+projects `WindowEvent::GeometryChanged { rect }` and `WindowEvent::CloseRequested`; the manager
+applies the new geometry or hides the window before queuing either observation.
+`PopupHandle::events` projects `PopupEvent::Dismissed` whenever policy removes that application
+popup from the active branch. Private menu popups instead publish the selected item's
+`MenuItemHandle::submitted` event.
+
+The stable handles select mutations through the short-lived `Ui<'_>` façade returned by
 `Context::ui()` and passed to context-aware event handlers. This keeps ordinary application code
-and event-time code on one API while preventing a handle from another context—even one whose
-private counter happens to match—from addressing a surface. For example:
+and event-time code on one API while preventing a handle from another Context from addressing a
+surface. For example:
 
 ```rust,ignore
 fn window_event(&mut self, ui: &mut Ui<'_>, event: &WindowEvent) {
@@ -285,8 +303,8 @@ fn popup_event(&mut self, event: &PopupEvent) {
     }
 }
 
-context.subscribe_context(window.clone(), Model::window_event).unwrap();
-context.subscribe(popup.clone(), Model::popup_event).unwrap();
+context.subscribe_context(window.events(), Model::window_event).unwrap();
+context.subscribe(popup.events(), Model::popup_event).unwrap();
 context.ui().set_window_visible(&window, true).unwrap();
 context.ui().show_popup_at(&popup, anchor).unwrap();
 ```

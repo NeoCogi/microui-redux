@@ -46,10 +46,10 @@ builds.
 
 Applications borrow a short-lived `Ui<'_>` from `Context` to create or mutate surfaces. Window and
 dialog operations take a complete `WindowHandle`; popup operations take a distinct `PopupHandle`.
-The handles are the weak typed event capabilities themselves, keep no surface alive, and
-authenticate the originating context through allocation identity. There is no public numeric
-window id, and a stale or foreign handle returns
-a concrete `SurfaceMutationError`.
+Each non-owning handle contains private process-unique identity and separately projects its weak
+typed event endpoint. Surface lookup never uses an event-port pointer, so freeing and reusing an
+allocation cannot retarget a stale handle. There is no public numeric window ID, and a stale or
+foreign handle returns a concrete `SurfaceMutationError`.
 
 ```rust,ignore
 let main = context.ui().create_window(Window::new(
@@ -62,8 +62,8 @@ let dialog = context
     .create_dialog(&main, Window::new("settings", rect(80, 60, 320, 220), settings_content))?;
 let popup = context.ui().create_popup(&main, "choices", popup_content)?;
 
-context.subscribe_context(main.clone(), Model::window_event)?;
-context.subscribe(popup.clone(), Model::popup_event)?;
+context.subscribe_context(main.events(), Model::window_event)?;
+context.subscribe(popup.events(), Model::popup_event)?;
 context.ui().set_window_visible(&dialog, true)?;
 context.ui().show_popup_at(&popup, anchor)?;
 ```

@@ -12,14 +12,15 @@ The public composition types are deliberately small:
 | `MenuBar` | Ordered top-level menus installed on one window. |
 | `Menu` | One heading or submenu, built with `item`, `separator`, and `submenu`. |
 | `MenuItem` | Uniquely owned actionable value moved into exactly one menu position. |
-| `MenuItemHandle` | Cloneable typed submission capability that is also the item's non-owning identity. Mounted presentation is borrowed through `Ui`. |
+| `MenuItemHandle` | Cloneable non-owning handle containing private stable identity and a separately projected submission endpoint. Mounted presentation is borrowed through `Ui`. |
 
 There is no public menu-popup handle, coordinator, command enum, row widget, or parallel menu model.
 
 ## Construction and events
 
-`MenuItem::create` returns a handle and a uniquely owned item value. Subscribe through the handle,
-move the value into the declaration, and install the completed bar on its owning window:
+`MenuItem::create` returns a handle and a uniquely owned item value. Subscribe through
+`handle.submitted()`, move the value into the declaration, and install the completed bar on its
+owning window:
 
 ```rust
 use microui_redux::prelude::*;
@@ -40,14 +41,14 @@ impl Model {
 fn build_model<B: RendererBackend>(
     context: &mut Context<B, Model>,
 ) -> Result<Model, SubscribeError> {
-    // The handle supplies the event port; the value moves into one menu below.
+    // The handle projects the event port; the value moves into one menu below.
     let (open, open_item) =
         MenuItem::create(MenuItemParameters::new("Open...").shortcut_hint("Ctrl+O"));
-    context.subscribe_context(open.clone(), Model::open)?;
+    context.subscribe_context(open.submitted(), Model::open)?;
 
     // This command has the same handler but remains a distinct typed event source.
     let (recent, recent_item) = MenuItem::create(MenuItemParameters::new("Recent Document"));
-    context.subscribe_context(recent.clone(), Model::open)?;
+    context.subscribe_context(recent.submitted(), Model::open)?;
 
     // Keep this handle because application state will mutate the item after construction.
     let (save, save_item) = MenuItem::create(
@@ -75,10 +76,10 @@ Consuming `MenuItem` in `Menu::item` makes the relationship unforgeable: a value
 one declaration position, and a caller cannot accidentally pair one item's visible state with a
 different item's submission handle.
 
-The subscribed port identifies its concrete item; `MenuItemSubmitted` carries no copied command
-value. The manager closes an active menu before dispatch reaches the application handler. An
-enabled item without a subscriber still closes the menu when selected; its unobserved event is
-simply discarded.
+The handle's private stable ID identifies its concrete item; the subscribed port only delivers
+`MenuItemSubmitted` and carries no copied command value. The manager closes an active menu before
+dispatch reaches the application handler. An enabled item without a subscriber still closes the
+menu when selected; its unobserved event is simply discarded.
 
 Use a `MenuItemHandle` as the stable identity for short-lived presentation borrows from `Ui`:
 
@@ -112,11 +113,13 @@ submenu placement. Each popup derives its leading mark column from its direct it
 collapses completely when none of those items has a check or radio mark; otherwise every direct row
 uses the shared content offset. Nested submenu popups calculate their columns independently.
 
-Each `MenuSlot` directly owns its `MenuItemParameters` and strong submission port.
-`MenuItemHandle` is the corresponding weak port and therefore unforgeable item identity; it does
-not mirror presentation state. Mutation through `Ui::menu_item_mut` invalidates the owning layout transaction, ensuring
-that role and text-width changes resize and reanchor open popups correctly. Warm layout reuses the
-surface's slot-geometry vector and the forest's popup-path workspace.
+Each `MenuSlot` directly owns its `MenuItemId`, `MenuItemParameters`, and strong submission port.
+`MenuItemHandle` carries the same private ID and a weak projection of that port; it does not mirror
+presentation state. IDs come from the process-wide non-reused retained-object namespace, so a
+destroyed item's endpoint allocation can be recycled without redirecting stale lookup. Mutation
+through `Ui::menu_item_mut` invalidates the owning layout transaction, ensuring that role and
+text-width changes resize and reanchor open popups correctly. Warm layout reuses the surface's
+slot-geometry vector and the forest's popup-path workspace.
 
 ## Placement and interaction
 

@@ -854,8 +854,8 @@ mod tests {
 
     /// Presses one retained node through the typed window that owns its concrete widget tree.
     fn click_node(context: &mut Context<NoopRenderer, Model>, model: &mut Model, window: &WindowHandle, node: RuntimeNodeId, batched: bool) {
-        // Internal geometry diagnostics still resolve the manager-local identity only after this
-        // test helper has received the same authenticated capability used by public mutations.
+        // Internal geometry diagnostics resolve the private stable identity only after this test
+        // helper receives the same non-owning capability used by public mutations.
         let rect = context.debug_root_node_rect(window.id(), node).expect("node rect should be laid out");
         let x = rect.x + rect.width / 2;
         let y = rect.y + rect.height / 2;

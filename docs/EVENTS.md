@@ -77,24 +77,31 @@ dispatch boundary ── lends &mut Ui<'_> ──> opted-in Handler
 
 Application State
 └── owns FileDialog
-       ├── holds a weak WindowHandle to its Context-owned dialog
+       ├── holds a non-owning WindowHandle { stable ID, weak events }
        ├── owns shared dynamic-row event ports
        └── owns WidgetEventPort<FileDialogCompleted>
 ```
 
 The only strong event-port owner is its retained producer. Consequently:
 
-- cloning a handle does not extend producer lifetime;
+- cloning a `WidgetEventPortHandle` does not extend producer lifetime;
 - registering a handler does not extend producer lifetime;
 - removing a widget immediately destroys its port and queued payloads;
 - an application-owned component source remains alive for the component lifetime; and
 - the next dispatch prunes the now-dead subscription.
 
-Manager-owned chrome follows the same concrete rule. `WindowHandle` is itself one
+Manager-owned chrome follows the same concrete rule. `WindowHandle::events()` projects one weak
 `WindowEvent` port whose variants are `GeometryChanged { rect }` and `CloseRequested`; combining
-them removes a second allocation without erasing the payload. `PopupHandle` is itself the
-separate `PopupEvent::Dismissed` lifecycle stream, so popup events cannot be subscribed through a
-window capability or vice versa.
+them removes a second event allocation without erasing the payload. `PopupHandle::events()`
+projects the separate `PopupEvent::Dismissed` lifecycle stream, so popup events cannot be
+subscribed through a window endpoint or vice versa.
+
+Object identity remains outside this event model. Window, popup, and menu-item handles carry a
+private process-unique stable ID beside their weak endpoint. Manager lookup compares only that ID;
+it never casts or compares an `Rc`/`Weak` pointer. Destroying an object permanently retires the ID,
+so a later port may reuse the same allocation address without inheriting any old tracking. This
+also leaves room for one object to expose several named ports: every endpoint delivers one event
+kind, while the single object ID continues to select retained state.
 
 `Rc<RefCell<_>>` makes the port shareable inside the retained UI thread while preserving
 runtime-checked, short mutable accesses. It also intentionally makes this mechanism neither
@@ -414,9 +421,9 @@ ctx.subscribe_context(open_button.submitted(), Model::show_popup)?;
 only after the complete retained-tree update has released its widget borrows and returned before
 the following layout. Rust therefore prevents a handler from retaining it. Window/dialog
 operations accept `&WindowHandle`; popup operations accept `&PopupHandle`. Each handle combines a
-distinct event type with weak allocation identity, so the manager derives its private key and
-rejects stale or foreign capabilities without storing another key in the handle. A popup is shown
-with `show_popup` or `show_popup_at`; the
+private process-unique ID with a weak typed event endpoint. The manager uses only the ID to reject
+stale or foreign capabilities; applications explicitly project the endpoint when subscribing. A
+popup is shown with `show_popup` or `show_popup_at`; the
 same transaction reconciles placement and the deepest active popup, while parent edges derive the
 visible branch. Replacement, hiding, and outside-press policy emit `PopupEvent::Dismissed`.
 Cascading menu parentage is private forest data consumed directly from `Menu`; no public subpopup API,
@@ -428,7 +435,7 @@ handler calls `show_popup_at(&popup, anchor)` to reconcile branch visibility and
 atomically in the triggering input transaction. The target parameter accepts `PopupHandle`, so a
 window or dialog cannot accidentally enter popup placement policy. The combo popup is a definition
 owned directly by the Demo Window, so showing it does not restate ownership. The demo state already
-owns both weak handles: `PopupEvent::Dismissed` closes the combo's shared semantic state
+owns both non-owning handles: `PopupEvent::Dismissed` closes the combo's shared semantic state
 after replacement, an outside press, or owner hiding. This coordination stays with the
 composed-control owner instead of leaking popup policy into the base widget abstractions. Paint does no
 coordination, and application state performs no per-frame popup polling. The frame callback only
@@ -445,13 +452,13 @@ widgets. Multiple component instances are independent dialogs directly owned by 
 windows; the frontmost visible dialog is the active modal group, whether shown or explicitly raised.
 
 Menus need no application-owned component binding. Applications subscribe each concrete
-`MenuItemHandle` directly, move the uniquely owned `MenuItem` values into
+`MenuItemHandle::submitted()` endpoint, move the uniquely owned `MenuItem` values into
 recursive `Menu` values, install a `MenuBar` on `Window`, and retain only handles for items whose
 presentation changes later. The window manager opens and positions private menu popups from logical
 heading and submenu-row slots cached by direct `MenuSurface` bodies, then closes the derived active
 branch before dispatching an invoked item's event. Item presentation is manager-owned and borrowed
-through `Ui::menu_item` or `Ui::menu_item_mut`; `MenuItemHandle` is both identity and its typed
-submission endpoint. No command payload, menu coordinator, or public menu-popup handle
+through `Ui::menu_item` or `Ui::menu_item_mut`; the handle's stable ID selects that record while
+`submitted()` supplies its independent typed endpoint. No command payload, menu coordinator, or public menu-popup handle
 intervenes. See the [menu guide](MENUS.md) for construction, state mutation, and current
 keyboard-navigation scope.
 

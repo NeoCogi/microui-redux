@@ -5,7 +5,7 @@ cover the retained UI model, integration details, and repository workflows.
 
 ## Core concepts
 
-- [Architecture](ARCHITECTURE.md) — retained trees, roots, widget ownership, and node identity.
+- [Architecture](ARCHITECTURE.md) — retained trees, concrete surfaces, ownership, and stable identity.
 - [Events](EVENTS.md) — typed widget events, dispatch ordering, roots, and retained services.
 - [Layout](LAYOUT.md) — measurement, tracks, placement, invalidation, and update/paint boundaries.
 - [Application menus](MENUS.md) — concrete registered items, retained composition, popup coordination, and

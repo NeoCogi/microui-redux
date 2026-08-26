@@ -193,7 +193,8 @@ impl<'a> Ui<'a> {
 
     /// Borrows the concrete state of one mounted menu item.
     pub fn menu_item(&self, handle: &crate::MenuItemHandle) -> Result<&crate::MenuItemParameters, crate::MenuItemAccessError> {
-        // The weak event endpoint doubles as unforgeable identity; semantic ownership stays in the manager.
+        // The handle's private stable ID selects manager-owned state; its event endpoint remains an
+        // independent subscription capability.
         self.window_manager.menu_item(handle)
     }
 

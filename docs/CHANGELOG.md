@@ -23,14 +23,15 @@ layer.
     - [x] Removed sixteen fixed-layer vectors, the modal-order vector, stacking sequence fields/counters, and the duplicate z-index diagnostic.
     - [x] Traversal filters the one chronology through layers `0..=15`, then the modal band, appending the derived active popup branch at its owner's tier.
 - [x] Replaced numeric root APIs with authenticated window and popup capabilities.
-    - [x] `WindowHandle` and `PopupHandle` are their distinct weak typed event capabilities. Allocation identity authenticates every public mutation without a second public or handle-local key and rejects capabilities from another Context.
+    - [x] `WindowHandle` and `PopupHandle` contain private process-unique stable IDs and separately project their weak typed event endpoints. Forest membership validates every public mutation and rejects stale or foreign capabilities without using an allocation address.
+    - [x] The shared non-zero `u64` identity allocator stops before wraparound and never reuses a destroyed window, popup, or menu-item ID during the process lifetime.
     - [x] Removed public `RootId`, `RootHandle`, `RootChanged`, `RootSubmitted`, and `RootMutationError`. `Ui` now exposes window-named operations and `SurfaceMutationError` reports concrete window, popup, dialog-owner, and layer failures.
     - [x] One `WindowEvent` port covers `GeometryChanged { rect }` and `CloseRequested`, eliminating the second window event allocation. `PopupEvent::Dismissed` is a separate popup-only stream.
     - [x] `FileDialog`, examples, composed controls, and downstream tests use borrowed handles throughout; no compatibility aliases or numeric adapters remain.
 - [x] Replaced retained/coordinated menu machinery with direct concrete surfaces.
     - [x] `MenuBar::new` contains top-level `Menu` values; `Menu::item`, `separator`, and recursive `submenu(Menu)` calls preserve declaration order.
     - [x] The manager owns direct `MenuSurface` values and `MenuSlot` item records. Removed menu `Node`/`UiRuntime` adaptation, controllers/actions, duplicate menu ids, and runtime-node anchor identities.
-    - [x] `MenuItemHandle` is the item's typed submission capability itself. `Ui::menu_item` and `Ui::menu_item_mut` use its allocation identity to lend the authoritative `MenuItemParameters`, returning `UnknownItem` for unmounted, destroyed, or foreign capabilities.
+    - [x] `MenuItemHandle` carries stable item identity and projects its typed submission endpoint through `submitted()`. `Ui::menu_item` and `Ui::menu_item_mut` compare only the private ID to lend authoritative `MenuItemParameters`, returning `UnknownItem` for unmounted, destroyed, or foreign capabilities.
     - [x] Parent edges plus trigger-slot indices anchor headings and submenus; slot geometry and popup-path storage are reused after warm-up with no layout allocation.
     - [x] Window registration consumes declarations directly into forest nodes; no temporary recursive compiled-menu tree mirrors the final ownership hierarchy.
     - [x] The implementation contains no `Any` payload, type inspection, or downcast path.

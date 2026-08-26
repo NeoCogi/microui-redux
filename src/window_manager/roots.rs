@@ -418,8 +418,8 @@ impl SurfaceBody {
 
 /// Private identity for one node in the concrete surface forest.
 ///
-/// Public code carries authenticated [`WindowHandle`] and [`PopupHandle`] capabilities. Internally,
-/// this compact manager-local key is sufficient for common layout, input, and paint traversal
+/// Public code carries stable [`WindowHandle`] and [`PopupHandle`] capabilities. Internally, this
+/// compact process-unique typed key is sufficient for common layout, input, and paint traversal
 /// without an erased payload, trait object, or `(owner, popup)` adapter pair.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum SurfaceKey {
@@ -1155,7 +1155,8 @@ impl WindowManager {
 
     /// Shows one popup at an exact screen-space anchor and updates the sole active path.
     pub fn show_popup_at(&mut self, popup: &PopupHandle, anchor: Recti) -> Result<(), SurfaceMutationError> {
-        // Authenticate before opening: manager-local counters overlap between Context instances.
+        // Resolve the stable ID before opening; foreign and destroyed handles have no matching
+        // application-popup node in this forest.
         let popup = self.popup_id(popup)?;
         // Open first so an invalid child path cannot partially replace its retained anchor.
         self.open_popup_id(popup)?;

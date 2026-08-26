@@ -916,9 +916,9 @@ fn context_aware_handler_creates_and_mutates_every_root_kind_before_layout() {
     context.mousedown(button_rect.x + 1, button_rect.y + 1, MouseButton::LEFT);
     context.update_ui_state(dimensions, &mut model);
 
-    let window = model.window.as_ref().expect("event handler must retain the weak window handle");
-    let dialog = model.dialog.as_ref().expect("event handler must retain the weak dialog handle");
-    let popup = model.popup.as_ref().expect("event handler must retain the weak popup handle");
+    let window = model.window.as_ref().expect("event handler must retain the non-owning window handle");
+    let dialog = model.dialog.as_ref().expect("event handler must retain the non-owning dialog handle");
+    let popup = model.popup.as_ref().expect("event handler must retain the non-owning popup handle");
     assert_eq!(
         context.debug_root_rect(window.id()).map(|rect| (rect.x, rect.y, rect.width, rect.height)),
         Some((30, 40, 110, 75))

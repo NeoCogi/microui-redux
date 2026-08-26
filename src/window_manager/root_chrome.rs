@@ -70,9 +70,9 @@ impl crate::WidgetEvent for WindowEvent {}
 
 /// Cloneable non-owning capability for one manager-owned window or dialog.
 ///
-/// Stable object identity and event delivery are deliberately separate fields. The private
-/// [`super::RootId`] selects checked [`crate::Ui`] mutations and is never derived from an address;
-/// the weak typed endpoint only subscribes to [`WindowEvent`] values. Cloning or dropping this
+/// Stable object identity and event delivery are deliberately separate fields. The private root ID
+/// selects checked [`crate::Ui`] mutations and is never derived from an address; the weak typed
+/// endpoint only subscribes to [`WindowEvent`] values. Cloning or dropping this
 /// aggregate application handle never changes retained window ownership.
 pub struct WindowHandle {
     /// Process-unique concrete identity used only by the owning window manager.
