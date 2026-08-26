@@ -33,7 +33,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use super::*;
-use crate::menu::{MenuAction, MenuAnchor, MenuController};
+use crate::menu::{CompiledMenuPopup, MenuItemId, MenuPress, MenuSurface};
 use crate::{MouseButton, Node, RootHandle, UiInputEvent, Vec2i, rect};
 
 use super::root_chrome::{RootChromeGeometry, RootChromePart, RootInteraction, record_root_background, record_root_overlay, root_chrome_geometry, root_handle};
@@ -65,18 +65,6 @@ pub enum RootMutationError {
 /// [`PopupHandle`], so popup definitions cannot be passed to generic window APIs.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 struct PopupId(usize);
-
-/// Placement relation retained by one popup definition.
-///
-/// Generic popups keep an exact screen rectangle. Menu popups instead retain the heading or row
-/// identity that owns their placement, so layout can resolve the current geometry after a window
-/// move or an ancestor popup resize.
-enum PopupAnchor {
-    /// Exact screen-space rectangle supplied through the public popup API.
-    Screen(Recti),
-    /// Window-menu relation and its weak presentation handle.
-    Menu(MenuAnchor),
-}
 
 /// Cloneable non-owning capability for one popup retained inside a window.
 ///
@@ -125,8 +113,16 @@ struct Surface {
     rect: Recti,
     /// Chrome and application-body geometry from the latest layout commit.
     geometry: RootChromeGeometry,
-    /// Retained application-authored tree drawn inside `geometry.body`.
-    tree: WidgetTree,
+    /// Concrete content body with no erased node or dynamic downcast.
+    body: SurfaceBody,
+}
+
+/// Concrete content variants owned by a forest surface.
+enum SurfaceBody {
+    /// Ordinary application-authored retained widget tree.
+    Widgets(WidgetTree),
+    /// Compact manager-owned menu popup surface.
+    Menu(MenuSurface),
 }
 
 impl Surface {
@@ -138,14 +134,31 @@ impl Surface {
             options,
             rect,
             geometry: RootChromeGeometry::default(),
-            tree: WidgetTree::new(content),
+            body: SurfaceBody::Widgets(WidgetTree::new(content)),
+        }
+    }
+
+    /// Creates an auto-sized popup around one concrete menu surface.
+    fn menu(surface: MenuSurface) -> Self {
+        // Menu popups need neither diagnostic title allocation nor generic popup chrome.
+        Self {
+            name: String::new(),
+            options: WindowOption::NO_TITLE | WindowOption::NO_RESIZE | WindowOption::AUTO_SIZE,
+            rect: Recti::default(),
+            geometry: RootChromeGeometry::default(),
+            body: SurfaceBody::Menu(surface),
         }
     }
 
     /// Measures automatic axes and lays out the application tree in the derived body.
-    fn layout(&mut self, style: &Style, atlas: &crate::AtlasHandle, viewport: Recti) {
+    fn layout(&mut self, menu_bar: Option<&mut MenuSurface>, style: &Style, atlas: &crate::AtlasHandle, viewport: Recti) {
         let auto_width = self.options.intersects(WindowOption::AUTO_WIDTH);
         let auto_height = self.options.intersects(WindowOption::AUTO_HEIGHT);
+        let mut menu_bar = menu_bar;
+        let menu_size = menu_bar
+            .as_deref_mut()
+            .map(|bar| bar.measure(style, atlas, crate::Constraints::unbounded()))
+            .unwrap_or_default();
         if self.options.intersects(WindowOption::AUTO_SIZE) {
             // Convert retained outer bounds to application-body bounds before asking the content
             // tree for intrinsic size. Fixed axes retain their programmed outer extent.
@@ -164,8 +177,10 @@ impl Surface {
                     crate::AvailableSpace::bounded(self.rect.height).shrink(vertical_chrome)
                 },
             );
-            let child = self.tree.measure(style, atlas, constraints);
-            let intrinsic = root_chrome_geometry(Recti::default(), child, &self.name, self.options, style, atlas).intrinsic_outer;
+            let body_constraints = crate::Constraints::new(constraints.width, constraints.height.shrink(menu_size.height));
+            let child = self.body.measure(style, atlas, body_constraints);
+            let combined = Dimensioni::new(child.width.max(menu_size.width), child.height.saturating_add(menu_size.height));
+            let intrinsic = root_chrome_geometry(Recti::default(), combined, &self.name, self.options, style, atlas).intrinsic_outer;
             if auto_width {
                 self.rect.width = intrinsic.width;
             }
@@ -176,13 +191,131 @@ impl Surface {
 
         // Store one geometry snapshot shared by application layout, chrome hit testing, and paint.
         self.geometry = root_chrome_geometry(self.rect, Dimensioni::default(), &self.name, self.options, style, atlas);
-        self.tree.layout(style, atlas.clone(), self.geometry.body, viewport);
+        let bar_height = menu_size.height.min(self.geometry.body.height.max(0));
+        if let Some(bar) = menu_bar {
+            bar.layout(
+                Recti::new(self.geometry.body.x, self.geometry.body.y, self.geometry.body.width, bar_height),
+                viewport,
+            );
+        }
+        let body = Recti::new(
+            self.geometry.body.x,
+            self.geometry.body.y.saturating_add(bar_height),
+            self.geometry.body.width,
+            self.geometry.body.height.saturating_sub(bar_height).max(0),
+        );
+        // Public/debug body geometry denotes application content, excluding the intrinsic menu bar.
+        self.geometry.body = body;
+        self.body.layout(style, atlas, body, viewport);
     }
 
     /// Returns whether the outer surface contains one screen-space point.
     fn contains(&self, point: Vec2i) -> bool {
         // Root and popup hit testing both begin with the same positive-area rectangle predicate.
         self.rect.contains(&point)
+    }
+}
+
+impl SurfaceBody {
+    /// Measures either concrete body without type erasure.
+    fn measure(&mut self, style: &Style, atlas: &crate::AtlasHandle, constraints: crate::Constraints) -> Dimensioni {
+        match self {
+            Self::Widgets(tree) => tree.measure(style, atlas, constraints),
+            Self::Menu(menu) => menu.measure(style, atlas, constraints),
+        }
+    }
+
+    /// Commits one body allocation through the concrete variant.
+    fn layout(&mut self, style: &Style, atlas: &crate::AtlasHandle, rect: Recti, viewport: Recti) {
+        match self {
+            Self::Widgets(tree) => tree.layout(style, atlas.clone(), rect, viewport),
+            Self::Menu(menu) => menu.layout(rect, viewport),
+        }
+    }
+
+    /// Returns whether this body owns pointer capture.
+    fn has_capture(&self) -> bool {
+        match self {
+            Self::Widgets(tree) => tree.has_capture(),
+            Self::Menu(menu) => menu.has_capture(),
+        }
+    }
+
+    /// Clears pointer state while preserving application keyboard focus where applicable.
+    fn clear_pointer_targets(&mut self) {
+        match self {
+            Self::Widgets(tree) => tree.clear_pointer_targets(),
+            Self::Menu(menu) => menu.clear_pointer_targets(),
+        }
+    }
+
+    /// Clears every transient input identity through the concrete body variant.
+    fn clear_transient_targets(&mut self) {
+        match self {
+            Self::Widgets(tree) => tree.clear_transient_targets(),
+            Self::Menu(menu) => menu.clear_pointer_targets(),
+        }
+    }
+
+    /// Returns the concrete menu body when this is a private menu popup.
+    fn menu(&self) -> Option<&MenuSurface> {
+        match self {
+            Self::Menu(menu) => Some(menu),
+            Self::Widgets(_) => None,
+        }
+    }
+
+    /// Returns the mutable concrete menu body when this is a private menu popup.
+    fn menu_mut(&mut self) -> Option<&mut MenuSurface> {
+        match self {
+            Self::Menu(menu) => Some(menu),
+            Self::Widgets(_) => None,
+        }
+    }
+
+    /// Returns the retained widget tree for application-authored bodies only.
+    #[cfg(test)]
+    fn widgets(&self) -> Option<&WidgetTree> {
+        match self {
+            Self::Widgets(tree) => Some(tree),
+            Self::Menu(_) => None,
+        }
+    }
+
+    /// Starts an update cycle for widget bodies; concrete menus have no traversal runtime.
+    fn begin_update(&mut self) {
+        if let Self::Widgets(tree) = self {
+            tree.begin_update();
+        }
+    }
+
+    /// Stages event-local routing only for a retained widget tree.
+    fn begin_input_event(&mut self, pointer_input_enabled: bool, event: &UiInputEvent) {
+        if let Self::Widgets(tree) = self {
+            tree.begin_input_event(pointer_input_enabled, event);
+        }
+    }
+
+    /// Routes keyboard/text input only to application widget bodies.
+    fn route_focus(&mut self, style: &Style, event: &UiInputEvent) {
+        if let Self::Widgets(tree) = self {
+            tree.route_focus(style, event);
+        }
+    }
+
+    /// Updates widget bodies; menu state is committed synchronously by direct pointer routing.
+    fn update(&mut self, style: &Style, atlas: crate::AtlasHandle, input: crate::input::InputSnapshot) {
+        if let Self::Widgets(tree) = self {
+            tree.update(style, atlas, input);
+        }
+    }
+
+    /// Paints one concrete body into the shared manager display list.
+    fn paint(&mut self, display_list: &mut crate::render::DisplayList, style: &Style, atlas: &crate::AtlasHandle) {
+        match self {
+            Self::Widgets(tree) => tree.paint(display_list, style, atlas.clone()),
+            Self::Menu(menu) => menu.paint(display_list, style, atlas),
+        }
     }
 }
 
@@ -209,6 +342,13 @@ impl WidgetTree {
     /// Clears focus, hover, capture, and staged input without dropping retained widgets.
     fn clear_transient_targets(&mut self) {
         self.runtime.clear_transient_targets();
+    }
+
+    /// Revokes only pointer capture, preserving the application's keyboard focus identity.
+    fn clear_pointer_targets(&mut self) {
+        // Menus are pointer-only manager surfaces. Replacing an application drag must not make that
+        // separate interaction authority behave like a focusable retained widget.
+        self.runtime.clear_pointer_capture();
     }
 
     /// Measures the complete application tree under body-space constraints.
@@ -266,6 +406,7 @@ impl WidgetTree {
     }
 
     /// Resolves one retained node rectangle for relational popup anchors and tests.
+    #[cfg(test)]
     fn node_rect(&self, node: crate::ui_node::RuntimeNodeId) -> Option<Recti> {
         // Runtime identities are process-unique, so the first recursive match is authoritative.
         self.runtime.node_rect(std::slice::from_ref(&self.root), node)
@@ -336,18 +477,24 @@ struct RootState {
     changed_event: Rc<RefCell<crate::event::WidgetEventPort<crate::RootChanged>>>,
     /// Strong owner of window close submissions.
     submitted_event: Rc<RefCell<crate::event::WidgetEventPort<crate::RootSubmitted>>>,
-    /// Optional compact menu action controller owned by this root.
-    menu: Option<MenuController>,
-    /// MenuId-to-popup mapping in the controller's exact declaration order.
-    menu_popups: Vec<PopupId>,
+    /// Optional concrete menu bar laid out above the application widget body.
+    menu_bar: Option<MenuSurface>,
 }
 
 /// Popup-specific policy attached to a concrete surface node.
-struct PopupState {
-    /// Exact or relational placement resolved before every active layout.
-    anchor: PopupAnchor,
-    /// Strong owner of policy-driven dismissal events.
-    submitted_event: Rc<RefCell<crate::event::WidgetEventPort<crate::RootSubmitted>>>,
+enum PopupState {
+    /// Application-authored popup with exact placement and an observable dismissal event.
+    Application {
+        /// Exact screen rectangle supplied by the public popup API.
+        anchor: Recti,
+        /// Strong owner of policy-driven dismissal events.
+        submitted_event: Rc<RefCell<crate::event::WidgetEventPort<crate::RootSubmitted>>>,
+    },
+    /// Private menu popup positioned from one slot in its direct forest parent.
+    Menu {
+        /// Heading or parent-row index that opens and anchors this popup.
+        trigger_slot: usize,
+    },
 }
 
 /// Concrete role data for a retained surface node.
@@ -409,7 +556,9 @@ impl SurfaceNode {
 
     /// Returns whether manager chrome or application content owns pointer capture.
     fn has_capture(&self) -> bool {
-        self.root().is_some_and(|root| root.interaction != RootInteraction::None) || self.surface.tree.has_capture()
+        self.root().is_some_and(|root| root.interaction != RootInteraction::None)
+            || self.root().and_then(|root| root.menu_bar.as_ref()).is_some_and(MenuSurface::has_capture)
+            || self.surface.body.has_capture()
     }
 
     /// Clears every transient input identity retained by this surface.
@@ -418,7 +567,15 @@ impl SurfaceNode {
         if let Some(root) = self.root_mut() {
             root.interaction = RootInteraction::None;
         }
-        self.surface.tree.clear_transient_targets();
+        if let Some(root) = self.root_mut()
+            && let Some(menu) = root.menu_bar.as_mut()
+        {
+            menu.clear_pointer_targets();
+        }
+        match &mut self.surface.body {
+            SurfaceBody::Widgets(tree) => tree.clear_transient_targets(),
+            SurfaceBody::Menu(menu) => menu.clear_pointer_targets(),
+        }
     }
 
     /// Shows or hides a root without dropping its application state.
@@ -465,12 +622,20 @@ impl SurfaceNode {
     /// Dismisses an active popup and emits exactly one policy event.
     fn dismiss_popup(&mut self) {
         // The caller walks the active leaf upward, so descendants are always notified first.
-        self.surface.tree.clear_transient_targets();
-        self.popup()
-            .expect("popup dismissal requires a popup node")
-            .submitted_event
-            .borrow_mut()
-            .emit(crate::RootSubmitted::PopupDismissed);
+        self.surface.body.clear_transient_targets();
+        if let Some(PopupState::Application { submitted_event, .. }) = self.popup() {
+            // Menu popups have no unobservable lifecycle port; their visibility is wholly internal.
+            submitted_event.borrow_mut().emit(crate::RootSubmitted::PopupDismissed);
+        }
+    }
+
+    /// Lays out this node and its optional root-owned menu bar through concrete bodies.
+    fn layout(&mut self, style: &Style, atlas: &crate::AtlasHandle, viewport: Recti) {
+        let menu_bar = match &mut self.kind {
+            SurfaceKind::Root(root) => root.menu_bar.as_mut(),
+            SurfaceKind::Popup(_) => None,
+        };
+        self.surface.layout(menu_bar, style, atlas, viewport);
     }
 }
 
@@ -754,6 +919,45 @@ impl SurfaceForest {
 }
 
 impl WindowManager {
+    /// Borrows one mounted menu item's concrete public state by private identity.
+    pub(crate) fn menu_item(&self, id: MenuItemId) -> Result<&crate::MenuItemParameters, crate::MenuItemAccessError> {
+        for node in &self.surfaces.nodes {
+            if let Some(item) = node.root().and_then(|root| root.menu_bar.as_ref()).and_then(|menu| menu.item(id)) {
+                return Ok(item.parameters());
+            }
+            if let Some(item) = node.surface.body.menu().and_then(|menu| menu.item(id)) {
+                return Ok(item.parameters());
+            }
+        }
+        Err(crate::MenuItemAccessError::UnknownItem)
+    }
+
+    /// Mutably borrows one mounted menu item's concrete public state by private identity.
+    pub(crate) fn menu_item_mut(&mut self, id: MenuItemId) -> Result<&mut crate::MenuItemParameters, crate::MenuItemAccessError> {
+        // Invalidate before returning the reference: the caller may change any public field, and its
+        // borrow prevents a second manager call until the mutation has completed.
+        self.invalidate_ui_commit();
+        for node in &mut self.surfaces.nodes {
+            match (&mut node.kind, &mut node.surface.body) {
+                (SurfaceKind::Root(root), _) => {
+                    if let Some(item) = root.menu_bar.as_mut().and_then(|menu| menu.item_mut(id)) {
+                        return Ok(item.parameters_mut());
+                    }
+                }
+                (SurfaceKind::Popup(PopupState::Menu { .. }), SurfaceBody::Menu(menu)) => {
+                    if let Some(item) = menu.item_mut(id) {
+                        return Ok(item.parameters_mut());
+                    }
+                }
+                (SurfaceKind::Popup(_), SurfaceBody::Widgets(_)) => {}
+                (SurfaceKind::Popup(_), SurfaceBody::Menu(_)) => {
+                    unreachable!("surface role and concrete body must remain structurally aligned")
+                }
+            }
+        }
+        Err(crate::MenuItemAccessError::UnknownItem)
+    }
+
     /// Registers one concrete root after validating its optional dialog parent edge.
     fn register_window(
         &mut self,
@@ -774,14 +978,11 @@ impl WindowManager {
         }
 
         let (name, rect, content, menu_bar) = window.into_parts();
-        // Compile before mounting the root. The compiled definitions are parent-first, so each menu
-        // popup can point directly to a previously inserted concrete ancestor.
-        let (content, menu_popups, menu_controller) = match menu_bar {
-            Some(menu_bar) => {
-                let (content, popups, controller) = menu_bar.compile(&name, content);
-                (content, popups, Some(controller))
-            }
-            None => (content, Vec::new(), None),
+        // Compile before mounting the root, retaining recursive popup ownership until each direct
+        // forest parent has been inserted. No numeric menu namespace or topology translation exists.
+        let (menu_bar, menu_popups) = match menu_bar.map(crate::MenuBar::compile) {
+            Some(menu) => (Some(menu.bar), menu.popups),
+            None => (None, Vec::new()),
         };
 
         // Strong event owners live with root policy; returned handles retain neither them nor trees.
@@ -802,31 +1003,14 @@ impl WindowManager {
                 interaction: RootInteraction::None,
                 changed_event,
                 submitted_event,
-                menu: menu_controller,
-                menu_popups: Vec::with_capacity(menu_popups.len()),
+                menu_bar,
             }),
         });
 
-        // Record MenuId translation explicitly on the root; generic popups can now share the same
-        // forest without depending on a leading slice or a window-local index convention.
+        // Each recursive transport value becomes one direct child edge. Branch labels remain in the
+        // parent surface, so release builds allocate no separate diagnostic popup names.
         for popup in menu_popups {
-            let parent = popup.parent.map_or(SurfaceKey::Root(id), |parent| {
-                let popup = self
-                    .surfaces
-                    .root_node(id)
-                    .and_then(SurfaceNode::root)
-                    .and_then(|root| root.menu_popups.get(parent))
-                    .copied()
-                    .expect("compiled menu parents must precede their children");
-                SurfaceKey::Popup(popup)
-            });
-            let handle = self.register_popup_with_anchor(parent, &popup.name, popup.content, PopupAnchor::Menu(popup.anchor));
-            self.surfaces
-                .root_node_mut(id)
-                .and_then(SurfaceNode::root_mut)
-                .expect("new menu owner must remain retained")
-                .menu_popups
-                .push(handle.id);
+            self.register_menu_popup(SurfaceKey::Root(id), popup);
         }
         self.surfaces.rebuild_visible_order();
         self.invalidate_ui_commit();
@@ -870,32 +1054,41 @@ impl WindowManager {
     pub fn create_popup(&mut self, owner: RootId, name: &str, content: Node) -> Result<PopupHandle, RootMutationError> {
         self.root_node(owner)?;
         // A top-level popup's sole parent edge points directly to its owning root.
-        Ok(self.register_popup_with_anchor(SurfaceKey::Root(owner), name, content, PopupAnchor::Screen(Recti::default())))
+        Ok(self.register_application_popup(SurfaceKey::Root(owner), name, content))
     }
 
-    /// Registers one concrete popup below an already validated root or popup parent.
-    fn register_popup_with_anchor(&mut self, parent: SurfaceKey, name: &str, content: Node, anchor: PopupAnchor) -> PopupHandle {
+    /// Registers one application-authored popup below an already validated root.
+    fn register_application_popup(&mut self, parent: SurfaceKey, name: &str, content: Node) -> PopupHandle {
         let id = self.next_popup_id();
-        let rect = match &anchor {
-            PopupAnchor::Screen(rect) => *rect,
-            PopupAnchor::Menu(_) => Recti::default(),
-        };
-        let options = if matches!(&anchor, PopupAnchor::Menu(_)) {
-            // The compact menu leaf paints edge-to-edge; only the popup frame surrounds it.
-            Self::default_popup_options() | WindowOption::NO_PADDING
-        } else {
-            Self::default_popup_options()
-        };
         let submitted_event = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
         let submitted = crate::WidgetEventPortHandle::new(&submitted_event);
         self.surfaces.insert_popup(SurfaceNode {
             key: SurfaceKey::Popup(id),
             parent: Some(parent),
-            surface: Surface::new(name.to_owned(), options, rect, content),
-            kind: SurfaceKind::Popup(PopupState { anchor, submitted_event }),
+            surface: Surface::new(name.to_owned(), Self::default_popup_options(), Recti::default(), content),
+            kind: SurfaceKind::Popup(PopupState::Application {
+                anchor: Recti::default(),
+                submitted_event,
+            }),
         });
         self.invalidate_ui_commit();
         PopupHandle::new(id, submitted)
+    }
+
+    /// Recursively inserts one concrete menu popup beneath its direct forest parent.
+    fn register_menu_popup(&mut self, parent: SurfaceKey, popup: CompiledMenuPopup) {
+        let CompiledMenuPopup { trigger_slot, surface, children } = popup;
+        let id = self.next_popup_id();
+        self.surfaces.insert_popup(SurfaceNode {
+            key: SurfaceKey::Popup(id),
+            parent: Some(parent),
+            surface: Surface::menu(surface),
+            kind: SurfaceKind::Popup(PopupState::Menu { trigger_slot }),
+        });
+        // The parent is retained before recursion, satisfying the forest's sole structural invariant.
+        for child in children {
+            self.register_menu_popup(SurfaceKey::Popup(id), child);
+        }
     }
 
     /// Replaces a retained window title silently.
@@ -1009,7 +1202,10 @@ impl WindowManager {
         // Open first so an invalid child path cannot partially replace its retained anchor.
         self.open_popup_id(popup.id)?;
         let node = self.popup_node_mut(popup)?;
-        node.popup_mut().expect("popup lookup must return popup policy").anchor = PopupAnchor::Screen(anchor);
+        let PopupState::Application { anchor: current, .. } = node.popup_mut().expect("popup lookup must return popup policy") else {
+            return Err(RootMutationError::UnknownPopup);
+        };
+        *current = anchor;
         node.surface.rect = anchor;
         self.invalidate_ui_commit();
         Ok(())
@@ -1156,7 +1352,7 @@ impl WindowManager {
             let popup = self.surfaces.popup_node_mut(current).expect("active popup must remain retained");
             // Once the popup leaves the active ancestry only the manager can consume the remainder
             // of an application capture gesture, so remember capture before clearing the runtime.
-            revoked_capture |= popup.surface.tree.has_capture();
+            revoked_capture |= popup.surface.body.has_capture();
             popup.dismiss_popup();
             retained_leaf = parent;
             let Some(parent) = parent else { break };
@@ -1216,6 +1412,22 @@ impl WindowManager {
         self.surfaces.surface_mut(key)
     }
 
+    /// Borrows the concrete menu presentation attached to one root or menu-popup key.
+    fn menu_surface(&self, key: SurfaceKey) -> Option<&MenuSurface> {
+        match key {
+            SurfaceKey::Root(root) => self.surfaces.root_node(root)?.root()?.menu_bar.as_ref(),
+            SurfaceKey::Popup(popup) => self.surfaces.popup_node(popup)?.surface.body.menu(),
+        }
+    }
+
+    /// Mutably borrows the concrete menu presentation attached to one forest key.
+    fn menu_surface_mut(&mut self, key: SurfaceKey) -> Option<&mut MenuSurface> {
+        match key {
+            SurfaceKey::Root(root) => self.surfaces.root_node_mut(root)?.root_mut()?.menu_bar.as_mut(),
+            SurfaceKey::Popup(popup) => self.surfaces.popup_node_mut(popup)?.surface.body.menu_mut(),
+        }
+    }
+
     /// Returns whether a traversal surface belongs to the current input group.
     fn surface_is_eligible(&self, key: SurfaceKey, modal: Option<RootId>) -> bool {
         let Some(owner) = self.surfaces.owning_root(key) else {
@@ -1238,13 +1450,35 @@ impl WindowManager {
 
     /// Rewrites menu trigger presentation from the deepest authoritative popup leaf.
     fn sync_menu_presentation(&mut self) {
+        // Clear every derived highlight first. This is linear in menu surfaces and avoids retaining
+        // a second open-path projection beside the forest's authoritative active leaf.
         for index in 0..self.surfaces.nodes.len() {
-            let key = self.surfaces.nodes[index].key;
+            let node = &mut self.surfaces.nodes[index];
+            if let Some(root) = node.root_mut()
+                && let Some(bar) = root.menu_bar.as_mut()
+            {
+                bar.set_open_slot(None);
+            }
+            if let Some(menu) = node.surface.body.menu_mut() {
+                menu.set_open_slot(None);
+            }
+        }
+
+        // Each active menu popup marks exactly the trigger slot in its direct parent surface.
+        for index in 0..self.surfaces.visible_surfaces().len() {
+            let key = self.surfaces.visible_surfaces()[index];
             let SurfaceKey::Popup(popup) = key else { continue };
-            let open = self.surfaces.popup_is_active(popup);
-            if let Some(PopupState { anchor: PopupAnchor::Menu(anchor), .. }) = self.surfaces.nodes[index].popup_mut() {
-                // `open` remains a derived paint bit; menu widgets own no semantic visibility.
-                anchor.set_open(open);
+            let relation = {
+                let Some(node) = self.surfaces.popup_node(popup) else { continue };
+                let Some(parent) = node.parent else { continue };
+                let PopupState::Menu { trigger_slot } = node.popup().expect("popup key must retain popup policy") else {
+                    continue;
+                };
+                (parent, *trigger_slot)
+            };
+            let (parent, trigger_slot) = relation;
+            if let Some(source) = self.menu_surface_mut(parent) {
+                source.set_open_slot(Some(trigger_slot));
             }
         }
     }
@@ -1253,15 +1487,14 @@ impl WindowManager {
     fn resolved_popup_rect(&self, key: SurfaceKey) -> Option<Recti> {
         let SurfaceKey::Popup(popup) = key else { return None };
         let definition = self.surfaces.popup_node(popup)?;
-        match &definition.popup()?.anchor {
-            PopupAnchor::Screen(rect) => Some(*rect),
-            PopupAnchor::Menu(anchor) => {
+        match definition.popup()? {
+            PopupState::Application { anchor, .. } => Some(*anchor),
+            PopupState::Menu { trigger_slot } => {
                 // The direct parent is the sole anchor source: root parents open below, while popup
-                // parents open to the right. All cached geometry is already in screen coordinates.
+                // parents open to the right. No runtime node or weak typed widget is consulted.
                 let parent = definition.parent?;
                 let below = matches!(parent, SurfaceKey::Root(_));
-                let source_surface = self.surfaces.surface(parent)?.tree.node_rect(anchor.node)?;
-                let trigger = anchor.trigger_rect(source_surface)?;
+                let trigger = self.menu_surface(parent)?.slot_rect(*trigger_slot)?;
                 let current = definition.surface.rect;
                 let (x, y) = if below {
                     (trigger.x, trigger.y.saturating_add(trigger.height))
@@ -1283,28 +1516,49 @@ impl WindowManager {
         }
     }
 
-    /// Applies the compact action staged by a routed menu surface after widget update.
-    fn apply_menu_action(&mut self, surface: SurfaceKey, previous_top: Option<PopupId>) {
-        // Every descendant derives one root controller by following parent edges. Taking the action ends the
-        // controller borrow before popup-path mutation or item-event emission begins.
-        let Some(owner) = self.surfaces.owning_root(surface) else { return };
-        let action = self
-            .surfaces
-            .root_node(owner)
-            .and_then(SurfaceNode::root)
-            .and_then(|root| root.menu.as_ref())
-            .and_then(MenuController::take_action);
-        let Some(action) = action else { return };
+    /// Revokes competing pointer gestures without clearing any application keyboard focus.
+    fn clear_other_pointer_captures(&mut self, keep: SurfaceKey) {
+        for node in &mut self.surfaces.nodes {
+            if node.key != keep {
+                node.surface.body.clear_pointer_targets();
+                if let Some(root) = node.root_mut()
+                    && let Some(menu) = root.menu_bar.as_mut()
+                {
+                    menu.clear_pointer_targets();
+                }
+            }
+        }
+        // A root menu bar and its application body share one forest key, so revoke same-root widget
+        // capture explicitly while leaving its focus identity intact.
+        if let Some(node) = self.surfaces.node_mut(keep) {
+            node.surface.body.clear_pointer_targets();
+        }
+    }
 
-        match action {
-            MenuAction::Open(menu_id) => {
+    /// Returns whether the concrete menu attached to a visible key contains one pointer point.
+    fn menu_contains(&self, key: SurfaceKey, point: Vec2i) -> bool {
+        self.menu_surface(key).is_some_and(|menu| menu.contains(point))
+    }
+
+    /// Routes a pointer event directly to a root bar or menu-popup body.
+    fn route_menu_pointer(&mut self, key: SurfaceKey, event: &UiInputEvent) -> Option<crate::menu::MenuRoute> {
+        self.menu_surface_mut(key).map(|menu| menu.route_pointer(event))
+    }
+
+    /// Applies one concrete menu press after releasing the surface borrow that produced it.
+    fn apply_menu_press(&mut self, surface: SurfaceKey, press: MenuPress, previous_top: Option<PopupId>) {
+        match press {
+            MenuPress::OpenSlot(slot) => {
                 let target = self
                     .surfaces
-                    .root_node(owner)
-                    .and_then(SurfaceNode::root)
-                    .and_then(|root| root.menu_popups.get(menu_id))
-                    .copied()
-                    .expect("a compiled MenuId must retain one registered popup");
+                    .nodes
+                    .iter()
+                    .find(|node| node.parent == Some(surface) && matches!(node.popup(), Some(PopupState::Menu { trigger_slot }) if *trigger_slot == slot))
+                    .and_then(|node| match node.key {
+                        SurfaceKey::Popup(popup) => Some(popup),
+                        SurfaceKey::Root(_) => None,
+                    })
+                    .expect("a menu branch slot must retain one direct popup child");
                 // Outside dismissal already closed the old path before this bar press reached the
                 // window. A repeated heading press therefore toggles closed instead of reopening.
                 if matches!(surface, SurfaceKey::Root(_)) && previous_top == Some(target) {
@@ -1312,11 +1566,11 @@ impl WindowManager {
                 }
                 self.open_popup_id(target).expect("a staged menu action must retain an eligible declared popup");
             }
-            MenuAction::Invoke(submitted) => {
-                // Close and revoke popup capture before queuing the typed application event. Event
-                // subscribers consequently observe final menu visibility at their safe boundary.
+            MenuPress::Close => {
+                // The surface already queued the typed event. Arm tail suppression before removing
+                // its popup so the physical release cannot fall through to newly exposed content.
+                self.discard_pointer_capture_tail = true;
                 self.dismiss_active_popups();
-                submitted.borrow_mut().emit(crate::MenuItemSubmitted);
             }
         }
     }
@@ -1339,13 +1593,13 @@ impl WindowManager {
                     }
                     Some(RootChromePart::Resize) => {
                         let node = self.root_node_mut(root).expect("chrome target must remain retained");
-                        node.surface.tree.clear_transient_targets();
+                        node.surface.body.clear_transient_targets();
                         node.root_mut().expect("chrome target must be a root").interaction = RootInteraction::Resizing;
                         true
                     }
                     Some(RootChromePart::Title) => {
                         let node = self.root_node_mut(root).expect("chrome target must remain retained");
-                        node.surface.tree.clear_transient_targets();
+                        node.surface.body.clear_transient_targets();
                         node.root_mut().expect("chrome target must be a root").interaction = RootInteraction::Moving;
                         true
                     }
@@ -1414,7 +1668,7 @@ impl WindowManager {
         let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
         for node in &mut self.surfaces.nodes {
             // Every concrete surface begins the cycle so hidden trees retain coherent staged state.
-            node.surface.tree.begin_update();
+            node.surface.body.begin_update();
         }
         self.layout(viewport, atlas);
         if after_event(self, dispatch_state) {
@@ -1452,8 +1706,8 @@ impl WindowManager {
                     .expect("active popup anchor node must remain in its retained parent surface");
                 self.surface_mut(key).expect("visible popup must remain retained").rect = rect;
             }
-            let surface = self.surface_mut(key).expect("visible surface must remain retained");
-            surface.layout(&style, atlas, viewport);
+            let node = self.surfaces.node_mut(key).expect("visible surface must remain retained");
+            node.layout(&style, atlas, viewport);
         }
     }
 
@@ -1480,7 +1734,12 @@ impl WindowManager {
             self.activate_pointer_surface(surface);
             let owner = self.surfaces.owning_root(surface).expect("visible surface must retain a root ancestor");
             self.bring_root_to_front(owner).expect("pointer target owner must remain registered");
-            self.clear_other_captures(surface);
+            if self.menu_contains(surface, input.mouse_pos) {
+                // A pointer-only menu gesture may preempt application capture but never keyboard focus.
+                self.clear_other_pointer_captures(surface);
+            } else {
+                self.clear_other_captures(surface);
+            }
         }
 
         let drag = (!discard_pointer).then(|| self.drag_input_surface()).flatten();
@@ -1494,53 +1753,65 @@ impl WindowManager {
         for index in 0..self.surfaces.visible_surfaces().len() {
             let key = self.surfaces.visible_surfaces()[index];
             if self.surface_is_eligible(key, modal) {
+                let widget_pointer = pointer == Some(key) && !self.menu_contains(key, input.mouse_pos);
                 self.surface_mut(key)
                     .expect("visible input surface must remain retained")
-                    .tree
-                    .begin_input_event(pointer == Some(key), event);
+                    .body
+                    .begin_input_event(widget_pointer, event);
             }
         }
 
-        let mut routed_pointer = None;
+        let mut staged_menu_press = None;
         if event.is_pointer() && !discard_pointer {
             let captured = matches!(event, UiInputEvent::MouseDrag { .. } | UiInputEvent::MouseUp { .. })
                 .then(|| self.captured_input_surface())
                 .flatten();
-            let mut handled = captured.is_some_and(|surface| match surface {
-                SurfaceKey::Root(root) => {
-                    // Chrome receives continuation only when it owns the window's capture. A
-                    // captured application widget must keep drag and release even over chrome.
-                    let chrome_captured = self
-                        .root_node(root)
-                        .ok()
-                        .and_then(SurfaceNode::root)
-                        .is_some_and(|state| state.interaction != RootInteraction::None);
-                    if chrome_captured {
-                        self.route_chrome_event(root, event)
-                    } else {
-                        self.surface_mut(surface)
-                            .expect("captured window must remain retained")
-                            .tree
-                            .route_captured_pointer(&style, input.mouse_buttons, event)
-                            .is_some()
-                    }
+            let mut handled = false;
+            if let Some(surface) = captured {
+                if self.menu_surface(surface).is_some_and(MenuSurface::has_capture) {
+                    let route = self.route_menu_pointer(surface, event).expect("captured menu surface must remain retained");
+                    staged_menu_press = route.press.map(|press| (surface, press));
+                    handled = route.handled;
+                } else {
+                    handled = match surface {
+                        SurfaceKey::Root(root) => {
+                            // Chrome receives continuation only when it owns the window's capture. A
+                            // captured application widget must keep drag and release even over chrome.
+                            let chrome_captured = self
+                                .root_node(root)
+                                .ok()
+                                .and_then(SurfaceNode::root)
+                                .is_some_and(|state| state.interaction != RootInteraction::None);
+                            if chrome_captured {
+                                self.route_chrome_event(root, event)
+                            } else {
+                                match &mut self.surface_mut(surface).expect("captured window must remain retained").body {
+                                    SurfaceBody::Widgets(tree) => tree.route_captured_pointer(&style, input.mouse_buttons, event).is_some(),
+                                    SurfaceBody::Menu(_) => false,
+                                }
+                            }
+                        }
+                        SurfaceKey::Popup(_) => match &mut self.surface_mut(surface).expect("captured popup must remain retained").body {
+                            SurfaceBody::Widgets(tree) => tree.route_captured_pointer(&style, input.mouse_buttons, event).is_some(),
+                            SurfaceBody::Menu(_) => false,
+                        },
+                    };
                 }
-                SurfaceKey::Popup(_) => self
-                    .surface_mut(surface)
-                    .expect("captured popup must remain retained")
-                    .tree
-                    .route_captured_pointer(&style, input.mouse_buttons, event)
-                    .is_some(),
-            });
+            }
             if !handled && let Some(surface) = pointer {
                 handled = matches!(surface, SurfaceKey::Root(root) if self.route_chrome_event(root, event));
-                if !handled && self.surface(surface).is_some_and(|surface| surface.tree.accepts_pointer_input()) {
-                    let node = self
-                        .surface_mut(surface)
-                        .expect("pointer surface must remain retained")
-                        .tree
-                        .route_pointer(&style, event, input.mouse_buttons);
-                    routed_pointer = node.map(|node| (surface, node));
+                if !handled && self.menu_contains(surface, input.mouse_pos) {
+                    let route = self.route_menu_pointer(surface, event).expect("hit menu surface must remain retained");
+                    staged_menu_press = route.press.map(|press| (surface, press));
+                    handled = route.handled;
+                }
+                if !handled {
+                    let body = &mut self.surface_mut(surface).expect("pointer surface must remain retained").body;
+                    if let SurfaceBody::Widgets(tree) = body
+                        && tree.accepts_pointer_input()
+                    {
+                        let _ = tree.route_pointer(&style, event, input.mouse_buttons);
+                    }
                 }
             }
         } else if event.is_focus_input()
@@ -1548,7 +1819,7 @@ impl WindowManager {
         {
             self.surface_mut(surface)
                 .expect("keyboard surface must remain retained")
-                .tree
+                .body
                 .route_focus(&style, event);
         }
 
@@ -1565,16 +1836,16 @@ impl WindowManager {
             if self.surface_is_eligible(key, modal) {
                 self.surface_mut(key)
                     .expect("visible update surface must remain retained")
-                    .tree
+                    .body
                     .update(&style, atlas.clone(), input);
             }
         }
         if self.active_root.is_some_and(|root| !self.root_is_visible(root)) {
             self.active_root = None;
         }
-        if menu_press && let Some((surface, _)) = routed_pointer {
-            // Widget update has staged an action and released every retained borrow.
-            self.apply_menu_action(surface, previous_top);
+        if let Some((surface, press)) = staged_menu_press {
+            // Direct routing has ended its concrete surface borrow before forest visibility changes.
+            self.apply_menu_press(surface, press, previous_top);
         }
     }
 
@@ -1589,7 +1860,12 @@ impl WindowManager {
             let node_index = self.surfaces.node_index(key).expect("visible surface must remain retained");
             let node = &mut self.surfaces.nodes[node_index];
             record_root_background(&mut self.display_list, viewport, node.surface.rect, node.surface.options, &style);
-            node.surface.tree.paint(&mut self.display_list, &style, atlas.clone());
+            if let Some(root) = node.root_mut()
+                && let Some(bar) = root.menu_bar.as_mut()
+            {
+                bar.paint(&mut self.display_list, &style, atlas);
+            }
+            node.surface.body.paint(&mut self.display_list, &style, atlas);
             if matches!(key, SurfaceKey::Root(_)) {
                 record_root_overlay(&mut self.display_list, viewport, &node.surface.name, node.surface.geometry, &style, atlas);
             }
@@ -1764,25 +2040,16 @@ impl WindowManager {
 
     /// Returns a window body rectangle for chrome geometry tests.
     #[cfg(test)]
-    pub(crate) fn debug_root_body(&self, root: RootId, atlas: &crate::AtlasHandle) -> Option<Recti> {
+    pub(crate) fn debug_root_body(&self, root: RootId, _atlas: &crate::AtlasHandle) -> Option<Recti> {
         let node = self.surfaces.root_node(root)?;
-        Some(
-            root_chrome_geometry(
-                node.surface.rect,
-                Dimensioni::default(),
-                &node.surface.name,
-                node.surface.options,
-                &self.style,
-                atlas,
-            )
-            .body,
-        )
+        // Committed geometry excludes the root-owned menu bar and therefore names app content.
+        Some(node.surface.geometry.body)
     }
 
     /// Returns window runtime metrics for tests.
     #[cfg(test)]
     pub(crate) fn debug_root_runtime_metrics(&self, root: RootId) -> Option<crate::ui_node::RuntimeMetrics> {
-        self.surfaces.root_node(root).map(|node| node.surface.tree.metrics())
+        self.surfaces.root_node(root)?.surface.body.widgets().map(WidgetTree::metrics)
     }
 
     /// Returns combined window pointer capture for tests.
@@ -1794,13 +2061,13 @@ impl WindowManager {
     /// Counts application nodes in one window for tests.
     #[cfg(test)]
     pub(crate) fn debug_root_node_count(&self, root: RootId) -> Option<usize> {
-        self.surfaces.root_node(root).map(|node| node.surface.tree.node_count())
+        self.surfaces.root_node(root)?.surface.body.widgets().map(WidgetTree::node_count)
     }
 
     /// Returns one application node rectangle inside a window.
     #[cfg(test)]
     pub(crate) fn debug_root_node_rect(&self, root: RootId, node: crate::ui_node::RuntimeNodeId) -> Option<Recti> {
-        self.surfaces.root_node(root)?.surface.tree.node_rect(node)
+        self.surfaces.root_node(root)?.surface.body.widgets()?.node_rect(node)
     }
 
     /// Returns title, close, and resize geometry for one window.
@@ -1834,13 +2101,13 @@ impl WindowManager {
     /// Returns popup content size through its typed handle for tests.
     #[cfg(test)]
     pub(crate) fn debug_popup_content_size(&self, popup: &PopupHandle) -> Option<Dimensioni> {
-        Some(self.popup_node(popup).ok()?.surface.tree.content_size())
+        Some(self.popup_node(popup).ok()?.surface.body.widgets()?.content_size())
     }
 
     /// Returns one retained node rectangle inside a popup for tests.
     #[cfg(test)]
     pub(crate) fn debug_popup_node_rect(&self, popup: &PopupHandle, node: crate::ui_node::RuntimeNodeId) -> Option<Recti> {
-        self.popup_node(popup).ok()?.surface.tree.node_rect(node)
+        self.popup_node(popup).ok()?.surface.body.widgets()?.node_rect(node)
     }
 
     /// Returns the active popup names in parent-to-child order for path tests.
@@ -1851,7 +2118,20 @@ impl WindowManager {
             .iter()
             .copied()
             .filter(|key| matches!(key, SurfaceKey::Popup(_)))
-            .filter_map(|key| self.surface(key).map(|surface| surface.name.clone()))
+            .filter_map(|key| {
+                let SurfaceKey::Popup(popup) = key else { return None };
+                let node = self.surfaces.popup_node(popup)?;
+                match node.popup()? {
+                    PopupState::Application { .. } => Some(node.surface.name.clone()),
+                    PopupState::Menu { trigger_slot } => {
+                        let parent = node.parent?;
+                        let label = self.menu_surface(parent)?.branch_label(*trigger_slot)?;
+                        let owner = self.surfaces.owning_root(key)?;
+                        let root_name = &self.surfaces.root_node(owner)?.surface.name;
+                        Some(format!("{root_name} {label} Menu"))
+                    }
+                }
+            })
             .collect()
     }
 
@@ -1871,43 +2151,39 @@ impl WindowManager {
     /// Returns each relational menu trigger rectangle in declaration order for tests.
     #[cfg(test)]
     pub(crate) fn debug_menu_anchor_rects(&self, root: RootId) -> Option<Vec<Option<Recti>>> {
-        // The explicit MenuId mapping excludes generic popups and preserves declaration order.
-        let root_state = self.surfaces.root_node(root)?.root()?;
+        self.surfaces.root_node(root)?.root()?.menu_bar.as_ref()?;
         Some(
-            root_state
-                .menu_popups
+            self.surfaces
+                .nodes
                 .iter()
-                .filter_map(|popup| {
-                    let node = self.surfaces.popup_node(*popup)?;
-                    let PopupAnchor::Menu(anchor) = &node.popup()?.anchor else { return None };
-                    let source = node.parent.and_then(|parent| self.surfaces.surface(parent)?.tree.node_rect(anchor.node));
-                    Some(source.and_then(|source| anchor.trigger_rect(source)))
+                .filter(|node| self.surfaces.owning_root(node.key) == Some(root))
+                .filter_map(|node| {
+                    let PopupState::Menu { trigger_slot } = node.popup()? else { return None };
+                    Some(node.parent.and_then(|parent| self.menu_surface(parent)?.slot_rect(*trigger_slot)))
                 })
                 .collect(),
         )
     }
 
+    /// Returns the full committed root-owned menu-bar allocation for layout tests.
+    #[cfg(test)]
+    pub(crate) fn debug_menu_bar_rect(&self, root: RootId) -> Option<Recti> {
+        self.surfaces.root_node(root)?.root()?.menu_bar.as_ref().map(MenuSurface::surface_rect)
+    }
+
     /// Returns active compact menu row rectangles in parent-to-child popup order for tests.
     #[cfg(test)]
     pub(crate) fn debug_active_menu_row_rects(&self) -> Vec<Vec<Recti>> {
-        // Map active popup identities back through the root's explicit MenuId translation.
+        // Active forest order is already parent-first; copy geometry directly from menu bodies.
         self.surfaces
             .visible_surfaces()
             .iter()
             .copied()
             .filter_map(|key| {
                 let SurfaceKey::Popup(popup_id) = key else { return None };
-                let owner = self.surfaces.owning_root(key)?;
-                let root = self.surfaces.root_node(owner)?.root()?;
-                let menu = root.menu.as_ref()?;
-                let menu_id = root.menu_popups.iter().position(|popup| *popup == popup_id)?;
                 let popup = self.surfaces.popup_node(popup_id)?;
-                if !matches!(popup.popup()?.anchor, PopupAnchor::Menu(_)) {
-                    return None;
-                }
-                let node = menu.popup_node(menu_id)?;
-                let source = popup.surface.tree.node_rect(node)?;
-                menu.popup_slot_rects(menu_id, source)
+                let PopupState::Menu { .. } = popup.popup()? else { return None };
+                Some(popup.surface.body.menu()?.slot_rects())
             })
             .collect()
     }

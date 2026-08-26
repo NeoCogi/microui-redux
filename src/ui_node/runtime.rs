@@ -116,6 +116,13 @@ impl UiRuntime {
         self.input_router.clear_transient_targets();
     }
 
+    /// Revokes pointer capture while preserving this tree's keyboard focus owner.
+    pub(crate) fn clear_pointer_capture(&mut self) {
+        // Manager-owned menu interaction must swallow the displaced gesture without making a
+        // pointer-only overlay erase the application's independent keyboard target.
+        self.input_router.invalidate_pointer_capture();
+    }
+
     /// Measures one persistent root node for auto-size without introducing a parallel projection.
     ///
     /// Root chrome owns the conversion from application constraints to the final outer extent.
@@ -267,12 +274,14 @@ impl UiRuntime {
     }
 
     /// Returns the current screen rectangle for a retained node after committed transforms.
+    #[cfg(test)]
     pub(crate) fn node_rect(&self, roots: &[Node], id: RuntimeNodeId) -> Option<Recti> {
         // Search each retained root with the transform committed by the latest layout pass.
         roots.iter().find_map(|root| Self::node_rect_from(root, id, self.root_transform))
     }
 
     /// Recursively resolves one node while accumulating its parent transform.
+    #[cfg(test)]
     fn node_rect_from(current: &Node, target: RuntimeNodeId, parent: Transform) -> Option<Recti> {
         // Resolve the first identity match; runtime node IDs are process-unique.
         if current.id() == target {

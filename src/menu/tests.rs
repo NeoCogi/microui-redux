@@ -45,9 +45,9 @@ fn empty_bar_has_zero_geometry() {
     assert_eq!(layout.marker_width, 0);
 }
 
-/// Proves that compilation retains only the bar shell and one leaf per logical popup.
+/// Proves that compilation retains recursive concrete surfaces without row nodes or identity maps.
 #[test]
-fn nested_declarations_compile_parent_first_without_row_nodes_or_strong_handles() {
+fn nested_declarations_compile_as_recursive_concrete_surfaces() {
     // Keep weak handles to items at two hierarchy depths so the final lifetime assertion covers
     // both nested and top-level popup ownership.
     let (deep_handle, deep_item) = MenuItem::create(MenuItemParameters::new("Deep action"));
@@ -57,30 +57,23 @@ fn nested_declarations_compile_parent_first_without_row_nodes_or_strong_handles(
         Menu::new("Edit").item(edit_item),
     ]);
 
-    // A one-node placeholder makes the expected bar/body shell budget exact: the vertical shell,
-    // the compact bar leaf, and the application body leaf.
-    let body = Node::widget(WidgetOption::NONE);
-    let (shell, popups, controller) = menu.compile("Topology", body);
+    let compiled = menu.compile();
 
-    // Recursive compilation reserves each parent before visiting its children, then resumes with
-    // the next top-level heading. These indices are the manager's stable popup-path vocabulary.
-    let parents: Vec<_> = popups.iter().map(|popup| popup.parent).collect();
-    assert_eq!(parents, [None, Some(0), Some(1), None]);
-    assert_eq!(popups.len(), 4, "File, Recent, Deep, and Edit each require one popup");
-
-    // Logical rows live as values inside each MenuSurface, so every popup content tree is exactly
-    // one retained node. The test-only controller identities must name those same four leaves.
-    for (menu_id, popup) in popups.iter().enumerate() {
-        assert_eq!(popup.content.debug_node_count(), 1, "popup {menu_id} unexpectedly retained row nodes");
-        assert_eq!(controller.popup_node(menu_id), Some(popup.content.id()));
-    }
-    assert_eq!(shell.debug_node_count(), 3, "the bar/body shell must remain a three-node tree");
-    assert_eq!(shell.debug_node_count() + popups.len(), 7, "the complete declaration must retain seven nodes");
-    assert!(deep_handle.is_alive() && edit_handle.is_alive(), "compiled popup leaves own their item state");
+    // The bar has two headings. File owns Recent, Recent owns Deep, and Edit is a sibling; no flat
+    // vector or parent index is required to recover this declaration topology.
+    assert_eq!(compiled.bar.rows.len(), 2);
+    assert_eq!(compiled.popups.len(), 2);
+    assert_eq!(compiled.popups[0].trigger_slot, 0);
+    assert_eq!(compiled.popups[0].children.len(), 1);
+    assert_eq!(compiled.popups[0].children[0].children.len(), 1);
+    assert_eq!(compiled.popups[0].children[0].children[0].surface.rows.len(), 1);
+    assert_eq!(compiled.popups[1].trigger_slot, 1);
+    assert_eq!(compiled.popups[1].surface.rows.len(), 1);
+    assert!(deep_handle.is_alive() && edit_handle.is_alive(), "compiled surfaces own their item records");
 
     // Dropping every compiled output removes all strong owners. Application handles and event
     // endpoints are deliberately weak, so neither can extend a destroyed menu's lifetime.
-    drop((shell, popups, controller));
+    drop(compiled);
     assert!(!deep_handle.is_alive() && !edit_handle.is_alive());
 }
 
@@ -92,7 +85,7 @@ fn popup_text_region_separates_labels_from_shortcuts_and_submenu_arrows() {
     let atlas = test_atlas();
     let style = Style::default();
     let (_, item) = MenuItem::create(MenuItemParameters::new("aaaa").shortcut_hint("bbbb"));
-    let rows = vec![MenuSlot::Item(item.state), MenuSlot::Branch { label: "aaaaaa".into(), target: 1 }];
+    let rows = vec![MenuSlot::Item(item.record), MenuSlot::Branch { label: "aaaaaa".into() }];
     let layout = layout_popup(&rows, &style, &atlas);
     let padding = style.padding.max(1);
 

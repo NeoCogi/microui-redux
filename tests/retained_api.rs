@@ -179,17 +179,21 @@ fn downstream_window_owns_declarative_menu_and_live_concrete_items() {
 
     // Public state mutations address the concrete retained items directly. Text getters return
     // owned snapshots, while setters update the compact surface without exposing its private node.
-    assert_eq!(open.label().as_deref(), Some("Open"));
-    assert_eq!(open.shortcut_hint().flatten().as_deref(), Some("Ctrl+O"));
-    assert_eq!(save.shortcut_hint(), Some(None));
-    assert_eq!(save.set_label("Save As"), Some(()));
-    assert_eq!(save.set_shortcut_hint(Some("Ctrl+Shift+S".into())), Some(()));
-    assert_eq!(save.set_enabled(true), Some(()));
-    assert_eq!(word_wrap.set_mark(MenuItemMark::Checked(false)), Some(()));
-    assert_eq!(save.label().as_deref(), Some("Save As"));
-    assert_eq!(save.shortcut_hint().flatten().as_deref(), Some("Ctrl+Shift+S"));
-    assert_eq!(save.is_enabled(), Some(true));
-    assert_eq!(word_wrap.mark(), Some(MenuItemMark::Checked(false)));
+    assert_eq!(context.ui().menu_item(&open).unwrap().label, "Open");
+    assert_eq!(context.ui().menu_item(&open).unwrap().shortcut_hint.as_deref(), Some("Ctrl+O"));
+    assert_eq!(context.ui().menu_item(&save).unwrap().shortcut_hint, None);
+    {
+        let mut ui = context.ui();
+        let save = ui.menu_item_mut(&save).unwrap();
+        save.label = "Save As".into();
+        save.shortcut_hint = Some("Ctrl+Shift+S".into());
+        save.enabled = true;
+        ui.menu_item_mut(&word_wrap).unwrap().mark = MenuItemMark::Checked(false);
+    }
+    assert_eq!(context.ui().menu_item(&save).unwrap().label, "Save As");
+    assert_eq!(context.ui().menu_item(&save).unwrap().shortcut_hint.as_deref(), Some("Ctrl+Shift+S"));
+    assert!(context.ui().menu_item(&save).unwrap().enabled);
+    assert_eq!(context.ui().menu_item(&word_wrap).unwrap().mark, MenuItemMark::Checked(false));
 
     let model = MenuModel { save, word_wrap, invoked: Vec::new() };
     // Context owns the complete window, including its compact menu data and private surfaces.

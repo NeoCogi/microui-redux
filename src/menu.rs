@@ -29,31 +29,36 @@
 
 //! Compact declarative window menus.
 //!
-//! A menu bar compiles to one retained leaf for the bar and one retained leaf for each popup. Each
-//! leaf measures, hit-tests, anchors, and paints all of its logical slots from the same leaf-local
-//! data. Menu rows are therefore values rather than retained widget subtrees: there is no per-row
-//! container, interaction node, or three-cell presentation tree.
+//! A menu bar compiles to one manager-owned surface for the bar and one surface for each popup.
+//! Each surface measures, hit-tests, anchors, and paints all logical slots from the same concrete
+//! data. Menu rows are values rather than retained widget subtrees: there is no per-row container,
+//! interaction node, or three-cell presentation tree.
 
 use std::{
     cell::RefCell,
-    rc::{Rc, Weak},
+    num::NonZeroU64,
+    rc::Rc,
+    sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::ui_node::RuntimeNodeId;
 use crate::ui_node::widgets::content_height;
 use crate::{
-    AtlasHandle, Color, Constraints, ControlColor, Dimensioni, FontChoice, FontRole, LeafWidget, Linear, LinearItem, LinearParameters, MouseButton, Node,
-    Recti, Style, TypedWidgetHandle, UiInputEvent, Widget, WidgetEventPortHandle, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
+    AtlasHandle, Color, Constraints, ControlColor, Dimensioni, FontChoice, FontRole, MouseButton, Recti, Style, UiInputEvent, Vec2i, WidgetEventPortHandle,
+    WidgetOption, WidgetPaintCtx,
 };
 
 #[cfg(test)]
 mod tests;
 
-/// Compact index of one parent-first compiled popup.
-type MenuId = usize;
-
 /// Smallest marker column that can contain the atlas-independent radio fallback.
 const MIN_MARKER_COLUMN_WIDTH: i32 = 3;
+
+/// Process-wide allocator for private menu-item identities created before a manager exists.
+///
+/// Relaxed ordering is sufficient because uniqueness, rather than cross-thread publication, is the
+/// only property required. The application-facing handle remains non-owning through its weak event
+/// endpoint even though its compact identifier is copied by value.
+static NEXT_MENU_ITEM_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Visual state displayed in the optional marker gutter of one menu item.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -148,22 +153,51 @@ pub struct MenuItemSubmitted;
 
 impl crate::WidgetEvent for MenuItemSubmitted {}
 
-/// Mutable semantic state shared by one menu definition and its weak application handle.
-struct MenuItemState {
-    /// Mutable user-visible label.
-    label: String,
-    /// Mutable interaction state.
-    enabled: bool,
-    /// Mutable check or radio presentation.
-    mark: MenuItemMark,
-    /// Mutable presentation-only accelerator text.
-    shortcut_hint: Option<String>,
-    /// Font used consistently for measurement and paint.
-    font: FontChoice,
+/// Failure reported when a [`Ui`](crate::Ui) cannot resolve one menu-item capability.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum MenuItemAccessError {
+    /// The item is unmounted, belongs to another UI manager, or has been destroyed.
+    UnknownItem,
+}
+
+/// Stable private identity assigned while an item is still an unmounted declaration.
+///
+/// Creation cannot borrow a window manager, so this process-unique value crosses the declaration
+/// boundary and later lets the concrete surface forest locate the manager-owned record directly.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub(crate) struct MenuItemId(NonZeroU64);
+
+impl MenuItemId {
+    /// Allocates an identity that is never reused during the process lifetime.
+    fn next() -> Self {
+        // Fetching the maximum value would make the following allocation wrap to zero, which cannot
+        // be represented by `NonZeroU64`; fail at the allocation site instead of aliasing an item.
+        let raw = NEXT_MENU_ITEM_ID.fetch_add(1, Ordering::Relaxed);
+        assert!(raw != u64::MAX, "menu item identity space exhausted");
+        Self(NonZeroU64::new(raw).expect("menu item identity allocator returned zero"))
+    }
+}
+
+/// Concrete semantic record owned by a declaration and then by exactly one menu surface.
+pub(crate) struct MenuItemRecord {
+    /// Stable lookup identity copied into the application-facing weak handle.
+    id: MenuItemId,
+    /// Mutable presentation and interaction values stored without a second mirror type.
+    parameters: MenuItemParameters,
     /// Strong source of this item's independently subscribable typed event.
     submitted_event: Rc<RefCell<crate::event::WidgetEventPort<MenuItemSubmitted>>>,
-    /// Weak invalidation link installed when the item enters its unique popup surface.
-    owner: Option<TypedWidgetHandle<MenuSurface>>,
+}
+
+impl MenuItemRecord {
+    /// Borrows the concrete public presentation record stored by this menu row.
+    pub(crate) fn parameters(&self) -> &MenuItemParameters {
+        &self.parameters
+    }
+
+    /// Mutably borrows the concrete public presentation record stored by this menu row.
+    pub(crate) fn parameters_mut(&mut self) -> &mut MenuItemParameters {
+        &mut self.parameters
+    }
 }
 
 /// Uniquely owned declaration value for one actionable menu row.
@@ -171,37 +205,33 @@ struct MenuItemState {
 /// Move this value into [`Menu::item`]. Keep the separately returned [`MenuItemHandle`] when the
 /// application needs to subscribe or change live presentation state after compilation into a leaf.
 pub struct MenuItem {
-    /// Sole strong state owner until this declaration moves into a compiled popup leaf.
-    state: Rc<RefCell<MenuItemState>>,
+    /// Sole semantic owner until this declaration moves into a manager-owned menu surface.
+    record: MenuItemRecord,
 }
 
 impl MenuItem {
     /// Creates one uniquely owned item declaration and its weak application capability.
     pub fn create(parameters: MenuItemParameters) -> (MenuItemHandle, Self) {
-        // Allocate semantic state once; no retained row or visual-cell allocations are created.
+        // Only the typed event queue is shared because subscriptions are weak capabilities. The
+        // semantic record itself remains a plain value throughout declaration and manager ownership.
         let submitted_event = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
-        let state = Rc::new(RefCell::new(MenuItemState {
-            label: parameters.label,
-            enabled: parameters.enabled,
-            mark: parameters.mark,
-            shortcut_hint: parameters.shortcut_hint,
-            font: parameters.font,
-            submitted_event: submitted_event.clone(),
-            owner: None,
-        }));
+        let id = MenuItemId::next();
         let handle = MenuItemHandle {
-            state: Rc::downgrade(&state),
+            id,
             submitted: WidgetEventPortHandle::new(&submitted_event),
         };
-        (handle, Self { state })
+        let item = Self {
+            record: MenuItemRecord { id, parameters, submitted_event },
+        };
+        (handle, item)
     }
 }
 
 /// Cloneable weak access to one item retained by a compiled menu.
 #[derive(Clone)]
 pub struct MenuItemHandle {
-    /// Weak semantic access that cannot keep an unmounted or destroyed menu alive.
-    state: Weak<RefCell<MenuItemState>>,
+    /// Private semantic identity resolved only through an exclusive [`Ui`](crate::Ui) façade.
+    pub(crate) id: MenuItemId,
     /// Weak native event capability returned without borrowing semantic state.
     submitted: WidgetEventPortHandle<MenuItemSubmitted>,
 }
@@ -209,88 +239,14 @@ pub struct MenuItemHandle {
 impl MenuItemHandle {
     /// Returns whether a declaration or compiled menu still owns this item.
     pub fn is_alive(&self) -> bool {
-        // Observe liveness without temporarily retaining the item allocation.
-        self.state.strong_count() != 0
+        // The declaration or mounted record strongly owns this event port for exactly its lifetime.
+        self.submitted.is_alive()
     }
 
     /// Returns this specific item's native submission endpoint.
     pub fn submitted(&self) -> WidgetEventPortHandle<MenuItemSubmitted> {
         // The returned clone remains weak and preserves item ownership semantics.
         self.submitted.clone()
-    }
-
-    /// Returns a snapshot of the current user-visible label while the item is alive.
-    pub fn label(&self) -> Option<String> {
-        // Clone the presentation value so no RefCell borrow escapes this method.
-        self.read(|state| state.label.clone())
-    }
-
-    /// Replaces the user-visible label without emitting a submission.
-    pub fn set_label(&self, label: impl Into<String>) -> Option<()> {
-        // A label mutation always requests fresh popup measurement.
-        self.update(label.into(), |state, label| state.label = label)
-    }
-
-    /// Returns the current enabled state while the item is alive.
-    pub fn is_enabled(&self) -> Option<bool> {
-        // Copy the boolean while holding only a brief immutable borrow.
-        self.read(|state| state.enabled)
-    }
-
-    /// Enables or disables this specific item immediately.
-    pub fn set_enabled(&self, enabled: bool) -> Option<()> {
-        // The compact surface consults this value directly during action resolution and paint.
-        self.update(enabled, |state, enabled| state.enabled = enabled)
-    }
-
-    /// Returns the current check or radio presentation while the item is alive.
-    pub fn mark(&self) -> Option<MenuItemMark> {
-        // Copy the marker so no shared-state borrow crosses the API boundary.
-        self.read(|state| state.mark)
-    }
-
-    /// Replaces this item's check or radio presentation.
-    pub fn set_mark(&self, mark: MenuItemMark) -> Option<()> {
-        // Changing marker role may add or remove the popup's shared marker gutter.
-        self.update(mark, |state, mark| state.mark = mark)
-    }
-
-    /// Returns the optional shortcut snapshot while this item remains alive.
-    pub fn shortcut_hint(&self) -> Option<Option<String>> {
-        // The outer option reports handle access; the inner option preserves an absent live hint.
-        self.read(|state| state.shortcut_hint.clone())
-    }
-
-    /// Replaces presentation-only shortcut text without registering a keyboard shortcut.
-    pub fn set_shortcut_hint(&self, shortcut_hint: Option<String>) -> Option<()> {
-        // Accelerator width participates in shared text-region measurement.
-        self.update(shortcut_hint, |state, shortcut_hint| state.shortcut_hint = shortcut_hint)
-    }
-
-    /// Reads one copied or cloned property without exposing the shared-state borrow.
-    fn read<T>(&self, read: impl FnOnce(&MenuItemState) -> T) -> Option<T> {
-        // Upgrade and borrow only for the callback so dead or currently mutating items return `None`.
-        let state = self.state.upgrade()?;
-        let state = state.try_borrow().ok()?;
-        Some(read(&state))
-    }
-
-    /// Applies one typed state mutation and invalidates the unique owning popup surface.
-    fn update<T>(&self, value: T, update: impl FnOnce(&mut MenuItemState, T)) -> Option<()> {
-        // End the state borrow before invalidating; one conservative measurement path keeps all
-        // property mutations correct without a second classification or invalidation protocol.
-        let state = self.state.upgrade()?;
-        let owner = {
-            let mut state = state.try_borrow_mut().ok()?;
-            update(&mut state, value);
-            state.owner.clone()
-        };
-        if let Some(owner) = owner {
-            // Dirty the leaf and its ancestor path so automatic popup sizing remains authoritative.
-            let invalidated = owner.try_update(|_| ());
-            debug_assert!(invalidated.is_some(), "a retained item must not outlive its menu surface");
-        }
-        Some(())
     }
 }
 
@@ -307,64 +263,21 @@ impl MenuBar {
         Self { menus: menus.into_iter().collect() }
     }
 
-    /// Compiles declarations into one bar leaf, one leaf per popup, and one controller.
-    pub(crate) fn compile(self, window_name: &str, content: Node) -> (Node, Vec<CompiledMenuPopup>, MenuController) {
-        // Flatten hierarchy once. Each resulting popup later moves its rows into its own leaf, so
-        // the controller shares only one tiny pending-action cell rather than a second topology.
-        let mut flat = Vec::new();
+    /// Compiles declarations into one concrete bar and recursive popup transport values.
+    pub(crate) fn compile(self) -> CompiledMenu {
+        // Preserve declaration topology instead of manufacturing a parallel `MenuId` namespace.
+        // The manager consumes each child recursively and makes the forest parent edge authoritative.
         let mut headings = Vec::with_capacity(self.menus.len());
+        let mut popups = Vec::with_capacity(self.menus.len());
         for (slot, menu) in self.menus.into_iter().enumerate() {
-            let (target, label) = flatten_menu(menu, None, slot, &mut flat);
-            headings.push(MenuSlot::Branch { label, target });
+            let (label, popup) = CompiledMenuPopup::from_declaration(menu, slot);
+            headings.push(MenuSlot::Branch { label });
+            popups.push(popup);
         }
-        let pending = Rc::new(RefCell::new(None));
-
-        // The bar remains an ordinary child of a two-item vertical shell above application content.
-        let (bar_handle, bar_node) = Node::typed_widget(MenuSurface::new(headings, false, pending.clone()));
-        let bar_surface = MenuSurfaceRef { node: bar_node.id(), handle: bar_handle };
-        let (_, shell) = Linear::create(LinearParameters::vertical([LinearItem::content(bar_node), LinearItem::flex(content, 1.0)]));
-
-        // Menus are parent-first, so every child anchor can clone its parent surface immediately.
-        let mut popup_surfaces: Vec<MenuSurfaceRef> = Vec::with_capacity(flat.len());
-        let mut popups = Vec::with_capacity(flat.len());
-        for menu in flat {
-            let FlatMenu { label, parent, trigger_slot, rows } = menu;
-            let (surface_handle, surface_node) = Node::typed_widget(MenuSurface::new(rows, true, pending.clone()));
-            let surface = MenuSurfaceRef {
-                node: surface_node.id(),
-                handle: surface_handle,
-            };
-
-            // Parent-first flattening guarantees that a child can clone its source surface here.
-            let source = match parent {
-                Some(parent) => &popup_surfaces[parent],
-                None => &bar_surface,
-            };
-            let anchor = MenuAnchor {
-                node: source.node,
-                surface: source.handle.clone(),
-                slot: trigger_slot,
-            };
-
-            // Attach each item through the just-created surface without allocating backlink arrays.
-            let attached = surface.handle.try_read(|menu| menu.attach_items(&surface.handle));
-            debug_assert!(attached.is_some(), "a new menu surface must remain alive during compilation");
-            popup_surfaces.push(surface);
-            popups.push(CompiledMenuPopup {
-                parent,
-                name: format!("{window_name} {label} Menu"),
-                anchor,
-                content: surface_node,
-            });
+        CompiledMenu {
+            bar: MenuSurface::new(headings, false),
+            popups,
         }
-
-        let controller = MenuController {
-            pending,
-            #[cfg(test)]
-            popups: popup_surfaces,
-        };
-        // A tuple avoids retaining a one-use transport wrapper at the manager ownership seam.
-        (shell, popups, controller)
     }
 }
 
@@ -415,70 +328,25 @@ enum MenuEntry {
     Submenu(Menu),
 }
 
-/// Temporary parent-first popup record consumed during surface construction.
-struct FlatMenu {
-    /// Direct label used to name the popup surface.
-    ///
-    /// Keeping only the direct label avoids retaining and formatting recursive diagnostic paths;
-    /// [`MenuId`] remains the authoritative, unambiguous runtime identity.
-    label: String,
-    /// Direct parent menu, or `None` for a bar heading.
-    parent: Option<MenuId>,
-    /// Heading index or parent-row index that triggers this menu.
-    trigger_slot: usize,
-    /// Direct compact rows moved into this popup's sole leaf.
-    rows: Vec<MenuSlot>,
-}
-
 /// Compact runtime representation of one bar heading or popup row.
-enum MenuSlot {
-    /// Shared live item state owned strongly by this row.
-    Item(Rc<RefCell<MenuItemState>>),
+pub(crate) enum MenuSlot {
+    /// Concrete live item record owned directly by this row.
+    Item(MenuItemRecord),
     /// Non-interactive visual rule.
     Separator,
-    /// Label and indexed popup opened by either a bar heading or submenu row.
+    /// Label whose child popup is resolved from the surface forest's direct edges.
     Branch {
         /// Immutable user-visible branch label.
         label: String,
-        /// Compiled popup index staged when this slot is pressed.
-        target: MenuId,
     },
 }
 
-/// Flattens one declaration and returns its stable index plus its presentation label.
-fn flatten_menu(menu: Menu, parent: Option<MenuId>, trigger_slot: usize, flat: &mut Vec<FlatMenu>) -> (MenuId, String) {
-    // Reserve the parent index before recursion, then return each consumed label to its caller so
-    // exactly one leaf owns it: the bar for top-level menus or the parent row for child menus.
-    let Menu { label, entries } = menu;
-    let id = flat.len();
-    flat.push(FlatMenu {
-        label: label.clone(),
-        parent,
-        trigger_slot,
-        rows: Vec::new(),
-    });
-
-    let mut rows = Vec::with_capacity(entries.len());
-    for (slot, entry) in entries.into_iter().enumerate() {
-        rows.push(match entry {
-            MenuEntry::Item(item) => MenuSlot::Item(item.state),
-            MenuEntry::Separator => MenuSlot::Separator,
-            MenuEntry::Submenu(child) => {
-                let (target, label) = flatten_menu(child, Some(id), slot, flat);
-                MenuSlot::Branch { label, target }
-            }
-        });
-    }
-    flat[id].rows = rows;
-    (id, label)
-}
-
-/// Semantic action transferred from a menu surface after its widget update finishes.
-pub(crate) enum MenuAction {
-    /// Open or extend the active path to one compiled popup index.
-    Open(MenuId),
-    /// Close the path and emit through one enabled item's short-lived native endpoint.
-    Invoke(Rc<RefCell<crate::event::WidgetEventPort<MenuItemSubmitted>>>),
+/// Concrete result of one left press routed to a menu surface.
+pub(crate) enum MenuPress {
+    /// Open, toggle, or replace the child attached to this local branch slot.
+    OpenSlot(usize),
+    /// Close the complete active path after an enabled item queued its typed event.
+    Close,
 }
 
 /// Shared output of menu measurement, hit testing, anchoring, and paint geometry.
@@ -492,14 +360,12 @@ struct MenuSurfaceLayout {
     marker_width: i32,
 }
 
-/// The only retained widget type used to present an entire menu bar or popup.
-struct MenuSurface {
-    /// Bar headings or popup rows owned directly by this one retained leaf.
+/// Manager-owned concrete presentation for one complete menu bar or popup.
+pub(crate) struct MenuSurface {
+    /// Bar headings or popup rows owned directly by this surface.
     rows: Vec<MenuSlot>,
     /// Whether rows flow vertically and paint popup-only marker and arrow decoration.
     popup: bool,
-    /// Tiny action cell shared with sibling menu leaves and the owning window manager.
-    pending: Rc<RefCell<Option<MenuAction>>>,
     /// Slot currently under the pointer, or `None` when no logical row is hovered.
     ///
     /// Absence is represented structurally so no valid future slot index can collide with an
@@ -511,165 +377,244 @@ struct MenuSurface {
     /// This is paint-only state: popup ownership and the authoritative active path remain in the
     /// window manager.
     open_slot: Option<usize>,
-    /// Latest retained geometry shared by update, anchoring, and paint.
-    geometry: RefCell<MenuSurfaceLayout>,
+    /// Whether this surface consumed the current left-button gesture.
+    ///
+    /// The manager uses this concrete bit only to keep drag/release away from application trees; menu
+    /// actions themselves remain press-only and never acquire keyboard focus.
+    captured: bool,
+    /// Screen-space content rectangle assigned during the latest layout commit.
+    rect: Recti,
+    /// Screen-space viewport clip shared by hit testing and paint.
+    clip: Recti,
+    /// Latest local geometry shared by update, anchoring, and paint.
+    geometry: MenuSurfaceLayout,
 }
 
 impl MenuSurface {
-    /// Creates one compact retained presentation leaf.
-    fn new(rows: Vec<MenuSlot>, popup: bool, pending: Rc<RefCell<Option<MenuAction>>>) -> Self {
-        // All presentation data stays leaf-local; only one action slot crosses the manager seam.
+    /// Creates one compact concrete presentation surface.
+    fn new(rows: Vec<MenuSlot>, popup: bool) -> Self {
+        // Geometry and transient pointer state begin empty and become authoritative during layout.
         Self {
             rows,
             popup,
-            pending,
             hovered_slot: None,
             open_slot: None,
-            geometry: RefCell::new(MenuSurfaceLayout::default()),
+            captured: false,
+            rect: Recti::default(),
+            clip: Recti::default(),
+            geometry: MenuSurfaceLayout::default(),
         }
     }
 
-    /// Installs this leaf as the weak invalidation owner of each direct item row.
-    fn attach_items(&self, owner: &TypedWidgetHandle<Self>) {
-        // Unique declarations guarantee no prior owner; bar slots contain no item variants.
-        for row in &self.rows {
-            if let MenuSlot::Item(item) = row {
-                let previous = item.borrow_mut().owner.replace(owner.clone());
-                debug_assert!(previous.is_none(), "a menu item can belong to only one popup");
-            }
-        }
-    }
-
-    /// Resolves one local slot into a manager-consumed semantic action.
-    fn action_for(&self, slot: usize) -> Option<MenuAction> {
-        // Disabled items and separators intentionally produce no action and leave the path open.
-        match self.rows.get(slot)? {
-            MenuSlot::Branch { target, .. } => Some(MenuAction::Open(*target)),
-            MenuSlot::Item(item) => {
-                let item = item.borrow();
-                // No application dispatch can intervene between this check and manager emission.
-                item.enabled.then(|| MenuAction::Invoke(item.submitted_event.clone()))
-            }
-            MenuSlot::Separator => None,
-        }
-    }
-
-    /// Measures all logical slots and caches the exact geometry used by later surface phases.
-    ///
-    /// This ordinary method is the concrete menu implementation. The retained-widget trait below
-    /// is intentionally only an adapter while menu surfaces still travel through `Node`.
-    fn measure_surface(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
-        // Menus keep intrinsic slot geometry: Linear assigns the bar its desired height, while the
-        // manager auto-sizes and viewport-clips popups. Cache those same rectangles for anchors.
-        let layout = if self.popup {
+    /// Returns this surface's intrinsic menu extent and refreshes local slot geometry.
+    pub(crate) fn measure(&mut self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+        // Menus deliberately keep intrinsic row geometry. Root layout stretches only the bar's
+        // assigned width, while popup outer auto-size consumes this exact preferred size.
+        self.geometry = if self.popup {
             layout_popup(&self.rows, style, atlas)
         } else {
             layout_bar(&self.rows, style, atlas)
         };
-        let size = layout.size;
-        *self.geometry.borrow_mut() = layout;
-        size
+        self.geometry.size
     }
 
-    /// Applies one routed input event to hover presentation and the manager action bridge.
-    ///
-    /// Keeping this behavior on the concrete surface makes pointer policy reusable when the window
-    /// manager owns menu bodies directly; the widget adapter contributes no independent state.
-    fn update_surface(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
-        // Losing root-local hover clears row presentation even when this widget receives no event.
-        if !ctx.hovered() {
+    /// Commits one screen-space allocation without changing intrinsic slot rectangles.
+    pub(crate) fn layout(&mut self, rect: Recti, viewport: Recti) {
+        // Slots remain local so the same cached values feed painting and relational anchors. The bar
+        // may be wider than its headings; popup surfaces retain their measured intrinsic allocation.
+        self.rect = rect;
+        self.clip = viewport;
+    }
+
+    /// Returns whether this concrete surface owns a menu pointer gesture.
+    pub(crate) fn has_capture(&self) -> bool {
+        self.captured
+    }
+
+    /// Returns whether one screen point lies in this surface's allocated and clipped region.
+    pub(crate) fn contains(&self, point: Vec2i) -> bool {
+        self.rect.contains(&point) && self.clip.contains(&point)
+    }
+
+    /// Clears hover and capture without changing the forest-derived open highlight.
+    pub(crate) fn clear_pointer_targets(&mut self) {
+        // Open state is synchronized separately from active forest edges and must survive ordinary
+        // hover loss until the manager commits a different popup path.
+        self.hovered_slot = None;
+        self.captured = false;
+    }
+
+    /// Routes one pointer event and returns a concrete manager action plus consumption state.
+    pub(crate) fn route_pointer(&mut self, input: &UiInputEvent) -> MenuRoute {
+        let Some(position) = input.position() else {
+            return MenuRoute::unhandled();
+        };
+        let inside = self.rect.contains(&position) && self.clip.contains(&position);
+        if !inside && !self.captured {
             self.hovered_slot = None;
+            return MenuRoute::unhandled();
         }
-        let Some(input) = input else { return };
-        let Some(position) = input.position() else { return };
-        // Reuse clip-aware runtime hit testing against the exact rectangles retained by measure.
-        let slot = self.geometry.borrow().slots.iter().position(|slot| ctx.mouse_over(*slot, position));
+
+        // Slot geometry is local while normalized input is screen-space. Translate once and use the
+        // same rectangles later painted by `paint`, including full-row separator occlusion.
+        let local = Vec2i::new(position.x.saturating_sub(self.rect.x), position.y.saturating_sub(self.rect.y));
+        let slot = inside.then(|| self.geometry.slots.iter().position(|bounds| bounds.contains(&local))).flatten();
         self.hovered_slot = slot;
 
-        // Only the left press commits menu policy; drag and release remain capture tail.
+        // Only the left press commits policy. Capture keeps the remainder of that physical gesture
+        // out of the application tree even when popup closure removes this surface from traversal.
         if matches!(input, UiInputEvent::MouseDown { button, .. } if button.intersects(MouseButton::LEFT)) {
-            // Disabled and separator slots overwrite with `None`, so no stale action can survive.
-            *self.pending.borrow_mut() = slot.and_then(|slot| self.action_for(slot));
+            self.captured = true;
+            let press = slot.and_then(|slot| match self.rows.get_mut(slot)? {
+                MenuSlot::Branch { .. } => Some(MenuPress::OpenSlot(slot)),
+                MenuSlot::Item(item) if item.parameters.enabled => {
+                    // Emission only queues a typed value. Application code cannot run until the
+                    // manager has consumed `Close` and released every concrete surface borrow.
+                    item.submitted_event.borrow_mut().emit(MenuItemSubmitted);
+                    Some(MenuPress::Close)
+                }
+                MenuSlot::Item(_) | MenuSlot::Separator => None,
+            });
+            return MenuRoute::handled(press);
         }
+        if matches!(input, UiInputEvent::MouseUp { button, .. } if button.intersects(MouseButton::LEFT)) {
+            self.captured = false;
+        }
+        MenuRoute::handled(None)
     }
 
     /// Paints the complete bar or popup from the geometry shared with measurement and hit testing.
-    ///
-    /// Drawing remains a single background fill plus one logical-slot loop. This method deliberately
-    /// accepts the existing concrete paint context so extraction changes ownership seams, not pixels.
-    fn paint_surface(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
+    pub(crate) fn paint(&mut self, display_list: &mut crate::render::DisplayList, style: &Style, atlas: &AtlasHandle) {
+        // Reuse the concrete built-in paint services without retaining a `Widget`, node identity, or
+        // runtime. This keeps control text and atlas clipping exactly aligned with other controls.
+        let mut ctx = WidgetPaintCtx::new_with_content_geometry(
+            self.rect,
+            display_list,
+            self.clip,
+            style,
+            atlas,
+            self.hovered_slot.is_some(),
+            false,
+            false,
+            self.captured,
+        );
         // One uninterrupted fill and one slot loop replace container, row, and cell paint passes.
         let style = *ctx.style();
-        let layout = self.geometry.borrow();
         ctx.draw_rect(ctx.local_rect(), style.menu_background);
         for (slot, entry) in self.rows.iter().enumerate() {
-            let row = layout.slots[slot];
+            let row = self.geometry.slots[slot];
             match entry {
                 MenuSlot::Item(item) => {
-                    let item = item.borrow();
-                    if item.enabled && self.hovered_slot == Some(slot) {
+                    if item.parameters.enabled && self.hovered_slot == Some(slot) {
                         ctx.draw_rect(row, style.colors[ControlColor::ButtonHover as usize]);
                     }
-                    let marker = Recti::new(row.x, row.y, layout.marker_width.max(0), row.height);
-                    let text = text_region(row, layout.marker_width);
+                    let marker = Recti::new(row.x, row.y, self.geometry.marker_width.max(0), row.height);
+                    let text = text_region(row, self.geometry.marker_width);
                     // Preserve the theme hue while subduing disabled rows through opacity alone.
                     let mut color = style.menu_foreground;
-                    if !item.enabled {
+                    if !item.parameters.enabled {
                         color.a = ((u16::from(color.a) * 45) / 100).max(1) as u8;
                     }
-                    paint_item_marker(ctx, marker, item.mark, color);
-                    let font = style.resolve_font_choice(item.font);
+                    paint_item_marker(&mut ctx, marker, item.parameters.mark, color);
+                    let font = style.resolve_font_choice(item.parameters.font);
                     // Both strings share one clip so control padding is applied exactly once.
-                    ctx.draw_control_text_color_with_font(font, &item.label, text, color, WidgetOption::NONE);
-                    if let Some(hint) = &item.shortcut_hint {
+                    ctx.draw_control_text_color_with_font(font, &item.parameters.label, text, color, WidgetOption::NONE);
+                    if let Some(hint) = &item.parameters.shortcut_hint {
                         ctx.draw_control_text_color_with_font(font, hint, text, color, WidgetOption::ALIGN_RIGHT);
                     }
                 }
-                MenuSlot::Separator => paint_separator(ctx, row),
-                MenuSlot::Branch { label, .. } => {
+                MenuSlot::Separator => paint_separator(&mut ctx, row),
+                MenuSlot::Branch { label } => {
                     if self.open_slot == Some(slot) {
                         ctx.draw_rect(row, style.colors[ControlColor::ButtonFocus as usize]);
                     } else if self.hovered_slot == Some(slot) {
                         ctx.draw_rect(row, style.colors[ControlColor::ButtonHover as usize]);
                     }
                     // Bar headings use their full slot; popup branches reserve the marker gutter.
-                    let text = if self.popup { text_region(row, layout.marker_width) } else { row };
+                    let text = if self.popup { text_region(row, self.geometry.marker_width) } else { row };
                     let font = style.resolve_font_choice(FontChoice::Role(FontRole::Body));
                     ctx.draw_control_text_color_with_font(font, label, text, style.menu_foreground, WidgetOption::NONE);
                     if self.popup {
-                        paint_submenu_arrow(ctx, text);
+                        paint_submenu_arrow(&mut ctx, text);
                     }
                 }
             }
         }
     }
-}
 
-impl LeafWidget for MenuSurface {
-    /// Adapts retained-tree measurement to the concrete menu-surface implementation.
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
-        // Keep the compatibility seam behavior-free so direct manager ownership can remove it later.
-        self.measure_surface(style, atlas, constraints)
+    /// Resolves one local slot into screen coordinates for popup anchoring and diagnostics.
+    pub(crate) fn slot_rect(&self, slot: usize) -> Option<Recti> {
+        // Translation occurs at the concrete owner boundary; no runtime node lookup is involved.
+        self.geometry.slots.get(slot).copied().map(|bounds| {
+            Recti::new(
+                self.rect.x.saturating_add(bounds.x),
+                self.rect.y.saturating_add(bounds.y),
+                bounds.width,
+                bounds.height,
+            )
+        })
+    }
+
+    /// Copies every committed slot rectangle into screen space for focused manager tests.
+    #[cfg(test)]
+    pub(crate) fn slot_rects(&self) -> Vec<Recti> {
+        self.geometry.slots.iter().enumerate().filter_map(|(slot, _)| self.slot_rect(slot)).collect()
+    }
+
+    /// Returns the label of one branch slot for test-only diagnostic synthesis.
+    #[cfg(test)]
+    pub(crate) fn branch_label(&self, slot: usize) -> Option<&str> {
+        match self.rows.get(slot)? {
+            MenuSlot::Branch { label } => Some(label),
+            MenuSlot::Item(_) | MenuSlot::Separator => None,
+        }
+    }
+
+    /// Returns the committed full surface allocation for root-layout tests.
+    #[cfg(test)]
+    pub(crate) fn surface_rect(&self) -> Recti {
+        self.rect
+    }
+
+    /// Replaces the paint-only child highlight derived from active forest edges.
+    pub(crate) fn set_open_slot(&mut self, slot: Option<usize>) {
+        self.open_slot = slot;
+    }
+
+    /// Returns a manager-owned item record by stable private identity.
+    pub(crate) fn item(&self, id: MenuItemId) -> Option<&MenuItemRecord> {
+        self.rows.iter().find_map(|row| match row {
+            MenuSlot::Item(item) if item.id == id => Some(item),
+            MenuSlot::Item(_) | MenuSlot::Separator | MenuSlot::Branch { .. } => None,
+        })
+    }
+
+    /// Returns mutable manager-owned item state by stable private identity.
+    pub(crate) fn item_mut(&mut self, id: MenuItemId) -> Option<&mut MenuItemRecord> {
+        self.rows.iter_mut().find_map(|row| match row {
+            MenuSlot::Item(item) if item.id == id => Some(item),
+            MenuSlot::Item(_) | MenuSlot::Separator | MenuSlot::Branch { .. } => None,
+        })
     }
 }
 
-impl Widget for MenuSurface {
-    /// Preserves application keyboard focus during menu pointer interaction.
-    fn widget_opt(&self) -> &WidgetOption {
-        // The whole leaf is interactive; disabled logical rows are filtered during action resolution.
-        &WidgetOption::PRESERVE_FOCUS
+/// Concrete pointer-routing result produced without a retained widget node.
+pub(crate) struct MenuRoute {
+    /// Whether the menu surface occluded or captured this pointer event.
+    pub(crate) handled: bool,
+    /// Optional semantic press policy for the manager to apply after releasing the surface borrow.
+    pub(crate) press: Option<MenuPress>,
+}
+
+impl MenuRoute {
+    /// Constructs a result for an event outside a non-captured menu surface.
+    fn unhandled() -> Self {
+        Self { handled: false, press: None }
     }
 
-    /// Adapts retained-tree input routing to the concrete menu-surface implementation.
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
-        // All semantic and presentation behavior belongs to the ordinary surface method above.
-        self.update_surface(ctx, input);
-    }
-
-    /// Adapts retained-tree painting to the concrete menu-surface implementation.
-    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        // Keeping this delegate trivial prevents the temporary widget seam from diverging visually.
-        self.paint_surface(ctx);
+    /// Constructs a consumed result with an optional press-only semantic action.
+    fn handled(press: Option<MenuPress>) -> Self {
+        Self { handled: true, press }
     }
 }
 
@@ -717,18 +662,18 @@ fn layout_popup(rows: &[MenuSlot], style: &Style, atlas: &AtlasHandle) -> MenuSu
     for entry in rows {
         let height = match entry {
             MenuSlot::Item(item) => {
-                let item = item.borrow();
-                let font = style.resolve_font_choice(item.font);
-                label_width = label_width.max(atlas.get_text_size(font, &item.label).width.max(0));
+                let font = style.resolve_font_choice(item.parameters.font);
+                label_width = label_width.max(atlas.get_text_size(font, &item.parameters.label).width.max(0));
                 trailing_width = trailing_width.max(
-                    item.shortcut_hint
+                    item.parameters
+                        .shortcut_hint
                         .as_deref()
                         .map(|hint| atlas.get_text_size(font, hint).width.max(0))
                         .unwrap_or(0),
                 );
                 // False check/radio values retain their role so toggling never moves adjacent text.
-                marker |= !matches!(item.mark, MenuItemMark::None);
-                content_height(style, atlas, item.font, atlas.get_icon_size(style.icons.check).height)
+                marker |= !matches!(item.parameters.mark, MenuItemMark::None);
+                content_height(style, atlas, item.parameters.font, atlas.get_icon_size(style.icons.check).height)
             }
             MenuSlot::Separator => style.spacing.max(3),
             MenuSlot::Branch { label, .. } => {
@@ -849,98 +794,48 @@ fn paint_separator(ctx: &mut WidgetPaintCtx<'_>, row: Recti) {
     ctx.draw_rect(rule, color);
 }
 
-/// Weak identity and geometry access for one retained menu surface.
-#[derive(Clone)]
-struct MenuSurfaceRef {
-    /// Stable root node identity used to resolve this leaf's screen origin.
-    node: RuntimeNodeId,
-    /// Weak presentation access for open highlights and slot geometry.
-    handle: TypedWidgetHandle<MenuSurface>,
+/// Complete concrete menu transport consumed at one root-registration boundary.
+pub(crate) struct CompiledMenu {
+    /// Persistent bar retained directly on the root policy.
+    pub(crate) bar: MenuSurface,
+    /// Top-level popup declarations in heading order.
+    pub(crate) popups: Vec<CompiledMenuPopup>,
 }
 
-/// Compact retained relationship that opens and positions one popup.
-pub(crate) struct MenuAnchor {
-    /// Root node of the bar or parent popup containing the trigger slot.
-    pub(crate) node: RuntimeNodeId,
-    /// Weak access to that root surface's cached logical rectangles.
-    surface: TypedWidgetHandle<MenuSurface>,
-    /// Heading or row index inside the source surface.
-    slot: usize,
-}
-
-impl MenuAnchor {
-    /// Resolves the trigger slot in screen coordinates from its source root rectangle.
-    pub(crate) fn trigger_rect(&self, source: Recti) -> Option<Recti> {
-        // Slot geometry is source-local; translate only its origin and preserve dimensions.
-        self.surface
-            .try_read(|surface| surface.geometry.borrow().slots.get(self.slot).copied())
-            .flatten()
-            .map(|slot| Recti::new(source.x.saturating_add(slot.x), source.y.saturating_add(slot.y), slot.width, slot.height))
-    }
-
-    /// Reconciles this slot's paint-only open state with popup visibility.
-    pub(crate) fn set_open(&self, open: bool) {
-        // Avoid measurement invalidation because open state changes color, never geometry.
-        let updated = self.surface.try_update_without_measurement(|surface| {
-            // Clearing an inactive anchor must not clear a different open slot on this surface.
-            if open {
-                surface.open_slot = Some(self.slot);
-            } else if surface.open_slot == Some(self.slot) {
-                surface.open_slot = None;
-            }
-        });
-        debug_assert!(updated.is_some(), "a retained menu anchor must outlive its popup definition");
-    }
-}
-
-/// One compact menu popup ready to transfer into its owning window.
+/// One recursively owned menu popup ready to become a forest child.
 pub(crate) struct CompiledMenuPopup {
-    /// Index of the direct parent popup, or `None` for a top-level menu.
-    pub(crate) parent: Option<MenuId>,
-    /// Diagnostic name derived from the window and this popup's direct label.
-    pub(crate) name: String,
-    /// Source surface and slot used for placement and derived highlight.
-    pub(crate) anchor: MenuAnchor,
-    /// Sole retained leaf presenting every direct row.
-    pub(crate) content: Node,
+    /// Heading or parent-row index whose forest edge opens this popup.
+    pub(crate) trigger_slot: usize,
+    /// Sole concrete surface presenting every direct row.
+    pub(crate) surface: MenuSurface,
+    /// Direct submenu declarations in row order.
+    pub(crate) children: Vec<CompiledMenuPopup>,
 }
 
-/// Window-owned endpoint for actions produced by any surface in one menu bar.
-pub(crate) struct MenuController {
-    /// Pending-action cell also retained by each compact surface.
-    pending: Rc<RefCell<Option<MenuAction>>>,
-    /// Popup surface identities used only by unit-test geometry inspection.
-    #[cfg(test)]
-    popups: Vec<MenuSurfaceRef>,
-}
-
-impl MenuController {
-    /// Removes and returns the action produced by the latest routed menu press.
-    pub(crate) fn take_action(&self) -> Option<MenuAction> {
-        // Taking rather than copying ensures a physical press is applied at most once.
-        self.pending.borrow_mut().take()
-    }
-
-    /// Resolves every cached row of one popup into screen coordinates for tests.
-    #[cfg(test)]
-    pub(crate) fn popup_slot_rects(&self, menu: MenuId, source: Recti) -> Option<Vec<Recti>> {
-        // Copy rectangles out without exposing private surface handles or node identities.
-        let surface = self.popups.get(menu)?;
-        surface.handle.try_read(|surface| {
-            surface
-                .geometry
-                .borrow()
-                .slots
-                .iter()
-                .map(|slot| Recti::new(source.x.saturating_add(slot.x), source.y.saturating_add(slot.y), slot.width, slot.height))
-                .collect()
-        })
-    }
-
-    /// Returns the root node identity of one popup surface for tests.
-    #[cfg(test)]
-    pub(crate) fn popup_node(&self, menu: MenuId) -> Option<RuntimeNodeId> {
-        // Popup vector order is identical to compact MenuId indexing.
-        self.popups.get(menu).map(|surface| surface.node)
+impl CompiledMenuPopup {
+    /// Converts one recursive declaration and returns its uniquely owned parent-facing label.
+    fn from_declaration(menu: Menu, trigger_slot: usize) -> (String, Self) {
+        let Menu { label, entries } = menu;
+        let mut rows = Vec::with_capacity(entries.len());
+        let mut children = Vec::new();
+        for (slot, entry) in entries.into_iter().enumerate() {
+            match entry {
+                MenuEntry::Item(item) => rows.push(MenuSlot::Item(item.record)),
+                MenuEntry::Separator => rows.push(MenuSlot::Separator),
+                MenuEntry::Submenu(child) => {
+                    let (label, child) = Self::from_declaration(child, slot);
+                    rows.push(MenuSlot::Branch { label });
+                    children.push(child);
+                }
+            }
+        }
+        (
+            label,
+            Self {
+                trigger_slot,
+                surface: MenuSurface::new(rows, true),
+                children,
+            },
+        )
     }
 }

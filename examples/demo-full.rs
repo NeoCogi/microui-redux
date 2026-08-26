@@ -1929,7 +1929,7 @@ impl State {
         }
         // Subscribe to this application-owned component's stable completion source once.
         let file_dialog_completed = self.file_dialog.completed();
-        context.subscribe(file_dialog_completed, Self::file_dialog_completed).unwrap();
+        context.subscribe_context(file_dialog_completed, Self::file_dialog_completed).unwrap();
     }
 
     fn background_changed(&mut self, index: &usize, event: &SliderChanged) {
@@ -2055,7 +2055,7 @@ impl State {
         if self.file_dialog.is_open() {
             return;
         }
-        self.menu_open_file.set_enabled(false).expect("Open menu item unavailable");
+        context.menu_item_mut(&self.menu_open_file).expect("Open menu item unavailable").enabled = false;
         self.file_dialog.open(context, FileDialogRequest::default());
         self.write_log("Opened the file dialog from File > Open...");
     }
@@ -2066,11 +2066,12 @@ impl State {
     }
 
     /// Toggles auto-scroll and updates this concrete item's check marker.
-    fn menu_toggle_auto_scroll(&mut self, _context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
+    fn menu_toggle_auto_scroll(&mut self, context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
         self.menu_auto_scroll = !self.menu_auto_scroll;
-        self.menu_auto_scroll_item
-            .set_mark(MenuItemMark::Checked(self.menu_auto_scroll))
-            .expect("auto-scroll menu item unavailable");
+        context
+            .menu_item_mut(&self.menu_auto_scroll_item)
+            .expect("auto-scroll menu item unavailable")
+            .mark = MenuItemMark::Checked(self.menu_auto_scroll);
         self.write_log(if self.menu_auto_scroll {
             "Enabled log auto-scroll"
         } else {
@@ -2079,13 +2080,13 @@ impl State {
     }
 
     /// Selects comfortable spacing through its registered concrete item.
-    fn menu_comfortable_spacing(&mut self, _context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
-        self.select_menu_spacing(true, 4);
+    fn menu_comfortable_spacing(&mut self, context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
+        self.select_menu_spacing(context, true, 4);
     }
 
     /// Selects compact spacing through its registered concrete item.
-    fn menu_compact_spacing(&mut self, _context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
-        self.select_menu_spacing(false, 1);
+    fn menu_compact_spacing(&mut self, context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
+        self.select_menu_spacing(context, false, 1);
     }
 
     /// Writes application information for the registered About item.
@@ -2102,7 +2103,7 @@ impl State {
     }
 
     /// Toggles unit-spaced geometry from the fullscreen grid's own checked menu item.
-    fn grid_toggle_minor_lines(&mut self, _context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
+    fn grid_toggle_minor_lines(&mut self, context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
         // End the shared-state borrow before updating the item and log, keeping callback-owned data
         // independent from the rest of mutable application state.
         let show_minor_lines = {
@@ -2110,9 +2111,10 @@ impl State {
             grid.show_minor_lines = !grid.show_minor_lines;
             grid.show_minor_lines
         };
-        self.grid_show_minor_lines_item
-            .set_mark(MenuItemMark::Checked(show_minor_lines))
-            .expect("minor-grid-lines menu item unavailable");
+        context
+            .menu_item_mut(&self.grid_show_minor_lines_item)
+            .expect("minor-grid-lines menu item unavailable")
+            .mark = MenuItemMark::Checked(show_minor_lines);
         self.write_log(if show_minor_lines {
             "Enabled minor X-Y grid lines"
         } else {
@@ -2126,13 +2128,15 @@ impl State {
     }
 
     /// Updates the two concrete spacing markers and applies the chosen style value.
-    fn select_menu_spacing(&mut self, comfortable: bool, spacing: i32) {
-        self.menu_comfortable_spacing
-            .set_mark(MenuItemMark::Radio(comfortable))
-            .expect("comfortable-spacing menu item unavailable");
-        self.menu_compact_spacing
-            .set_mark(MenuItemMark::Radio(!comfortable))
-            .expect("compact-spacing menu item unavailable");
+    fn select_menu_spacing(&mut self, context: &mut Ui<'_>, comfortable: bool, spacing: i32) {
+        context
+            .menu_item_mut(&self.menu_comfortable_spacing)
+            .expect("comfortable-spacing menu item unavailable")
+            .mark = MenuItemMark::Radio(comfortable);
+        context
+            .menu_item_mut(&self.menu_compact_spacing)
+            .expect("compact-spacing menu item unavailable")
+            .mark = MenuItemMark::Radio(!comfortable);
         self.style.spacing = spacing;
         set_slider_value(&self.style_value_slider_states[1], spacing as Real);
         self.write_log(if comfortable {
@@ -2641,9 +2645,9 @@ impl State {
         &mut state.file_dialog
     }
 
-    fn file_dialog_completed(&mut self, event: &FileDialogCompleted) {
+    fn file_dialog_completed(&mut self, context: &mut Ui<'_>, event: &FileDialogCompleted) {
         // Completion makes File > Open available again regardless of acceptance or cancellation.
-        self.menu_open_file.set_enabled(true).expect("Open menu item unavailable");
+        context.menu_item_mut(&self.menu_open_file).expect("Open menu item unavailable").enabled = true;
         match event.status() {
             FileDialogStatus::Accepted(result) => {
                 self.write_log(format!("Selected file: {}", result.file_name).as_str());

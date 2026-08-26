@@ -2026,7 +2026,7 @@ fn changing_item_marker_role_reflows_parent_and_reanchors_open_child() {
     // Introducing an unchecked role must still allocate the shared marker gutter. A normal update
     // remeasures the parent, widens every parent row, and repositions the already-open child from
     // the freshly committed submenu slot without altering the child's own intrinsic dimensions.
-    assert_eq!(item.set_mark(MenuItemMark::Checked(false)), Some(()));
+    ctx.ui().menu_item_mut(&item).unwrap().mark = MenuItemMark::Checked(false);
     ctx.update_and_render_ui();
     let unchecked_popups = ctx.debug_active_popup_rects();
     let unchecked_rows = ctx.debug_active_menu_row_rects();
@@ -2043,14 +2043,14 @@ fn changing_item_marker_role_reflows_parent_and_reanchors_open_child() {
 
     // Toggling only the boolean paints a check but preserves its role, so no geometry on either
     // surface may move. This guards against measuring marker visibility instead of marker role.
-    assert_eq!(item.set_mark(MenuItemMark::Checked(true)), Some(()));
+    ctx.ui().menu_item_mut(&item).unwrap().mark = MenuItemMark::Checked(true);
     ctx.update_and_render_ui();
     assert_eq!(popup_geometry(&ctx.debug_active_popup_rects()), popup_geometry(&unchecked_popups));
     assert_eq!(row_geometry(&ctx.debug_active_menu_row_rects()), row_geometry(&unchecked_rows));
 
     // Removing the role releases the gutter. The parent and child must return to their exact
     // baseline rectangles while the open path remains intact and the child keeps its own size.
-    assert_eq!(item.set_mark(MenuItemMark::None), Some(()));
+    ctx.ui().menu_item_mut(&item).unwrap().mark = MenuItemMark::None;
     ctx.update_and_render_ui();
     assert_eq!(popup_geometry(&ctx.debug_active_popup_rects()), popup_geometry(&baseline_popups));
     assert_eq!(row_geometry(&ctx.debug_active_menu_row_rects()), row_geometry(&baseline_rows));
@@ -2339,6 +2339,49 @@ fn popup_auto_size_tracks_content() {
     let outer = ctx.debug_popup_rect(&popup).unwrap();
     assert!(content.width > 0 && content.height > 0);
     assert!(outer.width >= content.width && outer.height >= content.height);
+}
+
+#[test]
+fn auto_sized_window_includes_menu_bar_and_exposes_application_body_below_it() {
+    let (_, action) = MenuItem::create(MenuItemParameters::new("Action"));
+    let menu_bar = MenuBar::new([Menu::new("File").item(action)]);
+    let mut ctx = context();
+    let root = ctx
+        .ui()
+        .create_window(Window::new("auto menu", rect(20, 30, 1, 1), desired_size_node(90, 24)).menu_bar(menu_bar));
+    ctx.ui()
+        .set_root_options(
+            root.id(),
+            WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE | WindowOption::AUTO_SIZE,
+        )
+        .unwrap();
+
+    ctx.update_and_render_ui();
+
+    let outer = ctx.debug_root_rect(root.id()).unwrap();
+    let bar = ctx.debug_menu_bar_rect(root.id()).unwrap();
+    let body = ctx.debug_root_body(root.id()).unwrap();
+    assert!(bar.height > 0, "a non-empty menu must contribute intrinsic height");
+    assert_eq!((bar.x, bar.width), (body.x, body.width), "the bar must fill the complete client width");
+    assert_eq!(bar.y + bar.height, body.y, "application content must begin immediately below the bar");
+    assert_eq!(body.height, 24, "auto height must retain the application's intrinsic extent below the bar");
+    assert!(
+        outer.height >= bar.height + body.height,
+        "outer auto-size must include menu and application content"
+    );
+}
+
+#[test]
+fn live_but_unmounted_menu_item_is_unknown_to_ui() {
+    let (handle, item) = MenuItem::create(MenuItemParameters::new("Unmounted"));
+    let mut ctx = context();
+
+    assert!(handle.is_alive(), "the declaration still owns its typed event source");
+    assert!(matches!(ctx.ui().menu_item(&handle), Err(crate::MenuItemAccessError::UnknownItem)));
+    assert!(matches!(ctx.ui().menu_item_mut(&handle), Err(crate::MenuItemAccessError::UnknownItem)));
+
+    drop(item);
+    assert!(!handle.is_alive(), "dropping the unmounted declaration expires its weak capability");
 }
 
 #[test]

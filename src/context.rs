@@ -191,6 +191,18 @@ impl<'a> Ui<'a> {
         self.window_manager.destroy_root(root)
     }
 
+    /// Borrows the concrete state of one mounted menu item.
+    pub fn menu_item(&self, handle: &crate::MenuItemHandle) -> Result<&crate::MenuItemParameters, crate::MenuItemAccessError> {
+        // The handle supplies only private identity; all semantic ownership stays in the manager.
+        self.window_manager.menu_item(handle.id)
+    }
+
+    /// Mutably borrows the concrete state of one mounted menu item.
+    pub fn menu_item_mut(&mut self, handle: &crate::MenuItemHandle) -> Result<&mut crate::MenuItemParameters, crate::MenuItemAccessError> {
+        // WindowManager invalidates layout conservatively before lending any public field mutably.
+        self.window_manager.menu_item_mut(handle.id)
+    }
+
     /// Returns the active popup names at the event-dispatch boundary for internal tests.
     #[cfg(test)]
     pub(crate) fn debug_active_popup_names(&self) -> Vec<String> {
@@ -684,6 +696,11 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     pub(crate) fn debug_menu_anchor_rects(&self, root: RootId) -> Option<Vec<Option<Recti>>> {
         // The manager resolves private trigger identities; Context exposes only copied geometry.
         self.window_manager.debug_menu_anchor_rects(root)
+    }
+
+    /// Returns the committed full menu-bar allocation for root layout tests.
+    pub(crate) fn debug_menu_bar_rect(&self, root: RootId) -> Option<Recti> {
+        self.window_manager.debug_menu_bar_rect(root)
     }
 
     /// Returns active compact menu rows in parent-to-child popup order for tests.
