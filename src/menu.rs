@@ -52,9 +52,6 @@ mod tests;
 /// Compact index of one parent-first compiled popup.
 type MenuId = usize;
 
-/// Sentinel for compact surface slots that are neither hovered nor open.
-const NO_SLOT: usize = usize::MAX;
-
 /// Smallest marker column that can contain the atlas-independent radio fallback.
 const MIN_MARKER_COLUMN_WIDTH: i32 = 3;
 
@@ -503,10 +500,17 @@ struct MenuSurface {
     popup: bool,
     /// Tiny action cell shared with sibling menu leaves and the owning window manager.
     pending: Rc<RefCell<Option<MenuAction>>>,
-    /// Slot currently under the pointer, or [`NO_SLOT`], used only for paint.
-    hovered_slot: usize,
-    /// Slot whose child popup belongs to the active path, or [`NO_SLOT`].
-    open_slot: usize,
+    /// Slot currently under the pointer, or `None` when no logical row is hovered.
+    ///
+    /// Absence is represented structurally so no valid future slot index can collide with an
+    /// out-of-band sentinel value.
+    hovered_slot: Option<usize>,
+    /// Slot whose child popup belongs to the active path, or `None` when this surface has no open
+    /// child.
+    ///
+    /// This is paint-only state: popup ownership and the authoritative active path remain in the
+    /// window manager.
+    open_slot: Option<usize>,
     /// Latest retained geometry shared by update, anchoring, and paint.
     geometry: RefCell<MenuSurfaceLayout>,
 }
@@ -519,8 +523,8 @@ impl MenuSurface {
             rows,
             popup,
             pending,
-            hovered_slot: NO_SLOT,
-            open_slot: NO_SLOT,
+            hovered_slot: None,
+            open_slot: None,
             geometry: RefCell::new(MenuSurfaceLayout::default()),
         }
     }
@@ -549,11 +553,12 @@ impl MenuSurface {
             MenuSlot::Separator => None,
         }
     }
-}
 
-impl LeafWidget for MenuSurface {
-    /// Measures all logical slots without allocating retained row nodes.
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    /// Measures all logical slots and caches the exact geometry used by later surface phases.
+    ///
+    /// This ordinary method is the concrete menu implementation. The retained-widget trait below
+    /// is intentionally only an adapter while menu surfaces still travel through `Node`.
+    fn measure_surface(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         // Menus keep intrinsic slot geometry: Linear assigns the bar its desired height, while the
         // manager auto-sizes and viewport-clips popups. Cache those same rectangles for anchors.
         let layout = if self.popup {
@@ -565,26 +570,21 @@ impl LeafWidget for MenuSurface {
         *self.geometry.borrow_mut() = layout;
         size
     }
-}
 
-impl Widget for MenuSurface {
-    /// Preserves application keyboard focus during menu pointer interaction.
-    fn widget_opt(&self) -> &WidgetOption {
-        // The whole leaf is interactive; disabled logical rows are filtered during action resolution.
-        &WidgetOption::PRESERVE_FOCUS
-    }
-
-    /// Converts a routed pointer event into hover state or one compact semantic action.
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+    /// Applies one routed input event to hover presentation and the manager action bridge.
+    ///
+    /// Keeping this behavior on the concrete surface makes pointer policy reusable when the window
+    /// manager owns menu bodies directly; the widget adapter contributes no independent state.
+    fn update_surface(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         // Losing root-local hover clears row presentation even when this widget receives no event.
         if !ctx.hovered() {
-            self.hovered_slot = NO_SLOT;
+            self.hovered_slot = None;
         }
         let Some(input) = input else { return };
         let Some(position) = input.position() else { return };
         // Reuse clip-aware runtime hit testing against the exact rectangles retained by measure.
         let slot = self.geometry.borrow().slots.iter().position(|slot| ctx.mouse_over(*slot, position));
-        self.hovered_slot = slot.unwrap_or(NO_SLOT);
+        self.hovered_slot = slot;
 
         // Only the left press commits menu policy; drag and release remain capture tail.
         if matches!(input, UiInputEvent::MouseDown { button, .. } if button.intersects(MouseButton::LEFT)) {
@@ -593,8 +593,11 @@ impl Widget for MenuSurface {
         }
     }
 
-    /// Paints the complete bar or popup from the geometry shared with hit testing.
-    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
+    /// Paints the complete bar or popup from the geometry shared with measurement and hit testing.
+    ///
+    /// Drawing remains a single background fill plus one logical-slot loop. This method deliberately
+    /// accepts the existing concrete paint context so extraction changes ownership seams, not pixels.
+    fn paint_surface(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         // One uninterrupted fill and one slot loop replace container, row, and cell paint passes.
         let style = *ctx.style();
         let layout = self.geometry.borrow();
@@ -604,7 +607,7 @@ impl Widget for MenuSurface {
             match entry {
                 MenuSlot::Item(item) => {
                     let item = item.borrow();
-                    if item.enabled && self.hovered_slot == slot {
+                    if item.enabled && self.hovered_slot == Some(slot) {
                         ctx.draw_rect(row, style.colors[ControlColor::ButtonHover as usize]);
                     }
                     let marker = Recti::new(row.x, row.y, layout.marker_width.max(0), row.height);
@@ -624,9 +627,9 @@ impl Widget for MenuSurface {
                 }
                 MenuSlot::Separator => paint_separator(ctx, row),
                 MenuSlot::Branch { label, .. } => {
-                    if self.open_slot == slot {
+                    if self.open_slot == Some(slot) {
                         ctx.draw_rect(row, style.colors[ControlColor::ButtonFocus as usize]);
-                    } else if self.hovered_slot == slot {
+                    } else if self.hovered_slot == Some(slot) {
                         ctx.draw_rect(row, style.colors[ControlColor::ButtonHover as usize]);
                     }
                     // Bar headings use their full slot; popup branches reserve the marker gutter.
@@ -639,6 +642,34 @@ impl Widget for MenuSurface {
                 }
             }
         }
+    }
+}
+
+impl LeafWidget for MenuSurface {
+    /// Adapts retained-tree measurement to the concrete menu-surface implementation.
+    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+        // Keep the compatibility seam behavior-free so direct manager ownership can remove it later.
+        self.measure_surface(style, atlas, constraints)
+    }
+}
+
+impl Widget for MenuSurface {
+    /// Preserves application keyboard focus during menu pointer interaction.
+    fn widget_opt(&self) -> &WidgetOption {
+        // The whole leaf is interactive; disabled logical rows are filtered during action resolution.
+        &WidgetOption::PRESERVE_FOCUS
+    }
+
+    /// Adapts retained-tree input routing to the concrete menu-surface implementation.
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+        // All semantic and presentation behavior belongs to the ordinary surface method above.
+        self.update_surface(ctx, input);
+    }
+
+    /// Adapts retained-tree painting to the concrete menu-surface implementation.
+    fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
+        // Keeping this delegate trivial prevents the temporary widget seam from diverging visually.
+        self.paint_surface(ctx);
     }
 }
 
@@ -853,9 +884,9 @@ impl MenuAnchor {
         let updated = self.surface.try_update_without_measurement(|surface| {
             // Clearing an inactive anchor must not clear a different open slot on this surface.
             if open {
-                surface.open_slot = self.slot;
-            } else if surface.open_slot == self.slot {
-                surface.open_slot = NO_SLOT;
+                surface.open_slot = Some(self.slot);
+            } else if surface.open_slot == Some(self.slot) {
+                surface.open_slot = None;
             }
         });
         debug_assert!(updated.is_some(), "a retained menu anchor must outlive its popup definition");
