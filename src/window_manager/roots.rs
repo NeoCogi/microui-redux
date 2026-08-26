@@ -120,7 +120,12 @@ struct Surface {
 /// Concrete content variants owned by a forest surface.
 enum SurfaceBody {
     /// Ordinary application-authored retained widget tree.
-    Widgets(WidgetTree),
+    Widgets {
+        /// Sole application-authored root node owned by this surface.
+        root: Node,
+        /// Traversal state paired exclusively with `root` for its mounted lifetime.
+        runtime: UiRuntime,
+    },
     /// Compact manager-owned menu popup surface.
     Menu(MenuSurface),
 }
@@ -134,7 +139,7 @@ impl Surface {
             options,
             rect,
             geometry: RootChromeGeometry::default(),
-            body: SurfaceBody::Widgets(WidgetTree::new(content)),
+            body: SurfaceBody::Widgets { root: content, runtime: UiRuntime::new() },
         }
     }
 
@@ -217,7 +222,7 @@ impl SurfaceBody {
     /// Measures either concrete body without type erasure.
     fn measure(&mut self, style: &Style, atlas: &crate::AtlasHandle, constraints: crate::Constraints) -> Dimensioni {
         match self {
-            Self::Widgets(tree) => tree.measure(style, atlas, constraints),
+            Self::Widgets { root, runtime } => runtime.measure_tree_root(root, style, atlas, constraints),
             Self::Menu(menu) => menu.measure(style, atlas),
         }
     }
@@ -225,7 +230,7 @@ impl SurfaceBody {
     /// Commits one body allocation through the concrete variant.
     fn layout(&mut self, style: &Style, atlas: &crate::AtlasHandle, rect: Recti, viewport: Recti) {
         match self {
-            Self::Widgets(tree) => tree.layout(style, atlas.clone(), rect, viewport),
+            Self::Widgets { root, runtime } => runtime.layout_tree_root(root, style, atlas.clone(), rect, viewport),
             Self::Menu(menu) => menu.layout(rect, viewport),
         }
     }
@@ -233,7 +238,7 @@ impl SurfaceBody {
     /// Returns whether this body owns pointer capture.
     fn has_capture(&self) -> bool {
         match self {
-            Self::Widgets(tree) => tree.has_capture(),
+            Self::Widgets { runtime, .. } => runtime.has_pointer_capture(),
             Self::Menu(menu) => menu.has_capture(),
         }
     }
@@ -241,7 +246,11 @@ impl SurfaceBody {
     /// Clears pointer state while preserving application keyboard focus where applicable.
     fn clear_pointer_targets(&mut self) {
         match self {
-            Self::Widgets(tree) => tree.clear_pointer_targets(),
+            Self::Widgets { runtime, .. } => {
+                // Menu presses may preempt an application drag, but must preserve the independent
+                // keyboard-focus identity retained by the application runtime.
+                runtime.clear_pointer_capture();
+            }
             Self::Menu(menu) => menu.clear_pointer_targets(),
         }
     }
@@ -249,7 +258,7 @@ impl SurfaceBody {
     /// Clears every transient input identity through the concrete body variant.
     fn clear_transient_targets(&mut self) {
         match self {
-            Self::Widgets(tree) => tree.clear_transient_targets(),
+            Self::Widgets { runtime, .. } => runtime.clear_transient_targets(),
             Self::Menu(menu) => menu.clear_pointer_targets(),
         }
     }
@@ -258,7 +267,7 @@ impl SurfaceBody {
     fn menu(&self) -> Option<&MenuSurface> {
         match self {
             Self::Menu(menu) => Some(menu),
-            Self::Widgets(_) => None,
+            Self::Widgets { .. } => None,
         }
     }
 
@@ -266,165 +275,105 @@ impl SurfaceBody {
     fn menu_mut(&mut self) -> Option<&mut MenuSurface> {
         match self {
             Self::Menu(menu) => Some(menu),
-            Self::Widgets(_) => None,
-        }
-    }
-
-    /// Returns the retained widget tree for application-authored bodies only.
-    #[cfg(test)]
-    fn widgets(&self) -> Option<&WidgetTree> {
-        match self {
-            Self::Widgets(tree) => Some(tree),
-            Self::Menu(_) => None,
+            Self::Widgets { .. } => None,
         }
     }
 
     /// Starts an update cycle for widget bodies; concrete menus have no traversal runtime.
     fn begin_update(&mut self) {
-        if let Self::Widgets(tree) = self {
-            tree.begin_update();
+        if let Self::Widgets { runtime, .. } = self {
+            runtime.begin_update();
         }
     }
 
     /// Stages event-local routing only for a retained widget tree.
     fn begin_input_event(&mut self, pointer_input_enabled: bool, event: &UiInputEvent) {
-        if let Self::Widgets(tree) = self {
-            tree.begin_input_event(pointer_input_enabled, event);
+        if let Self::Widgets { runtime, .. } = self {
+            runtime.begin_input_event(pointer_input_enabled, event);
         }
+    }
+
+    /// Routes drag continuation or release to the captured application node, if this is a widget body.
+    fn route_captured_pointer(&mut self, style: &Style, mouse_buttons: MouseButton, event: &UiInputEvent) -> Option<bool> {
+        let Self::Widgets { root, runtime } = self else {
+            return None;
+        };
+        runtime.route_captured_pointer_input_event(std::slice::from_mut(root), style, mouse_buttons, event)
+    }
+
+    /// Returns whether a widget runtime accepts an ordinary pointer hit for the staged event.
+    fn accepts_pointer_input(&self) -> bool {
+        matches!(self, Self::Widgets { runtime, .. } if runtime.accepts_pointer_input())
+    }
+
+    /// Routes one ordinary widget hit and records any resulting capture transition.
+    fn route_pointer(&mut self, style: &Style, event: &UiInputEvent, mouse_buttons: MouseButton) -> Option<crate::ui_node::RuntimeNodeId> {
+        let Self::Widgets { root, runtime } = self else {
+            return None;
+        };
+        // Capture changes only after the selected target and its ancestors classify the event.
+        let (owner, result) = runtime.route_input_event_to_node_ref(root, style, event)?;
+        runtime.update_pointer_capture(owner, result, event, mouse_buttons);
+        Some(owner)
     }
 
     /// Routes keyboard/text input only to application widget bodies.
     fn route_focus(&mut self, style: &Style, event: &UiInputEvent) {
-        if let Self::Widgets(tree) = self {
-            tree.route_focus(style, event);
+        if let Self::Widgets { root, runtime } = self {
+            runtime.route_focus_input_event(std::slice::from_mut(root), style, event);
         }
     }
 
     /// Updates widget bodies; menu state is committed synchronously by direct pointer routing.
     fn update(&mut self, style: &Style, atlas: crate::AtlasHandle, input: crate::input::InputSnapshot) {
-        if let Self::Widgets(tree) = self {
-            tree.update(style, atlas, input);
+        if let Self::Widgets { root, runtime } = self {
+            runtime.update_tree_root(root, style, atlas, input);
         }
     }
 
     /// Paints one concrete body into the shared manager display list.
     fn paint(&mut self, display_list: &mut crate::render::DisplayList, style: &Style, atlas: &crate::AtlasHandle) {
         match self {
-            Self::Widgets(tree) => tree.paint(display_list, style, atlas.clone()),
+            Self::Widgets { root, runtime } => runtime.paint_tree_root(root, display_list, style, atlas.clone()),
             Self::Menu(menu) => menu.paint(display_list, style, atlas),
         }
     }
-}
 
-/// One persistent retained application tree and its traversal-local runtime.
-struct WidgetTree {
-    /// Sole application-authored root node.
-    root: Node,
-    /// Measurement, layout, input, and paint state associated with `root`.
-    runtime: UiRuntime,
-}
-
-impl WidgetTree {
-    /// Creates traversal state for one newly owned application node.
-    fn new(root: Node) -> Self {
-        // UiRuntime owns no nodes; this record keeps the parallel values together by construction.
-        Self { root, runtime: UiRuntime::new() }
-    }
-
-    /// Starts a retained update cycle while preserving focus and capture.
-    fn begin_update(&mut self) {
-        self.runtime.begin_update();
-    }
-
-    /// Clears focus, hover, capture, and staged input without dropping retained widgets.
-    fn clear_transient_targets(&mut self) {
-        self.runtime.clear_transient_targets();
-    }
-
-    /// Revokes only pointer capture, preserving the application's keyboard focus identity.
-    fn clear_pointer_targets(&mut self) {
-        // Menus are pointer-only manager surfaces. Replacing an application drag must not make that
-        // separate interaction authority behave like a focusable retained widget.
-        self.runtime.clear_pointer_capture();
-    }
-
-    /// Measures the complete application tree under body-space constraints.
-    fn measure(&mut self, style: &Style, atlas: &crate::AtlasHandle, constraints: crate::Constraints) -> Dimensioni {
-        self.runtime.measure_tree_root(&mut self.root, style, atlas, constraints)
-    }
-
-    /// Commits the complete application tree to one screen-space body rectangle.
-    fn layout(&mut self, style: &Style, atlas: crate::AtlasHandle, rect: Recti, viewport: Recti) {
-        self.runtime.layout_tree_root(&mut self.root, style, atlas, rect, viewport);
-    }
-
-    /// Returns whether an application node owns pointer capture.
-    fn has_capture(&self) -> bool {
-        self.runtime.has_pointer_capture()
-    }
-
-    /// Prepares event-local routing for this tree.
-    fn begin_input_event(&mut self, pointer_input_enabled: bool, event: &UiInputEvent) {
-        self.runtime.begin_input_event(pointer_input_enabled, event);
-    }
-
-    /// Routes drag continuation or release directly to the captured application node.
-    fn route_captured_pointer(&mut self, style: &Style, mouse_buttons: MouseButton, event: &UiInputEvent) -> Option<bool> {
-        self.runtime
-            .route_captured_pointer_input_event(std::slice::from_mut(&mut self.root), style, mouse_buttons, event)
-    }
-
-    /// Returns whether this runtime accepts an ordinary pointer hit for the current event.
-    fn accepts_pointer_input(&self) -> bool {
-        self.runtime.accepts_pointer_input()
-    }
-
-    /// Routes one ordinary hit and returns the selected retained node identity.
-    fn route_pointer(&mut self, style: &Style, event: &UiInputEvent, mouse_buttons: MouseButton) -> Option<crate::ui_node::RuntimeNodeId> {
-        // Capture changes only after the selected target and its ancestors classify the event.
-        let (owner, result) = self.runtime.route_input_event_to_node_ref(&mut self.root, style, event)?;
-        self.runtime.update_pointer_capture(owner, result, event, mouse_buttons);
-        Some(owner)
-    }
-
-    /// Routes keyboard or text input to this tree's current focus owner.
-    fn route_focus(&mut self, style: &Style, event: &UiInputEvent) {
-        self.runtime.route_focus_input_event(std::slice::from_mut(&mut self.root), style, event);
-    }
-
-    /// Updates every participating application node after event routing.
-    fn update(&mut self, style: &Style, atlas: crate::AtlasHandle, input: crate::input::InputSnapshot) {
-        self.runtime.update_tree_root(&mut self.root, style, atlas, input);
-    }
-
-    /// Records the application tree into the manager display list.
-    fn paint(&mut self, display_list: &mut crate::render::DisplayList, style: &Style, atlas: crate::AtlasHandle) {
-        self.runtime.paint_tree_root(&mut self.root, display_list, style, atlas);
-    }
-
-    /// Resolves one retained node rectangle for relational popup anchors and tests.
+    /// Resolves one retained widget rectangle for relational popup anchors and tests.
     #[cfg(test)]
     fn node_rect(&self, node: crate::ui_node::RuntimeNodeId) -> Option<Recti> {
+        let Self::Widgets { root, runtime } = self else {
+            return None;
+        };
         // Runtime identities are process-unique, so the first recursive match is authoritative.
-        self.runtime.node_rect(std::slice::from_ref(&self.root), node)
+        runtime.node_rect(std::slice::from_ref(root), node)
     }
 
-    /// Returns committed content size for retained layout tests.
+    /// Returns committed widget content size for retained layout tests.
     #[cfg(test)]
-    fn content_size(&self) -> Dimensioni {
-        self.runtime.debug_root_content_size()
+    fn content_size(&self) -> Option<Dimensioni> {
+        match self {
+            Self::Widgets { runtime, .. } => Some(runtime.debug_root_content_size()),
+            Self::Menu(_) => None,
+        }
     }
 
-    /// Returns traversal counters for phase-order tests.
+    /// Returns widget traversal counters for phase-order tests.
     #[cfg(test)]
-    fn metrics(&self) -> crate::ui_node::RuntimeMetrics {
-        self.runtime.debug_metrics()
+    fn metrics(&self) -> Option<crate::ui_node::RuntimeMetrics> {
+        match self {
+            Self::Widgets { runtime, .. } => Some(runtime.debug_metrics()),
+            Self::Menu(_) => None,
+        }
     }
 
     /// Counts application-authored nodes without manager chrome.
     #[cfg(test)]
-    fn node_count(&self) -> usize {
-        self.root.debug_node_count()
+    fn node_count(&self) -> Option<usize> {
+        match self {
+            Self::Widgets { root, .. } => Some(root.debug_node_count()),
+            Self::Menu(_) => None,
+        }
     }
 }
 
@@ -562,10 +511,7 @@ impl SurfaceNode {
         {
             menu.clear_pointer_targets();
         }
-        match &mut self.surface.body {
-            SurfaceBody::Widgets(tree) => tree.clear_transient_targets(),
-            SurfaceBody::Menu(menu) => menu.clear_pointer_targets(),
-        }
+        self.surface.body.clear_transient_targets();
     }
 
     /// Shows or hides a root without dropping its application state.
@@ -921,7 +867,7 @@ impl WindowManager {
                         return Ok(&mut item.parameters);
                     }
                 }
-                (SurfaceKind::Popup(_), SurfaceBody::Widgets(_)) => {}
+                (SurfaceKind::Popup(_), SurfaceBody::Widgets { .. }) => {}
                 (SurfaceKind::Popup(_), SurfaceBody::Menu(_)) => {
                     unreachable!("surface role and concrete body must remain structurally aligned")
                 }
@@ -1745,16 +1691,19 @@ impl WindowManager {
                             if chrome_captured {
                                 self.route_chrome_event(root, event)
                             } else {
-                                match &mut self.surface_mut(surface).expect("captured window must remain retained").body {
-                                    SurfaceBody::Widgets(tree) => tree.route_captured_pointer(&style, input.mouse_buttons, event).is_some(),
-                                    SurfaceBody::Menu(_) => false,
-                                }
+                                self.surface_mut(surface)
+                                    .expect("captured window must remain retained")
+                                    .body
+                                    .route_captured_pointer(&style, input.mouse_buttons, event)
+                                    .is_some()
                             }
                         }
-                        SurfaceKey::Popup(_) => match &mut self.surface_mut(surface).expect("captured popup must remain retained").body {
-                            SurfaceBody::Widgets(tree) => tree.route_captured_pointer(&style, input.mouse_buttons, event).is_some(),
-                            SurfaceBody::Menu(_) => false,
-                        },
+                        SurfaceKey::Popup(_) => self
+                            .surface_mut(surface)
+                            .expect("captured popup must remain retained")
+                            .body
+                            .route_captured_pointer(&style, input.mouse_buttons, event)
+                            .is_some(),
                     };
                 }
             }
@@ -1767,10 +1716,8 @@ impl WindowManager {
                 }
                 if !handled {
                     let body = &mut self.surface_mut(surface).expect("pointer surface must remain retained").body;
-                    if let SurfaceBody::Widgets(tree) = body
-                        && tree.accepts_pointer_input()
-                    {
-                        let _ = tree.route_pointer(&style, event, input.mouse_buttons);
+                    if body.accepts_pointer_input() {
+                        let _ = body.route_pointer(&style, event, input.mouse_buttons);
                     }
                 }
             }
@@ -2003,7 +1950,7 @@ impl WindowManager {
     /// Returns window runtime metrics for tests.
     #[cfg(test)]
     pub(crate) fn debug_root_runtime_metrics(&self, root: RootId) -> Option<crate::ui_node::RuntimeMetrics> {
-        self.surfaces.root_node(root)?.surface.body.widgets().map(WidgetTree::metrics)
+        self.surfaces.root_node(root)?.surface.body.metrics()
     }
 
     /// Returns combined window pointer capture for tests.
@@ -2015,13 +1962,13 @@ impl WindowManager {
     /// Counts application nodes in one window for tests.
     #[cfg(test)]
     pub(crate) fn debug_root_node_count(&self, root: RootId) -> Option<usize> {
-        self.surfaces.root_node(root)?.surface.body.widgets().map(WidgetTree::node_count)
+        self.surfaces.root_node(root)?.surface.body.node_count()
     }
 
     /// Returns one application node rectangle inside a window.
     #[cfg(test)]
     pub(crate) fn debug_root_node_rect(&self, root: RootId, node: crate::ui_node::RuntimeNodeId) -> Option<Recti> {
-        self.surfaces.root_node(root)?.surface.body.widgets()?.node_rect(node)
+        self.surfaces.root_node(root)?.surface.body.node_rect(node)
     }
 
     /// Returns title, close, and resize geometry for one window.
@@ -2055,13 +2002,13 @@ impl WindowManager {
     /// Returns popup content size through its typed handle for tests.
     #[cfg(test)]
     pub(crate) fn debug_popup_content_size(&self, popup: &PopupHandle) -> Option<Dimensioni> {
-        Some(self.popup_node(popup).ok()?.surface.body.widgets()?.content_size())
+        self.popup_node(popup).ok()?.surface.body.content_size()
     }
 
     /// Returns one retained node rectangle inside a popup for tests.
     #[cfg(test)]
     pub(crate) fn debug_popup_node_rect(&self, popup: &PopupHandle, node: crate::ui_node::RuntimeNodeId) -> Option<Recti> {
-        self.popup_node(popup).ok()?.surface.body.widgets()?.node_rect(node)
+        self.popup_node(popup).ok()?.surface.body.node_rect(node)
     }
 
     /// Returns the active popup names in parent-to-child order for path tests.
