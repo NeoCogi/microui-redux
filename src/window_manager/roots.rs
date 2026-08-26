@@ -599,22 +599,22 @@ impl SurfaceForest {
 
     /// Borrows one retained root node.
     fn root_node(&self, root: RootId) -> Option<&SurfaceNode> {
-        self.node(SurfaceKey::Root(root)).filter(|node| node.root().is_some())
+        self.node(SurfaceKey::Root(root))
     }
 
     /// Mutably borrows one retained root node.
     fn root_node_mut(&mut self, root: RootId) -> Option<&mut SurfaceNode> {
-        self.node_mut(SurfaceKey::Root(root)).filter(|node| node.root().is_some())
+        self.node_mut(SurfaceKey::Root(root))
     }
 
     /// Borrows one retained popup node.
     fn popup_node(&self, popup: PopupId) -> Option<&SurfaceNode> {
-        self.node(SurfaceKey::Popup(popup)).filter(|node| node.popup().is_some())
+        self.node(SurfaceKey::Popup(popup))
     }
 
     /// Mutably borrows one retained popup node.
     fn popup_node_mut(&mut self, popup: PopupId) -> Option<&mut SurfaceNode> {
-        self.node_mut(SurfaceKey::Popup(popup)).filter(|node| node.popup().is_some())
+        self.node_mut(SurfaceKey::Popup(popup))
     }
 
     /// Borrows common surface storage for one traversal key.
@@ -784,11 +784,6 @@ impl SurfaceForest {
 
         self.visible_order = visible;
         self.popup_path_scratch = popup_path;
-    }
-
-    /// Returns the shared back-to-front traversal used by every visible-surface phase.
-    fn visible_surfaces(&self) -> &[SurfaceKey] {
-        &self.visible_order
     }
 
     /// Removes roots and all popup descendants whose derived owner is in `roots`.
@@ -1072,12 +1067,12 @@ impl WindowManager {
                 if !self.root_is_visible(owner) {
                     return Err(SurfaceMutationError::InvalidDialogOwner);
                 }
-                if self.active_modal_root() != Some(root) {
+                if self.surfaces.active_modal_root() != Some(root) {
                     self.dismiss_active_popups();
                 }
             }
             self.root_node_mut(root)?.set_root_visible(true);
-            self.raise_root(root);
+            self.surfaces.move_root_to_front(root);
         } else {
             // The one parent edge makes directly owned dialogs discoverable without a second map.
             let affected = self.owned_root_ids(root);
@@ -1173,10 +1168,10 @@ impl WindowManager {
     /// Raises one already authenticated internal window identity inside its structural layer.
     fn bring_window_to_front_id(&mut self, root: RootId) -> Result<(), SurfaceMutationError> {
         let state = self.root_node(root)?.root().expect("root lookup must return root policy");
-        if state.mode == RootMode::Modal && state.visible && self.active_modal_root() != Some(root) {
+        if state.mode == RootMode::Modal && state.visible && self.surfaces.active_modal_root() != Some(root) {
             self.dismiss_active_popups();
         }
-        self.raise_root(root);
+        self.surfaces.move_root_to_front(root);
         self.invalidate_ui_commit();
         Ok(())
     }
@@ -1272,7 +1267,7 @@ impl WindowManager {
         if !state.visible {
             return false;
         }
-        match self.active_modal_root() {
+        match self.surfaces.active_modal_root() {
             Some(modal) => owner == modal,
             None => matches!(state.mode, RootMode::Normal { .. }),
         }
@@ -1330,28 +1325,6 @@ impl WindowManager {
         }
     }
 
-    /// Makes one retained root the newest entry in global activation chronology.
-    fn raise_root(&mut self, root: RootId) {
-        // The forest moves the complete node so layer changes can later reuse this chronology
-        // without a parallel sequence number or order index.
-        self.surfaces.move_root_to_front(root);
-    }
-
-    /// Returns the frontmost visible modal dialog.
-    fn active_modal_root(&self) -> Option<RootId> {
-        self.surfaces.active_modal_root()
-    }
-
-    /// Returns an immutable common surface by concrete traversal key.
-    fn surface(&self, key: SurfaceKey) -> Option<&Surface> {
-        self.surfaces.surface(key)
-    }
-
-    /// Returns a mutable common surface by concrete traversal key.
-    fn surface_mut(&mut self, key: SurfaceKey) -> Option<&mut Surface> {
-        self.surfaces.surface_mut(key)
-    }
-
     /// Borrows the concrete menu presentation attached to one root or menu-popup key.
     fn menu_surface(&self, key: SurfaceKey) -> Option<&MenuSurface> {
         match key {
@@ -1383,11 +1356,6 @@ impl WindowManager {
         }
     }
 
-    /// Returns whether a surface owns manager or application pointer capture.
-    fn surface_has_capture(&self, key: SurfaceKey) -> bool {
-        self.surfaces.node(key).is_some_and(SurfaceNode::has_capture)
-    }
-
     /// Rewrites menu trigger presentation from the deepest authoritative popup leaf.
     fn sync_menu_presentation(&mut self) {
         // Clear every derived highlight first. This is linear in menu surfaces and avoids retaining
@@ -1405,8 +1373,8 @@ impl WindowManager {
         }
 
         // Each active menu popup marks exactly the trigger slot in its direct parent surface.
-        for index in 0..self.surfaces.visible_surfaces().len() {
-            let key = self.surfaces.visible_surfaces()[index];
+        for index in 0..self.surfaces.visible_order.len() {
+            let key = self.surfaces.visible_order[index];
             let SurfaceKey::Popup(popup) = key else { continue };
             let relation = {
                 let Some(node) = self.surfaces.popup_node(popup) else { continue };
@@ -1634,19 +1602,19 @@ impl WindowManager {
         let style = self.style;
         for index in 0..self.surfaces.nodes.len() {
             let key = self.surfaces.nodes[index].key;
-            if !self.surfaces.visible_surfaces().contains(&key) {
+            if !self.surfaces.visible_order.contains(&key) {
                 self.surfaces.nodes[index].clear_transient_targets();
             }
         }
 
         // Keys are copied one at a time so mutating geometry never requires cloning the traversal.
-        for index in 0..self.surfaces.visible_surfaces().len() {
-            let key = self.surfaces.visible_surfaces()[index];
+        for index in 0..self.surfaces.visible_order.len() {
+            let key = self.surfaces.visible_order[index];
             if matches!(key, SurfaceKey::Popup(_)) {
                 let rect = self
                     .resolved_popup_rect(key)
                     .expect("active popup anchor node must remain in its retained parent surface");
-                self.surface_mut(key).expect("visible popup must remain retained").rect = rect;
+                self.surfaces.surface_mut(key).expect("visible popup must remain retained").rect = rect;
             }
             let node = self.surfaces.node_mut(key).expect("visible surface must remain retained");
             node.layout(&style, atlas, viewport);
@@ -1690,13 +1658,14 @@ impl WindowManager {
             _ => hover,
         };
         let keyboard = self.keyboard_input_surface();
-        let modal = self.active_modal_root();
+        let modal = self.surfaces.active_modal_root();
 
-        for index in 0..self.surfaces.visible_surfaces().len() {
-            let key = self.surfaces.visible_surfaces()[index];
+        for index in 0..self.surfaces.visible_order.len() {
+            let key = self.surfaces.visible_order[index];
             if self.surface_is_eligible(key, modal) {
                 let widget_pointer = pointer == Some(key) && !self.menu_contains(key, input.mouse_pos);
-                self.surface_mut(key)
+                self.surfaces
+                    .surface_mut(key)
                     .expect("visible input surface must remain retained")
                     .body
                     .begin_input_event(widget_pointer, event);
@@ -1727,7 +1696,8 @@ impl WindowManager {
                             if chrome_captured {
                                 self.route_chrome_event(root, event)
                             } else {
-                                self.surface_mut(surface)
+                                self.surfaces
+                                    .surface_mut(surface)
                                     .expect("captured window must remain retained")
                                     .body
                                     .route_captured_pointer(&style, input.mouse_buttons, event)
@@ -1735,6 +1705,7 @@ impl WindowManager {
                             }
                         }
                         SurfaceKey::Popup(_) => self
+                            .surfaces
                             .surface_mut(surface)
                             .expect("captured popup must remain retained")
                             .body
@@ -1751,7 +1722,7 @@ impl WindowManager {
                     handled = route.handled;
                 }
                 if !handled {
-                    let body = &mut self.surface_mut(surface).expect("pointer surface must remain retained").body;
+                    let body = &mut self.surfaces.surface_mut(surface).expect("pointer surface must remain retained").body;
                     if body.accepts_pointer_input() {
                         let _ = body.route_pointer(&style, event, input.mouse_buttons);
                     }
@@ -1760,24 +1731,26 @@ impl WindowManager {
         } else if event.is_focus_input()
             && let Some(surface) = keyboard
         {
-            self.surface_mut(surface)
+            self.surfaces
+                .surface_mut(surface)
                 .expect("keyboard surface must remain retained")
                 .body
                 .route_focus(&style, event);
         }
 
-        let modal = self.active_modal_root();
+        let modal = self.surfaces.active_modal_root();
         for index in 0..self.surfaces.nodes.len() {
             let key = self.surfaces.nodes[index].key;
-            let participates = self.surfaces.visible_surfaces().contains(&key) && self.surface_is_eligible(key, modal);
+            let participates = self.surfaces.visible_order.contains(&key) && self.surface_is_eligible(key, modal);
             if !participates {
                 self.surfaces.nodes[index].clear_transient_targets();
             }
         }
-        for index in 0..self.surfaces.visible_surfaces().len() {
-            let key = self.surfaces.visible_surfaces()[index];
+        for index in 0..self.surfaces.visible_order.len() {
+            let key = self.surfaces.visible_order[index];
             if self.surface_is_eligible(key, modal) {
-                self.surface_mut(key)
+                self.surfaces
+                    .surface_mut(key)
                     .expect("visible update surface must remain retained")
                     .body
                     .update(&style, atlas.clone(), input);
@@ -1798,8 +1771,8 @@ impl WindowManager {
         let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
         self.surfaces.rebuild_visible_order();
         let style = self.style;
-        for index in 0..self.surfaces.visible_surfaces().len() {
-            let key = self.surfaces.visible_surfaces()[index];
+        for index in 0..self.surfaces.visible_order.len() {
+            let key = self.surfaces.visible_order[index];
             let node_index = self.surfaces.node_index(key).expect("visible surface must remain retained");
             let node = &mut self.surfaces.nodes[node_index];
             record_root_background(&mut self.display_list, viewport, node.surface.rect, node.surface.options, &style);
@@ -1851,20 +1824,20 @@ impl WindowManager {
 
     /// Returns the front eligible surface containing one pointer point.
     fn input_surface_at(&self, point: Vec2i) -> Option<SurfaceKey> {
-        let modal = self.active_modal_root();
+        let modal = self.surfaces.active_modal_root();
         self.surfaces
-            .visible_surfaces()
+            .visible_order
             .iter()
             .rev()
             .copied()
-            .find(|key| self.surface_is_eligible(*key, modal) && self.surface(*key).is_some_and(|surface| surface.contains(point)))
+            .find(|key| self.surface_is_eligible(*key, modal) && self.surfaces.surface(*key).is_some_and(|surface| surface.contains(point)))
     }
 
     /// Returns the front visible surface in the current modal group.
     fn front_input_surface(&self) -> Option<SurfaceKey> {
-        let modal = self.active_modal_root();
+        let modal = self.surfaces.active_modal_root();
         self.surfaces
-            .visible_surfaces()
+            .visible_order
             .iter()
             .rev()
             .copied()
@@ -1873,13 +1846,13 @@ impl WindowManager {
 
     /// Returns the eligible surface that currently owns pointer capture.
     fn captured_input_surface(&self) -> Option<SurfaceKey> {
-        let modal = self.active_modal_root();
+        let modal = self.surfaces.active_modal_root();
         self.surfaces
-            .visible_surfaces()
+            .visible_order
             .iter()
             .rev()
             .copied()
-            .find(|key| self.surface_is_eligible(*key, modal) && self.surface_has_capture(*key))
+            .find(|key| self.surface_is_eligible(*key, modal) && self.surfaces.node(*key).is_some_and(SurfaceNode::has_capture))
     }
 
     /// Returns the surface receiving pointer-drag continuation.
@@ -1889,7 +1862,7 @@ impl WindowManager {
 
     /// Returns the sole surface receiving keyboard and text input.
     fn keyboard_input_surface(&self) -> Option<SurfaceKey> {
-        if let Some(modal) = self.active_modal_root() {
+        if let Some(modal) = self.surfaces.active_modal_root() {
             return Some(SurfaceKey::Root(modal));
         }
         self.captured_input_surface()
@@ -1918,9 +1891,9 @@ impl WindowManager {
     #[cfg(test)]
     pub(crate) fn debug_rendered_root_names(&self) -> Vec<String> {
         self.surfaces
-            .visible_surfaces()
+            .visible_order
             .iter()
-            .filter_map(|key| self.surface(*key).map(|surface| surface.name.clone()))
+            .filter_map(|key| self.surfaces.surface(*key).map(|surface| surface.name.clone()))
             .collect()
     }
 
@@ -1972,7 +1945,7 @@ impl WindowManager {
     /// Returns the active modal dialog for tests.
     #[cfg(test)]
     pub(crate) fn debug_modal_root(&self) -> Option<RootId> {
-        self.active_modal_root()
+        self.surfaces.active_modal_root()
     }
 
     /// Returns a window body rectangle for chrome geometry tests.
@@ -2051,7 +2024,7 @@ impl WindowManager {
     #[cfg(test)]
     pub(crate) fn debug_active_popup_names(&self) -> Vec<String> {
         self.surfaces
-            .visible_surfaces()
+            .visible_order
             .iter()
             .copied()
             .filter(|key| matches!(key, SurfaceKey::Popup(_)))
@@ -2077,11 +2050,11 @@ impl WindowManager {
     pub(crate) fn debug_active_popup_rects(&self) -> Vec<Recti> {
         // Copy geometry out so tests cannot mutate or retain references into window-owned popups.
         self.surfaces
-            .visible_surfaces()
+            .visible_order
             .iter()
             .copied()
             .filter(|key| matches!(key, SurfaceKey::Popup(_)))
-            .filter_map(|key| self.surface(key).map(|surface| surface.rect))
+            .filter_map(|key| self.surfaces.surface(key).map(|surface| surface.rect))
             .collect()
     }
 
@@ -2113,7 +2086,7 @@ impl WindowManager {
     pub(crate) fn debug_active_menu_row_rects(&self) -> Vec<Vec<Recti>> {
         // Active forest order is already parent-first; copy geometry directly from menu bodies.
         self.surfaces
-            .visible_surfaces()
+            .visible_order
             .iter()
             .copied()
             .filter_map(|key| {
