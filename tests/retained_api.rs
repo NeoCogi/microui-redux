@@ -38,7 +38,7 @@ use microui_redux::prelude::{
 };
 use microui_redux::{
     color, rect, AtlasHandle, AtlasSource, Constraints, Context, Disclosure, DisclosureParameters, FontEntry, Grid, GridParameters, Linear, LinearParameters,
-    RootMutationError, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SourceFormat, Style, TextureId,
+    ScrollArea, ScrollAreaOption, ScrollAreaParameters, SourceFormat, Style, SurfaceMutationError, TextureId,
 };
 
 struct TestBackend {
@@ -124,7 +124,7 @@ fn downstream_file_dialog_completion_is_subscriber_driven_without_widget_access(
         rect(0, 0, 1, 1),
         TextBlock::create(TextBlockParameters::new("")).1,
     ));
-    let mut dialog = FileDialog::new(&mut context, owner.id(), FileDialogModel::dialog_mut);
+    let mut dialog = FileDialog::new(&mut context, &owner, FileDialogModel::dialog_mut);
     let completed = dialog.completed();
     context.subscribe(completed, FileDialogModel::file_dialog_completed).unwrap();
     dialog.open(&mut context.ui(), FileDialogRequest::default());
@@ -169,12 +169,12 @@ fn downstream_window_owns_declarative_menu_and_live_concrete_items() {
         Menu::new("File").item(open_item).item(save_item),
         Menu::new("View").item(word_wrap_item),
     ]));
-    let root = context.ui().create_window(window);
+    let window = context.ui().create_window(window);
     // The deliberately minimal downstream atlas contains no chrome icons, so this compile-contract
     // test removes title controls before committing the retained tree.
     context
         .ui()
-        .set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .set_window_options(&window, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
 
     // Public state mutations address the concrete retained items directly. Text getters return
@@ -198,16 +198,16 @@ fn downstream_window_owns_declarative_menu_and_live_concrete_items() {
     let model = MenuModel { save, word_wrap, invoked: Vec::new() };
     // Context owns the complete window, including its compact menu data and private surfaces.
     // Concrete handles remain weak live views of item values moved into that declaration.
-    assert!(root.is_alive());
+    assert!(window.is_alive());
     assert!(open.is_alive());
     assert!(model.save.is_alive());
     assert!(model.word_wrap.is_alive());
     assert!(model.invoked.is_empty());
 
-    // Destroying the root releases the sole strong ownership chain for all menu items. The public
+    // Destroying the window releases the sole strong ownership chain for all menu items. The public
     // handles are deliberately weak, so no handle can accidentally keep a discarded window alive.
-    assert!(context.ui().destroy_root(root.id()));
-    assert!(!root.is_alive());
+    context.ui().destroy_window(&window).unwrap();
+    assert!(!window.is_alive());
     assert!(!open.is_alive());
     assert!(!model.save.is_alive());
     assert!(!model.word_wrap.is_alive());
@@ -326,9 +326,9 @@ fn downstream_custom_container_measures_and_lays_out_through_public_scoped_apis(
     let (state, runtime) = external_container([child]);
     let node = Node::container(runtime);
     let mut ctx = context();
-    let root = ctx.ui().create_window(Window::new("external", rect(10, 20, 100, 80), node));
+    let window = ctx.ui().create_window(Window::new("external", rect(10, 20, 100, 80), node));
     ctx.ui()
-        .set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .set_window_options(&window, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
         .unwrap();
     let frame = FrameInfo::try_new(Dimensioni::new(320, 240), color(0, 0, 0, 255)).unwrap();
 
@@ -340,22 +340,21 @@ fn downstream_custom_container_measures_and_lays_out_through_public_scoped_apis(
     let allocated = state.try_read(|state| state.allocated_child.get()).flatten().unwrap();
     assert!(allocated.width > 12 && allocated.height > 9, "the parent rectangle must be authoritative");
     assert!(child_state.is_alive());
-    assert!(ctx.ui().destroy_root(root.id()));
+    ctx.ui().destroy_window(&window).unwrap();
     assert!(!state.is_alive());
     assert!(!child_state.is_alive());
 }
 
 #[test]
-fn root_creation_and_lifecycle_need_no_projection_or_generated_node_identity() {
+fn window_creation_and_lifecycle_need_no_numeric_application_identity() {
     let mut ctx = context();
     let content = Linear::create(LinearParameters::vertical(std::iter::empty::<Node>())).1;
-    let root = ctx.ui().create_window(Window::new("root", rect(10, 20, 100, 80), content));
-    let id = root.id();
+    let window = ctx.ui().create_window(Window::new("window", rect(10, 20, 100, 80), content));
 
-    assert!(root.is_alive());
-    ctx.ui().set_root_visible(id, false).unwrap();
-    assert!(root.is_alive(), "hiding retains the root and its application tree");
-    assert!(ctx.ui().destroy_root(id));
-    assert!(!root.is_alive());
-    assert_eq!(ctx.ui().set_root_rect(id, rect(0, 0, 1, 1)), Err(RootMutationError::UnknownRoot));
+    assert!(window.is_alive());
+    ctx.ui().set_window_visible(&window, false).unwrap();
+    assert!(window.is_alive(), "hiding retains the window and its application tree");
+    ctx.ui().destroy_window(&window).unwrap();
+    assert!(!window.is_alive());
+    assert_eq!(ctx.ui().set_window_rect(&window, rect(0, 0, 1, 1)), Err(SurfaceMutationError::UnknownWindow));
 }

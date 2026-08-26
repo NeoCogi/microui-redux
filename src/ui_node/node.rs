@@ -208,8 +208,8 @@ impl NodeRuntime {
 ///
 /// A `Node` owns exactly one concrete widget or container runtime. It is intentionally not
 /// cloneable: successful insertion transfers ownership into one [`Children`] collection. Its
-/// process-unique identity is runtime-private, unrelated to public [`crate::RootId`] values, and is
-/// never stored in or exposed through a [`crate::TypedWidgetHandle`]. Attached nodes cannot be
+/// process-unique identity is runtime-private, unrelated to application-facing window handles, and
+/// is never stored in or exposed through a [`crate::TypedWidgetHandle`]. Attached nodes cannot be
 /// detached or reparented: topology APIs either keep ownership in place or drop the removed
 /// runtime. Build a replacement node when content must move to another parent.
 pub struct Node {

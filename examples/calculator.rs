@@ -308,7 +308,7 @@ impl Calculator {
 }
 
 struct State {
-    root: RootHandle,
+    window: WindowHandle,
     display: TypedWidgetHandle<Textbox>,
     calculator: Calculator,
     buttons: [CalcButton; 20],
@@ -366,12 +366,12 @@ fn main() {
             LinearItem::flex(display_row, display_weight),
             LinearItem::flex(keypad_row, 1.0 - display_weight),
         ]));
-        let root = ctx.ui().create_window(Window::new("Calculator", rect(0, 0, 320, 420), tree));
+        let window = ctx.ui().create_window(Window::new("Calculator", rect(0, 0, 320, 420), tree));
         ctx.ui()
-            .set_root_options(root.id(), WindowOption::FRAME | WindowOption::NO_RESIZE | WindowOption::NO_TITLE)
-            .expect("calculator root should remain registered");
+            .set_window_options(&window, WindowOption::FRAME | WindowOption::NO_RESIZE | WindowOption::NO_TITLE)
+            .expect("calculator window should remain registered");
         State {
-            root,
+            window,
             display: display_state,
             calculator: Calculator::new(),
             buttons,
@@ -389,8 +389,8 @@ fn main() {
         },
         |ctx, state, dim| {
             ctx.ui()
-                .set_root_rect(state.root.id(), rect(0, 0, dim.width, dim.height))
-                .expect("calculator root should remain registered");
+                .set_window_rect(&state.window, rect(0, 0, dim.width, dim.height))
+                .expect("calculator window should remain registered");
             let _ = state.display.set_text(state.calculator.display_text());
         },
     );

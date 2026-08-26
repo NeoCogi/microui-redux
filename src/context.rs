@@ -36,7 +36,9 @@
 //! context-owned dispatcher only drains semantic [`crate::WidgetEvent`] ports into application
 //! state.
 
-use crate::window_manager::{LayerBinding, PopupHandle, RootHandle, RootId, RootMutationError, Window, WindowManager, WindowOption};
+use crate::window_manager::{LayerBinding, PopupHandle, SurfaceMutationError, Window, WindowHandle, WindowManager, WindowOption};
+#[cfg(test)]
+use crate::window_manager::RootId;
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, FrameInfo, RenderError, Renderer, RendererBackend};
 use crate::{Dimensioni, ImageSource, KeyCode, KeyMode, MouseButton, Node, Recti, Style, TextureId};
 
@@ -44,10 +46,10 @@ use crate::{Dimensioni, ImageSource, KeyCode, KeyMode, MouseButton, Node, Recti,
 ///
 /// Ordinary application code obtains this façade through [`Context::ui`]. Context-aware event
 /// handlers receive the same concrete type after retained widget traversal has released every
-/// widget borrow. Keeping root mutation on this non-generic façade prevents the renderer-owning
+/// widget borrow. Keeping surface mutation on this non-generic façade prevents the renderer-owning
 /// [`Context`] and event dispatch from maintaining duplicate APIs.
 ///
-/// `Ui` owns no roots, application state, or renderer resources. Its lifetime is tied to the
+/// `Ui` owns no surfaces, application state, or renderer resources. Its lifetime is tied to the
 /// exclusive `Context` or dispatch borrow that created it, so it cannot escape a transaction or
 /// re-enter an active retained traversal.
 pub struct Ui<'a> {
@@ -65,98 +67,97 @@ impl<'a> Ui<'a> {
 
     /// Creates an open retained window from one complete body and optional menu-bar definition.
     ///
-    /// The returned handle is weak; the lending [`Context`] remains the sole root owner.
-    pub fn create_window(&mut self, window: Window) -> RootHandle {
+    /// The returned handle is weak; the lending [`Context`] remains the sole window owner.
+    pub fn create_window(&mut self, window: Window) -> WindowHandle {
         // Transfer the complete definition to the same owner used by ordinary Context creation.
         self.window_manager.create_window(window)
     }
 
     /// Creates a hidden retained dialog owned by `parent`.
     ///
-    /// `parent` must be an ordinary window. Show the returned root with
-    /// [`Self::set_root_visible`]; it becomes the front modal group before the layout immediately
+    /// `parent` must be a live ordinary window from this Context. Show the returned dialog with
+    /// [`Self::set_window_visible`]; it becomes the front modal group before the layout immediately
     /// following this UI transaction.
-    pub fn create_dialog(&mut self, parent: RootId, window: Window) -> Result<RootHandle, RootMutationError> {
-        // WindowManager validates ownership before consuming the dialog's body and optional bar.
+    pub fn create_dialog(&mut self, parent: &WindowHandle, window: Window) -> Result<WindowHandle, SurfaceMutationError> {
+        // WindowManager authenticates the complete capability before consuming the dialog value.
         self.window_manager.create_dialog(parent, window)
     }
 
-    /// Creates a hidden auto-sized popup owned directly by the window identified by `parent`.
+    /// Creates a hidden auto-sized popup owned directly by `parent`.
     ///
-    /// The popup definition and retained content tree are stored inside that window. The returned
-    /// typed handle can address popup-only operations, while generic root APIs remain restricted to
-    /// windows and dialogs.
-    pub fn create_popup(&mut self, parent: RootId, name: &str, content: Node) -> Result<PopupHandle, RootMutationError> {
-        // Register the definition under its sole window owner so stacking, modal eligibility, and
-        // destruction need no generic root-parent relationship.
+    /// The popup definition and retained content tree become a concrete child in the same forest.
+    /// The distinct handle prevents popup identity from entering window-only operations.
+    pub fn create_popup(&mut self, parent: &WindowHandle, name: &str, content: Node) -> Result<PopupHandle, SurfaceMutationError> {
+        // Authenticate the owner capability before transferring the popup content into the forest.
         self.window_manager.create_popup(parent, name, content)
     }
 
-    /// Replaces a retained root title before the next layout commit.
-    pub fn set_root_name(&mut self, root: RootId, name: impl Into<String>) -> Result<(), RootMutationError> {
-        // Convert the caller-facing string once, at the concrete manager boundary that owns it.
-        self.window_manager.set_root_name(root, name.into())
+    /// Replaces a retained window or dialog title before the next layout commit.
+    pub fn set_window_name(&mut self, window: &WindowHandle, name: impl Into<String>) -> Result<(), SurfaceMutationError> {
+        // Convert the caller-facing string once at the concrete manager boundary that owns it.
+        self.window_manager.set_window_name(window, name.into())
     }
 
-    /// Replaces a retained root rectangle before the next layout commit.
-    pub fn set_root_rect(&mut self, root: RootId, rect: Recti) -> Result<(), RootMutationError> {
-        // Preserve WindowManager's checked root identity and active-chrome reconciliation.
-        self.window_manager.set_root_rect(root, rect)
+    /// Replaces a retained window or dialog rectangle before the next layout commit.
+    pub fn set_window_rect(&mut self, window: &WindowHandle, rect: Recti) -> Result<(), SurfaceMutationError> {
+        // The manager validates context ownership before changing authoritative chrome geometry.
+        self.window_manager.set_window_rect(window, rect)
     }
 
-    /// Replaces a retained root size without changing its origin.
-    pub fn set_root_size(&mut self, root: RootId, size: Dimensioni) -> Result<(), RootMutationError> {
-        // Size is still authoritative root state rather than an application-side deferred value.
-        self.window_manager.set_root_size(root, size)
+    /// Replaces a retained window or dialog size without changing its origin.
+    pub fn set_window_size(&mut self, window: &WindowHandle, size: Dimensioni) -> Result<(), SurfaceMutationError> {
+        // Size remains authoritative manager state rather than an application-side deferred value.
+        self.window_manager.set_window_size(window, size)
     }
 
     /// Replaces the chrome options for a retained window or dialog.
-    pub fn set_root_options(&mut self, root: RootId, options: WindowOption) -> Result<(), RootMutationError> {
-        // Apply option-dependent capture cleanup in the shared WindowManager implementation.
-        self.window_manager.set_root_options(root, options)
+    pub fn set_window_options(&mut self, window: &WindowHandle, options: WindowOption) -> Result<(), SurfaceMutationError> {
+        // Apply option-dependent capture cleanup in the concrete WindowManager implementation.
+        self.window_manager.set_window_options(window, options)
     }
 
     /// Replaces the presentation options for one window-owned popup definition.
     ///
     /// Popup identity remains typed so this operation cannot accidentally mutate window chrome.
-    pub fn set_popup_options(&mut self, popup: &PopupHandle, options: WindowOption) -> Result<(), RootMutationError> {
+    pub fn set_popup_options(&mut self, popup: &PopupHandle, options: WindowOption) -> Result<(), SurfaceMutationError> {
         // Apply the option change to the retained popup definition before the next layout commit.
         self.window_manager.set_popup_options(popup, options)
     }
 
     /// Assigns an ordinary window to one of the sixteen fixed application layers.
-    pub fn set_root_layer(&mut self, root: RootId, layer: u8) -> Result<(), RootMutationError> {
+    pub fn set_window_layer(&mut self, window: &WindowHandle, layer: u8) -> Result<(), SurfaceMutationError> {
         // Layer validation and modal restrictions remain one WindowManager transaction at the
         // event-safe mutation boundary; popups derive the layer from their owning window.
-        self.window_manager.set_root_layer(root, layer)
+        self.window_manager.set_window_layer(window, layer)
     }
 
     /// Returns a registered window's fixed or modal layer policy.
-    pub fn root_layer_binding(&self, root: RootId) -> Result<LayerBinding, RootMutationError> {
-        // Preserve checked identity rather than exposing manager storage or a forged default band.
-        self.window_manager.root_layer_binding(root)
+    pub fn window_layer(&self, window: &WindowHandle) -> Result<LayerBinding, SurfaceMutationError> {
+        // Authenticate the handle rather than exposing manager storage or a forged default band.
+        self.window_manager.window_layer(window)
     }
 
     /// Shows or hides a retained window or dialog while preserving its application tree.
     ///
     /// Popup definitions have a distinct typed identity and cannot be passed to this generic window
     /// operation. Use [`Self::show_popup`], [`Self::show_popup_at`], or [`Self::hide_popup`] instead.
-    pub fn set_root_visible(&mut self, root: RootId, visible: bool) -> Result<(), RootMutationError> {
-        // Mutate the root synchronously at the safe dispatch boundary so the following layout sees
+    pub fn set_window_visible(&mut self, window: &WindowHandle, visible: bool) -> Result<(), SurfaceMutationError> {
+        // Mutate the window synchronously at the safe dispatch boundary so the following layout sees
         // the requested visibility without an application-owned frame flag.
-        self.window_manager.set_root_visible(root, visible)
+        self.window_manager.set_window_visible(window, visible)
     }
 
     /// Shows a popup at the current pointer position under its stable owner.
-    pub fn show_popup(&mut self, popup: &PopupHandle) -> Result<(), RootMutationError> {
+    pub fn show_popup(&mut self, popup: &PopupHandle) -> Result<(), SurfaceMutationError> {
         // Placement and active-path replacement remain atomic inside the manager.
         self.window_manager.show_popup(popup)
     }
 
     /// Hides an active popup and every active descendant while retaining their definitions.
     ///
-    /// Closing any active suffix records one dismissal submission for each removed popup.
-    pub fn hide_popup(&mut self, popup: &PopupHandle) -> Result<(), RootMutationError> {
+    /// Closing any active suffix records one [`crate::PopupEvent::Dismissed`] event per removed
+    /// application popup.
+    pub fn hide_popup(&mut self, popup: &PopupHandle) -> Result<(), SurfaceMutationError> {
         // Delegate path truncation to the manager so visibility has one authoritative source.
         self.window_manager.hide_popup(popup)
     }
@@ -166,29 +167,28 @@ impl<'a> Ui<'a> {
     /// This atomic form is intended for composed controls such as combos. It applies popup-path
     /// replacement and replaces the popup rectangle, so no pointer-relative intermediate placement
     /// can be observed. The typed handle prevents passing a window or dialog as the popup target.
-    pub fn show_popup_at(&mut self, popup: &PopupHandle, anchor: Recti) -> Result<(), RootMutationError> {
+    pub fn show_popup_at(&mut self, popup: &PopupHandle, anchor: Recti) -> Result<(), SurfaceMutationError> {
         // Delegate the complete transaction while retaining compile-time popup identity across the
         // event façade boundary.
         self.window_manager.show_popup_at(popup, anchor)
     }
 
-    /// Raises a registered root inside its effective layer.
+    /// Raises a registered window or dialog inside its effective layer.
     ///
-    /// This operation never moves an ordinary root across another numeric application layer. A
+    /// This operation never moves an ordinary window across another numeric application layer. A
     /// visible dialog moves its modal group in front and closes popups from the previous modal
-    /// group. A stale root returns a checked mutation error.
-    pub fn bring_root_to_front(&mut self, root: RootId) -> Result<(), RootMutationError> {
-        // Let WindowManager raise the flat window inside its structural stacking band.
-        self.window_manager.bring_root_to_front(root)
+    /// group. A stale or foreign handle returns a checked mutation error.
+    pub fn bring_window_to_front(&mut self, window: &WindowHandle) -> Result<(), SurfaceMutationError> {
+        // Let WindowManager raise the authenticated node inside its structural stacking band.
+        self.window_manager.bring_window_to_front(window)
     }
 
     /// Permanently unregisters a window or dialog and its window-owned popup definitions.
     ///
     /// Every owned popup tree is dropped and every corresponding weak popup handle expires.
-    pub fn destroy_root(&mut self, root: RootId) -> bool {
-        // Root destruction also expires every weak application widget and root event handle owned
-        // by the removed tree.
-        self.window_manager.destroy_root(root)
+    pub fn destroy_window(&mut self, window: &WindowHandle) -> Result<(), SurfaceMutationError> {
+        // Destruction also expires every weak application widget and event handle in the subtree.
+        self.window_manager.destroy_window(window)
     }
 
     /// Borrows the concrete state of one mounted menu item.

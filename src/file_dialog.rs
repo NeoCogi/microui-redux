@@ -30,9 +30,9 @@
 //! Application-owned retained file picker with typed completion delivery.
 //!
 //! [`FileDialog`] is a library component, not a window-manager service. An application constructs
-//! and stores one alongside its own state. The component registers an ordinary hidden dialog root
+//! and stores one alongside its own state. The component registers a hidden dialog window
 //! as a stable child of an application window and binds its controls to the application's normal
-//! [`crate::Context`] dispatcher. Opening resets and shows that root; acceptance or cancellation
+//! [`crate::Context`] dispatcher. Opening resets and shows that window; acceptance or cancellation
 //! hides it and emits [`FileDialogCompleted`] from the component-owned source.
 //!
 //! Paths cross the public API as UTF-8 [`String`] values. On platforms that permit non-UTF-8 paths,
@@ -43,8 +43,8 @@ use std::{cell::RefCell, path::Path, rc::Rc};
 
 use crate::{
     Button, ButtonParameters, ButtonSubmitted, IconId, Linear, LinearItem, LinearParameters, ListItem, ListItemParameters, ListItemSubmitted, Node, Recti,
-    Context, RootHandle, RootId, RootSubmitted, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Textbox, TextboxParameters, TextboxSubmitted, Ui,
-    ThemeIcons, TypedWidgetHandle, WidgetEventPortHandle, WidgetOption, Window, WindowOption,
+    Context, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Textbox, TextboxParameters, TextboxSubmitted, ThemeIcons, TypedWidgetHandle, Ui,
+    WidgetEventPortHandle, WidgetOption, Window, WindowEvent, WindowHandle, WindowOption,
 };
 use crate::event::WidgetEventPort;
 #[cfg(test)]
@@ -73,7 +73,7 @@ impl FileDialogRequest {
         Self::default()
     }
 
-    /// Replaces the title displayed by the retained dialog root.
+    /// Replaces the title displayed by the retained dialog window.
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
         self.title = title.into();
         self
@@ -206,15 +206,15 @@ type FileDialogAccessor<State> = for<'a> fn(&'a mut State) -> &'a mut FileDialog
 ///
 /// Construct it once with [`FileDialog::new`], store the returned value at the location selected by
 /// the supplied accessor, and subscribe to [`FileDialog::completed`] with the application's normal
-/// `Context` dispatcher. The window manager sees one hidden modal root owned by the caller-supplied
+/// `Context` dispatcher. The window manager sees one hidden modal window owned by the caller-supplied
 /// application window; all file-picker behavior remains in this component.
 pub struct FileDialog {
-    /// Application-side semantic activation, synchronized with the hidden dialog root.
+    /// Application-side semantic activation, synchronized with the hidden dialog window.
     active: bool,
     /// Component-owned terminal event source retained independently of any one activation.
     completed: Rc<RefCell<WidgetEventPort<FileDialogCompleted>>>,
-    /// Weak handle to the Context-owned dialog root.
-    root: RootHandle,
+    /// Weak typed capability for the Context-owned dialog window.
+    window: WindowHandle,
     /// UTF-8 directory currently represented by the two retained list columns.
     current_working_directory: String,
     /// Display names currently mounted in the folder column.
@@ -258,11 +258,11 @@ impl FileDialog {
     /// resolve that same `FileDialog` for the remainder of the component's lifetime.
     pub fn new<B: crate::render::RendererBackend, State: 'static>(
         ctx: &mut Context<B, State>,
-        parent: RootId,
+        parent: &WindowHandle,
         accessor: for<'a> fn(&'a mut State) -> &'a mut FileDialog,
     ) -> Self {
         // Start with an empty inactive model. The first activation supplies directory data, title, and
-        // geometry immediately before this already-retained modal root becomes visible.
+        // geometry immediately before this already-retained modal window becomes visible.
         let current_working_directory = String::new();
         let folders = Vec::new();
         let files = Vec::new();
@@ -328,14 +328,14 @@ impl FileDialog {
         ]));
 
         // Register the modal surface as a stable child of the application window supplied by the
-        // caller. Construction fails only when that weak parent identifier is stale or ineligible.
-        let root = ctx
+        // caller. Construction fails only when that typed parent capability is stale or ineligible.
+        let window = ctx
             .ui()
             .create_dialog(parent, Window::new(DEFAULT_FILE_DIALOG_TITLE, DEFAULT_FILE_DIALOG_RECT, shell))
             .expect("new file-dialog parent must remain registered");
         ctx.ui()
-            .set_root_options(root.id(), WindowOption::FRAME)
-            .expect("new file-dialog root must accept options");
+            .set_window_options(&window, WindowOption::FRAME)
+            .expect("new file-dialog window must accept options");
 
         // These sources are new and private to this component, so connection failure would indicate
         // an internal construction error rather than an application-level subscription conflict.
@@ -355,13 +355,13 @@ impl FileDialog {
             .expect("new file-dialog Open event must be unsubscribed");
         ctx.subscribe_context_with(cancel_handle.submitted(), accessor, Self::dispatch_cancel::<State>)
             .expect("new file-dialog Cancel event must be unsubscribed");
-        ctx.subscribe_context_with(root.submitted(), accessor, Self::dispatch_root_cancel::<State>)
-            .expect("new file-dialog root event must be unsubscribed");
+        ctx.subscribe_context_with(window.events(), accessor, Self::dispatch_window_event::<State>)
+            .expect("new file-dialog window event must be unsubscribed");
 
         Self {
             active: false,
             completed: Rc::new(RefCell::new(WidgetEventPort::new())),
-            root,
+            window,
             current_working_directory,
             folders,
             files,
@@ -495,13 +495,15 @@ impl FileDialog {
         WidgetEventPortHandle::new(&self.completed)
     }
 
-    /// Returns the ordinary retained dialog root used by this component.
+    /// Returns the retained dialog window used by this component.
     ///
-    /// Its state may be inspected like any other root. Keep lifecycle changes routed through
+    /// Its typed handle supports the same checked mutations and event access as any other window.
+    /// Keep lifecycle changes routed through
     /// [`Self::open`] or [`Self::cancel`] so component activity and modal visibility stay
     /// synchronized.
-    pub fn root(&self) -> &RootHandle {
-        &self.root
+    pub fn window(&self) -> &WindowHandle {
+        // Lend the weak capability without transferring ownership or exposing manager identity.
+        &self.window
     }
 
     /// Returns whether this component is open, regardless of which visible dialog is frontmost.
@@ -515,18 +517,18 @@ impl FileDialog {
     ///
     /// # Panics
     ///
-    /// Panics when the dialog is already open or its application-owned root was destroyed.
+    /// Panics when the dialog is already open or its application-owned window was destroyed.
     pub fn open(&mut self, ui: &mut Ui<'_>, request: FileDialogRequest) {
         // Capture theme-owned icons before mutating the retained dialog so model reset and surface
         // visibility remain one transaction through the shared façade.
         let icons = ui.style().icons;
         let (title, rect) = self.prepare_open(request, icons);
-        ui.set_root_name(self.root.id(), title)
-            .expect("application-owned file-dialog root must remain registered");
-        ui.set_root_rect(self.root.id(), rect)
-            .expect("application-owned file-dialog root must remain registered");
-        ui.set_root_visible(self.root.id(), true)
-            .expect("application-owned file-dialog root must remain registered");
+        ui.set_window_name(&self.window, title)
+            .expect("application-owned file-dialog window must remain registered");
+        ui.set_window_rect(&self.window, rect)
+            .expect("application-owned file-dialog window must remain registered");
+        ui.set_window_visible(&self.window, true)
+            .expect("application-owned file-dialog window must remain registered");
     }
 
     /// Cancels an open picker through the current retained UI transaction.
@@ -543,10 +545,10 @@ impl FileDialog {
         true
     }
 
-    /// Resets activation-specific model and widget state before the root is shown.
+    /// Resets activation-specific model and widget state before the dialog window is shown.
     fn prepare_open(&mut self, request: FileDialogRequest, icons: ThemeIcons) -> (String, Recti) {
         assert!(!self.active, "file dialog is already open");
-        assert!(self.root.is_alive(), "application-owned file-dialog root was destroyed");
+        assert!(self.window.is_alive(), "application-owned file-dialog window was destroyed");
 
         let FileDialogRequest { title, initial_directory, rect } = request;
         self.icons = icons;
@@ -702,8 +704,8 @@ impl FileDialog {
     fn finish(&mut self, ui: &mut Ui<'_>, completion: FileDialogStatus) {
         // Hide the retained modal before publishing completion so later subscribers observe the
         // component as idle at the same dispatch boundary.
-        ui.set_root_visible(self.root.id(), false)
-            .expect("application-owned file-dialog root must remain registered");
+        ui.set_window_visible(&self.window, false)
+            .expect("application-owned file-dialog window must remain registered");
         self.emit_completion(completion);
     }
 
@@ -726,11 +728,13 @@ impl FileDialog {
         }
     }
 
-    /// Converts title-bar closure of the retained dialog into component cancellation.
-    fn root_cancelled(&mut self, ui: &mut Ui<'_>, _event: &RootSubmitted) {
-        // Root and button cancellation converge on the same visibility and event transaction.
-        if self.active {
-            self.finish(ui, FileDialogStatus::Cancelled);
+    /// Handles one unified event from the retained dialog window.
+    fn window_event(&mut self, ui: &mut Ui<'_>, event: &WindowEvent) {
+        // Geometry changes remain observable to applications through the same port but do not alter
+        // file-picker state. A close request converges with explicit and button cancellation.
+        match event {
+            WindowEvent::CloseRequested if self.active => self.finish(ui, FileDialogStatus::Cancelled),
+            WindowEvent::CloseRequested | WindowEvent::GeometryChanged { .. } => {}
         }
     }
 
@@ -770,10 +774,11 @@ impl FileDialog {
         accessor(state).cancel_submitted(ui, event);
     }
 
-    /// Resolves the application-owned component before forwarding title-bar closure.
-    fn dispatch_root_cancel<State>(state: &mut State, accessor: &FileDialogAccessor<State>, ui: &mut Ui<'_>, event: &RootSubmitted) {
-        // Root submission is translated only by this component, not by WindowManager policy.
-        accessor(state).root_cancelled(ui, event);
+    /// Resolves the application-owned component before forwarding one dialog-window event.
+    fn dispatch_window_event<State>(state: &mut State, accessor: &FileDialogAccessor<State>, ui: &mut Ui<'_>, event: &WindowEvent) {
+        // The component exhaustively interprets the concrete window event without an erased payload
+        // or a second close-only event port.
+        accessor(state).window_event(ui, event);
     }
 }
 
@@ -786,7 +791,7 @@ fn replace_column_rows(handle: &TypedWidgetHandle<Linear>, nodes: Vec<Node>) -> 
 mod tests {
     use super::*;
     use crate::test_support::{NoopRenderer, test_atlas};
-    use crate::{Button, ButtonParameters, ButtonSubmitted, Context, Dimensioni, MouseButton, WindowOption, rect};
+    use crate::{Button, ButtonParameters, ButtonSubmitted, Context, Dimensioni, MouseButton, SurfaceMutationError, WindowOption, rect};
     use std::{
         fs,
         panic::{AssertUnwindSafe, catch_unwind},
@@ -830,7 +835,7 @@ mod tests {
             rect(0, 0, 1, 1),
             Button::create(ButtonParameters::new("owner")).1,
         ));
-        let dialog = FileDialog::new(&mut context, owner.id(), Model::dialog_mut);
+        let dialog = FileDialog::new(&mut context, &owner, Model::dialog_mut);
         context.subscribe(dialog.completed(), Model::completed).unwrap();
         (
             context,
@@ -847,8 +852,11 @@ mod tests {
         std::env::temp_dir().join(format!("microui-redux-{name}-{}-{nanos}", std::process::id()))
     }
 
-    fn click_node(context: &mut Context<NoopRenderer, Model>, model: &mut Model, root: crate::RootId, node: RuntimeNodeId, batched: bool) {
-        let rect = context.debug_root_node_rect(root, node).expect("node rect should be laid out");
+    /// Presses one retained node through the typed window that owns its concrete widget tree.
+    fn click_node(context: &mut Context<NoopRenderer, Model>, model: &mut Model, window: &WindowHandle, node: RuntimeNodeId, batched: bool) {
+        // Internal geometry diagnostics still resolve the manager-local identity only after this
+        // test helper has received the same authenticated capability used by public mutations.
+        let rect = context.debug_root_node_rect(window.id(), node).expect("node rect should be laid out");
         let x = rect.x + rect.width / 2;
         let y = rect.y + rect.height / 2;
         context.mousemove(x, y);
@@ -878,17 +886,30 @@ mod tests {
         assert_eq!((request_rect.x, request_rect.y, request_rect.width, request_rect.height), (10, 20, 400, 300));
 
         let (mut context, mut model) = context_and_model();
-        let root = model.dialog.root().id();
+        let dialog_window = model.dialog.window().clone();
         model.dialog.open(&mut context.ui(), request);
         assert!(model.dialog.is_open());
-        assert_eq!(context.debug_root_name(root).as_deref(), Some("Choose"));
-        let root_rect = context.debug_root_rect(root).unwrap();
-        assert_eq!((root_rect.x, root_rect.y, root_rect.width, root_rect.height), (10, 20, 400, 300));
-        assert_eq!(context.debug_modal_root(), Some(root));
+        assert_eq!(context.debug_root_name(dialog_window.id()).as_deref(), Some("Choose"));
+        let window_rect = context.debug_root_rect(dialog_window.id()).unwrap();
+        assert_eq!((window_rect.x, window_rect.y, window_rect.width, window_rect.height), (10, 20, 400, 300));
+        assert_eq!(context.debug_modal_root(), Some(dialog_window.id()));
         assert!(model.dialog.cancel(&mut context.ui()));
         context.update_ui_state(dimensions(), &mut model);
         assert_eq!(model.completions, [FileDialogStatus::Cancelled]);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Proves the component exposes the same authenticated, fallible capability as other windows.
+    #[test]
+    fn destroyed_dialog_window_reports_the_concrete_surface_error() {
+        let (mut context, model) = context_and_model();
+        let dialog_window = model.dialog.window().clone();
+
+        // Destruction expires both the component's stored handle and this clone; subsequent public
+        // mutation reports the concrete window failure instead of consulting a forgeable id.
+        context.ui().destroy_window(&dialog_window).unwrap();
+        assert!(!model.dialog.window().is_alive());
+        assert_eq!(context.ui().set_window_visible(&dialog_window, true), Err(SurfaceMutationError::UnknownWindow));
     }
 
     #[test]
@@ -900,9 +921,9 @@ mod tests {
         context.subscribe_context(button.submitted(), Model::open_from_button).unwrap();
         context.update_ui_state(dimensions(), &mut model);
 
-        click_node(&mut context, &mut model, window.id(), button_id, true);
+        click_node(&mut context, &mut model, &window, button_id, true);
         assert!(model.dialog.is_open());
-        assert_eq!(context.debug_modal_root(), Some(model.dialog.root().id()));
+        assert_eq!(context.debug_modal_root(), Some(model.dialog.window().id()));
     }
 
     #[test]
@@ -917,10 +938,10 @@ mod tests {
             .file_name_box
             .try_update_with("picked.txt", |state, name| state.set_text(name))
             .unwrap();
-        let root = model.dialog.root.id();
+        let dialog_window = model.dialog.window.clone();
         let open = model.dialog.test.ok_button_id;
 
-        click_node(&mut context, &mut model, root, open, true);
+        click_node(&mut context, &mut model, &dialog_window, open, true);
         assert_eq!(
             model.completions,
             [FileDialogStatus::Accepted(FileDialogResult {
@@ -929,7 +950,7 @@ mod tests {
             })]
         );
         assert!(!model.dialog.is_open());
-        assert_eq!(context.debug_root_visible(root), Some(false));
+        assert_eq!(context.debug_root_visible(dialog_window.id()), Some(false));
     }
 
     #[test]
@@ -951,7 +972,7 @@ mod tests {
         fs::create_dir_all(&first_dir).unwrap();
         fs::create_dir_all(&second_dir).unwrap();
         let (mut context, mut model) = context_and_model();
-        let root = model.dialog.root.id();
+        let dialog_window = model.dialog.window.clone();
         let open = model.dialog.test.ok_button_id;
         let path = model.dialog.path_box.clone();
         let filename = model.dialog.file_name_box.clone();
@@ -972,7 +993,7 @@ mod tests {
                 .with_title("Second")
                 .with_initial_directory(second_dir.to_string_lossy()),
         );
-        assert_eq!(model.dialog.root.id(), root);
+        assert_eq!(model.dialog.window.id(), dialog_window.id());
         assert_eq!(model.dialog.test.ok_button_id, open);
         assert_eq!(
             path.try_read(|state| state.text().to_owned()).as_deref(),
@@ -981,7 +1002,7 @@ mod tests {
         assert_eq!(filename.try_read(|state| state.text().to_owned()).as_deref(), Some(""));
         let offset = scroll.try_read(|state| state.offset()).unwrap();
         assert_eq!((offset.x, offset.y), (0, 0));
-        assert_eq!(context.debug_root_name(root).as_deref(), Some("Second"));
+        assert_eq!(context.debug_root_name(dialog_window.id()).as_deref(), Some("Second"));
 
         fs::remove_dir_all(first_dir).unwrap();
         fs::remove_dir_all(second_dir).unwrap();
@@ -996,7 +1017,7 @@ mod tests {
         }));
         assert!(result.is_err());
         assert!(model.dialog.is_open());
-        assert_eq!(context.debug_modal_root(), Some(model.dialog.root.id()));
+        assert_eq!(context.debug_modal_root(), Some(model.dialog.window.id()));
     }
 
     #[test]
@@ -1032,8 +1053,8 @@ mod tests {
             rect(0, 0, 1, 1),
             Button::create(ButtonParameters::new("owner")).1,
         ));
-        let first = FileDialog::new(&mut context, owner.id(), DualModel::first_mut);
-        let second = FileDialog::new(&mut context, owner.id(), DualModel::second_mut);
+        let first = FileDialog::new(&mut context, &owner, DualModel::first_mut);
+        let second = FileDialog::new(&mut context, &owner, DualModel::second_mut);
         context.subscribe(first.completed(), DualModel::first_completed).unwrap();
         context.subscribe(second.completed(), DualModel::second_completed).unwrap();
         let mut model = DualModel {
@@ -1045,13 +1066,13 @@ mod tests {
 
         model.first.open(&mut context.ui(), FileDialogRequest::new().with_title("First"));
         model.second.open(&mut context.ui(), FileDialogRequest::new().with_title("Second"));
-        assert_ne!(model.first.root.id(), model.second.root.id());
-        assert_eq!(context.debug_modal_root(), Some(model.second.root.id()));
+        assert_ne!(model.first.window.id(), model.second.window.id());
+        assert_eq!(context.debug_modal_root(), Some(model.second.window.id()));
         assert!(model.second.cancel(&mut context.ui()));
         context.update_ui_state(dimensions(), &mut model);
         assert_eq!((model.first_completions, model.second_completions), (0, 1));
         assert!(model.first.is_open());
-        assert_eq!(context.debug_modal_root(), Some(model.first.root.id()));
+        assert_eq!(context.debug_modal_root(), Some(model.first.window.id()));
     }
 
     #[test]
@@ -1062,7 +1083,7 @@ mod tests {
         let window = context.ui().create_window(Window::new("window", rect(0, 0, 100, 80), button_node));
         context
             .ui()
-            .set_root_options(window.id(), WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+            .set_window_options(&window, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
             .unwrap();
         model.dialog.open(&mut context.ui(), FileDialogRequest::default());
         context.update_ui_state(dimensions(), &mut model);
@@ -1080,19 +1101,19 @@ mod tests {
         let (mut context, mut model) = context_and_model();
         model.dialog.open(&mut context.ui(), FileDialogRequest::default());
         context.update_ui_state(dimensions(), &mut model);
-        let root = model.dialog.root.id();
-        let toolbar_before = context.debug_root_node_rect(root, model.dialog.test.up_button_id).unwrap();
-        let cancel_before = context.debug_root_node_rect(root, model.dialog.test.cancel_button_id).unwrap();
-        let open_before = context.debug_root_node_rect(root, model.dialog.test.ok_button_id).unwrap();
+        let dialog_window = model.dialog.window.clone();
+        let toolbar_before = context.debug_root_node_rect(dialog_window.id(), model.dialog.test.up_button_id).unwrap();
+        let cancel_before = context.debug_root_node_rect(dialog_window.id(), model.dialog.test.cancel_button_id).unwrap();
+        let open_before = context.debug_root_node_rect(dialog_window.id(), model.dialog.test.ok_button_id).unwrap();
         assert_eq!(cancel_before.height, toolbar_before.height);
         assert_eq!(open_before.height, toolbar_before.height);
 
-        let mut resized = context.debug_root_rect(root).unwrap();
+        let mut resized = context.debug_root_rect(dialog_window.id()).unwrap();
         resized.height += 80;
-        context.ui().set_root_rect(root, resized).unwrap();
+        context.ui().set_window_rect(&dialog_window, resized).unwrap();
         context.update_ui_state(dimensions(), &mut model);
-        let toolbar_after = context.debug_root_node_rect(root, model.dialog.test.up_button_id).unwrap();
-        let open_after = context.debug_root_node_rect(root, model.dialog.test.ok_button_id).unwrap();
+        let toolbar_after = context.debug_root_node_rect(dialog_window.id(), model.dialog.test.up_button_id).unwrap();
+        let open_after = context.debug_root_node_rect(dialog_window.id(), model.dialog.test.ok_button_id).unwrap();
         assert_eq!(
             (toolbar_after.x, toolbar_after.y, toolbar_after.width, toolbar_after.height),
             (toolbar_before.x, toolbar_before.y, toolbar_before.width, toolbar_before.height)
@@ -1111,16 +1132,16 @@ mod tests {
             .dialog
             .open(&mut context.ui(), FileDialogRequest::new().with_initial_directory(dir.to_string_lossy()));
         context.update_ui_state(dimensions(), &mut model);
-        let root = model.dialog.root.id();
+        let dialog_window = model.dialog.window.clone();
         let file_node = model.dialog.test.file_item_ids[0];
-        click_node(&mut context, &mut model, root, file_node, batched);
+        click_node(&mut context, &mut model, &dialog_window, file_node, batched);
         assert_eq!(
             model.dialog.file_name_box.try_read(|state| state.text().to_owned()).as_deref(),
             Some("picked.txt")
         );
         release_pointer(&mut context, &mut model);
         let open = model.dialog.test.ok_button_id;
-        click_node(&mut context, &mut model, root, open, batched);
+        click_node(&mut context, &mut model, &dialog_window, open, batched);
         assert_eq!(
             model.completions,
             [FileDialogStatus::Accepted(FileDialogResult {
@@ -1133,7 +1154,7 @@ mod tests {
     }
 
     #[test]
-    fn selecting_file_then_open_accepts_and_hides_root() {
+    fn selecting_file_then_open_accepts_and_hides_window() {
         selection_flow(false);
     }
 
@@ -1147,32 +1168,36 @@ mod tests {
         let (mut context, mut model) = context_and_model();
         model.dialog.open(&mut context.ui(), FileDialogRequest::default());
         context.update_ui_state(dimensions(), &mut model);
-        let root = model.dialog.root.id();
+        let dialog_window = model.dialog.window.clone();
         let open = model.dialog.test.ok_button_id;
         let cancel = model.dialog.test.cancel_button_id;
-        click_node(&mut context, &mut model, root, open, false);
+        click_node(&mut context, &mut model, &dialog_window, open, false);
         assert!(model.dialog.is_open());
         assert!(model.completions.is_empty());
 
         release_pointer(&mut context, &mut model);
-        click_node(&mut context, &mut model, root, cancel, false);
+        click_node(&mut context, &mut model, &dialog_window, cancel, false);
         assert_eq!(model.completions, [FileDialogStatus::Cancelled]);
         assert!(!model.dialog.is_open());
     }
 
     #[test]
-    fn title_close_cancels_and_hides_the_dialog_root() {
+    fn close_request_cancels_and_hides_the_dialog_window() {
         let (mut context, mut model) = context_and_model();
         model.dialog.open(&mut context.ui(), FileDialogRequest::default());
         context.update_ui_state(dimensions(), &mut model);
-        let root = model.dialog.root.id();
-        let close = context.debug_root_chrome(root).unwrap().1.expect("dialog should have a close button");
+        let dialog_window = model.dialog.window.clone();
+        let close = context
+            .debug_root_chrome(dialog_window.id())
+            .unwrap()
+            .1
+            .expect("dialog should have a close button");
         context.mousemove(close.x + close.width / 2, close.y + close.height / 2);
         context.mousedown(close.x + close.width / 2, close.y + close.height / 2, MouseButton::LEFT);
         context.update_ui_state(dimensions(), &mut model);
         assert_eq!(model.completions, [FileDialogStatus::Cancelled]);
         assert!(!model.dialog.is_open());
-        assert_eq!(context.debug_root_visible(root), Some(false));
+        assert_eq!(context.debug_root_visible(dialog_window.id()), Some(false));
     }
 
     #[test]
@@ -1192,11 +1217,11 @@ mod tests {
             .iter()
             .position(|folder| Path::new(folder) == child)
             .expect("child directory should be listed");
-        let root = model.dialog.root.id();
+        let dialog_window = model.dialog.window.clone();
         let child_node = model.dialog.test.folder_item_ids[index];
         let folder_scroll = model.dialog.folder_scroll.clone();
         let path_box = model.dialog.path_box.clone();
-        click_node(&mut context, &mut model, root, child_node, false);
+        click_node(&mut context, &mut model, &dialog_window, child_node, false);
         assert_eq!(Path::new(&model.dialog.current_working_directory), child);
         assert_eq!(model.dialog.files, ["inside.txt"]);
         assert!(folder_scroll.is_alive());

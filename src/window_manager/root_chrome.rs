@@ -42,43 +42,43 @@ use super::RootId;
 
 /// Cloneable, non-owning capability for one manager-owned window or dialog.
 ///
-/// The handle deliberately exposes identity, liveness, and semantic event ports only. Geometry and
-/// visibility mutations pass through [`crate::Context`] so every change invalidates layout and
-/// reconciles cross-window input policy in one place. Dropping a handle never affects the retained
-/// surface lifetime.
+/// The private identifier is intentionally paired with a weak typed event capability. Public
+/// mutations accept the complete handle, allowing the manager to authenticate both identity and
+/// originating [`crate::Context`] even though different contexts allocate overlapping numeric
+/// identifiers. Geometry and visibility remain manager-owned, and dropping this handle never
+/// affects the retained surface lifetime.
 #[derive(Clone)]
-pub struct RootHandle {
-    /// Stable identifier accepted by Context window and dialog operations.
+pub struct WindowHandle {
+    /// Manager-local identity used only after the event capability has authenticated its context.
     id: RootId,
-    /// Weak event capability for user-driven movement and resizing.
-    changed: crate::WidgetEventPortHandle<RootChanged>,
-    /// Weak event capability for user-requested window or dialog closure.
-    submitted: crate::WidgetEventPortHandle<RootSubmitted>,
+    /// Weak endpoint for all manager-originated events from this window or dialog.
+    events: crate::WidgetEventPortHandle<WindowEvent>,
 }
 
-impl RootHandle {
-    /// Returns the stable manager identifier for this window or dialog.
-    pub fn id(&self) -> RootId {
-        // Identity remains valid only while `is_alive` is true; Context validates it on mutation.
+impl WindowHandle {
+    /// Returns the manager-local identity for internal routing and diagnostic tests.
+    pub(crate) fn id(&self) -> RootId {
+        // Public code cannot extract or forge this value; checked mutations take the full handle.
         self.id
     }
 
     /// Returns whether the Context still owns the referenced window or dialog.
     pub fn is_alive(&self) -> bool {
-        // Both event owners are stored in the same window entry and expire with that entry.
-        self.changed.is_alive()
+        // The sole strong event owner is stored in the same forest node and expires with that node.
+        self.events.is_alive()
     }
 
-    /// Returns the native event endpoint emitted after a user move or resize.
-    pub fn changed(&self) -> crate::WidgetEventPortHandle<RootChanged> {
-        // Event handles are weak and therefore expire with the same window entry as this handle.
-        self.changed.clone()
+    /// Returns the weak endpoint for geometry changes and close requests from this window.
+    pub fn events(&self) -> crate::WidgetEventPortHandle<WindowEvent> {
+        // Cloning the weak endpoint neither retains the forest node nor duplicates pending events.
+        self.events.clone()
     }
 
-    /// Returns the native event endpoint emitted when window chrome requests closure.
-    pub fn submitted(&self) -> crate::WidgetEventPortHandle<RootSubmitted> {
-        // Cloning the weak endpoint does not retain either the window or its event queue.
-        self.submitted.clone()
+    /// Returns whether this handle authenticates one manager-owned event allocation.
+    pub(super) fn identifies(&self, events: &std::rc::Rc<std::cell::RefCell<crate::event::WidgetEventPort<WindowEvent>>>) -> bool {
+        // Numeric ids are manager-local; allocation identity prevents a handle from another Context
+        // with the same counter value from resolving this node.
+        self.events.identifies(events)
     }
 }
 
@@ -93,34 +93,27 @@ pub(super) enum RootInteraction {
     Resizing,
 }
 
-/// Geometry snapshot emitted after a user-driven window move or resize.
+/// Semantic event emitted by manager-owned window chrome.
+///
+/// One concrete event stream replaces separate changed/submitted allocations while retaining an
+/// explicit variant for each application-observable action.
 #[derive(Copy, Clone, Debug)]
-pub struct RootChanged {
-    /// Authoritative outer rectangle after applying the interaction.
-    pub rect: Recti,
+pub enum WindowEvent {
+    /// A user move or resize committed a new authoritative outer rectangle.
+    GeometryChanged {
+        /// Complete outer rectangle after applying the interaction.
+        rect: Recti,
+    },
+    /// The user pressed the manager-owned close affordance.
+    CloseRequested,
 }
 
-impl crate::WidgetEvent for RootChanged {}
-
-/// Reason emitted when manager-owned window or popup policy submits a lifecycle action.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum RootSubmitted {
-    /// The user pressed the window close affordance.
-    Close,
-    /// Popup policy dismissed a window-owned popup definition from the active path.
-    PopupDismissed,
-}
-
-impl crate::WidgetEvent for RootSubmitted {}
+impl crate::WidgetEvent for WindowEvent {}
 
 /// Creates the weak application handle for a newly retained window or dialog.
-pub(super) fn root_handle(
-    id: RootId,
-    changed: crate::WidgetEventPortHandle<RootChanged>,
-    submitted: crate::WidgetEventPortHandle<RootSubmitted>,
-) -> RootHandle {
-    // Both event endpoints are weak, so this value cannot retain the manager-owned window.
-    RootHandle { id, changed, submitted }
+pub(super) fn window_handle(id: RootId, events: crate::WidgetEventPortHandle<WindowEvent>) -> WindowHandle {
+    // The event endpoint is weak, so the returned application capability cannot retain the window.
+    WindowHandle { id, events }
 }
 
 /// Window-chrome region selected by a pointer press.

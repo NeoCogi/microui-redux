@@ -53,7 +53,7 @@
 //! Full retained-mode demo application.
 //!
 //! This example exercises core widgets, layout groups, scroll areas, images, and optional 3D
-//! renderer integrations in one interactive application. A dedicated titleless layer-0 root fills
+//! renderer integrations in one interactive application. A dedicated titleless layer-0 window fills
 //! the client area with its own menu and a perspective X-Y grid; ordinary demo windows float above
 //! it at the default layer.
 #[path = "./common/mod.rs"]
@@ -199,7 +199,7 @@ impl Widget for Grid3dWidget {
 }
 
 impl LeafWidget for Grid3dWidget {
-    /// Supplies a small intrinsic size; the fullscreen root's flex layout expands it to fit.
+    /// Supplies a small intrinsic size; the fullscreen window's flex layout expands it to fit.
     fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(80, 24)
     }
@@ -1242,7 +1242,7 @@ fn grid_menu_bar(context: &mut Context<SelectedBackend, State>) -> (MenuBar, Gri
     let (about_grid, about_grid_item) = registered_menu_item(context, MenuItemParameters::new("About X-Y Grid"), State::grid_about);
 
     // This bar is intentionally separate from the floating demo's File/View/Help menus. Installing
-    // it on the grid Window makes every generated popup belong to the layer-zero grid root.
+    // it on the grid Window makes every generated popup belong to the layer-zero grid window.
     let menu_bar = MenuBar::new([
         Menu::new("Grid").item(reset_view_item).separator().item(show_minor_lines_item),
         Menu::new("Help").item(about_grid_item),
@@ -1317,14 +1317,14 @@ struct State {
     window_info_value_states: [TypedWidgetHandle<ListItem>; 3],
     style: Style,
 
-    demo_root: RootHandle,
+    demo_root: WindowHandle,
     combo_popup_root: PopupHandle,
     popup_root: PopupHandle,
 
     /// Shared camera and presentation state consumed by the grid widget and render callback.
     grid_3d_state: Rc<RefCell<Grid3dState>>,
     /// Fullscreen layer-zero window whose rectangle follows the platform drawable area.
-    grid_root: RootHandle,
+    grid_root: WindowHandle,
     /// Concrete checked item reflecting whether unit-spaced grid lines are enabled.
     grid_show_minor_lines_item: MenuItemHandle,
 
@@ -1623,17 +1623,17 @@ impl State {
         let grid_root = ctx
             .ui()
             .create_window(Window::new("X-Y Grid Surface", rect(0, 0, 1, 1), grid_node).menu_bar(grid_menu_bar));
-        // This dedicated desktop-like root is the only layer-0 window. Its menu remains visible at
+        // This dedicated desktop-like window is the only layer-0 surface. Its menu remains visible at
         // the top edge, while the custom-render body consumes every remaining pixel below it.
         ctx.ui()
-            .set_root_layer(grid_root.id(), MIN_LAYER)
-            .expect("grid root must accept the bottom application layer");
+            .set_window_layer(&grid_root, MIN_LAYER)
+            .expect("grid window must accept the bottom application layer");
         ctx.ui()
-            .set_root_options(
-                grid_root.id(),
+            .set_window_options(
+                &grid_root,
                 WindowOption::NO_TITLE | WindowOption::NO_CLOSE | WindowOption::NO_RESIZE | WindowOption::NO_PADDING,
             )
-            .expect("grid root must accept fullscreen chrome options");
+            .expect("grid window must accept fullscreen chrome options");
 
         // Preserve the original Demo Window as an independently movable and resizable layer-15
         // window. Its existing menu is unrelated to the fullscreen grid menu above.
@@ -1645,7 +1645,7 @@ impl State {
         let _log_root = ctx.ui().create_window(Window::new("Log Window", rect(350, 40, 300, 200), log_node));
         let combo_popup_root = ctx
             .ui()
-            .create_popup(demo_root.id(), "Combo Box Popup", combo_node)
+            .create_popup(&demo_root, "Combo Box Popup", combo_node)
             .expect("demo window must own the combo popup");
         ctx.ui()
             .set_popup_options(
@@ -1655,7 +1655,7 @@ impl State {
             .expect("combo popup definition must exist");
         let popup_root = ctx
             .ui()
-            .create_popup(demo_root.id(), "Test Popup", popup_node)
+            .create_popup(&demo_root, "Test Popup", popup_node)
             .expect("demo window must own the test popup");
         ctx.ui()
             .set_popup_options(
@@ -1815,9 +1815,9 @@ impl State {
             suzanne_widget: SuzanneWidgetBuilder::create_widget(SuzanneWidgetParameters { data: suzanne_data.clone() }),
             background_swatch,
         };
-        // The file picker is a library component owned by this application state. Its root and
+        // The file picker is a library component owned by this application state. Its dialog and
         // controls use the same generic Context APIs and dispatcher as the rest of the demo.
-        let file_dialog = FileDialog::new(ctx, demo_root.id(), Self::file_dialog_mut);
+        let file_dialog = FileDialog::new(ctx, &demo_root, Self::file_dialog_mut);
         let mut state = Self {
             bg: [90.0, 95.0, 100.0],
             bg_slider_states,
@@ -1897,10 +1897,10 @@ impl State {
         for (index, submitted) in self.combo_item_submitted.iter().enumerate() {
             context.subscribe_context_with(submitted.clone(), index, Self::combo_item).unwrap();
         }
-        context.subscribe(self.combo_popup_root.submitted(), Self::combo_popup_submitted).unwrap();
-        // The floating Demo Window still owns user-driven move/resize diagnostics independently of
-        // the platform-sized grid root.
-        context.subscribe_context(self.demo_root.changed(), Self::demo_root_changed).unwrap();
+        context.subscribe(self.combo_popup_root.events(), Self::combo_popup_event).unwrap();
+        // One concrete window event stream reports both geometry changes and close requests. The
+        // floating Demo Window retains diagnostics independently of the platform-sized grid window.
+        context.subscribe_context(self.demo_root.events(), Self::demo_window_event).unwrap();
         for (submitted, label) in self.popup_button_submitted.iter().zip(["Hello", "World"]) {
             context.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
         }
@@ -2035,11 +2035,11 @@ impl State {
         }
     }
 
-    fn combo_popup_submitted(&mut self, event: &RootSubmitted) {
-        // PopupDismissed covers every policy-driven hide, including outside presses, replacement,
-        // and recursive root-tree hiding. Reflect that typed fact into the composed Combo so its
+    fn combo_popup_event(&mut self, event: &PopupEvent) {
+        // Dismissed covers every policy-driven hide, including outside presses, replacement, and
+        // recursive forest hiding. Reflect that typed fact into the composed Combo so its
         // next header click opens instead of toggling stale semantic state closed.
-        if matches!(event, RootSubmitted::PopupDismissed) {
+        if matches!(event, PopupEvent::Dismissed) {
             self.combo_typed_state.try_update(Combo::close_popup).expect("combo state unavailable");
         }
     }
@@ -2122,7 +2122,7 @@ impl State {
         });
     }
 
-    /// Describes the separate background root from its own Help menu.
+    /// Describes the separate background window from its own Help menu.
     fn grid_about(&mut self, _context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
         self.write_log("Layer-0 fullscreen X-Y grid: left-drag to orbit and use the wheel to zoom");
     }
@@ -2146,15 +2146,20 @@ impl State {
         });
     }
 
-    /// Reconciles diagnostics and the minimum size of the ordinary floating Demo Window.
-    fn demo_root_changed(&mut self, context: &mut Ui<'_>, event: &RootChanged) {
-        // Root chrome emits only after a user-driven move or resize. Clamp the demo-specific
-        // minimum at this event boundary without coupling it to the fullscreen grid geometry.
-        let mut rect = event.rect;
+    /// Handles all manager-originated events for the ordinary floating Demo Window.
+    fn demo_window_event(&mut self, context: &mut Ui<'_>, event: &WindowEvent) {
+        let WindowEvent::GeometryChanged { rect: event_rect } = event else {
+            // The demo intentionally leaves close requests observational; host shutdown policy is
+            // owned by the shared runner rather than inferred from a geometry notification.
+            return;
+        };
+        // Clamp the demo-specific minimum at the user move/resize boundary without coupling it to
+        // the fullscreen grid geometry.
+        let mut rect = *event_rect;
         rect.width = rect.width.max(240);
         rect.height = rect.height.max(300);
-        if (rect.width, rect.height) != (event.rect.width, event.rect.height) {
-            context.set_root_rect(self.demo_root.id(), rect).expect("demo root must exist");
+        if (rect.width, rect.height) != (event_rect.width, event_rect.height) {
+            context.set_window_rect(&self.demo_root, rect).expect("demo window must exist");
         }
 
         // These retained values describe the floating Demo Window, not the platform-sized grid.
@@ -2660,12 +2665,12 @@ impl State {
 
     /// Keeps the chromeless layer-0 grid surface exactly aligned with the drawable viewport.
     fn sync_grid_surface(&mut self, ctx: &mut Context<SelectedBackend, Self>, dimensions: Dimensioni) {
-        // The platform owns drawable dimensions, while Context owns retained root geometry. Join
+        // The platform owns drawable dimensions, while Context owns retained window geometry. Join
         // those authorities once per host frame so window resizes become visible in the second
         // update/layout commit performed by the shared example runner before painting.
         ctx.ui()
-            .set_root_rect(self.grid_root.id(), rect(0, 0, dimensions.width, dimensions.height))
-            .expect("fullscreen grid root must remain registered");
+            .set_window_rect(&self.grid_root, rect(0, 0, dimensions.width, dimensions.height))
+            .expect("fullscreen grid window must remain registered");
     }
 
     /// Applies application-owned animation, style, and viewport state between update commits.
@@ -2921,7 +2926,7 @@ fn clip_plane_distances(point: Vec4f) -> [f32; 6] {
     ]
 }
 
-/// Builds a perspective X-Y ground grid for the dedicated fullscreen background root.
+/// Builds a perspective X-Y ground grid for the dedicated fullscreen background window.
 fn build_xy_grid_vertices(area: Recti, white_uv: Vec2f, show_minor_lines: bool, pvm: Mat4f) -> Vec<Vertex> {
     if area.width <= 0 || area.height <= 0 {
         return Vec::new();

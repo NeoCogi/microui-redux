@@ -66,10 +66,10 @@ use roots::SurfaceForest;
 mod root_chrome;
 mod roots;
 
-pub use root_chrome::{RootChanged, RootHandle, RootSubmitted};
-// PopupHandle and RootMutationError describe popup identity and manager policy rather than window
-// chrome. Re-export them from this boundary with the rest of the public window API.
-pub use roots::{PopupHandle, RootMutationError};
+pub use root_chrome::{WindowEvent, WindowHandle};
+// Popup identity/events and checked surface failures describe forest policy rather than chrome.
+// Re-export them from this boundary with the rest of the public window API.
+pub use roots::{PopupEvent, PopupHandle, SurfaceMutationError};
 
 bitflags! {
     #[derive(Copy, Clone)]
@@ -141,9 +141,12 @@ impl Window {
     }
 }
 
-/// Opaque identifier for a window or dialog retained by [`crate::Context`].
+/// Manager-local identity for a window or dialog retained by [`crate::Context`].
+///
+/// Application code carries an authenticated [`WindowHandle`] instead. Keeping the counter private
+/// prevents a value allocated by one Context from being accepted accidentally by another Context.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub struct RootId(usize);
+pub(crate) struct RootId(usize);
 
 impl RootId {
     /// Wraps a raw counter value as a root identifier.

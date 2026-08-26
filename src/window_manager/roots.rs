@@ -34,9 +34,9 @@ use std::{cell::RefCell, rc::Rc};
 
 use super::*;
 use crate::menu::{CompiledMenuPopup, MenuPress, MenuSurface};
-use crate::{MouseButton, Node, RootHandle, UiInputEvent, Vec2i, rect};
+use crate::{MouseButton, Node, UiInputEvent, Vec2i, rect};
 
-use super::root_chrome::{RootChromeGeometry, RootChromePart, RootInteraction, record_root_background, record_root_overlay, root_chrome_geometry, root_handle};
+use super::root_chrome::{RootChromeGeometry, RootChromePart, RootInteraction, record_root_background, record_root_overlay, root_chrome_geometry, window_handle};
 
 /// Failure reported by a checked window or popup mutation.
 ///
@@ -44,13 +44,13 @@ use super::root_chrome::{RootChromeGeometry, RootChromePart, RootInteraction, re
 /// only stale identity or explicit ownership and layer policy. No application borrow can make one of
 /// these mutations partially succeed.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum RootMutationError {
-    /// The supplied [`RootId`] does not identify a retained window or dialog.
-    UnknownRoot,
+pub enum SurfaceMutationError {
+    /// The supplied [`WindowHandle`] is stale or belongs to another Context.
+    UnknownWindow,
     /// The supplied [`PopupHandle`] no longer identifies a window-owned popup definition.
     UnknownPopup,
     /// A dialog owner is stale, hidden when shown, or is not an ordinary window.
-    InvalidRootParent,
+    InvalidDialogOwner,
     /// The requested fixed layer is outside the supported inclusive range `0..=15`.
     InvalidLayer(u8),
     /// The requested window occupies the manager-controlled modal layer.
@@ -58,6 +58,15 @@ pub enum RootMutationError {
     /// A popup owner is hidden, blocked by a modal, or missing from the active parent path.
     InvalidPopupParent,
 }
+
+/// Observable lifecycle event emitted by one application-authored popup.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum PopupEvent {
+    /// Popup policy removed this surface from the sole active branch.
+    Dismissed,
+}
+
+impl crate::WidgetEvent for PopupEvent {}
 
 /// Stable identifier for one popup definition inside its owning window.
 ///
@@ -73,29 +82,36 @@ struct PopupId(usize);
 /// single active popup path. Dropping this handle never closes or destroys the popup.
 #[derive(Clone)]
 pub struct PopupHandle {
-    /// Stable popup identity resolved directly in the concrete surface forest.
+    /// Manager-local popup identity used only after authenticating `events`.
     id: PopupId,
     /// Weak endpoint for policy-driven dismissal notifications.
-    submitted: crate::WidgetEventPortHandle<crate::RootSubmitted>,
+    events: crate::WidgetEventPortHandle<PopupEvent>,
 }
 
 impl PopupHandle {
     /// Creates the weak capability returned for one newly retained popup.
-    fn new(id: PopupId, submitted: crate::WidgetEventPortHandle<crate::RootSubmitted>) -> Self {
+    fn new(id: PopupId, events: crate::WidgetEventPortHandle<PopupEvent>) -> Self {
         // Construction stays private so callers cannot forge an internal popup identity.
-        Self { id, submitted }
+        Self { id, events }
     }
 
     /// Returns whether the owning window still retains this popup definition.
     pub fn is_alive(&self) -> bool {
         // The event owner is stored in the popup record and expires when that record is dropped.
-        self.submitted.is_alive()
+        self.events.is_alive()
     }
 
     /// Returns the weak endpoint emitted when popup policy removes this popup from the active path.
-    pub fn submitted(&self) -> crate::WidgetEventPortHandle<crate::RootSubmitted> {
+    pub fn events(&self) -> crate::WidgetEventPortHandle<PopupEvent> {
         // Cloning the weak endpoint does not retain the popup tree or owner window.
-        self.submitted.clone()
+        self.events.clone()
+    }
+
+    /// Returns whether this handle authenticates one manager-owned popup event allocation.
+    fn identifies(&self, events: &Rc<RefCell<crate::event::WidgetEventPort<PopupEvent>>>) -> bool {
+        // Allocation identity prevents a same-valued popup counter from another Context from being
+        // accepted by this forest.
+        self.events.identifies(events)
     }
 }
 
@@ -379,9 +395,9 @@ impl SurfaceBody {
 
 /// Private identity for one node in the concrete surface forest.
 ///
-/// Public code continues to carry distinct [`RootId`] and [`PopupHandle`] capabilities. Internally,
-/// this compact enum is sufficient for common layout, input, and paint traversal without an erased
-/// payload, trait object, or `(owner, popup)` adapter pair.
+/// Public code carries authenticated [`WindowHandle`] and [`PopupHandle`] capabilities. Internally,
+/// this compact manager-local key is sufficient for common layout, input, and paint traversal
+/// without an erased payload, trait object, or `(owner, popup)` adapter pair.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum SurfaceKey {
     /// An ordinary window or modal dialog.
@@ -412,10 +428,8 @@ struct RootState {
     visible: bool,
     /// Manager-owned title movement or resize gesture.
     interaction: RootInteraction,
-    /// Strong owner of user-driven geometry-change events.
-    changed_event: Rc<RefCell<crate::event::WidgetEventPort<crate::RootChanged>>>,
-    /// Strong owner of window close submissions.
-    submitted_event: Rc<RefCell<crate::event::WidgetEventPort<crate::RootSubmitted>>>,
+    /// Strong owner of the unified window geometry/lifecycle event stream.
+    events: Rc<RefCell<crate::event::WidgetEventPort<WindowEvent>>>,
     /// Optional concrete menu bar laid out above the application widget body.
     menu_bar: Option<MenuSurface>,
 }
@@ -426,8 +440,8 @@ enum PopupState {
     Application {
         /// Exact screen rectangle supplied by the public popup API.
         anchor: Recti,
-        /// Strong owner of policy-driven dismissal events.
-        submitted_event: Rc<RefCell<crate::event::WidgetEventPort<crate::RootSubmitted>>>,
+        /// Strong owner of policy-driven popup lifecycle events.
+        events: Rc<RefCell<crate::event::WidgetEventPort<PopupEvent>>>,
     },
     /// Private menu popup positioned from one slot in its direct forest parent.
     Menu {
@@ -540,28 +554,20 @@ impl SurfaceNode {
         self.surface.geometry.hit_test(point)
     }
 
-    /// Emits the authoritative root geometry after a user move or resize.
-    fn emit_changed(&mut self) {
-        let event = &self.root().expect("geometry changes are emitted only by roots").changed_event;
-        event.borrow_mut().emit(crate::RootChanged { rect: self.surface.rect });
-    }
-
-    /// Emits one semantic root submission at the next safe application dispatch boundary.
-    fn emit_submitted(&mut self, event: crate::RootSubmitted) {
-        self.root()
-            .expect("root submissions are emitted only by roots")
-            .submitted_event
-            .borrow_mut()
-            .emit(event);
+    /// Emits one concrete window event at the next safe application dispatch boundary.
+    fn emit_window_event(&mut self, event: WindowEvent) {
+        // The strong port shares the window node's exact lifetime, while subscribers carry only a
+        // weak capability and cannot emit into this queue themselves.
+        self.root().expect("window events are emitted only by roots").events.borrow_mut().emit(event);
     }
 
     /// Dismisses an active popup and emits exactly one policy event.
     fn dismiss_popup(&mut self) {
         // The caller walks the active leaf upward, so descendants are always notified first.
         self.surface.body.clear_transient_targets();
-        if let Some(PopupState::Application { submitted_event, .. }) = self.popup() {
+        if let Some(PopupState::Application { events, .. }) = self.popup() {
             // Menu popups have no unobservable lifecycle port; their visibility is wholly internal.
-            submitted_event.borrow_mut().emit(crate::RootSubmitted::PopupDismissed);
+            events.borrow_mut().emit(PopupEvent::Dismissed);
         }
     }
 
@@ -884,12 +890,12 @@ impl WindowManager {
         window: Window,
         options: WindowOption,
         visible: bool,
-    ) -> Result<RootHandle, RootMutationError> {
+    ) -> Result<WindowHandle, SurfaceMutationError> {
         if mode == RootMode::Modal {
-            let owner = parent.ok_or(RootMutationError::InvalidRootParent)?;
+            let owner = parent.ok_or(SurfaceMutationError::InvalidDialogOwner)?;
             let owner = self.root_node(owner)?.root().expect("root lookup must return root policy");
             if !matches!(owner.mode, RootMode::Normal { .. }) {
-                return Err(RootMutationError::InvalidRootParent);
+                return Err(SurfaceMutationError::InvalidDialogOwner);
             }
         } else {
             debug_assert!(parent.is_none(), "ordinary roots cannot have a structural parent");
@@ -903,11 +909,10 @@ impl WindowManager {
             None => (None, Vec::new()),
         };
 
-        // Strong event owners live with root policy; returned handles retain neither them nor trees.
-        let changed_event = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
-        let submitted_event = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
-        let changed = crate::WidgetEventPortHandle::new(&changed_event);
-        let submitted = crate::WidgetEventPortHandle::new(&submitted_event);
+        // One strong event owner lives with root policy; the returned handle keeps only a weak,
+        // typed capability that also authenticates its originating Context.
+        let events = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
+        let event_handle = crate::WidgetEventPortHandle::new(&events);
         let id = self.next_root_id();
         self.surfaces.insert_root(SurfaceNode {
             key: SurfaceKey::Root(id),
@@ -917,8 +922,7 @@ impl WindowManager {
                 mode,
                 visible,
                 interaction: RootInteraction::None,
-                changed_event,
-                submitted_event,
+                events,
                 menu_bar,
             }),
         });
@@ -930,7 +934,7 @@ impl WindowManager {
         }
         self.surfaces.rebuild_visible_order();
         self.invalidate_ui_commit();
-        Ok(root_handle(id, changed, submitted))
+        Ok(window_handle(id, event_handle))
     }
 
     /// Allocates a root identifier that will never be reused.
@@ -948,21 +952,23 @@ impl WindowManager {
     }
 
     /// Creates an open ordinary window from one complete retained definition.
-    pub fn create_window(&mut self, window: Window) -> RootHandle {
+    pub fn create_window(&mut self, window: Window) -> WindowHandle {
         // Ordinary construction has no fallible owner edge.
         self.register_window(RootMode::Normal { layer: DEFAULT_LAYER }, None, window, WindowOption::FRAME, true)
             .expect("ordinary window registration cannot fail")
     }
 
     /// Creates a hidden modal dialog directly owned by an ordinary window.
-    pub fn create_dialog(&mut self, owner: RootId, window: Window) -> Result<RootHandle, RootMutationError> {
-        // Dialog validation and optional menu compilation share ordinary window registration.
+    pub fn create_dialog(&mut self, owner: &WindowHandle, window: Window) -> Result<WindowHandle, SurfaceMutationError> {
+        // Authenticate before compiling or mounting the supplied dialog definition.
+        let owner = self.window_id(owner)?;
         self.register_window(RootMode::Modal, Some(owner), window, WindowOption::FRAME, false)
     }
 
     /// Creates a hidden top-level popup definition inside one window or dialog.
-    pub fn create_popup(&mut self, owner: RootId, name: &str, content: Node) -> Result<PopupHandle, RootMutationError> {
-        self.root_node(owner)?;
+    pub fn create_popup(&mut self, owner: &WindowHandle, name: &str, content: Node) -> Result<PopupHandle, SurfaceMutationError> {
+        // Resolve the authenticated window capability before transferring the content node.
+        let owner = self.window_id(owner)?;
         // A top-level popup's sole parent edge points directly to its owning root.
         Ok(self.register_application_popup(SurfaceKey::Root(owner), name, content))
     }
@@ -970,19 +976,16 @@ impl WindowManager {
     /// Registers one application-authored popup below an already validated root.
     fn register_application_popup(&mut self, parent: SurfaceKey, name: &str, content: Node) -> PopupHandle {
         let id = self.next_popup_id();
-        let submitted_event = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
-        let submitted = crate::WidgetEventPortHandle::new(&submitted_event);
+        let events = Rc::new(RefCell::new(crate::event::WidgetEventPort::new()));
+        let event_handle = crate::WidgetEventPortHandle::new(&events);
         self.surfaces.insert_popup(SurfaceNode {
             key: SurfaceKey::Popup(id),
             parent: Some(parent),
             surface: Surface::new(name.to_owned(), Self::default_popup_options(), Recti::default(), content),
-            kind: SurfaceKind::Popup(PopupState::Application {
-                anchor: Recti::default(),
-                submitted_event,
-            }),
+            kind: SurfaceKind::Popup(PopupState::Application { anchor: Recti::default(), events }),
         });
         self.invalidate_ui_commit();
-        PopupHandle::new(id, submitted)
+        PopupHandle::new(id, event_handle)
     }
 
     /// Recursively inserts one concrete menu popup beneath its direct forest parent.
@@ -1001,22 +1004,25 @@ impl WindowManager {
         }
     }
 
-    /// Replaces a retained window title silently.
-    pub fn set_root_name(&mut self, root: RootId, name: String) -> Result<(), RootMutationError> {
+    /// Replaces a retained window title after authenticating its application capability.
+    pub fn set_window_name(&mut self, window: &WindowHandle, name: String) -> Result<(), SurfaceMutationError> {
+        let root = self.window_id(window)?;
         self.root_node_mut(root)?.surface.name = name;
         self.invalidate_ui_commit();
         Ok(())
     }
 
     /// Replaces a window outer rectangle silently.
-    pub fn set_root_rect(&mut self, root: RootId, rect: Recti) -> Result<(), RootMutationError> {
+    pub fn set_window_rect(&mut self, window: &WindowHandle, rect: Recti) -> Result<(), SurfaceMutationError> {
+        let root = self.window_id(window)?;
         self.root_node_mut(root)?.surface.rect = rect;
         self.invalidate_ui_commit();
         Ok(())
     }
 
     /// Replaces a window outer size without changing its screen origin.
-    pub fn set_root_size(&mut self, root: RootId, size: Dimensioni) -> Result<(), RootMutationError> {
+    pub fn set_window_size(&mut self, window: &WindowHandle, size: Dimensioni) -> Result<(), SurfaceMutationError> {
+        let root = self.window_id(window)?;
         let surface = &mut self.root_node_mut(root)?.surface;
         surface.rect.width = size.width;
         surface.rect.height = size.height;
@@ -1025,14 +1031,15 @@ impl WindowManager {
     }
 
     /// Replaces window chrome options and reconciles capture immediately.
-    pub fn set_root_options(&mut self, root: RootId, options: WindowOption) -> Result<(), RootMutationError> {
+    pub fn set_window_options(&mut self, window: &WindowHandle, options: WindowOption) -> Result<(), SurfaceMutationError> {
+        let root = self.window_id(window)?;
         self.root_node_mut(root)?.set_root_options(options);
         self.invalidate_ui_commit();
         Ok(())
     }
 
     /// Replaces popup frame, padding, and automatic-size policy through its typed handle.
-    pub fn set_popup_options(&mut self, popup: &PopupHandle, options: WindowOption) -> Result<(), RootMutationError> {
+    pub fn set_popup_options(&mut self, popup: &PopupHandle, options: WindowOption) -> Result<(), SurfaceMutationError> {
         let node = self.popup_node_mut(popup)?;
         // Popups never acquire manager chrome; enforce that invariant regardless of caller flags.
         node.surface.options = options | WindowOption::NO_TITLE | WindowOption::NO_RESIZE;
@@ -1041,13 +1048,14 @@ impl WindowManager {
     }
 
     /// Assigns an ordinary window to one fixed application stacking layer.
-    pub fn set_root_layer(&mut self, root: RootId, layer: u8) -> Result<(), RootMutationError> {
+    pub fn set_window_layer(&mut self, window: &WindowHandle, layer: u8) -> Result<(), SurfaceMutationError> {
         if layer > MAX_LAYER {
-            return Err(RootMutationError::InvalidLayer(layer));
+            return Err(SurfaceMutationError::InvalidLayer(layer));
         }
+        let root = self.window_id(window)?;
         let state = self.root_node(root)?.root().expect("root lookup must return root policy");
         if !matches!(state.mode, RootMode::Normal { .. }) {
-            return Err(RootMutationError::ManagedLayer);
+            return Err(SurfaceMutationError::ManagedLayer);
         }
         self.surfaces.set_root_layer(root, layer);
         self.invalidate_ui_commit();
@@ -1055,7 +1063,8 @@ impl WindowManager {
     }
 
     /// Returns the fixed or modal layer policy of one window.
-    pub fn root_layer_binding(&self, root: RootId) -> Result<LayerBinding, RootMutationError> {
+    pub fn window_layer(&self, window: &WindowHandle) -> Result<LayerBinding, SurfaceMutationError> {
+        let root = self.window_id(window)?;
         let state = self.root_node(root)?.root().expect("root lookup must return root policy");
         Ok(match state.mode {
             RootMode::Normal { layer } => LayerBinding::Fixed(layer),
@@ -1064,16 +1073,22 @@ impl WindowManager {
     }
 
     /// Shows or hides a window while retaining its application and popup definitions.
-    pub fn set_root_visible(&mut self, root: RootId, visible: bool) -> Result<(), RootMutationError> {
+    pub fn set_window_visible(&mut self, window: &WindowHandle, visible: bool) -> Result<(), SurfaceMutationError> {
+        let root = self.window_id(window)?;
+        self.set_window_visible_id(root, visible)
+    }
+
+    /// Applies visibility policy to one already authenticated internal window identity.
+    fn set_window_visible_id(&mut self, root: RootId, visible: bool) -> Result<(), SurfaceMutationError> {
         let mode = self.root_node(root)?.root().expect("root lookup must return root policy").mode;
         if visible {
             if mode == RootMode::Modal {
                 let owner = match self.root_node(root)?.parent {
                     Some(SurfaceKey::Root(owner)) => owner,
-                    _ => return Err(RootMutationError::InvalidRootParent),
+                    _ => return Err(SurfaceMutationError::InvalidDialogOwner),
                 };
                 if !self.root_is_visible(owner) {
-                    return Err(RootMutationError::InvalidRootParent);
+                    return Err(SurfaceMutationError::InvalidDialogOwner);
                 }
                 if self.active_modal_root() != Some(root) {
                     self.dismiss_active_popups();
@@ -1102,18 +1117,20 @@ impl WindowManager {
     }
 
     /// Shows one popup at the current pointer position.
-    pub fn show_popup(&mut self, popup: &PopupHandle) -> Result<(), RootMutationError> {
+    pub fn show_popup(&mut self, popup: &PopupHandle) -> Result<(), SurfaceMutationError> {
         let mouse = self.input.snapshot().mouse_pos;
         self.show_popup_at(popup, rect(mouse.x, mouse.y, 1, 1))
     }
 
     /// Shows one popup at an exact screen-space anchor and updates the sole active path.
-    pub fn show_popup_at(&mut self, popup: &PopupHandle, anchor: Recti) -> Result<(), RootMutationError> {
+    pub fn show_popup_at(&mut self, popup: &PopupHandle, anchor: Recti) -> Result<(), SurfaceMutationError> {
+        // Authenticate before opening: manager-local counters overlap between Context instances.
+        let popup = self.popup_id(popup)?;
         // Open first so an invalid child path cannot partially replace its retained anchor.
-        self.open_popup_id(popup.id)?;
-        let node = self.popup_node_mut(popup)?;
+        self.open_popup_id(popup)?;
+        let node = self.surfaces.popup_node_mut(popup).expect("authenticated popup must remain retained");
         let PopupState::Application { anchor: current, .. } = node.popup_mut().expect("popup lookup must return popup policy") else {
-            return Err(RootMutationError::UnknownPopup);
+            return Err(SurfaceMutationError::UnknownPopup);
         };
         *current = anchor;
         node.surface.rect = anchor;
@@ -1122,12 +1139,12 @@ impl WindowManager {
     }
 
     /// Opens one retained popup identity without replacing its configured placement relation.
-    fn open_popup_id(&mut self, popup: PopupId) -> Result<(), RootMutationError> {
-        let node = self.surfaces.popup_node(popup).ok_or(RootMutationError::UnknownPopup)?;
+    fn open_popup_id(&mut self, popup: PopupId) -> Result<(), SurfaceMutationError> {
+        let node = self.surfaces.popup_node(popup).ok_or(SurfaceMutationError::UnknownPopup)?;
         let parent = node.parent.expect("every popup must retain one parent edge");
-        let owner = self.surfaces.owning_root(SurfaceKey::Popup(popup)).ok_or(RootMutationError::UnknownPopup)?;
+        let owner = self.surfaces.owning_root(SurfaceKey::Popup(popup)).ok_or(SurfaceMutationError::UnknownPopup)?;
         if !self.popup_owner_is_eligible(owner) {
-            return Err(RootMutationError::InvalidPopupParent);
+            return Err(SurfaceMutationError::InvalidPopupParent);
         }
 
         // A top-level popup may replace another branch. A child is legal only while its sole parent
@@ -1139,7 +1156,7 @@ impl WindowManager {
             }
             SurfaceKey::Popup(parent) => {
                 if !self.surfaces.popup_is_active(parent) {
-                    return Err(RootMutationError::InvalidPopupParent);
+                    return Err(SurfaceMutationError::InvalidPopupParent);
                 }
                 let parent_depth = self.surfaces.popup_depth(parent).expect("active popup must have a rooted ancestry");
                 let retained = self.surfaces.popup_is_active(popup);
@@ -1156,17 +1173,23 @@ impl WindowManager {
     }
 
     /// Hides one active popup and all of its active descendants.
-    pub fn hide_popup(&mut self, popup: &PopupHandle) -> Result<(), RootMutationError> {
-        self.popup_node(popup)?;
-        if self.surfaces.popup_is_active(popup.id) {
-            let depth = self.surfaces.popup_depth(popup.id).expect("active popup must have rooted ancestry");
+    pub fn hide_popup(&mut self, popup: &PopupHandle) -> Result<(), SurfaceMutationError> {
+        let popup = self.popup_id(popup)?;
+        if self.surfaces.popup_is_active(popup) {
+            let depth = self.surfaces.popup_depth(popup).expect("active popup must have rooted ancestry");
             self.truncate_active_popup_path(depth);
         }
         Ok(())
     }
 
-    /// Raises one root inside its incrementally maintained structural layer.
-    pub fn bring_root_to_front(&mut self, root: RootId) -> Result<(), RootMutationError> {
+    /// Raises one authenticated window inside its structural layer.
+    pub fn bring_window_to_front(&mut self, window: &WindowHandle) -> Result<(), SurfaceMutationError> {
+        let root = self.window_id(window)?;
+        self.bring_window_to_front_id(root)
+    }
+
+    /// Raises one already authenticated internal window identity inside its structural layer.
+    fn bring_window_to_front_id(&mut self, root: RootId) -> Result<(), SurfaceMutationError> {
         let state = self.root_node(root)?.root().expect("root lookup must return root policy");
         if state.mode == RootMode::Modal && state.visible && self.active_modal_root() != Some(root) {
             self.dismiss_active_popups();
@@ -1177,10 +1200,8 @@ impl WindowManager {
     }
 
     /// Destroys one window and, for an ordinary window, its directly owned dialogs.
-    pub fn destroy_root(&mut self, root: RootId) -> bool {
-        if self.root_node(root).is_err() {
-            return false;
-        }
+    pub fn destroy_window(&mut self, window: &WindowHandle) -> Result<(), SurfaceMutationError> {
+        let root = self.window_id(window)?;
         let removed = self.owned_root_ids(root);
         if self.active_popup_owner().is_some_and(|owner| removed.contains(&owner)) {
             self.dismiss_active_popups();
@@ -1190,27 +1211,57 @@ impl WindowManager {
         }
         self.surfaces.remove_roots(&removed);
         self.invalidate_ui_commit();
-        true
+        Ok(())
     }
 
-    /// Resolves a public root identity directly to its concrete forest node.
-    fn root_node(&self, root: RootId) -> Result<&SurfaceNode, RootMutationError> {
-        self.surfaces.root_node(root).ok_or(RootMutationError::UnknownRoot)
+    /// Resolves an already authenticated internal root identity to its concrete forest node.
+    fn root_node(&self, root: RootId) -> Result<&SurfaceNode, SurfaceMutationError> {
+        self.surfaces.root_node(root).ok_or(SurfaceMutationError::UnknownWindow)
     }
 
-    /// Mutably resolves a public root identity to its concrete forest node.
-    fn root_node_mut(&mut self, root: RootId) -> Result<&mut SurfaceNode, RootMutationError> {
-        self.surfaces.root_node_mut(root).ok_or(RootMutationError::UnknownRoot)
+    /// Mutably resolves an already authenticated root identity to its concrete forest node.
+    fn root_node_mut(&mut self, root: RootId) -> Result<&mut SurfaceNode, SurfaceMutationError> {
+        self.surfaces.root_node_mut(root).ok_or(SurfaceMutationError::UnknownWindow)
     }
 
-    /// Resolves a typed popup capability directly to its concrete forest node.
-    fn popup_node(&self, popup: &PopupHandle) -> Result<&SurfaceNode, RootMutationError> {
-        self.surfaces.popup_node(popup.id).ok_or(RootMutationError::UnknownPopup)
+    /// Authenticates one application-facing window handle and returns its manager-local identity.
+    fn window_id(&self, window: &WindowHandle) -> Result<RootId, SurfaceMutationError> {
+        let root = self
+            .surfaces
+            .root_node(window.id())
+            .and_then(|node| node.root())
+            .ok_or(SurfaceMutationError::UnknownWindow)?;
+        if !window.identifies(&root.events) {
+            return Err(SurfaceMutationError::UnknownWindow);
+        }
+        // The numeric identity is used only inside this manager after allocation authentication.
+        Ok(window.id())
     }
 
-    /// Mutably resolves a typed popup capability directly to its concrete forest node.
-    fn popup_node_mut(&mut self, popup: &PopupHandle) -> Result<&mut SurfaceNode, RootMutationError> {
-        self.surfaces.popup_node_mut(popup.id).ok_or(RootMutationError::UnknownPopup)
+    /// Authenticates one application-facing popup handle and returns its manager-local identity.
+    fn popup_id(&self, popup: &PopupHandle) -> Result<PopupId, SurfaceMutationError> {
+        let events = match self.surfaces.popup_node(popup.id).and_then(SurfaceNode::popup) {
+            Some(PopupState::Application { events, .. }) => events,
+            _ => return Err(SurfaceMutationError::UnknownPopup),
+        };
+        if !popup.identifies(events) {
+            return Err(SurfaceMutationError::UnknownPopup);
+        }
+        // Private menu popups have no public handle and cannot pass the Application match above.
+        Ok(popup.id)
+    }
+
+    /// Resolves a typed popup capability directly to its authenticated concrete forest node.
+    #[cfg(test)]
+    fn popup_node(&self, popup: &PopupHandle) -> Result<&SurfaceNode, SurfaceMutationError> {
+        let id = self.popup_id(popup)?;
+        Ok(self.surfaces.popup_node(id).expect("authenticated popup must remain retained"))
+    }
+
+    /// Mutably resolves a typed popup capability to its authenticated concrete forest node.
+    fn popup_node_mut(&mut self, popup: &PopupHandle) -> Result<&mut SurfaceNode, SurfaceMutationError> {
+        let id = self.popup_id(popup)?;
+        Ok(self.surfaces.popup_node_mut(id).expect("authenticated popup must remain retained"))
     }
 
     /// Collects one root and the modal roots whose sole parent edge points directly to it.
@@ -1491,10 +1542,10 @@ impl WindowManager {
                 match self.root_node(root).ok().and_then(|node| node.chrome_part_at(*pos)) {
                     Some(RootChromePart::Close) => {
                         // Apply visibility before queuing Close so subscribers observe final policy.
-                        self.set_root_visible(root, false).expect("chrome target must remain registered");
+                        self.set_window_visible_id(root, false).expect("chrome target must remain registered");
                         self.root_node_mut(root)
                             .expect("closing a root must not destroy it")
-                            .emit_submitted(crate::RootSubmitted::Close);
+                            .emit_window_event(WindowEvent::CloseRequested);
                         true
                     }
                     Some(RootChromePart::Resize) => {
@@ -1530,7 +1581,9 @@ impl WindowManager {
                 if (node.surface.rect.x, node.surface.rect.y, node.surface.rect.width, node.surface.rect.height)
                     != (initial.x, initial.y, initial.width, initial.height)
                 {
-                    node.emit_changed();
+                    // Snapshot after geometry mutation so subscribers receive the committed value.
+                    let rect = node.surface.rect;
+                    node.emit_window_event(WindowEvent::GeometryChanged { rect });
                     self.invalidate_ui_commit();
                 }
                 true
@@ -1639,7 +1692,7 @@ impl WindowManager {
         {
             self.activate_pointer_surface(surface);
             let owner = self.surfaces.owning_root(surface).expect("visible surface must retain a root ancestor");
-            self.bring_root_to_front(owner).expect("pointer target owner must remain registered");
+            self.bring_window_to_front_id(owner).expect("pointer target owner must remain registered");
             if self.menu_contains(surface, input.mouse_pos) {
                 // A pointer-only menu gesture may preempt application capture but never keyboard focus.
                 self.clear_other_pointer_captures(surface);

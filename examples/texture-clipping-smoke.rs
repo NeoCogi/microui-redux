@@ -212,12 +212,12 @@ fn main() -> Result<(), String> {
         screen_content: screen_content.clone(),
     });
     let tree = Node::widget(probe);
-    let root = ctx.ui().create_window(Window::new("texture clipping smoke", rect(0, 0, 64, 64), tree));
+    let window = ctx.ui().create_window(Window::new("texture clipping smoke", rect(0, 0, 64, 64), tree));
     ctx.ui()
-        .set_root_options(root.id(), WindowOption::NO_TITLE | WindowOption::NO_CLOSE | WindowOption::NO_RESIZE)
-        .expect("root should remain registered");
+        .set_window_options(&window, WindowOption::NO_TITLE | WindowOption::NO_CLOSE | WindowOption::NO_RESIZE)
+        .expect("window should remain registered");
 
-    // Keep the root background out of the recording log so the assertions isolate the widget's
+    // Keep the window background out of the recording log so the assertions isolate the widget's
     // atlas/texture ordering while still exercising the retained public rendering path.
     let mut style = Style::default();
     style.colors[ControlColor::WindowBG as usize] = color(0, 0, 0, 0);
