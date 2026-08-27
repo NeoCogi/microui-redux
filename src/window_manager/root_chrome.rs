@@ -291,10 +291,12 @@ pub(super) fn record_root_background(display_list: &mut crate::render::DisplayLi
     }
 }
 
-/// Records title and resize visuals that must appear above application content.
+/// Records the frame border, title, and resize visuals that must appear above child content.
 pub(super) fn record_root_overlay(
     display_list: &mut crate::render::DisplayList,
     viewport: Recti,
+    outer: Recti,
+    options: WindowOption,
     name: &str,
     geometry: RootChromeGeometry,
     style: &Style,
@@ -302,6 +304,13 @@ pub(super) fn record_root_overlay(
 ) {
     // Reuse committed geometry so hit-testing and painting cannot disagree within one UI commit.
     let mut painter = Painter::screen_space(display_list, viewport);
+    if options.intersects(WindowOption::FRAME) {
+        // Background recording already filled the framed interior before application content. Draw
+        // only the border again in the overlay pass so an unclipped child may extend beyond the
+        // parent body without covering parent-owned frame chrome.
+        let border = style.frame_border();
+        painter.stroke_rect(outer, border.width, border.color);
+    }
     if let Some(title) = geometry.title {
         painter.fill_rect(title, style.colors[ControlColor::TitleBG as usize]);
         let mut text = title;

@@ -14,11 +14,12 @@
   menus, dialogs, custom drawing, external textures, and custom backend rendering. Its menu shows
   grouped and disabled commands, shortcut hints, a live checked item, radio choices in a cascading
   View > Log Spacing submenu, and typed
-  item submission events into the file dialog, log, and style state. A separate titleless fullscreen window
-  at layer 0 renders a perspective X-Y grid beneath the original Demo Window and every other
-  default-layer floating window. The grid window owns an independent Grid/Help menu; its private
-  menu-popup nodes stack in the transient band derived from that layer-0 owner. Left-drag an
-  exposed part of the grid to rotate its arcball camera, use the mouse
+  item submission events into the file dialog, log, and style state. A titleless fullscreen family
+  root at layer 0 renders a perspective X-Y grid beneath its content-clipped floating child windows.
+  The grid root owns the Grid/Help menu, which records and handles above the complete child family;
+  its private menu-popup nodes stack in the transient band derived from that layer-0 root. The child
+  windows retain screen-space geometry and sibling activation order while inheriting that fixed
+  layer. Left-drag an exposed part of the grid to rotate its arcball camera, use the mouse
   wheel there to zoom, or choose Grid > Reset View to restore the initial composition. Grid > Minor
   Grid Lines controls its unit-spaced divisions. Grid segments are clipped in homogeneous space so
   rotation cannot project behind-camera endpoints into stray lines across the UI. Each `Window`

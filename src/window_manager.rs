@@ -102,8 +102,10 @@ bitflags! {
 
 /// Complete retained definition consumed when a window or dialog is created.
 ///
-/// The optional [`MenuBar`] belongs to this value rather than to an application-side coordinator.
-/// Creation transfers the body, bar, and recursive menus to the window manager as one owner.
+/// The optional [`MenuBar`] and descendant clip policy belong to this value rather than to an
+/// application-side coordinator. Creation transfers the body, bar, and recursive menus to the
+/// window manager as one owner. Child windows remain separate `Window` values registered later
+/// through [`crate::Ui::create_child_window`].
 pub struct Window {
     /// Diagnostic name and visible title text.
     name: String,
@@ -113,6 +115,8 @@ pub struct Window {
     content: Node,
     /// Declarative bar and recursive menu hierarchy installed with this window.
     menu_bar: Option<MenuBar>,
+    /// Policy applied to the complete surfaces of structural child windows.
+    child_window_clip: ChildWindowClip,
 }
 
 impl Window {
@@ -124,6 +128,7 @@ impl Window {
             rect,
             content,
             menu_bar: None,
+            child_window_clip: ChildWindowClip::None,
         }
     }
 
@@ -134,10 +139,23 @@ impl Window {
         self
     }
 
+    /// Selects how this window clips structural child windows.
+    ///
+    /// [`ChildWindowClip::Content`] is useful for a fullscreen application root whose retained
+    /// content belongs behind floating child windows while its intrinsic menu and chrome remain in
+    /// front. The setting has no effect until at least one child is registered through
+    /// [`crate::Ui::create_child_window`].
+    pub const fn child_window_clip(mut self, clip: ChildWindowClip) -> Self {
+        // Store policy on the construction value so the first committed child layout observes the
+        // same immutable parent configuration as registration and paint ordering.
+        self.child_window_clip = clip;
+        self
+    }
+
     /// Transfers all construction values to the private manager implementation.
-    pub(crate) fn into_parts(self) -> (String, Recti, Node, Option<MenuBar>) {
+    pub(crate) fn into_parts(self) -> (String, Recti, Node, Option<MenuBar>, ChildWindowClip) {
         // Destructuring makes the single ownership transfer explicit at the registration boundary.
-        (self.name, self.rect, self.content, self.menu_bar)
+        (self.name, self.rect, self.content, self.menu_bar, self.child_window_clip)
     }
 }
 
@@ -169,14 +187,34 @@ pub const MAX_LAYER: u8 = 15;
 /// Layer assigned to newly created independent windows.
 pub const DEFAULT_LAYER: u8 = MAX_LAYER;
 
+/// Controls whether one window narrows the visible region of its structural child windows.
+///
+/// This policy belongs to the parent window rather than to any individual child, so every direct
+/// child receives the same structural boundary without storing a second clip setting. The policy
+/// affects each complete descendant surface, including its background, application body, chrome,
+/// menu bar, and popup surfaces.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub enum ChildWindowClip {
+    /// Lets child windows use the complete clip inherited from earlier ancestors and the viewport.
+    #[default]
+    None,
+    /// Intersects every direct child's inherited clip with this window's application body.
+    ///
+    /// The body excludes the parent frame, title, padding, and intrinsic menu bar. Descendants are
+    /// therefore unable to paint or receive uncaptured pointer input over those parent-owned areas.
+    Content,
+}
+
 /// Describes the structural stacking layer of one retained window.
 ///
-/// Ordinary windows use a caller-selectable fixed layer. Dialogs occupy a dedicated modal layer
+/// Independent windows use a caller-selectable fixed layer and structural children report the
+/// fixed layer inherited from their top-level family root. Dialogs occupy a dedicated modal layer
 /// above every fixed value. Popups do not expose a binding because they derive their transient band
 /// directly from their owner window.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum LayerBinding {
-    /// A caller-selected application layer in the inclusive range [`MIN_LAYER`]..=[`MAX_LAYER`].
+    /// A selected or structurally inherited application layer in the inclusive range
+    /// [`MIN_LAYER`]..=[`MAX_LAYER`].
     Fixed(u8),
     /// A dialog in the dedicated layer above all application-selectable layers.
     Modal,
@@ -189,11 +227,12 @@ pub(crate) struct WindowManager {
     /// Window-manager-owned style used by all roots and scroll areas.
     style: Style,
 
-    /// Concrete ownership forest for windows, dialogs, and popup surfaces.
+    /// Concrete ownership forest for independent windows, child windows, dialogs, and popups.
     ///
     /// Every retained surface lives in one collection and has at most one parent edge. The forest
     /// uses that collection's root-node order as global activation chronology and separately caches
-    /// only the visible traversal shared by layout, input, and paint.
+    /// the parent-first visible traversal used by layout and retained updates. Paint and pointer
+    /// selection recursively project the same parent edges in opposite directions around overlays.
     surfaces: SurfaceForest,
     /// Whether drag/release events from a capture revoked with a dismissed popup must be swallowed.
     ///

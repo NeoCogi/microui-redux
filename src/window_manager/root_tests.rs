@@ -68,6 +68,11 @@ fn frame_info(dimensions: Dimensioni) -> FrameInfo {
     FrameInfo::try_new(dimensions, color(0, 0, 0, 255)).unwrap()
 }
 
+/// Converts external rectangle geometry into an equality-friendly test representation.
+fn rect_values(rect: Recti) -> (i32, i32, i32, i32) {
+    (rect.x, rect.y, rect.width, rect.height)
+}
+
 /// Leaf used when a test needs content with an exact intrinsic size.
 struct DesiredSize(Dimensioni);
 
@@ -1128,6 +1133,39 @@ fn destroy_expires_event_endpoints_and_stable_ids_survive_address_release() {
     assert_ne!(replacement.id(), destroyed_id);
 }
 
+#[test]
+fn parent_visibility_and_destruction_cover_the_complete_child_family() {
+    let mut ctx = context();
+    let parent = ctx.ui().create_window(Window::new("parent", rect(0, 0, 220, 180), empty_content()));
+    let child = ctx
+        .ui()
+        .create_child_window(&parent, Window::new("child", rect(20, 20, 120, 90), empty_content()))
+        .unwrap();
+    let grandchild = ctx
+        .ui()
+        .create_child_window(&child, Window::new("grandchild", rect(30, 30, 80, 60), empty_content()))
+        .unwrap();
+    let child_popup = ctx.ui().create_popup(&child, "child popup", empty_content()).unwrap();
+
+    assert_eq!(ctx.debug_rendered_root_names(), ["parent", "child", "grandchild"]);
+    ctx.ui().set_window_visible(&parent, false).unwrap();
+    assert!(ctx.debug_rendered_root_names().is_empty());
+    assert_eq!(ctx.debug_root_visible(child.id()), Some(true), "child visibility intent must be retained");
+    assert_eq!(ctx.debug_root_visible(grandchild.id()), Some(true));
+
+    ctx.ui().set_window_visible(&parent, true).unwrap();
+    assert_eq!(ctx.debug_rendered_root_names(), ["parent", "child", "grandchild"]);
+
+    ctx.ui().destroy_window(&parent).unwrap();
+    assert_eq!(ctx.ui().set_window_visible(&child, true), Err(SurfaceMutationError::UnknownWindow));
+    assert_eq!(ctx.ui().bring_window_to_front(&grandchild), Err(SurfaceMutationError::UnknownWindow));
+    assert_eq!(ctx.ui().show_popup(&child_popup), Err(SurfaceMutationError::UnknownPopup));
+    assert!(!parent.events().is_alive());
+    assert!(!child.events().is_alive());
+    assert!(!grandchild.events().is_alive());
+    assert!(!child_popup.events().is_alive());
+}
+
 /// Verifies identical definitions in separate Contexts cannot cross stable-ID membership boundaries.
 #[test]
 fn window_and_popup_capabilities_cannot_resolve_another_contexts_surfaces() {
@@ -1408,6 +1446,97 @@ fn fixed_layers_validate_and_managed_roots_reject_direct_assignment() {
 }
 
 #[test]
+fn child_windows_inherit_the_family_layer_and_front_only_among_siblings() {
+    let mut ctx = context();
+    let parent = ctx.ui().create_window(Window::new("parent", rect(0, 0, 220, 180), empty_content()));
+    ctx.ui().set_window_layer(&parent, 3).unwrap();
+    let first = ctx
+        .ui()
+        .create_child_window(&parent, Window::new("first child", rect(10, 30, 80, 60), empty_content()))
+        .unwrap();
+    let second = ctx
+        .ui()
+        .create_child_window(&parent, Window::new("second child", rect(30, 50, 80, 60), empty_content()))
+        .unwrap();
+    let peer = ctx.ui().create_window(Window::new("peer", rect(0, 0, 80, 60), empty_content()));
+    ctx.ui().set_window_layer(&peer, 3).unwrap();
+
+    assert_eq!(ctx.ui().window_layer(&first), Ok(LayerBinding::Fixed(3)));
+    assert_eq!(ctx.ui().set_window_layer(&first, 5), Err(SurfaceMutationError::ManagedLayer));
+    assert_eq!(ctx.debug_rendered_root_names(), ["parent", "first child", "second child", "peer"]);
+
+    ctx.ui().bring_window_to_front(&first).unwrap();
+    assert_eq!(
+        ctx.debug_rendered_root_names(),
+        ["parent", "second child", "first child", "peer"],
+        "fronting a child changes only its direct sibling chronology"
+    );
+
+    ctx.ui().set_window_layer(&parent, 7).unwrap();
+    assert_eq!(ctx.ui().window_layer(&first), Ok(LayerBinding::Fixed(7)));
+    assert_eq!(ctx.ui().window_layer(&second), Ok(LayerBinding::Fixed(7)));
+}
+
+#[test]
+fn modal_dialogs_cannot_own_structural_child_windows() {
+    let mut ctx = context();
+    let parent = ctx.ui().create_window(Window::new("parent", rect(0, 0, 220, 180), empty_content()));
+    let dialog = ctx
+        .ui()
+        .create_dialog(&parent, Window::new("dialog", rect(20, 20, 120, 90), empty_content()))
+        .unwrap();
+
+    assert!(matches!(
+        ctx.ui()
+            .create_child_window(&dialog, Window::new("invalid child", rect(0, 0, 20, 20), empty_content())),
+        Err(SurfaceMutationError::InvalidChildWindowParent)
+    ));
+}
+
+#[test]
+fn parent_content_clip_accumulates_through_nested_child_windows() {
+    let mut ctx = context();
+    let root = ctx
+        .ui()
+        .create_window(Window::new("root", rect(10, 10, 240, 190), empty_content()).child_window_clip(ChildWindowClip::Content));
+    let child = ctx
+        .ui()
+        .create_child_window(
+            &root,
+            Window::new("child", rect(30, 40, 180, 130), empty_content()).child_window_clip(ChildWindowClip::Content),
+        )
+        .unwrap();
+    let grandchild = ctx
+        .ui()
+        .create_child_window(&child, Window::new("grandchild", rect(0, 0, 320, 240), empty_content()))
+        .unwrap();
+    ctx.update_and_render_ui();
+
+    let viewport = rect(0, 0, 320, 240);
+    let root_body = ctx.debug_root_body(root.id()).unwrap();
+    let child_body = ctx.debug_root_body(child.id()).unwrap();
+    let root_clip = viewport.intersect(&root_body).unwrap();
+    let grandchild_clip = root_clip.intersect(&child_body).unwrap();
+    assert_eq!(ctx.debug_root_clip(root.id()).map(rect_values), Some(rect_values(viewport)));
+    assert_eq!(ctx.debug_root_clip(child.id()).map(rect_values), Some(rect_values(root_clip)));
+    assert_eq!(ctx.debug_root_clip(grandchild.id()).map(rect_values), Some(rect_values(grandchild_clip)));
+}
+
+#[test]
+fn unclipped_parent_passes_only_its_inherited_clip_to_children() {
+    let mut ctx = context();
+    let parent = ctx.ui().create_window(Window::new("parent", rect(40, 40, 120, 90), empty_content()));
+    let child = ctx
+        .ui()
+        .create_child_window(&parent, Window::new("child", rect(0, 0, 320, 240), empty_content()))
+        .unwrap();
+    ctx.update_and_render_ui();
+
+    assert_eq!(ctx.debug_root_clip(parent.id()).map(rect_values), Some((0, 0, 320, 240)));
+    assert_eq!(ctx.debug_root_clip(child.id()).map(rect_values), Some((0, 0, 320, 240)));
+}
+
+#[test]
 fn raising_reorders_only_inside_a_fixed_layer() {
     let mut ctx = context();
     let _high = ctx.ui().create_window(Window::new("high", rect(0, 0, 100, 80), empty_content()));
@@ -1442,6 +1571,106 @@ fn popup_inherits_its_parent_layer_and_uses_only_that_layers_transient_tier() {
     ctx.ui().set_window_layer(&source, 4).unwrap();
     assert_eq!(ctx.debug_rendered_root_names(), ["same layer", "higher", "source", "popup"]);
     assert_eq!(ctx.debug_active_popup_names(), ["popup"]);
+}
+
+#[test]
+fn clipped_child_windows_stay_between_parent_content_and_parent_menu() {
+    let (item, item_value) = MenuItem::create(MenuItemParameters::new("Parent action"));
+    let mut item_dispatcher = event_counter(item.submitted());
+    let menu_bar = MenuBar::new([Menu::new("Root").item(item_value)]);
+    let (parent_state, parent_content) = OrderedProbe::create(WidgetOption::NONE);
+    let (child_state, child_content) = OrderedProbe::create(WidgetOption::NONE);
+    let mut ctx = context();
+    let parent = ctx.ui().create_window(
+        Window::new("parent", rect(0, 0, 220, 180), parent_content)
+            .menu_bar(menu_bar)
+            .child_window_clip(ChildWindowClip::Content),
+    );
+    ctx.ui()
+        .set_window_options(
+            &parent,
+            WindowOption::NO_TITLE | WindowOption::NO_CLOSE | WindowOption::NO_RESIZE | WindowOption::NO_PADDING,
+        )
+        .unwrap();
+    let child = ctx
+        .ui()
+        .create_child_window(&parent, Window::new("child", rect(0, 0, 110, 180), child_content))
+        .unwrap();
+    ctx.ui()
+        .set_window_options(
+            &child,
+            WindowOption::NO_TITLE | WindowOption::NO_CLOSE | WindowOption::NO_RESIZE | WindowOption::NO_PADDING,
+        )
+        .unwrap();
+    ctx.update_and_render_ui();
+
+    let bar = ctx.debug_menu_bar_rect(parent.id()).unwrap();
+    let heading = ctx.debug_menu_anchor_rects(parent.id()).unwrap()[0].unwrap();
+    let body = ctx.debug_root_body(parent.id()).unwrap();
+    assert_eq!(ctx.debug_root_clip(child.id()).map(rect_values), Some(rect_values(body)));
+
+    // The child geometrically overlaps the bar, but its inherited content clip makes the parent
+    // heading the front input surface and lets the click open the parent-owned popup.
+    assert!(bar.contains(&crate::vec2(heading.x, heading.y)));
+    click_rect(&mut ctx, heading);
+    assert_eq!(ctx.debug_active_popup_names(), ["parent Root Menu"]);
+    assert_eq!(child_state.try_read(|state| state.events.clone()), Some(Vec::new()));
+
+    // The popup occupies the parent's transient tier above its child family, so an item inside the
+    // parent body cannot fall through to the clipped child behind it.
+    let item_row = ctx.debug_active_menu_row_rects()[0][0];
+    click_rect(&mut ctx, item_row);
+    let mut submissions = 0;
+    assert!(item_dispatcher.dispatch(&mut submissions));
+    assert_eq!(submissions, 1);
+    assert_eq!(child_state.try_read(|state| state.events.clone()), Some(Vec::new()));
+
+    // Within the application body, the child wins where it has geometry; uncovered body pixels
+    // fall through to the parent content, exactly reversing the recursive paint relationship.
+    ctx.mousedown(body.x + 10, body.y + 10, MouseButton::LEFT);
+    ctx.mouseup(body.x + 10, body.y + 10, MouseButton::LEFT);
+    ctx.mousedown(body.x + body.width - 10, body.y + 10, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(child_state.try_read(|state| state.events.clone()), Some(vec!["down", "up"]));
+    assert_eq!(parent_state.try_read(|state| state.events.clone()), Some(vec!["down"]));
+}
+
+#[test]
+fn parent_chrome_preempts_an_overlapping_unclipped_child() {
+    let (child_state, child_content) = OrderedProbe::create(WidgetOption::NONE);
+    let mut ctx = context();
+    let parent = ctx.ui().create_window(Window::new("parent", rect(30, 30, 160, 120), empty_content()));
+    let child = ctx
+        .ui()
+        .create_child_window(&parent, Window::new("child", rect(30, 30, 160, 120), child_content))
+        .unwrap();
+    ctx.ui()
+        .set_window_options(
+            &child,
+            WindowOption::NO_TITLE | WindowOption::NO_CLOSE | WindowOption::NO_RESIZE | WindowOption::NO_PADDING,
+        )
+        .unwrap();
+    ctx.update_and_render_ui();
+
+    // The visible frame border is a parent-owned hit shield even though it has no drag action. This
+    // keeps input consistent with the border pixels repainted after the child content.
+    let border = crate::vec2(30, 30);
+    ctx.mousedown(border.x, border.y, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_root(), Some(parent.id()));
+    assert_eq!(child_state.try_read(|state| state.events.clone()), Some(Vec::new()));
+    ctx.mouseup(border.x, border.y, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+
+    // Actionable chrome uses the same precedence and begins the parent's resize capture instead of
+    // delivering the overlapping press to the child body.
+    let resize = ctx.debug_root_chrome(parent.id()).unwrap().2.unwrap();
+    let point = crate::vec2(resize.x + 1, resize.y + 1);
+    ctx.mousedown(point.x, point.y, MouseButton::LEFT);
+    ctx.update_and_render_ui();
+
+    assert_eq!(ctx.debug_root_resizing(parent.id()), Some(true));
+    assert_eq!(child_state.try_read(|state| state.events.clone()), Some(Vec::new()));
 }
 
 #[test]
@@ -2764,4 +2993,36 @@ fn post_tree_chrome_overlay_is_submitted_after_custom_descendant_rendering() {
         .rposition(|event| matches!(event, RenderEvent::AtlasQuad(_)))
         .expect("root overlay quad missing");
     assert!(final_atlas_quad > marker);
+}
+
+#[test]
+fn parent_overlay_is_recorded_after_custom_child_window_content() {
+    let (backend, log) = recording_backend(test_atlas());
+    let mut ctx = Context::new_test(backend, Dimensioni::new(320, 240));
+    let parent_renderer = ctx.register_custom_renderer(|frame, _args| frame.record_marker("parent content")).unwrap();
+    let child_renderer = ctx.register_custom_renderer(|frame, _args| frame.record_marker("child content")).unwrap();
+    let parent_content = Node::custom_render(Custom::create(CustomParameters::new("parent custom")), parent_renderer);
+    let child_content = Node::custom_render(Custom::create(CustomParameters::new("child custom")), child_renderer);
+    let parent = ctx.ui().create_window(Window::new("parent", rect(20, 20, 180, 140), parent_content));
+    ctx.ui()
+        .create_child_window(&parent, Window::new("child", rect(40, 60, 100, 70), child_content))
+        .unwrap();
+
+    ctx.update_and_render_ui();
+    let events = log.snapshot();
+    let parent_content = events
+        .iter()
+        .position(|event| matches!(event, RenderEvent::Marker(name) if name == "parent content"))
+        .expect("parent custom marker missing");
+    let child_content = events
+        .iter()
+        .position(|event| matches!(event, RenderEvent::Marker(name) if name == "child content"))
+        .expect("child custom marker missing");
+    let final_parent_overlay = events
+        .iter()
+        .rposition(|event| matches!(event, RenderEvent::AtlasQuad(_)))
+        .expect("parent chrome overlay quad missing");
+
+    assert!(parent_content < child_content, "parent application content must record below child windows");
+    assert!(child_content < final_parent_overlay, "parent chrome must record after child window content");
 }

@@ -220,6 +220,14 @@ Three coordinate concepts are deliberately separate:
 Every display-list operation owns its effective screen-space clip. A clip is
 not mutable renderer state and there is no public clip stack.
 
+Surface layout supplies the initial clip for each retained root before widget-local painting
+begins. Independent windows receive the drawable viewport. A structural child inherits its direct
+parent's committed surface clip and, when that parent was constructed with
+`ChildWindowClip::Content`, intersects it with the parent's application-body rectangle. Nested
+families therefore accumulate clipping ancestors through the same ordinary per-operation clips;
+the renderer and backend require no child-window concept. Manager-owned backgrounds, menus, chrome,
+and pointer hit testing consume the same committed surface boundary.
+
 ```rust
 use microui_redux::{
     prelude::{color, Recti},

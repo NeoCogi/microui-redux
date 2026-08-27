@@ -6,6 +6,26 @@
 - [ ] Theming/Skinning
     - [ ] Win311 Theme
 
+## Version 0.8.0-alpha.6
+
+`0.8.0-alpha.6` adds the narrow structural child-window composition needed by fullscreen
+application roots while retaining the concrete `SurfaceForest` introduced in alpha.5. It does not
+add a general overlay graph, reparenting, local coordinate spaces, or a second ordering registry.
+
+- [x] Added explicit structural child-window construction.
+    - [x] `Ui::create_child_window(&parent, window)` accepts independent or child parents, keeps child geometry in screen coordinates, and rejects modal parents with `InvalidChildWindowParent`.
+    - [x] Child windows inherit the fixed layer of their top-level family root. `window_layer` returns that effective `LayerBinding::Fixed` value, while `set_window_layer` rejects children with `ManagedLayer`.
+    - [x] Forest chronology remains authoritative: independent roots order complete families, and direct children order sibling families. Showing or fronting never escapes that structural scope.
+- [x] Added opt-in descendant clipping and parent overlay composition.
+    - [x] `Window::child_window_clip(ChildWindowClip::Content)` intersects direct child surfaces with the parent's committed application body; the default `None` passes through the inherited viewport clip.
+    - [x] Nested children accumulate ancestor clips across existing parent edges. The same committed clip controls backgrounds, bodies, bars, chrome, popups, and uncaptured pointer hit testing.
+    - [x] Recursive family painting records parent background/content, child families, then parent menu/chrome. Pointer selection uses the exact inverse precedence, keeping parent-owned overlays visually and interactively above children.
+- [x] Kept existing lifecycle, modal, and transient rules coherent across families.
+    - [x] Hiding a parent removes its descendants from effective visibility while preserving child visibility intent; destruction recursively removes child windows, dialogs, popups, widget trees, and event ports.
+    - [x] Dialogs may be owned by independent or child windows and remain in the dedicated modal band. Popup paths retain the transient tier of their effective fixed or modal owner band.
+- [x] Converted `demo-full` to one layer-0 grid family root whose floating windows are content-clipped children below the root Grid/Help menu.
+- [x] Updated crate/API documentation, architecture, menus, events, examples, README, and downstream public-API coverage for the new contract.
+
 ## Version 0.8.0-alpha.5
 
 `0.8.0-alpha.5` replaces the generic/duplicated retained-root machinery with one concrete surface

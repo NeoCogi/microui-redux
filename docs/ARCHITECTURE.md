@@ -33,8 +33,11 @@ The supported authoring path is retained widget trees registered as context-owne
 application popups. Applications pass `Window::new(name, rect, body)` to
 `Context::ui().create_window(...)`; the optional
 `.menu_bar(MenuBar::new(...))` builder installs the bar as part of that window. An ordinary window
-may directly own dialogs created with `Ui::create_dialog(&parent, window)`. A window or dialog may
-retain generic popups created with `Ui::create_popup(&parent, name, content)`. Applications
+may own screen-space structural children created with `Ui::create_child_window(&parent, window)`;
+its `Window::child_window_clip(ChildWindowClip::Content)` construction policy optionally confines
+their complete descendant surfaces to its application body. An independent or child window may
+directly own dialogs created with `Ui::create_dialog(&parent, window)`. A window or dialog may retain
+generic popups created with `Ui::create_popup(&parent, name, content)`. Applications
 mutate leaves and containers through weak
 `TypedWidgetHandle<W>` values, commit contexts without application callbacks through
 `Context::update_ui(...)` or subscriber-driven contexts through `Context::update_ui_state(...)`,
@@ -75,16 +78,18 @@ forest. Event endpoints remain separate weak subscription capabilities and are n
 object keys. A stale or foreign window handle returns
 `SurfaceMutationError::UnknownWindow`; popup-only operations analogously return
 `SurfaceMutationError::UnknownPopup`. The same concrete error type reports ownership and policy
-failures as `InvalidDialogOwner`, `InvalidPopupParent`, `InvalidLayer`, or `ManagedLayer`.
+failures as `InvalidDialogOwner`, `InvalidChildWindowParent`, `InvalidPopupParent`, `InvalidLayer`,
+or `ManagedLayer`.
 
 Windows cannot be replaced while retaining their identity: mutate descendants through a container
 state's weak topology capability, or destroy and recreate the window.
 
 ### Concrete surface forest and parent edges
 
-`Context` owns one private `SurfaceForest`. Its single `Vec<SurfaceNode>` retains ordinary windows,
-dialogs, application popups, and menu popups; no parallel `WindowEntry` registry or popup-owner
-adapter exists. Each node combines common screen-space geometry with a concrete role:
+`Context` owns one private `SurfaceForest`. Its single `Vec<SurfaceNode>` retains independent and
+child windows, dialogs, application popups, and menu popups; no parallel `WindowEntry` registry,
+child list, or popup-owner adapter exists. Each node combines common screen-space geometry with a
+concrete role:
 
 - a window or dialog owns one application `Node` and its `UiRuntime`, window policy, the unified
   `WindowEvent` port, and an optional concrete menu-bar `MenuSurface`;
@@ -96,13 +101,15 @@ The surface layer uses concrete enums for those bodies and roles. It does not st
 surface payloads, or a manager-side menu controller. Widget implementations remain erased at the
 existing leaf/container boundary inside `Node`; that is independent of surface ownership.
 
-Every forest node has at most one parent edge. An ordinary window has none, a dialog points to its
-ordinary owner, a top-level popup points to a window or dialog, and a submenu menu surface points to
-its direct popup parent. Following that edge derives the owning window. Dialog ownership controls
-show eligibility and lifetime, but does not create a general public window hierarchy: there are no
-child windows, nested dialogs, reparenting, or public subpopup-registration APIs. Destroying an
-ordinary window also destroys its directly owned dialogs and every popup descendant; destroying a
-dialog destroys its popup descendants.
+Every forest node has at most one parent edge. An independent window has none; a structural child
+or dialog points to its ordinary owner; a top-level popup points to a window or dialog; and a
+submenu menu surface points to its direct popup parent. Following edges derives both the top-level
+family and popup owner without another relationship table. The restricted constructors admit only
+ordinary child-window nesting and directly owned modal dialogs: there is no reparenting, nested
+dialog ownership, or public subpopup-registration API. Destroying a window recursively destroys
+every child window, dialog, and popup below it. Hiding a parent removes its complete family from
+effective visibility while retaining each child's local visibility intent; showing the parent
+restores those locally visible children, but does not resurrect modal dialogs closed while hiding.
 
 A popup has no independent layer, visibility flag, or destruction operation. `SurfaceForest`
 stores only the deepest active popup key and derives the visible parent-to-child chain by following
@@ -113,33 +120,44 @@ No `PopupPath` object or parallel per-popup visibility state can disagree with t
 
 ### Chronological order and visible traversal
 
-The relative order of window and dialog nodes in the forest vector is the authoritative global
-back-to-front activation chronology. Creating a visible window appends it. Showing or explicitly
-fronting a window or dialog moves that complete `SurfaceNode` to the vector tail; its stable handle,
-event allocation, parent edges, and owned widget allocations remain valid. Changing a fixed layer
-mutates only the node's layer mode, so moving between layers does not manufacture a new activation.
+The relative order of window and dialog nodes in the forest vector is the authoritative activation
+chronology. Creating a visible window appends it. Showing or explicitly fronting a window or dialog
+moves that complete `SurfaceNode` to the vector tail; its stable handle, event allocation, parent
+edges, and owned widget allocations remain valid. For independent windows this changes order among
+fixed-layer peers. For a child it changes order only among siblings with the same direct parent.
+Changing an independent window's fixed layer mutates only that node's mode, so moving a complete
+family between layers does not manufacture a new activation.
 
 The forest rebuilds one allocation-reusing `visible_order` after an ordering, layer, visibility, or
-popup-path change. It scans the chronological nodes once for each fixed layer from `MIN_LAYER` to
-`MAX_LAYER`, preserving chronology within that layer, and then scans modal nodes. The active popup
-chain is appended at its owning fixed or modal transient tier. Layout, hit testing, input routing,
-painting, and diagnostics consume that same back-to-front sequence. This removes stable sorting,
-z-index counters, and separate fixed/modal order arrays while keeping the sixteen-layer policy
-explicit.
+popup-path change. It scans independent roots once for each fixed layer from `MIN_LAYER` to
+`MAX_LAYER`, recursively inserts each locally visible child family in parent-first order, and then
+scans modal nodes. The active popup chain is inserted at its owning fixed or modal transient tier.
+Layout, retained updates, and diagnostics consume that materialized traversal directly.
+
+Painting and hit testing use the same parent edges rather than a second z-order model. One family
+paints each parent background and application body, then its child families in sibling chronology,
+then the parent's intrinsic menu bar and manager chrome. Hit testing performs the inverse: parent
+menu/chrome, child families in reverse sibling chronology, then the parent body. This gives the
+required sandwich without a general overlay graph or render-command reordering. The popup branch
+keeps its existing transient tier above the ordinary families in its inherited fixed band. Stable
+sorting, z-index counters, child arrays, and separate fixed/modal order arrays remain unnecessary.
 
 ### Window bands, transients, and activation
 
 Independent windows occupy one of sixteen fixed application layers. Layer `0` is the bottom, layer
-`15` is the top and the default, and `Ui::set_window_layer(&window, layer)` changes an ordinary
-window's `LayerBinding::Fixed(u8)`. `Ui::window_layer(&window)` reads that policy. Numeric
-validation uses `MIN_LAYER`, `MAX_LAYER`, and
-`DEFAULT_LAYER`. Dialogs report `LayerBinding::Modal`; popups expose no layer binding and use their
-owner's fixed or modal band. There is no inherited `LayerBinding` variant.
+`15` is the top and the default, and `Ui::set_window_layer(&window, layer)` changes an independent
+window's `LayerBinding::Fixed(u8)`. Structural children have no separately mutable layer: they
+inherit the fixed band of their top-level family, report that effective `LayerBinding::Fixed(u8)`
+through `Ui::window_layer`, and reject `set_window_layer` with `ManagedLayer`. Numeric validation
+uses `MIN_LAYER`, `MAX_LAYER`, and `DEFAULT_LAYER`. Dialogs report `LayerBinding::Modal`; popups
+expose no layer binding and use their owner's fixed or modal band. No extra inherited binding variant
+or cached per-child layer is needed.
 
-Within a fixed layer, ordinary windows retain chronological order and
-`Ui::bring_window_to_front(&window)` raises
-a window only among peers in that layer. It cannot cross a higher fixed layer. Pointer hit testing
-and painting consume the same visible traversal, so overlap selects the surface visually in front.
+Within a fixed layer, independent windows retain chronological order. Children retain a separate
+chronological order at each direct parent. `Ui::bring_window_to_front(&window)` raises an
+independent family among fixed-layer peers or a child family among its siblings; it cannot escape
+that structural scope or cross a higher fixed layer. Pointer hit testing is the inverse of the
+recursive family paint order, so overlap selects the surface whose pixels are visually in front.
 
 A composed control creates a generic popup once in its stable window owner, then calls
 `show_popup(&popup)` at the current pointer or `show_popup_at(&popup, anchor)` at an exact
@@ -167,19 +185,25 @@ hiding it reveals the next visible dialog in z-order. Raising an ordinary owner 
 its dialogs because they occupy the separate modal band.
 
 Visual order is deliberately separate from keyboard activation. A pointer press records the active
-ordinary window (or a popup's ordinary source) without moving it to a different fixed layer.
-Keyboard and text input return to that window after the press, while pointer overlap still follows
-the visual stack. Pointer drags remain with their captured window, but wheel input has no capture
-lifecycle and goes to the topmost eligible window under the pointer. This lets exposed regions of a
-layer-0 application surface scroll or zoom even while a layer-15 floating window remains active.
-Modal policy and active pointer capture take precedence. Hiding or destroying the active window clears
-the record.
+ordinary window (or a popup's ordinary source) without moving its family to a different fixed
+layer. Keyboard and text input return to that exact independent or child window after the press,
+while pointer overlap still follows the visual stack. Pointer drags remain with their captured
+window, but wheel input has no capture lifecycle and goes to the topmost eligible window under the
+pointer. This lets exposed regions of a fullscreen family root scroll or zoom while a child window
+remains active. Modal policy and active pointer capture take precedence. Hiding or destroying the
+active window or one of its structural ancestors clears the record.
 
-A fullscreen application surface is therefore an independent window at layer `0`, not a special
-surface kind. Remove its chrome and outer inset, keep its rectangle synchronized with the
-drawable viewport, and let independent windows use the default layer:
+A fullscreen application surface remains an ordinary independent window, not a special surface
+kind. Give its `Window` a content clip policy, put the root in the desired fixed layer, remove its
+title/resize/padding chrome, keep its rectangle synchronized with the drawable viewport, and create
+the floating surfaces as its children:
 
 ```rust,ignore
+let surface = context.ui().create_window(
+    Window::new("desktop", rect(0, 0, 1, 1), desktop_content)
+        .menu_bar(desktop_menu)
+        .child_window_clip(ChildWindowClip::Content),
+);
 context.ui().set_window_layer(&surface, MIN_LAYER)?;
 context.ui().set_window_options(
     &surface,
@@ -191,13 +215,24 @@ context.ui().set_window_options(
 context
     .ui()
     .set_window_rect(&surface, rect(0, 0, dimensions.width, dimensions.height))?;
+let tool = context.ui().create_child_window(
+    &surface,
+    Window::new("tool", rect(40, 40, 300, 450), tool_content),
+)?;
 ```
 
-`NO_PADDING` removes only the window-owned content inset; descendant widgets still use the complete
-`Style`, including ordinary control and container padding. `demo-full` applies this recipe to a
-dedicated menu-bearing perspective X-Y grid surface with left-drag arcball rotation, wheel zoom,
-and homogeneous line clipping. Its original Demo Window and the other floating windows remain
-independent default-layer windows above that background.
+`ChildWindowClip::Content` intersects each direct child's inherited clip with the committed
+application-body rectangle, after frame, title, padding, and intrinsic menu-bar space have been
+removed. Descendants accumulate clipping ancestors, but their authoritative rectangles stay in
+screen coordinates. `ChildWindowClip::None`, the default, preserves the inherited viewport clip
+while keeping the same content/children/overlay order. `NO_PADDING` removes only the window-owned
+content inset; descendant widgets still use the complete `Style`, including ordinary control and
+container padding.
+
+`demo-full` applies this exact recipe to a menu-bearing perspective X-Y grid family root with
+left-drag arcball rotation, wheel zoom, and homogeneous line clipping. The original Demo Window and
+the other floating windows are content-clipped children: they render above the grid body, remain
+below the root's Grid/Help bar, and inherit the root's layer without a special desktop subsystem.
 
 ```rust
 #[derive(Default)]

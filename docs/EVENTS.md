@@ -51,15 +51,15 @@ owners and names distinct makes that borrow-safe boundary explicit.
 
 Context owns a concrete `SurfaceForest` and the widget-event dispatcher containing its state
 handlers. Each forest node owns either `{ Node, UiRuntime }` widget content or a direct
-`MenuSurface`; sole parent edges encode dialog and popup ownership. Application state may own
-reusable components and their semantic event sources. Neither a handle nor a subscription keeps a
-removed producer alive.
+`MenuSurface`; sole parent edges encode structural child-window, dialog, and popup ownership.
+Application state may own reusable components and their semantic event sources. Neither a handle
+nor a subscription keeps a removed producer alive.
 
 ```text
 Context<B, State>
 │
 ├── owns SurfaceForest
-│      ├── SurfaceNode(Window or Dialog) ── SurfaceBody::Widgets
+│      ├── SurfaceNode(Independent/Child Window or Dialog) ── SurfaceBody::Widgets
 │      │      └── concrete Widget owns Rc<RefCell<WidgetEventPort<E>>>
 │      ├── SurfaceNode(Application Popup) ── SurfaceBody::Widgets
 │      └── SurfaceNode(Menu Popup) ── SurfaceBody::Menu
@@ -441,7 +441,7 @@ after replacement, an outside press, or owner hiding. This coordination stays wi
 composed-control owner instead of leaking popup policy into the base widget abstractions. Paint does no
 coordination, and application state performs no per-frame popup polling. The frame callback only
 synchronizes the dedicated fullscreen layer-0 grid surface with platform dimensions and produces
-the FPS diagnostic for the separate floating Demo Window.
+the FPS diagnostic for the floating Demo Window child.
 
 `FileDialog` remains a reusable crate component while its instance and behavior live application-side.
 The application constructs it with the stable owner window and an accessor into its model, stores

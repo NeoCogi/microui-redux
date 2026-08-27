@@ -358,3 +358,23 @@ fn window_creation_and_lifecycle_need_no_numeric_application_identity() {
     assert!(!window.events().is_alive());
     assert_eq!(ctx.ui().set_window_rect(&window, rect(0, 0, 1, 1)), Err(SurfaceMutationError::UnknownWindow));
 }
+
+#[test]
+fn downstream_child_windows_use_their_parent_clip_and_layer_contract() {
+    let mut ctx = context();
+    let parent_content = Linear::create(LinearParameters::vertical(std::iter::empty::<Node>())).1;
+    let child_content = Linear::create(LinearParameters::vertical(std::iter::empty::<Node>())).1;
+    let parent = ctx
+        .ui()
+        .create_window(Window::new("desktop", rect(0, 0, 320, 240), parent_content).child_window_clip(ChildWindowClip::Content));
+    ctx.ui().set_window_layer(&parent, MIN_LAYER).unwrap();
+    let child = ctx
+        .ui()
+        .create_child_window(&parent, Window::new("tool", rect(20, 20, 100, 80), child_content))
+        .unwrap();
+
+    assert_eq!(ctx.ui().window_layer(&child), Ok(LayerBinding::Fixed(MIN_LAYER)));
+    assert_eq!(ctx.ui().set_window_layer(&child, DEFAULT_LAYER), Err(SurfaceMutationError::ManagedLayer));
+    ctx.ui().destroy_window(&parent).unwrap();
+    assert_eq!(ctx.ui().window_layer(&child), Err(SurfaceMutationError::UnknownWindow));
+}

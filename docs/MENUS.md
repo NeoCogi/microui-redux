@@ -130,6 +130,14 @@ the bar surface; a submenu popup is anchored at the right edge of its row slot i
 The manager resolves these relationships from current surface geometry, so open menus follow their
 window and parent rows without application-supplied screen coordinates or retained anchor nodes.
 
+An intrinsic bar is also the overlay boundary for structural child windows. Within one window
+family the manager records the parent's background and application body, then its child families,
+then the parent bar and chrome. Pointer selection walks that relationship in reverse, so a root bar
+both renders and handles input above children that geometrically overlap it. If the parent `Window`
+uses `ChildWindowClip::Content`, each complete child surface is additionally clipped below the bar
+to the parent's application body. The active menu-popup branch still occupies the transient tier of
+the owning window's inherited fixed or modal band.
+
 The manager stores only the deepest active popup. Following sole parent edges derives the one
 visible heading-to-descendant chain:
 

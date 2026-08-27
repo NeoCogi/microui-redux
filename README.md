@@ -6,12 +6,12 @@
 [rxi/microui](https://github.com/rxi/microui). It keeps microui's compact rendering model while
 using unique owning `Node` trees, typed weak widget handles, and typed backend frames. A concrete
 context-owned surface forest stores every widget tree and menu surface exactly once. Sole parent
-edges encode dialog and popup ownership, chronological window order is carried by the forest
-itself, and one deepest-popup key derives the visible transient branch. Declarative menus are
-consumed directly into concrete `MenuSurface` values rather than a generic popup payload, a
-temporary menu tree, or a separate controller.
+edges encode structural child-window, dialog, and popup ownership, chronological window order is
+carried by the forest itself, and one deepest-popup key derives the visible transient branch.
+Declarative menus are consumed directly into concrete `MenuSurface` values rather than a generic
+popup payload, a temporary menu tree, or a separate controller.
 
-> **Alpha status:** `0.8.0-alpha.5` is the current alpha of the breaking retained-API
+> **Alpha status:** `0.8.0-alpha.6` is the current alpha of the breaking retained-API
 > redesign. The 0.8 line is not API-compatible with 0.7 and may continue to evolve before the
 > stable 0.8.0 release.
 
@@ -27,7 +27,7 @@ Use the explicit alpha version while the retained API is being evaluated:
 
 ```toml
 [dependencies]
-microui-redux = "0.8.0-alpha.5"
+microui-redux = "0.8.0-alpha.6"
 ```
 
 `microui-redux` does not create a native window or graphics device. Applications provide a
@@ -52,11 +52,14 @@ allocation cannot retarget a stale handle. There is no public numeric window ID,
 foreign handle returns a concrete `SurfaceMutationError`.
 
 ```rust,ignore
-let main = context.ui().create_window(Window::new(
-    "main",
-    rect(20, 20, 480, 320),
-    main_content,
-));
+let main = context.ui().create_window(
+    Window::new("main", rect(20, 20, 480, 320), main_content)
+        .child_window_clip(ChildWindowClip::Content),
+);
+let tool = context.ui().create_child_window(
+    &main,
+    Window::new("tool", rect(60, 80, 240, 160), tool_content),
+)?;
 let dialog = context
     .ui()
     .create_dialog(&main, Window::new("settings", rect(80, 60, 320, 220), settings_content))?;
@@ -70,10 +73,12 @@ context.ui().show_popup_at(&popup, anchor)?;
 
 `WindowEvent` combines `GeometryChanged { rect }` and `CloseRequested` on one window port.
 `PopupEvent::Dismissed` reports removal of an application popup from the sole active branch.
-Showing or fronting a window moves its complete forest node to the tail of the global chronology;
-its effective layer still determines the rendered tier. Changing that layer does not reactivate the
-window. The forest derives one visible order for layout, input, and paint, so those phases cannot
-disagree about which surface is in front.
+Showing or fronting a window moves its complete forest node to the tail of the chronology in its
+structural scope; its effective layer still determines the rendered tier. Independent windows own
+fixed layers, while child windows inherit their family root's layer. Within a family, each parent
+body records below its children and its menu/chrome records and handles above them. An optional
+`ChildWindowClip::Content` policy confines complete descendant surfaces to the parent application
+body without changing their screen-space geometry.
 
 ## Documentation
 

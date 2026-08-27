@@ -53,9 +53,9 @@
 //! Full retained-mode demo application.
 //!
 //! This example exercises core widgets, layout groups, scroll areas, images, and optional 3D
-//! renderer integrations in one interactive application. A dedicated titleless layer-0 window fills
-//! the client area with its own menu and a perspective X-Y grid; ordinary demo windows float above
-//! it at the default layer.
+//! renderer integrations in one interactive application. A dedicated titleless layer-0 family root
+//! fills the client area with its own menu and a perspective X-Y grid; its content-clipped child
+//! windows float above the grid and below the root menu.
 #[path = "./common/mod.rs"]
 mod common;
 
@@ -1620,11 +1620,14 @@ impl State {
             Grid3dWidgetBuilder::create_widget(Grid3dWidgetParameters { data: grid_3d_state.clone() }),
             grid_renderer,
         );
-        let grid_root = ctx
-            .ui()
-            .create_window(Window::new("X-Y Grid Surface", rect(0, 0, 1, 1), grid_node).menu_bar(grid_menu_bar));
-        // This dedicated desktop-like window is the only layer-0 surface. Its menu remains visible at
-        // the top edge, while the custom-render body consumes every remaining pixel below it.
+        let grid_root = ctx.ui().create_window(
+            Window::new("X-Y Grid Surface", rect(0, 0, 1, 1), grid_node)
+                .menu_bar(grid_menu_bar)
+                .child_window_clip(ChildWindowClip::Content),
+        );
+        // This dedicated desktop-like window is the layer-0 family root. Its custom-render body is
+        // recorded first, every floating child is clipped to that body, and the intrinsic grid menu
+        // is recorded and hit-tested last so it remains above the complete child family.
         ctx.ui()
             .set_window_layer(&grid_root, MIN_LAYER)
             .expect("grid window must accept the bottom application layer");
@@ -1635,14 +1638,21 @@ impl State {
             )
             .expect("grid window must accept fullscreen chrome options");
 
-        // Preserve the original Demo Window as an independently movable and resizable layer-15
-        // window. Its existing menu is unrelated to the fullscreen grid menu above.
+        // Preserve the original Demo Window as a movable and resizable structural child. All demo
+        // windows inherit the grid root's layer but retain screen-space geometry and sibling order.
         let (menu_bar, menu_items) = demo_menu_bar(ctx);
         let demo_root = ctx
             .ui()
-            .create_window(Window::new("Demo Window", rect(40, 40, 300, 450), demo_node).menu_bar(menu_bar));
-        let _style_root = ctx.ui().create_window(Window::new("Style Editor", rect(350, 250, 300, 240), style_node));
-        let _log_root = ctx.ui().create_window(Window::new("Log Window", rect(350, 40, 300, 200), log_node));
+            .create_child_window(&grid_root, Window::new("Demo Window", rect(40, 40, 300, 450), demo_node).menu_bar(menu_bar))
+            .expect("grid root must own the demo window");
+        let _style_root = ctx
+            .ui()
+            .create_child_window(&grid_root, Window::new("Style Editor", rect(350, 250, 300, 240), style_node))
+            .expect("grid root must own the style editor");
+        let _log_root = ctx
+            .ui()
+            .create_child_window(&grid_root, Window::new("Log Window", rect(350, 40, 300, 200), log_node))
+            .expect("grid root must own the log window");
         let combo_popup_root = ctx
             .ui()
             .create_popup(&demo_root, "Combo Box Popup", combo_node)
@@ -1663,15 +1673,34 @@ impl State {
                 WindowOption::FRAME | WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
             )
             .expect("test popup definition must exist");
-        let _typography_root = ctx.ui().create_window(Window::new("Typography Demo", rect(40, 500, 300, 170), typography_node));
-        let _triangle_root = ctx.ui().create_window(Window::new("Triangle Window", rect(200, 100, 200, 200), triangle_node));
-        let _painter_root = ctx.ui().create_window(Window::new("Painter Window", rect(820, 40, 280, 240), painter_node));
-        let _falloff_root = ctx.ui().create_window(Window::new("Brush Falloff", rect(820, 300, 320, 260), falloff_node));
-        let _suzanne_root = ctx.ui().create_window(Window::new("Suzanne Window", rect(220, 220, 300, 300), suzanne_node));
+        let _typography_root = ctx
+            .ui()
+            .create_child_window(&grid_root, Window::new("Typography Demo", rect(40, 500, 300, 170), typography_node))
+            .expect("grid root must own the typography demo");
+        let _triangle_root = ctx
+            .ui()
+            .create_child_window(&grid_root, Window::new("Triangle Window", rect(200, 100, 200, 200), triangle_node))
+            .expect("grid root must own the triangle window");
+        let _painter_root = ctx
+            .ui()
+            .create_child_window(&grid_root, Window::new("Painter Window", rect(820, 40, 280, 240), painter_node))
+            .expect("grid root must own the painter window");
+        let _falloff_root = ctx
+            .ui()
+            .create_child_window(&grid_root, Window::new("Brush Falloff", rect(820, 300, 320, 260), falloff_node))
+            .expect("grid root must own the brush-falloff window");
+        let _suzanne_root = ctx
+            .ui()
+            .create_child_window(&grid_root, Window::new("Suzanne Window", rect(220, 220, 300, 300), suzanne_node))
+            .expect("grid root must own the Suzanne window");
         let _stack_direction_root = ctx
             .ui()
-            .create_window(Window::new("Stack Direction Demo", rect(530, 40, 280, 220), stack_direction_node));
-        let _weight_root = ctx.ui().create_window(Window::new("Weight Demo", rect(530, 270, 280, 260), weight_node));
+            .create_child_window(&grid_root, Window::new("Stack Direction Demo", rect(530, 40, 280, 220), stack_direction_node))
+            .expect("grid root must own the stack-direction demo");
+        let _weight_root = ctx
+            .ui()
+            .create_child_window(&grid_root, Window::new("Weight Demo", rect(530, 270, 280, 260), weight_node))
+            .expect("grid root must own the weight demo");
         let (combo_typed_state, combo_runtime) = stateful_leaf::<ComboBuilder>(ComboParameters::new());
         let combo_submitted = combo_typed_state.submitted();
         let combo_item_pairs = [

@@ -173,10 +173,12 @@
 //! measurement results.
 //! Retained application logic uses typed weak widget handles returned beside mounted nodes.
 //! The [`retained`] module and repository examples document the 0.8 alpha retained-authoring API.
-//! This release is versioned `0.8.0-alpha.5` and uses one concrete surface forest. Sole parent
-//! edges encode dialog and popup ownership, forest storage records chronological window order, and
-//! one deepest-popup identity derives the visible transient branch. Window-intrinsic declarative
-//! menu bars and their direct menu surfaces share that ownership model without erased payloads.
+//! This release is versioned `0.8.0-alpha.6` and uses one concrete surface forest. Sole parent
+//! edges encode structural child-window, dialog, and popup ownership; forest storage records
+//! chronological window order; and one deepest-popup identity derives the visible transient branch.
+//! Within a child family, parent content records below descendants while the parent's intrinsic menu
+//! and chrome record and handle above them. Window-intrinsic declarative menu surfaces share that
+//! ownership model without erased payloads.
 //!
 //! # Rendering pipeline
 //!
@@ -232,7 +234,8 @@ pub mod retained {
     };
     pub use crate::context::{Context, ContextFrame, Ui};
     pub use crate::window_manager::{
-        DEFAULT_LAYER, LayerBinding, MAX_LAYER, MIN_LAYER, PopupEvent, PopupHandle, SurfaceMutationError, Window, WindowEvent, WindowHandle, WindowOption,
+        ChildWindowClip, DEFAULT_LAYER, LayerBinding, MAX_LAYER, MIN_LAYER, PopupEvent, PopupHandle, SurfaceMutationError, Window, WindowEvent, WindowHandle,
+        WindowOption,
     };
 }
 
@@ -252,12 +255,12 @@ pub mod prelude {
     pub use crate::input::{KeyCode, KeyMode, MouseButton};
     pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame, TextureId};
     pub use crate::retained::{
-        ChildParticipation, Children, Container, ContainerLayoutCtx, ContainerWidget, Context, ContextFrame, Ui, CustomRenderArgs, AvailableSpace, Constraints,
-        CustomRenderHandle, Disclosure, DisclosureParameters, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, Linear, LinearCrossSize, LinearDirection,
-        LinearItem, LinearParameters, Node, PopupEvent, PopupHandle, MeasureCtx, SurfaceMutationError, WindowEvent, WindowHandle, LayerBinding, DEFAULT_LAYER,
-        MAX_LAYER, MIN_LAYER, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Scrollbar, ScrollbarAxis, ScrollbarChanged, ScrollbarParameters, TrackSize,
-        LeafWidget, TextWrap, UiInputEvent, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters,
-        WidgetUpdateCtx, Window, WindowOption,
+        ChildParticipation, ChildWindowClip, Children, Container, ContainerLayoutCtx, ContainerWidget, Context, ContextFrame, Ui, CustomRenderArgs,
+        AvailableSpace, Constraints, CustomRenderHandle, Disclosure, DisclosureParameters, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, Linear,
+        LinearCrossSize, LinearDirection, LinearItem, LinearParameters, Node, PopupEvent, PopupHandle, MeasureCtx, SurfaceMutationError, WindowEvent,
+        WindowHandle, LayerBinding, DEFAULT_LAYER, MAX_LAYER, MIN_LAYER, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Scrollbar, ScrollbarAxis,
+        ScrollbarChanged, ScrollbarParameters, TrackSize, LeafWidget, TextWrap, UiInputEvent, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption,
+        WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx, Window, WindowOption,
     };
     pub use crate::math::{expand_rect, rect, vec2};
     pub use crate::theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, color};
@@ -281,7 +284,8 @@ pub use atlas::{
 };
 pub use context::{Context, ContextFrame, Ui};
 pub use window_manager::{
-    DEFAULT_LAYER, LayerBinding, MAX_LAYER, MIN_LAYER, PopupEvent, PopupHandle, SurfaceMutationError, Window, WindowEvent, WindowHandle, WindowOption,
+    ChildWindowClip, DEFAULT_LAYER, LayerBinding, MAX_LAYER, MIN_LAYER, PopupEvent, PopupHandle, SurfaceMutationError, Window, WindowEvent, WindowHandle,
+    WindowOption,
 };
 pub use event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventPortHandle};
 pub use file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};

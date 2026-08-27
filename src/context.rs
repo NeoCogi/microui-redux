@@ -73,11 +73,32 @@ impl<'a> Ui<'a> {
         self.window_manager.create_window(window)
     }
 
+    /// Creates an open structural child window below `parent`'s menu and chrome.
+    ///
+    /// The child keeps screen-space geometry and its own retained application tree, menu, chrome,
+    /// visibility, focus, and pointer capture. It inherits the fixed layer of its top-level family
+    /// root and participates in chronological z-order only among windows with the same direct
+    /// parent. The parent's [`crate::ChildWindowClip`] policy determines whether the complete child
+    /// surface is additionally clipped to the parent application body.
+    ///
+    /// Destroying the parent destroys the child and its descendants. Hiding the parent excludes the
+    /// complete family until the parent is shown again. Modal dialogs cannot own child windows.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SurfaceMutationError::UnknownWindow`] for a stale or foreign parent and
+    /// [`SurfaceMutationError::InvalidChildWindowParent`] when the authenticated parent is modal.
+    pub fn create_child_window(&mut self, parent: &WindowHandle, window: Window) -> Result<WindowHandle, SurfaceMutationError> {
+        // WindowManager validates the authenticated root role before consuming the unique Window;
+        // failed ownership validation therefore leaves no partially mounted child surface.
+        self.window_manager.create_child_window(parent, window)
+    }
+
     /// Creates a hidden retained dialog owned by `parent`.
     ///
-    /// `parent` must be a live ordinary window from this Context. Show the returned dialog with
-    /// [`Self::set_window_visible`]; it becomes the front modal group before the layout immediately
-    /// following this UI transaction.
+    /// `parent` must be a live independent or structural child window from this Context. Show the
+    /// returned dialog with [`Self::set_window_visible`]; it becomes the front modal group before
+    /// the layout immediately following this UI transaction.
     pub fn create_dialog(&mut self, parent: &WindowHandle, window: Window) -> Result<WindowHandle, SurfaceMutationError> {
         // WindowManager authenticates the complete capability before consuming the dialog value.
         self.window_manager.create_dialog(parent, window)
@@ -124,20 +145,29 @@ impl<'a> Ui<'a> {
         self.window_manager.set_popup_options(popup, options)
     }
 
-    /// Assigns an ordinary window to one of the sixteen fixed application layers.
+    /// Assigns an independent window to one of the sixteen fixed application layers.
+    ///
+    /// Structural children inherit their family root's layer and return
+    /// [`SurfaceMutationError::ManagedLayer`] if passed here.
     pub fn set_window_layer(&mut self, window: &WindowHandle, layer: u8) -> Result<(), SurfaceMutationError> {
         // Layer validation and modal restrictions remain one WindowManager transaction at the
         // event-safe mutation boundary; popups derive the layer from their owning window.
         self.window_manager.set_window_layer(window, layer)
     }
 
-    /// Returns a registered window's fixed or modal layer policy.
+    /// Returns a registered window's effective fixed or modal layer policy.
+    ///
+    /// A structural child reports its top-level family root's current fixed layer.
     pub fn window_layer(&self, window: &WindowHandle) -> Result<LayerBinding, SurfaceMutationError> {
         // Authenticate the handle rather than exposing manager storage or a forged default band.
         self.window_manager.window_layer(window)
     }
 
     /// Shows or hides a retained window or dialog while preserving its application tree.
+    ///
+    /// Hiding a window removes its complete structural family from effective visibility. Child
+    /// windows retain their local visibility intent and recover when their ancestors are shown;
+    /// modal descendants are explicitly closed and do not recover implicitly.
     ///
     /// Popup definitions have a distinct typed identity and cannot be passed to this generic window
     /// operation. Use [`Self::show_popup`], [`Self::show_popup_at`], or [`Self::hide_popup`] instead.
@@ -175,18 +205,20 @@ impl<'a> Ui<'a> {
 
     /// Raises a registered window or dialog inside its effective layer.
     ///
-    /// This operation never moves an ordinary window across another numeric application layer. A
-    /// visible dialog moves its modal group in front and closes popups from the previous modal
-    /// group. A stale or foreign handle returns a checked mutation error.
+    /// This operation never moves an ordinary window across another numeric application layer. An
+    /// independent window raises its complete family among fixed-layer peers; a child raises only
+    /// among siblings with the same direct parent. A visible dialog moves its modal group in front
+    /// and closes popups from the previous modal group. A stale or foreign handle returns a checked
+    /// mutation error.
     pub fn bring_window_to_front(&mut self, window: &WindowHandle) -> Result<(), SurfaceMutationError> {
         // Let WindowManager raise the authenticated node inside its structural stacking band.
         self.window_manager.bring_window_to_front(window)
     }
 
-    /// Permanently unregisters a window or dialog and its window-owned popup definitions.
+    /// Permanently unregisters a window or dialog and its complete structural subtree.
     ///
-    /// Every owned popup tree is dropped, making its stable handles stale and expiring their weak
-    /// event endpoints.
+    /// Every child window, dialog, and popup below the target is dropped, making its stable handles
+    /// stale and expiring its weak widget and event endpoints.
     pub fn destroy_window(&mut self, window: &WindowHandle) -> Result<(), SurfaceMutationError> {
         // Destruction also expires every weak application widget and event handle in the subtree.
         self.window_manager.destroy_window(window)
@@ -227,12 +259,13 @@ impl<'a> Ui<'a> {
 /// to ordinary root hit routing is the popup boundary: an outside pointer press dismisses the
 /// active popup before the event may continue to the root underneath.
 ///
-/// Across ordinary roots, pointer hover and new presses follow topmost hit geometry. A press raises
-/// its root only within the effective layer and records the ordinary `active_root` independently.
-/// Drag remains confined by pointer capture or the front eligible visual root, while wheel input
-/// follows the topmost eligible root under the pointer. Keyboard and text return to the captured
-/// or active root. Captured pointer release still returns to its widget so local drag state is
-/// cleaned up.
+/// Across ordinary roots, pointer hover and new presses follow topmost hit geometry. Within a child
+/// family, parent menu/chrome precedes children, children precede the parent body, and later siblings
+/// precede earlier ones. A press raises its target only within the corresponding top-level or sibling
+/// scope and records the ordinary `active_root` independently. Drag remains confined by pointer
+/// capture or the front eligible visual root, while wheel input follows the topmost eligible root
+/// under the pointer. Keyboard and text return to the captured or active root. Captured pointer
+/// release still returns to its widget so local drag state is cleaned up.
 ///
 /// The frontmost visible dialog is modal. It occupies the dedicated band above all application
 /// layers, and the dialog with its active popup path forms the only eligible input group. Pointer
@@ -628,7 +661,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
 
 #[cfg(test)]
 impl<B: RendererBackend, State: 'static> Context<B, State> {
-    /// Returns visible window and popup names in exact paint order for internal tests.
+    /// Returns visible window and popup names in base-surface paint order for internal tests.
     pub(crate) fn debug_rendered_root_names(&self) -> Vec<String> {
         // Names expose ordering policy without leaking private stacking records.
         self.window_manager.debug_rendered_root_names()
@@ -644,6 +677,12 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     pub(crate) fn debug_root_rect(&self, root: RootId) -> Option<Recti> {
         // Copy geometry out so tests cannot retain references into manager storage.
         self.window_manager.debug_root_rect(root)
+    }
+
+    /// Returns the committed effective surface clip for internal hierarchy tests.
+    pub(crate) fn debug_root_clip(&self, root: RootId) -> Option<Recti> {
+        // Copy the private snapshot used jointly by retained paint and cross-window hit testing.
+        self.window_manager.debug_root_clip(root)
     }
 
     /// Returns whether a registered root is visible for internal behavioral tests.
