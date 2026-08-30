@@ -173,17 +173,17 @@ pub(super) fn place_scaled_visual_content(bounds: Recti, visual_size: Option<Dim
 }
 
 /// Selects which control color should be painted for a widget's fill policy and state.
-pub(super) fn widget_fill_color(ctx: &WidgetPaintCtx<'_>, base: ControlColor, fill: WidgetFillOption) -> Option<ControlColor> {
+pub(super) fn widget_fill_color(ctx: &WidgetPaintCtx<'_>, base: ControlColor, fill: WidgetFillOption) -> Option<Color> {
     if ctx.focused() && fill.intersects(WidgetFillOption::CLICK) {
-        let mut color = base;
-        color.focus();
-        Some(color)
+        // Focus is one cross-control interaction scope, so it uses the named Style accent rather
+        // than selecting a second base-family palette entry.
+        Some(ctx.style().focus_color)
     } else if ctx.hovered() && fill.intersects(WidgetFillOption::HOVER) {
         let mut color = base;
         color.hover();
-        Some(color)
+        Some(ctx.style().colors[color as usize])
     } else if fill.intersects(WidgetFillOption::NORMAL) {
-        Some(base)
+        Some(ctx.style().colors[base as usize])
     } else {
         None
     }

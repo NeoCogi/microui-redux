@@ -1803,12 +1803,12 @@ impl State {
                 static_label("panelbg:"),
                 static_label("button:"),
                 static_label("buttonhover:"),
-                static_label("buttonfocus:"),
                 static_label("base:"),
                 static_label("basehover:"),
-                static_label("basefocus:"),
                 static_label("scrollbase:"),
                 static_label("scrollthumb:"),
+                static_label("focus:"),
+                static_label("window focus:"),
                 static_label("menu foreground:"),
                 static_label("menu background:"),
             ],
@@ -1981,7 +1981,9 @@ impl State {
     fn style_color_changed(&mut self, index: &usize, event: &SliderChanged) {
         let color_index = *index / 4;
         let color = match color_index {
-            0..=13 => &mut self.style.colors[color_index],
+            0..=11 => &mut self.style.colors[color_index],
+            12 => &mut self.style.focus_color,
+            13 => &mut self.style.window_focus_color,
             14 => &mut self.style.menu_foreground,
             15 => &mut self.style.menu_background,
             _ => return,
@@ -2236,7 +2238,12 @@ impl State {
     }
 
     fn sync_style_controls_from_style(&mut self) {
-        let colors = self.style.colors.into_iter().chain([self.style.menu_foreground, self.style.menu_background]);
+        let colors = self.style.colors.into_iter().chain([
+            self.style.focus_color,
+            self.style.window_focus_color,
+            self.style.menu_foreground,
+            self.style.menu_background,
+        ]);
         for (i, color) in colors.enumerate() {
             let slider_base = i * 4;
             set_slider_value(&self.style_color_slider_states[slider_base], color.r as Real);

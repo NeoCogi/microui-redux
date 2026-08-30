@@ -404,6 +404,14 @@ impl<'a> WidgetPaintCtx<'a> {
     /// Draws an explicit widget-owned internal frame.
     pub(crate) fn draw_internal_frame(&mut self, rect: Recti, colorid: ControlColor) -> Option<Recti> {
         let color = self.common.style.colors[colorid as usize];
+        self.draw_internal_frame_color(rect, color)
+    }
+
+    /// Draws an explicit widget-owned internal frame with a concrete fill color.
+    ///
+    /// Interaction-wide colors such as [`Style::focus_color`] do not belong to one base palette
+    /// family. This helper keeps their geometry on the same authoritative frame path.
+    pub(crate) fn draw_internal_frame_color(&mut self, rect: Recti, color: Color) -> Option<Recti> {
         let border = self.common.style.frame_border();
         let mut painter = self.painter();
         crate::ui_node::frame::paint_internal_frame(&mut painter, rect, Some(color), border)
@@ -412,7 +420,7 @@ impl<'a> WidgetPaintCtx<'a> {
     /// Draws an explicit widget-owned internal frame with interaction fill coloring.
     pub(crate) fn draw_widget_internal_frame(&mut self, rect: Recti, mut colorid: ControlColor) -> Option<Recti> {
         if self.common.focused {
-            colorid.focus();
+            return self.draw_internal_frame_color(rect, self.common.style.focus_color);
         } else if self.common.hovered {
             colorid.hover();
         }
@@ -422,7 +430,8 @@ impl<'a> WidgetPaintCtx<'a> {
     /// Fills derived outer-frame content with interaction coloring.
     pub(crate) fn draw_widget_fill(&mut self, rect: Recti, mut colorid: ControlColor) {
         if self.common.focused {
-            colorid.focus();
+            self.draw_rect(rect, self.common.style.focus_color);
+            return;
         } else if self.common.hovered {
             colorid.hover();
         }

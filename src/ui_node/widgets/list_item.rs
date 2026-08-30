@@ -185,13 +185,13 @@ impl ListItem {
         let bounds = ctx.local_rect();
 
         if ctx.focused() || ctx.hovered() {
-            let mut color = ControlColor::Button;
-            if ctx.focused() {
-                color.focus();
+            let fill = if ctx.focused() {
+                ctx.style().focus_color
             } else {
+                let mut color = ControlColor::Button;
                 color.hover();
-            }
-            let fill = ctx.style().colors[color as usize];
+                ctx.style().colors[color as usize]
+            };
             ctx.draw_rect(bounds, fill);
         }
 

@@ -255,15 +255,25 @@ impl Widget for DisclosureHeader {
         let mut row = ctx.local_rect();
         match self.variant {
             DisclosureVariant::Header => {
-                let mut color = ControlColor::Button;
-                if ctx.hovered() {
-                    color.hover();
-                }
-                if self.opt.intersects(WidgetOption::FRAME) {
-                    row = ctx.draw_internal_frame(row, color).unwrap_or_default();
+                // Keyboard focus wins over simultaneous pointer hover, matching ordinary controls
+                // and making the retained header's Tab selection unambiguous.
+                let fill = if ctx.focused() {
+                    ctx.style().focus_color
                 } else {
-                    ctx.draw_rect(row, ctx.style().colors[color as usize]);
+                    let mut color = ControlColor::Button;
+                    if ctx.hovered() {
+                        color.hover();
+                    }
+                    ctx.style().colors[color as usize]
+                };
+                if self.opt.intersects(WidgetOption::FRAME) {
+                    row = ctx.draw_internal_frame_color(row, fill).unwrap_or_default();
+                } else {
+                    ctx.draw_rect(row, fill);
                 }
+            }
+            DisclosureVariant::Tree if ctx.focused() => {
+                ctx.draw_rect(row, ctx.style().focus_color);
             }
             DisclosureVariant::Tree if ctx.hovered() => {
                 ctx.draw_rect(row, ctx.style().colors[ControlColor::ButtonHover as usize]);

@@ -621,7 +621,7 @@ impl MenuSurface {
             match entry {
                 MenuSlot::Item(item) => {
                     if item.parameters.enabled && self.keyboard_slot == Some(slot) {
-                        ctx.draw_rect(row, style.colors[ControlColor::ButtonFocus as usize]);
+                        ctx.draw_rect(row, style.focus_color);
                     } else if item.parameters.enabled && self.hovered_slot == Some(slot) {
                         ctx.draw_rect(row, style.colors[ControlColor::ButtonHover as usize]);
                     }
@@ -643,7 +643,7 @@ impl MenuSurface {
                 MenuSlot::Separator => paint_separator(&mut ctx, row),
                 MenuSlot::Branch { label } => {
                     if self.open_slot == Some(slot) || self.keyboard_slot == Some(slot) {
-                        ctx.draw_rect(row, style.colors[ControlColor::ButtonFocus as usize]);
+                        ctx.draw_rect(row, style.focus_color);
                     } else if self.hovered_slot == Some(slot) {
                         ctx.draw_rect(row, style.colors[ControlColor::ButtonHover as usize]);
                     }

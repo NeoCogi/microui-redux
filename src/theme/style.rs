@@ -93,12 +93,22 @@ pub struct Style {
     pub thumb_size: i32,
     /// Width of inside-aligned widget and container borders.
     pub frame_border_width: i32,
+    /// Accent used for focused widget fills, menu selection, and the universal focus outline.
+    ///
+    /// Focus is an interaction scope rather than a control-family color, so this named value
+    /// replaces the former button/base focus entries in [`Self::colors`].
+    pub focus_color: Color,
+    /// Accent used for the active window title and framed outer outline.
+    ///
+    /// Keeping window activation separate lets themes distinguish application chrome from the
+    /// focused control within that window even when both defaults use the same accent.
+    pub window_focus_color: Color,
     /// Foreground color used by menu bars, menu items, and cascading submenu items.
     pub menu_foreground: Color,
     /// Background color used by menu bars, popup menus, and cascading submenus.
     pub menu_background: Color,
     /// Palette of [`crate::ControlColor`] entries.
-    pub colors: [Color; 14],
+    pub colors: [Color; 12],
 }
 
 impl Default for Style {
@@ -118,6 +128,8 @@ impl Default for Style {
             scrollbar_size: 12,
             thumb_size: 8,
             frame_border_width: 1,
+            focus_color: Color { r: 0, g: 120, b: 215, a: 255 },
+            window_focus_color: Color { r: 0, g: 120, b: 215, a: 255 },
             menu_foreground: Color { r: 230, g: 230, b: 230, a: 255 },
             menu_background: Color { r: 50, g: 50, b: 50, a: 255 },
             colors: [
@@ -129,10 +141,8 @@ impl Default for Style {
                 Color { r: 0, g: 0, b: 0, a: 0 },
                 Color { r: 75, g: 75, b: 75, a: 255 },
                 Color { r: 95, g: 95, b: 95, a: 255 },
-                Color { r: 115, g: 115, b: 115, a: 255 },
                 Color { r: 30, g: 30, b: 30, a: 255 },
                 Color { r: 35, g: 35, b: 35, a: 255 },
-                Color { r: 40, g: 40, b: 40, a: 255 },
                 Color { r: 43, g: 43, b: 43, a: 255 },
                 Color { r: 30, g: 30, b: 30, a: 255 },
             ],

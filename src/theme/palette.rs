@@ -35,19 +35,15 @@
 /// Identifiers for each of the built-in style colors.
 pub enum ControlColor {
     /// Number of color entries in [`crate::Style::colors`].
-    Max = 14,
+    Max = 12,
     /// Thumb of scrollbars.
-    ScrollThumb = 13,
+    ScrollThumb = 11,
     /// Base frame of scrollbars.
-    ScrollBase = 12,
-    /// Base color for focused widgets.
-    BaseFocus = 11,
+    ScrollBase = 10,
     /// Base color while the pointer hovers the widget.
-    BaseHover = 10,
+    BaseHover = 9,
     /// Default base color.
-    Base = 9,
-    /// Button color while the widget is focused.
-    ButtonFocus = 8,
+    Base = 8,
     /// Button color while the pointer hovers the widget.
     ButtonHover = 7,
     /// Default button color.
@@ -72,17 +68,6 @@ impl ControlColor {
         *self = match self {
             Self::Base => Self::BaseHover,
             Self::Button => Self::ButtonHover,
-            _ => *self,
-        }
-    }
-
-    /// Promotes the enum to the focused variant when relevant.
-    pub fn focus(&mut self) {
-        *self = match self {
-            Self::Base => Self::BaseFocus,
-            Self::Button => Self::ButtonFocus,
-            Self::BaseHover => Self::BaseFocus,
-            Self::ButtonHover => Self::ButtonFocus,
             _ => *self,
         }
     }

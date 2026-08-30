@@ -122,8 +122,8 @@ impl ListBox {
     /// Paints list-box frame, label, and optional image.
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let rect = ctx.local_rect();
-        if let Some(colorid) = widget_fill_color(ctx, ControlColor::Button, WidgetFillOption::HOVER | WidgetFillOption::CLICK) {
-            ctx.draw_rect(rect, ctx.style().colors[colorid as usize]);
+        if let Some(color) = widget_fill_color(ctx, ControlColor::Button, WidgetFillOption::HOVER | WidgetFillOption::CLICK) {
+            ctx.draw_rect(rect, color);
         }
         let visual_size = self.image.map(TextureId::size);
         let placement = place_inline_content(rect, ctx.style(), &self.label, visual_size);
