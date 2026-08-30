@@ -163,7 +163,9 @@ impl Widget for Grid3dWidget {
     }
 
     fn keyboard_behavior(&self) -> KeyboardBehavior {
-        KeyboardBehavior::TAB_STOP
+        // The background grid accepts pointer focus for camera gestures but exposes no discrete
+        // keyboard action, so sequential navigation skips this otherwise full-window surface.
+        KeyboardBehavior::FOCUSABLE
     }
 
     /// Applies left-button arcball motion and wheel zoom to the shared grid camera.
@@ -644,7 +646,8 @@ impl Widget for FalloffEditor {
     }
 
     fn keyboard_behavior(&self) -> KeyboardBehavior {
-        KeyboardBehavior::TAB_STOP
+        // Pointer focus keeps drag interaction stable without adding a non-functional Tab stop.
+        KeyboardBehavior::FOCUSABLE
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
@@ -852,6 +855,8 @@ impl Widget for SuzanneWidget {
     }
 
     fn keyboard_behavior(&self) -> KeyboardBehavior {
+        // The demo viewport intentionally remains a Tab stop because its update handler supports
+        // arrow-key orbiting and text-input W/S zoom alongside pointer gestures.
         KeyboardBehavior::TAB_STOP
     }
 

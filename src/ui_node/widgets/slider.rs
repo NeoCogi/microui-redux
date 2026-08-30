@@ -188,6 +188,20 @@ impl Slider {
         let font = ctx.style().resolve_font_choice(self.font);
         let last = self.value;
         let mut value = last;
+        if !self.edit.editing {
+            // Arrow adjustment shares wheel stepping and snapping: continuous sliders use one
+            // percent of their range, while stepped sliders move exactly one positive step.
+            let range = self.high - self.low;
+            let amount = if self.step != 0.0 { self.step.abs() } else { range.abs() / 100.0 };
+            match ctx.action(input, self.keyboard_behavior()) {
+                Some(KeyboardAction::Decrease) => value -= amount,
+                Some(KeyboardAction::Increase) => value += amount,
+                Some(KeyboardAction::Activate | KeyboardAction::Expand | KeyboardAction::Collapse) | None => {}
+            }
+            if self.step != 0.0 {
+                value = snap_slider_value(value, self.low, self.step);
+            }
+        }
         if number_textbox_update(ctx, input, &mut self.edit, self.precision, font, &mut value) {
             return;
         }
@@ -321,7 +335,7 @@ impl Widget for Slider {
     }
 
     fn keyboard_behavior(&self) -> KeyboardBehavior {
-        KeyboardBehavior::TAB_STOP
+        KeyboardBehavior::TAB_STOP | KeyboardBehavior::ADJUST_HORIZONTAL
     }
 }
 

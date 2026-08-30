@@ -57,7 +57,7 @@ use rs_math3d::{Recti, Vec2i};
 use crate::atlas::{AtlasHandle, FontId, IconId};
 use crate::render::{DisplayList, Painter, TextureId};
 use crate::input::{Modifiers, MouseButton};
-use crate::WidgetOption;
+use crate::{KeyboardAction, KeyboardBehavior, WidgetOption};
 use crate::theme::{Color, ControlColor, Style};
 use crate::ui_node::text_layout::control_text_position_with_font;
 
@@ -243,6 +243,17 @@ impl<'a> WidgetUpdateCtx<'a> {
     /// Returns whether this widget received the current click transition.
     pub fn clicked(&self) -> bool {
         self.common.clicked
+    }
+
+    /// Resolves this update's pointer click or declared key press to one shared widget action.
+    pub fn action(&self, input: Option<&UiInputEvent>, keyboard: KeyboardBehavior) -> Option<KeyboardAction> {
+        if self.clicked() {
+            // The router records only an eligible primary-button press as a click transition, so
+            // pointer and keyboard activation can share the same semantic branch in each widget.
+            Some(KeyboardAction::Activate)
+        } else {
+            keyboard.action(input)
+        }
     }
 
     /// Returns whether this widget owns pointer capture while the left button is held.

@@ -31,8 +31,8 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    AtlasHandle, ChildParticipation, Container, ContainerWidget, ControlColor, Dimensioni, MeasureCtx, MouseButton, Recti, Style, TypedWidgetHandle,
-    UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
+    AtlasHandle, ChildParticipation, Container, ContainerWidget, ControlColor, Dimensioni, MeasureCtx, Recti, Style, TypedWidgetHandle, UiInputEvent, Widget,
+    WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
 use super::{Children, ContainerLayoutCtx, LinearItem, Node};
@@ -231,13 +231,20 @@ impl Widget for DisclosureHeader {
         &self.opt
     }
 
-    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
-        // Routing already selected this real child surface; only a left press submits a toggle.
-        let submitted = matches!(input, Some(UiInputEvent::MouseDown { button, .. }) if button.intersects(MouseButton::LEFT));
-        if !submitted {
-            return;
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+        // Pointer/Enter/Space toggle while directional keys expose the conventional tree behavior.
+        match ctx.action(input, self.keyboard_behavior()) {
+            Some(crate::KeyboardAction::Activate) => {
+                let _ = self.disclosure.try_update(Disclosure::toggle);
+            }
+            Some(crate::KeyboardAction::Expand) => {
+                let _ = self.disclosure.try_update(Disclosure::expand);
+            }
+            Some(crate::KeyboardAction::Collapse) => {
+                let _ = self.disclosure.try_update(Disclosure::collapse);
+            }
+            Some(crate::KeyboardAction::Decrease | crate::KeyboardAction::Increase) | None => {}
         }
-        let _ = self.disclosure.try_update(Disclosure::toggle);
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
@@ -287,6 +294,9 @@ impl Widget for DisclosureHeader {
         // The addressable header, rather than the structural disclosure container, participates in
         // sequential focus and later shared activation.
         crate::KeyboardBehavior::TAB_STOP
+            | crate::KeyboardBehavior::ACTIVATE_ENTER
+            | crate::KeyboardBehavior::ACTIVATE_SPACE
+            | crate::KeyboardBehavior::EXPAND_COLLAPSE
     }
 }
 

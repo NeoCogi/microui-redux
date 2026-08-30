@@ -256,10 +256,11 @@ impl Widget for Button {
         &self.opt
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
-        if !ctx.clicked() {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+        if ctx.action(input, self.keyboard_behavior()) != Some(KeyboardAction::Activate) {
             return;
         }
+        // Pointer click, Enter, and Space converge on the button's single typed submission port.
         self.submitted_event.borrow_mut().emit(ButtonSubmitted);
     }
 
@@ -270,7 +271,7 @@ impl Widget for Button {
     fn keyboard_behavior(&self) -> KeyboardBehavior {
         // Buttons are ordinary sequential focus targets. Shared activation capabilities are added
         // independently so focus traversal does not depend on button-specific routing knowledge.
-        KeyboardBehavior::TAB_STOP
+        KeyboardBehavior::TAB_STOP | KeyboardBehavior::ACTIVATE_ENTER | KeyboardBehavior::ACTIVATE_SPACE
     }
 }
 

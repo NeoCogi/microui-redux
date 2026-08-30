@@ -35,8 +35,8 @@ use crate::{
     color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Combo, ComboParameters, ComboSubmitted, Custom,
     CustomParameters, Constraints, Context, Dimensioni, Disclosure, DisclosureParameters, Ui, Grid, GridParameters, Key, KeyEvent, KeyboardBehavior, Linear,
     LinearItem, LinearParameters, Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted, MouseButton, Node, ScrollArea,
-    ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Style, Textbox, TextboxChanged, TextBlock, TextBlockParameters, TextboxParameters,
-    TrackSize, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, Modifiers,
+    ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Slider, SliderParameters, Style, Textbox, TextboxChanged, TextBlock,
+    TextBlockParameters, TextboxParameters, TrackSize, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, Modifiers,
 };
 use crate::render::{FrameInfo, RenderError};
 use std::{
@@ -420,6 +420,41 @@ fn tab_and_shift_tab_move_window_focus_without_reaching_widget_input() {
     ctx.update_ui(Dimensioni::new(320, 240));
     assert_eq!(first_state.try_read(|state| state.events.clone()), Some(vec!["text", "text"]));
     assert_eq!(second_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
+}
+
+#[test]
+fn tab_focused_builtins_share_windows_activation_and_arrow_adjustment() {
+    let (button, button_node) = Button::create(ButtonParameters::new("submit"));
+    let (checkbox, checkbox_node) = Checkbox::create(CheckboxParameters::new("enabled", false));
+    let (slider, slider_node) = Slider::create(SliderParameters::with_opt(5.0, 0.0, 10.0, 1.0, 0, WidgetOption::FRAME));
+    let (_, content) = Linear::create(LinearParameters::vertical([button_node, checkbox_node, slider_node]));
+    let mut ctx = context();
+    let root = ctx.ui().create_window(Window::new("window", rect(10, 10, 140, 100), content));
+    ctx.ui()
+        .set_window_options(&root, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+    let mut submissions = 0;
+    let mut dispatcher = event_counter(button.submitted());
+
+    // The first Tab selects the button and Enter emits its ordinary typed submission event.
+    ctx.key(KeyEvent::pressed(Key::Tab, Modifiers::NONE));
+    ctx.key(KeyEvent::pressed(Key::Enter, Modifiers::NONE));
+    ctx.update_ui(Dimensioni::new(320, 240));
+    assert!(dispatcher.dispatch(&mut submissions));
+    assert_eq!(submissions, 1);
+
+    // Checkbox Enter is intentionally inert; Space performs the single conventional toggle.
+    ctx.key(KeyEvent::pressed(Key::Tab, Modifiers::NONE));
+    ctx.key(KeyEvent::pressed(Key::Enter, Modifiers::NONE));
+    ctx.key(KeyEvent::pressed(Key::Space, Modifiers::NONE));
+    ctx.update_ui(Dimensioni::new(320, 240));
+    assert_eq!(checkbox.checked(), Some(true));
+
+    // Horizontal sliders advance by one configured step on Right Arrow.
+    ctx.key(KeyEvent::pressed(Key::Tab, Modifiers::NONE));
+    ctx.key(KeyEvent::pressed(Key::ArrowRight, Modifiers::NONE));
+    ctx.update_ui(Dimensioni::new(320, 240));
+    assert_eq!(slider.value(), Some(6.0));
 }
 
 #[test]
@@ -1061,6 +1096,19 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     context.update_ui_state(dimensions, &mut model);
     assert_eq!(context.debug_popup_visible(&popup), Some(false));
     assert_eq!(context.debug_popup_visible(&replacement), Some(true));
+    assert_eq!(combo.is_open(), Some(false));
+
+    // The focused header uses conventional Windows popup keys through the same typed composition:
+    // F4 opens and replaces the unrelated popup, then Escape closes the combo popup.
+    context.key(KeyEvent::pressed(Key::Function(4), Modifiers::NONE));
+    context.update_ui_state(dimensions, &mut model);
+    assert_eq!(context.debug_popup_visible(&popup), Some(true));
+    assert_eq!(context.debug_popup_visible(&replacement), Some(false));
+    assert_eq!(combo.is_open(), Some(true));
+
+    context.key(KeyEvent::pressed(Key::Escape, Modifiers::NONE));
+    context.update_ui_state(dimensions, &mut model);
+    assert_eq!(context.debug_popup_visible(&popup), Some(false));
     assert_eq!(combo.is_open(), Some(false));
 }
 

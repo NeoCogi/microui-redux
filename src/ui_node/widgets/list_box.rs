@@ -150,10 +150,11 @@ impl Widget for ListBox {
         &self.opt
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
-        if !ctx.clicked() {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+        if ctx.action(input, self.keyboard_behavior()) != Some(KeyboardAction::Activate) {
             return;
         }
+        // Pointer and keyboard activation publish the same application-facing submission.
         self.submitted_event.borrow_mut().emit(ListBoxSubmitted);
     }
 
@@ -162,7 +163,7 @@ impl Widget for ListBox {
     }
 
     fn keyboard_behavior(&self) -> KeyboardBehavior {
-        KeyboardBehavior::TAB_STOP
+        KeyboardBehavior::TAB_STOP | KeyboardBehavior::ACTIVATE_ENTER | KeyboardBehavior::ACTIVATE_SPACE
     }
 }
 

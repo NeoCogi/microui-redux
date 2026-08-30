@@ -690,7 +690,7 @@ fn collect_tab_stops(node: &Node, parent_transform: Transform, output: &mut Vec<
         return;
     }
     let child_transform = parent_transform.push(node.state.layout);
-    let _ = node.with_children(|children| {
+    node.with_children(|children| {
         for child in children.iter() {
             collect_tab_stops(child, child_transform, output);
         }

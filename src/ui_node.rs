@@ -66,7 +66,8 @@ pub use text_layout::TextWrap;
 mod widget;
 mod widget_context;
 pub use widget::{
-    KeyboardBehavior, LeafWidget, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
+    KeyboardAction, KeyboardBehavior, LeafWidget, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters,
+    WidgetUpdateCtx,
 };
 pub(crate) use widget::WidgetStorage;
 pub mod widgets;

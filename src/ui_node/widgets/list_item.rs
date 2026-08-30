@@ -239,10 +239,11 @@ impl Widget for ListItem {
         &self.opt
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
-        if !ctx.clicked() {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+        if ctx.action(input, self.keyboard_behavior()) != Some(KeyboardAction::Activate) {
             return;
         }
+        // Clone before emission so observers receive an immutable selection snapshot.
         let label = self.label.clone();
         self.submitted_event.borrow_mut().emit(ListItemSubmitted { label });
     }
@@ -252,7 +253,7 @@ impl Widget for ListItem {
     }
 
     fn keyboard_behavior(&self) -> KeyboardBehavior {
-        KeyboardBehavior::TAB_STOP
+        KeyboardBehavior::TAB_STOP | KeyboardBehavior::ACTIVATE_ENTER | KeyboardBehavior::ACTIVATE_SPACE
     }
 }
 

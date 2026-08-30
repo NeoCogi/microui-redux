@@ -150,6 +150,16 @@ impl Number {
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         let font = ctx.style().resolve_font_choice(self.font);
         let last = self.value;
+        if !self.edit.editing {
+            // Up and Down use the positive magnitude of the configured drag step, matching a
+            // Windows spin control even when an application supplied a negative drag direction.
+            let amount = self.step.abs();
+            match ctx.action(input, self.keyboard_behavior()) {
+                Some(KeyboardAction::Decrease) => self.set_value(self.value - amount),
+                Some(KeyboardAction::Increase) => self.set_value(self.value + amount),
+                Some(KeyboardAction::Activate | KeyboardAction::Expand | KeyboardAction::Collapse) | None => {}
+            }
+        }
         if !number_textbox_update(ctx, input, &mut self.edit, self.precision, font, &mut self.value) {
             if ctx.focused()
                 && ctx.mouse_buttons().intersects(MouseButton::LEFT)
@@ -225,7 +235,7 @@ impl Widget for Number {
     }
 
     fn keyboard_behavior(&self) -> KeyboardBehavior {
-        KeyboardBehavior::TAB_STOP
+        KeyboardBehavior::TAB_STOP | KeyboardBehavior::ADJUST_VERTICAL
     }
 }
 

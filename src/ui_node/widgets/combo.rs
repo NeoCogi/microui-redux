@@ -305,14 +305,25 @@ impl Combo {
     }
 
     /// Updates popup-open state and records header submissions with their routed geometry.
-    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>) {
+    fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         // The Combo owns only semantic open state. The application composes that state with whichever
         // retained root it selected as popup content through the typed submission event below.
-        let submitted = if ctx.clicked() {
+        let action = ctx.action(input, self.keyboard_behavior());
+        let submitted = if let Some(action) = action {
+            let previous_open = self.open;
             let screen_header = ctx.screen_content_rect();
             let anchor = rect(screen_header.x, screen_header.y + screen_header.height, screen_header.width, 1);
-            self.open = !self.open;
-            Some(ComboSubmitted { open: self.open, anchor })
+            self.open = match action {
+                KeyboardAction::Activate => !self.open,
+                KeyboardAction::Expand => true,
+                KeyboardAction::Collapse => false,
+                // Combo headers declare no adjustment capability, so these branches remain a
+                // defensive no-op if a custom caller supplies inconsistent flags.
+                KeyboardAction::Decrease | KeyboardAction::Increase => self.open,
+            };
+            // Idempotent Expand/Collapse repeats do not ask the application to reapply identical
+            // popup state; every pointer or activation toggle necessarily changes the value.
+            (self.open != previous_open).then_some(ComboSubmitted { open: self.open, anchor })
         } else {
             None
         };
@@ -363,8 +374,8 @@ impl Widget for Combo {
         &self.opt
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
-        self.update_widget(ctx)
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+        self.update_widget(ctx, input)
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
@@ -372,7 +383,7 @@ impl Widget for Combo {
     }
 
     fn keyboard_behavior(&self) -> KeyboardBehavior {
-        KeyboardBehavior::TAB_STOP
+        KeyboardBehavior::TAB_STOP | KeyboardBehavior::ACTIVATE_ENTER | KeyboardBehavior::ACTIVATE_SPACE | KeyboardBehavior::POPUP
     }
 }
 

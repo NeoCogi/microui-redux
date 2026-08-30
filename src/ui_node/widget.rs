@@ -60,6 +60,7 @@ use bitflags::bitflags;
 use rs_math3d::Dimensioni;
 
 use crate::atlas::AtlasHandle;
+use crate::input::{Key, Modifiers};
 use crate::theme::Style;
 use crate::Constraints;
 use super::UiInputEvent;
@@ -150,20 +151,51 @@ bitflags! {
     #[derive(Copy, Clone, Debug, Default, Eq, Hash, PartialEq)]
     /// Declarative keyboard capabilities exposed by one retained widget surface.
     ///
-    /// These flags describe routing eligibility only. Pointer capture remains an independent
-    /// runtime concern, and concrete widgets continue to own their semantic values and typed event
-    /// ports. Built-in controls opt into the smallest applicable set; custom widgets are inert by
-    /// default and can expose explicit behavior through their own [`Widget`] implementation.
-    pub struct KeyboardBehavior: u8 {
+    /// Focus and traversal flags describe routing eligibility; action flags map normalized key
+    /// presses through [`KeyboardBehavior::action`]. Pointer capture remains independent, and
+    /// concrete widgets continue to own their semantic values and typed event ports. Built-in
+    /// controls opt into the smallest applicable set; custom widgets are inert by default.
+    pub struct KeyboardBehavior: u16 {
         /// The surface can own persistent keyboard focus after an eligible pointer press.
         const FOCUSABLE = 1;
         /// Sequential Tab traversal includes this surface.
         ///
         /// Every Tab stop is also treated as focusable; callers need not combine both flags.
         const TAB_STOP = 2;
+        /// Enter requests the control's primary action.
+        const ACTIVATE_ENTER = 4;
+        /// Space requests the control's primary action.
+        const ACTIVATE_SPACE = 8;
+        /// Left and right request a one-step decrease and increase respectively.
+        const ADJUST_HORIZONTAL = 16;
+        /// Down and up request a one-step decrease and increase respectively.
+        const ADJUST_VERTICAL = 32;
+        /// Left collapses and right expands a hierarchical control.
+        const EXPAND_COLLAPSE = 64;
+        /// F4, Alt+Down, Alt+Up, and Escape control a popup-bearing surface.
+        const POPUP = 128;
         /// No keyboard focus or traversal behavior.
         const NONE = 0;
     }
+}
+
+/// Widget-level meaning derived from a normalized keyboard transition.
+///
+/// This small semantic vocabulary prevents each built-in control from independently interpreting
+/// platform keys. It also lets custom widgets reuse the same Windows-style mapping while retaining
+/// their own state and typed application events.
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+pub enum KeyboardAction {
+    /// Invoke the control's primary action.
+    Activate,
+    /// Move one logical step toward the lower value.
+    Decrease,
+    /// Move one logical step toward the higher value.
+    Increase,
+    /// Reveal a hierarchical branch or popup.
+    Expand,
+    /// Hide a hierarchical branch or popup.
+    Collapse,
 }
 
 impl KeyboardBehavior {
@@ -175,6 +207,56 @@ impl KeyboardBehavior {
     /// Returns whether sequential traversal should visit this surface.
     pub const fn is_tab_stop(self) -> bool {
         self.intersects(Self::TAB_STOP)
+    }
+
+    /// Maps one routed key press to the action declared by these capabilities.
+    pub fn action(self, input: Option<&UiInputEvent>) -> Option<KeyboardAction> {
+        let UiInputEvent::Key { event } = input? else {
+            return None;
+        };
+        if !event.is_pressed() {
+            // Releases affect neither semantic values nor one-shot submission ports.
+            return None;
+        }
+
+        let system_modifiers = Modifiers::ALT | Modifiers::CTRL | Modifiers::SUPER;
+        let plain_command = !event.modifiers.intersects(system_modifiers);
+
+        // Popup chords are intentionally resolved before plain directional behavior. Alt is part
+        // of the command itself for Windows-style combo opening and closing.
+        if self.intersects(Self::POPUP) {
+            if event.key == Key::ArrowDown && event.modifiers.intersects(Modifiers::ALT) {
+                return Some(KeyboardAction::Expand);
+            }
+            if event.key == Key::ArrowUp && event.modifiers.intersects(Modifiers::ALT) {
+                return Some(KeyboardAction::Collapse);
+            }
+            if event.key == Key::Escape && !event.modifiers.intersects(Modifiers::CTRL | Modifiers::SUPER) {
+                return Some(KeyboardAction::Collapse);
+            }
+            if event.key == Key::Function(4) && plain_command && !event.repeat {
+                return Some(KeyboardAction::Activate);
+            }
+        }
+
+        if !plain_command {
+            // Ctrl, Alt, and Super chords remain available to application shortcuts. Shift alone
+            // does not suppress ordinary control activation or directional adjustment.
+            return None;
+        }
+        match event.key {
+            // Activation is one-shot for a held key; directional actions intentionally retain
+            // repeat so sliders, spin controls, and expanded trees respond continuously.
+            Key::Enter if self.intersects(Self::ACTIVATE_ENTER) && !event.repeat => Some(KeyboardAction::Activate),
+            Key::Space if self.intersects(Self::ACTIVATE_SPACE) && !event.repeat => Some(KeyboardAction::Activate),
+            Key::ArrowLeft if self.intersects(Self::EXPAND_COLLAPSE) => Some(KeyboardAction::Collapse),
+            Key::ArrowRight if self.intersects(Self::EXPAND_COLLAPSE) => Some(KeyboardAction::Expand),
+            Key::ArrowLeft if self.intersects(Self::ADJUST_HORIZONTAL) => Some(KeyboardAction::Decrease),
+            Key::ArrowRight if self.intersects(Self::ADJUST_HORIZONTAL) => Some(KeyboardAction::Increase),
+            Key::ArrowDown if self.intersects(Self::ADJUST_VERTICAL) => Some(KeyboardAction::Decrease),
+            Key::ArrowUp if self.intersects(Self::ADJUST_VERTICAL) => Some(KeyboardAction::Increase),
+            _ => None,
+        }
     }
 }
 
@@ -377,11 +459,43 @@ impl LeafWidget for WidgetOption {
 }
 
 #[cfg(test)]
-mod widget_ownership_tests {
+mod widget_tests {
     use std::{cell::Cell, rc::Rc};
 
     use super::*;
     use crate::test_support::AllocationMeasurement;
+
+    /// Constructs one routed key press for concise capability-mapping assertions.
+    fn key(key: Key, modifiers: Modifiers) -> UiInputEvent {
+        UiInputEvent::Key {
+            event: crate::KeyEvent::pressed(key, modifiers),
+        }
+    }
+
+    #[test]
+    fn keyboard_actions_apply_shared_windows_control_mappings() {
+        let push_button = KeyboardBehavior::ACTIVATE_ENTER | KeyboardBehavior::ACTIVATE_SPACE;
+        assert_eq!(push_button.action(Some(&key(Key::Enter, Modifiers::NONE))), Some(KeyboardAction::Activate));
+        assert_eq!(push_button.action(Some(&key(Key::Space, Modifiers::SHIFT))), Some(KeyboardAction::Activate));
+        assert_eq!(push_button.action(Some(&key(Key::Enter, Modifiers::CTRL))), None);
+        let repeated_space = UiInputEvent::Key {
+            event: crate::KeyEvent::pressed(Key::Space, Modifiers::NONE).repeated(),
+        };
+        assert_eq!(push_button.action(Some(&repeated_space)), None, "held activation must remain one-shot");
+
+        let checkbox = KeyboardBehavior::ACTIVATE_SPACE;
+        assert_eq!(checkbox.action(Some(&key(Key::Enter, Modifiers::NONE))), None);
+        assert_eq!(checkbox.action(Some(&key(Key::Space, Modifiers::NONE))), Some(KeyboardAction::Activate));
+
+        let horizontal = KeyboardBehavior::ADJUST_HORIZONTAL;
+        assert_eq!(horizontal.action(Some(&key(Key::ArrowLeft, Modifiers::NONE))), Some(KeyboardAction::Decrease));
+        assert_eq!(horizontal.action(Some(&key(Key::ArrowRight, Modifiers::NONE))), Some(KeyboardAction::Increase));
+
+        let popup = KeyboardBehavior::POPUP;
+        assert_eq!(popup.action(Some(&key(Key::Function(4), Modifiers::NONE))), Some(KeyboardAction::Activate));
+        assert_eq!(popup.action(Some(&key(Key::ArrowDown, Modifiers::ALT))), Some(KeyboardAction::Expand));
+        assert_eq!(popup.action(Some(&key(Key::Escape, Modifiers::NONE))), Some(KeyboardAction::Collapse));
+    }
 
     struct TestParameters {
         value: usize,

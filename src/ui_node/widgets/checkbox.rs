@@ -30,8 +30,8 @@
 
 //! Checkbox widget state and rendering.
 //!
-//! The checkbox toggles persistent boolean state on click and paints the atlas check icon when
-//! selected.
+//! The checkbox toggles persistent boolean state on pointer or keyboard activation and paints the
+//! atlas check icon when selected.
 
 use std::{cell::RefCell, rc::Rc};
 
@@ -87,7 +87,7 @@ impl CheckboxParameters {
 /// Value snapshot emitted after a user-originated checkbox change.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct CheckboxChanged {
-    /// Checked value after applying the triggering click.
+    /// Checked value after applying the triggering user activation.
     pub checked: bool,
 }
 
@@ -202,11 +202,12 @@ impl Widget for Checkbox {
         &self.opt
     }
 
-    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
-        if !ctx.clicked() {
+    fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
+        if ctx.action(input, self.keyboard_behavior()) != Some(KeyboardAction::Activate) {
             return;
         }
 
+        // Windows-style checkboxes toggle with Space; Enter remains available to a default button.
         self.checked = !self.checked;
         let checked = self.checked;
         self.changed_event.borrow_mut().emit(CheckboxChanged { checked });
@@ -217,7 +218,7 @@ impl Widget for Checkbox {
     }
 
     fn keyboard_behavior(&self) -> KeyboardBehavior {
-        KeyboardBehavior::TAB_STOP
+        KeyboardBehavior::TAB_STOP | KeyboardBehavior::ACTIVATE_SPACE
     }
 }
 
