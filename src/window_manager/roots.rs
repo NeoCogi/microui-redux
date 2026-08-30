@@ -2792,11 +2792,9 @@ impl WindowManager {
     /// Returns the sole surface receiving keyboard and text input.
     fn keyboard_input_surface(&self) -> Option<SurfaceKey> {
         let modal = self.surfaces.active_modal_root();
-        self.captured_input_surface()
-            .or_else(|| {
-                self.active_surface
-                    .filter(|surface| self.surfaces.visible_order.contains(surface) && self.surface_is_eligible(*surface, modal))
-            })
+        self.active_surface
+            .filter(|surface| self.surfaces.visible_order.contains(surface) && self.surface_is_eligible(*surface, modal))
+            .or_else(|| self.captured_input_surface())
             .or_else(|| modal.map(SurfaceKey::Root))
             .or_else(|| self.front_input_surface())
     }

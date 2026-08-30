@@ -447,6 +447,7 @@ fn tab_and_shift_tab_move_window_focus_without_reaching_widget_input() {
 /// Proves that a popup owns keyboard traversal until dismissal restores its parent's focus path.
 fn application_popup_takes_keyboard_focus_and_restores_its_parent_surface() {
     let (owner_state, owner_body) = OrderedProbe::create(WidgetOption::NONE);
+    let owner_body_id = owner_body.id();
     let (first_popup_state, first_popup) = OrderedProbe::create(WidgetOption::NONE);
     let (second_popup_state, second_popup) = OrderedProbe::create(WidgetOption::NONE);
     let (_, popup_body) = Linear::create(LinearParameters::vertical([first_popup, second_popup]));
@@ -459,11 +460,14 @@ fn application_popup_takes_keyboard_focus_and_restores_its_parent_surface() {
     ctx.key(KeyEvent::pressed(Key::Tab, Modifiers::NONE));
     ctx.text("owner");
     ctx.update_and_render_ui();
+    let owner_rect = ctx.debug_root_node_rect(owner.id(), owner_body_id).unwrap();
+    ctx.mousedown(owner_rect.x + 1, owner_rect.y + 1, MouseButton::LEFT);
+    ctx.update_and_render_ui();
     ctx.ui().show_popup_at(&popup, rect(40, 40, 100, 80)).unwrap();
     ctx.update_and_render_ui();
     ctx.text("popup first");
     ctx.update_and_render_ui();
-    assert_eq!(owner_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
+    assert_eq!(owner_state.try_read(|state| state.events.clone()), Some(vec!["text", "down"]));
     assert_eq!(first_popup_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
 
     // Tab remains inside the active popup surface and advances only its own root-owned focus path.
@@ -473,14 +477,15 @@ fn application_popup_takes_keyboard_focus_and_restores_its_parent_surface() {
     ctx.update_and_render_ui();
     assert_eq!(second_popup_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
 
-    // Escape owns both transitions, dismisses the popup, and restores the parent's remembered
-    // widget path before the following text event is routed.
+    // The owner's unreleased pointer capture remains responsible only for its eventual pointer
+    // tail; it cannot steal keyboard activation from the popup. Escape owns both key transitions,
+    // dismisses the popup, and restores the parent's remembered path before the following text.
     ctx.key(KeyEvent::pressed(Key::Escape, Modifiers::NONE));
     ctx.key(KeyEvent::released(Key::Escape, Modifiers::NONE));
     ctx.text("owner again");
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_popup_visible(&popup), Some(false));
-    assert_eq!(owner_state.try_read(|state| state.events.clone()), Some(vec!["text", "text"]));
+    assert_eq!(owner_state.try_read(|state| state.events.clone()), Some(vec!["text", "down", "text"]));
     assert_eq!(first_popup_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
     assert_eq!(second_popup_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
 }
@@ -1401,8 +1406,17 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     assert_eq!(context.debug_popup_visible(&replacement), Some(true));
     assert_eq!(combo.is_open(), Some(false));
 
-    // The focused header uses conventional Windows popup keys through the same typed composition:
-    // F4 opens and replaces the unrelated popup, then Escape closes the combo popup.
+    // The replacement popup is now the concrete keyboard surface, so F4 cannot leak through to the
+    // suspended Combo header. Escape dismisses it and restores the header's remembered focus; only
+    // then can F4 open the composed popup and a later Escape close it.
+    context.key(KeyEvent::pressed(Key::Function(4), Modifiers::NONE));
+    context.update_ui_state(dimensions, &mut model);
+    assert_eq!(context.debug_popup_visible(&popup), Some(false));
+    assert_eq!(context.debug_popup_visible(&replacement), Some(true));
+    assert_eq!(combo.is_open(), Some(false));
+
+    context.key(KeyEvent::pressed(Key::Escape, Modifiers::NONE));
+    context.key(KeyEvent::released(Key::Escape, Modifiers::NONE));
     context.key(KeyEvent::pressed(Key::Function(4), Modifiers::NONE));
     context.update_ui_state(dimensions, &mut model);
     assert_eq!(context.debug_popup_visible(&popup), Some(true));
