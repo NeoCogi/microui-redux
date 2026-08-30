@@ -393,9 +393,9 @@ impl SurfaceBody {
     }
 
     /// Paints one concrete body into the shared manager display list.
-    fn paint(&mut self, display_list: &mut crate::render::DisplayList, style: &Style, atlas: &crate::AtlasHandle) {
+    fn paint(&mut self, display_list: &mut crate::render::DisplayList, style: &Style, atlas: &crate::AtlasHandle, focus_visible: bool) {
         match self {
-            Self::Widgets { root, runtime } => runtime.paint_tree_root(root, display_list, style, atlas.clone()),
+            Self::Widgets { root, runtime } => runtime.paint_tree_root(root, display_list, style, atlas.clone(), focus_visible),
             Self::Menu(menu) => menu.paint(display_list, style, atlas),
         }
     }
@@ -2315,14 +2315,16 @@ impl WindowManager {
     }
 
     /// Records one ordinary root family with each parent's application content below its children.
-    fn paint_root_tree(&mut self, root: RootId, style: &Style, atlas: &crate::AtlasHandle) {
+    fn paint_root_tree(&mut self, root: RootId, style: &Style, atlas: &crate::AtlasHandle, focus_surface: Option<SurfaceKey>, active_window: Option<RootId>) {
         {
             // A short node borrow records the base before recursion. Releasing it here lets direct
             // child calls borrow arbitrary later forest entries without unsafe aliasing or mirrors.
             let node_index = self.surfaces.node_index(SurfaceKey::Root(root)).expect("visible root must remain retained");
             let node = &mut self.surfaces.nodes[node_index];
             record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, node.surface.options, style);
-            node.surface.body.paint(&mut self.display_list, style, atlas);
+            node.surface
+                .body
+                .paint(&mut self.display_list, style, atlas, focus_surface == Some(SurfaceKey::Root(root)));
         }
 
         // Forest chronology remains the sibling z-order source. Scanning direct edges avoids a
@@ -2341,7 +2343,7 @@ impl WindowManager {
                 }
             };
             if let Some(child) = child {
-                self.paint_root_tree(child, style, atlas);
+                self.paint_root_tree(child, style, atlas, focus_surface, active_window);
             }
         }
 
@@ -2364,12 +2366,13 @@ impl WindowManager {
                 node.surface.geometry,
                 style,
                 atlas,
+                active_window == Some(root),
             );
         }
     }
 
     /// Records the sole active popup path in parent-to-child order at its inherited transient tier.
-    fn paint_active_popup_path(&mut self, style: &Style, atlas: &crate::AtlasHandle) {
+    fn paint_active_popup_path(&mut self, style: &Style, atlas: &crate::AtlasHandle, focus_surface: Option<SurfaceKey>) {
         // `visible_order` materializes only the active popup ancestry. Filtering it reuses that
         // allocation and preserves the existing parent-first popup paint contract.
         for index in 0..self.surfaces.visible_order.len() {
@@ -2380,7 +2383,7 @@ impl WindowManager {
             let node_index = self.surfaces.node_index(key).expect("active popup must remain retained");
             let node = &mut self.surfaces.nodes[node_index];
             record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, node.surface.options, style);
-            node.surface.body.paint(&mut self.display_list, style, atlas);
+            node.surface.body.paint(&mut self.display_list, style, atlas, focus_surface == Some(key));
         }
     }
 
@@ -2393,6 +2396,18 @@ impl WindowManager {
         self.surfaces.rebuild_visible_order();
         let style = self.style;
         let active_mode = self.active_popup_owner().and_then(|owner| self.surfaces.stacking_mode(owner));
+        // A menu owns keyboard presentation without discarding application focus. Otherwise the
+        // same surface selected by routing is the only runtime allowed to paint remembered focus.
+        let focus_surface = if self.keyboard_menu_root.is_some() {
+            None
+        } else {
+            self.keyboard_input_surface()
+        };
+        // Window activation follows the current modal/menu/keyboard scope and is independent from
+        // fixed-layer stacking. Popup focus projects to its sole owning window for chrome paint.
+        let active_window = self
+            .keyboard_menu_root
+            .or_else(|| focus_surface.and_then(|surface| self.surfaces.owning_root(surface)));
 
         // Only parentless Normal roots enter global layer scans. Each recursive call paints one
         // structurally atomic family while still sandwiching children between parent content and
@@ -2412,11 +2427,11 @@ impl WindowManager {
                     }
                 };
                 if let Some(root) = root {
-                    self.paint_root_tree(root, &style, atlas);
+                    self.paint_root_tree(root, &style, atlas, focus_surface, active_window);
                 }
             }
             if active_mode == Some(RootMode::Normal { layer }) {
-                self.paint_active_popup_path(&style, atlas);
+                self.paint_active_popup_path(&style, atlas, focus_surface);
             }
         }
 
@@ -2430,11 +2445,11 @@ impl WindowManager {
                 }
             };
             if let Some(modal) = modal {
-                self.paint_root_tree(modal, &style, atlas);
+                self.paint_root_tree(modal, &style, atlas, focus_surface, active_window);
             }
         }
         if active_mode == Some(RootMode::Modal) {
-            self.paint_active_popup_path(&style, atlas);
+            self.paint_active_popup_path(&style, atlas, focus_surface);
         }
     }
 

@@ -43,6 +43,7 @@ use input_router::InputRouter;
 
 use crate::input::InputSnapshot;
 use crate::math::RectExt;
+// Re-exported into the private paint implementation and runtime tests through `super::*`.
 use crate::render::DisplayList;
 use crate::{Constraints, Dimensioni, MouseButton, Recti, Style, UNCLIPPED_RECT, Vec2i};
 #[cfg(test)]
@@ -152,11 +153,6 @@ impl UiRuntime {
         // Topology may change during update; remove identities whose retained path no longer
         // participates before the next event is routed.
         self.input_router.sanitize_transient_targets(std::slice::from_mut(root), self.root_transform);
-    }
-
-    /// Paints one persistent root node and its eligible descendants.
-    pub(crate) fn paint_tree_root(&mut self, root: &mut Node, display_list: &mut DisplayList, style: &Style, atlas: crate::AtlasHandle) {
-        self.paint_node_ref(root, self.root_transform, display_list, style, atlas);
     }
 
     /// Returns the aggregate root content size from the most recent layout.

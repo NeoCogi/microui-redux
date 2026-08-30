@@ -301,6 +301,7 @@ pub(super) fn record_root_overlay(
     geometry: RootChromeGeometry,
     style: &Style,
     atlas: &AtlasHandle,
+    active: bool,
 ) {
     // Reuse committed geometry so hit-testing and painting cannot disagree within one UI commit.
     let mut painter = Painter::screen_space(display_list, viewport);
@@ -308,11 +309,22 @@ pub(super) fn record_root_overlay(
         // Background recording already filled the framed interior before application content. Draw
         // only the border again in the overlay pass so an unclipped child may extend beyond the
         // parent body without covering parent-owned frame chrome.
-        let border = style.frame_border();
+        let mut border = style.frame_border();
+        if active {
+            // An active framed window keeps the same layout geometry while its inside-aligned
+            // outline remains visible even when the ordinary theme border width is zero.
+            border.width = border.width.max(1);
+            border.color = style.window_focus_color;
+        }
         painter.stroke_rect(outer, border.width, border.color);
     }
     if let Some(title) = geometry.title {
-        painter.fill_rect(title, style.colors[ControlColor::TitleBG as usize]);
+        let title_color = if active {
+            style.window_focus_color
+        } else {
+            style.colors[ControlColor::TitleBG as usize]
+        };
+        painter.fill_rect(title, title_color);
         let mut text = title;
         if let Some(close) = geometry.close {
             // Reserve the trailing square so title text cannot paint beneath the close icon.

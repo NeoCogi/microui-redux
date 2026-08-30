@@ -32,16 +32,55 @@
 
 use super::*;
 
+/// Deferred focus-outline geometry captured while painting one retained widget tree.
+///
+/// The outline is emitted only after the complete tree, including custom rendering, so later
+/// descendants and siblings cannot cover the current keyboard target inside the same surface.
+#[derive(Copy, Clone)]
+struct FocusIndicator {
+    /// Focused widget's complete outer allocation in screen coordinates.
+    rect: Recti,
+    /// Traversal-derived screen clip that prevents the outline escaping scroll or parent clips.
+    clip: Recti,
+    /// Resolved per-node Style accent, including a widget-local style override when present.
+    color: crate::Color,
+    /// Inside-aligned stroke width shared with ordinary Style-owned frames.
+    width: i32,
+}
+
+impl FocusIndicator {
+    /// Records the final focus outline after every ordinary and custom operation in the tree.
+    fn record(self, display_list: &mut DisplayList) {
+        // Transparent accents intentionally disable the visual without changing focus routing.
+        if self.color.a == 0 || self.rect.width <= 0 || self.rect.height <= 0 {
+            return;
+        }
+        let mut painter = crate::render::Painter::screen_space(display_list, self.clip);
+        painter.stroke_rect(self.rect, self.width.max(1), self.color);
+    }
+}
+
 impl UiRuntime {
+    /// Paints one persistent root and records at most one scope-visible focus outline last.
+    pub(crate) fn paint_tree_root(&mut self, root: &mut Node, display_list: &mut DisplayList, style: &Style, atlas: crate::AtlasHandle, focus_visible: bool) {
+        // Every runtime remembers focus independently, but only the manager-selected keyboard
+        // surface may present it. This prevents inactive windows and menu-suspended widgets from
+        // showing simultaneous carets, fills, or outlines.
+        if let Some(indicator) = self.paint_node_ref(root, self.root_transform, display_list, style, atlas, focus_visible) {
+            indicator.record(display_list);
+        }
+    }
+
     /// Paints one already-borrowed node and descendants.
-    pub(super) fn paint_node_ref(
+    fn paint_node_ref(
         &mut self,
         node: &mut Node,
         parent_transform: Transform,
         display_list: &mut DisplayList,
         style: &Style,
         atlas: crate::AtlasHandle,
-    ) {
+        focus_visible: bool,
+    ) -> Option<FocusIndicator> {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.paints += 1);
         let style = node.resolve_style(style);
@@ -66,6 +105,13 @@ impl UiRuntime {
             .unwrap_or_else(|| Recti::new(content_rect.x, content_rect.y, 0, 0));
         let screen_content_rect = content_rect.translated(screen_origin);
         let screen_content_clip = content_clip.translated(screen_origin);
+        let focused = focus_visible && node.state.focused;
+        let mut focus_indicator = focused.then_some(FocusIndicator {
+            rect: screen_rect,
+            clip: screen_clip,
+            color: style.focus_color,
+            width: style.frame_border_width.max(1),
+        });
         {
             // Limit the mutable display-list borrow to this widget call before custom/child output.
             let mut widget_ctx = crate::WidgetPaintCtx::new_with_content_geometry(
@@ -75,7 +121,7 @@ impl UiRuntime {
                 style,
                 &atlas,
                 node.state.hovered,
-                node.state.focused,
+                focused,
                 node.state.clicked,
                 node.state.active,
             );
@@ -97,9 +143,14 @@ impl UiRuntime {
                     .iter_mut()
                     .filter(|child| node_is_visible(child) && child.intersects_clip(child_transform))
                 {
-                    self.paint_node_ref(child, child_transform, display_list, style, atlas.clone());
+                    if let Some(child_focus) = self.paint_node_ref(child, child_transform, display_list, style, atlas.clone(), focus_visible) {
+                        // Focus identity is singular by invariant. Prefer a descendant defensively
+                        // if externally mutated state ever exposes both an ancestor and child.
+                        focus_indicator = Some(child_focus);
+                    }
                 }
             });
         }
+        focus_indicator
     }
 }
