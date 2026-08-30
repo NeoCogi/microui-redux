@@ -59,7 +59,7 @@ Built-in leaves and containers are mutated through their typed widget handles be
 
 Keyboard focus persists after a pointer release and is independent of pointer capture. A widget
 runtime owns one complete root-to-target focus path; nested containers do not maintain competing
-mutable focus pointers. Within the active eligible window, `Tab` and `Shift+Tab` replace that path
+mutable focus pointers. Within the active eligible surface, `Tab` and `Shift+Tab` replace that path
 with the next enabled, visible `TAB_STOP` surface in retained sibling order and wrap at the ends.
 Hidden, clipped, disabled, and pointer-focus-only surfaces are skipped. A modal dialog suspends
 ordinary-window traversal, and an active menu scope suspends widget key/text delivery without
@@ -67,8 +67,12 @@ discarding the widget that will regain focus when the menu closes. Custom widget
 traversal, and the shared Windows-style action mapping through `Widget::keyboard_behavior`; their
 default behavior is keyboard-inert.
 
+An application popup is a concrete keyboard surface with its own widget runtime. Showing it selects
+its first eligible target after layout; Tab wraps inside that tree, while Escape or focus transfer
+outside the popup restores the direct parent's remembered path.
+
 At the window level, `Ctrl+F6` and `Ctrl+Shift+F6` cycle forward and backward through visible
-ordinary roots. Each root's runtime keeps its focused node while inactive; modal dialogs and open
+ordinary roots. Each root's runtime keeps its focus path while inactive; modal dialogs and open
 intrinsic menus retain their narrower keyboard scopes instead of participating in the cycle.
 
 Paint exposes focus only for the manager-selected keyboard surface even though every window runtime

@@ -62,7 +62,7 @@ use crate::input::Input;
 use crate::menu::MenuBar;
 use crate::render::DisplayList;
 use crate::{Dimensioni, Node, Recti, Style, UiRuntime};
-use roots::SurfaceForest;
+use roots::{SurfaceForest, SurfaceKey};
 mod root_chrome;
 mod roots;
 
@@ -239,11 +239,12 @@ pub(crate) struct WindowManager {
     /// Popup-local routers cannot consume this tail after their surface leaves the active path, so
     /// the cross-surface manager retains the gesture boundary until release.
     discard_pointer_capture_tail: bool,
-    /// Last ordinary root explicitly activated by a pointer press.
+    /// Sole retained surface selected for keyboard and text input.
     ///
-    /// Activation is deliberately independent of stacking. A user can therefore focus a control
-    /// in a low layer without raising that root over windows in a higher layer.
-    active_root: Option<RootId>,
+    /// A concrete root or popup identity is stored directly instead of projecting every transient
+    /// back to its owning window. Activation remains independent of stacking, so a user can focus
+    /// a surface in a low layer without moving it over windows in a higher layer.
+    active_surface: Option<SurfaceKey>,
     /// Root whose intrinsic menu currently owns keyboard navigation.
     ///
     /// Application widget focus remains stored independently in that root's UiRuntime and resumes
@@ -260,6 +261,11 @@ pub(crate) struct WindowManager {
     /// window even when the user releases Control before F6 and the platform modifier snapshot no
     /// longer identifies the original chord.
     window_cycle_key_down: bool,
+    /// Whether an application-popup Escape dismissal awaits the matching key release.
+    ///
+    /// The popup is absent immediately after the press, so this manager-owned bit prevents its
+    /// later release from leaking into the restored parent surface.
+    popup_escape_key_down: bool,
     /// Ordered input state owned and consumed directly by this window manager.
     input: Input,
     /// Dimensions of the most recent complete update/layout commit.
@@ -276,10 +282,11 @@ impl WindowManager {
             style,
             surfaces: SurfaceForest::new(),
             discard_pointer_capture_tail: false,
-            active_root: None,
+            active_surface: None,
             keyboard_menu_root: None,
             pending_menu_alt: false,
             window_cycle_key_down: false,
+            popup_escape_key_down: false,
             input: Input::default(),
             ui_commit: None,
         }

@@ -177,7 +177,7 @@ impl<'a> Ui<'a> {
         self.window_manager.set_window_visible(window, visible)
     }
 
-    /// Shows a popup at the current pointer position under its stable owner.
+    /// Shows a popup at the current pointer position and gives its widget tree keyboard focus.
     pub fn show_popup(&mut self, popup: &PopupHandle) -> Result<(), SurfaceMutationError> {
         // Placement and active-path replacement remain atomic inside the manager.
         self.window_manager.show_popup(popup)
@@ -192,11 +192,12 @@ impl<'a> Ui<'a> {
         self.window_manager.hide_popup(popup)
     }
 
-    /// Shows a popup at an exact screen-space anchor before the following layout commit.
+    /// Shows and focuses a popup at an exact screen-space anchor before the following layout commit.
     ///
     /// This atomic form is intended for composed controls such as combos. It applies popup-path
-    /// replacement and replaces the popup rectangle, so no pointer-relative intermediate placement
-    /// can be observed. The typed handle prevents passing a window or dialog as the popup target.
+    /// replacement, replaces the popup rectangle, and selects its first eligible keyboard target
+    /// after layout, so no pointer-relative intermediate placement can be observed. The typed
+    /// handle prevents passing a window or dialog as the popup target.
     pub fn show_popup_at(&mut self, popup: &PopupHandle, anchor: Recti) -> Result<(), SurfaceMutationError> {
         // Delegate the complete transaction while retaining compile-time popup identity across the
         // event façade boundary.
@@ -262,12 +263,13 @@ impl<'a> Ui<'a> {
 /// Across ordinary roots, pointer hover and new presses follow topmost hit geometry. Within a child
 /// family, parent menu/chrome precedes children, children precede the parent body, and later siblings
 /// precede earlier ones. A press raises its target only within the corresponding top-level or sibling
-/// scope and records the ordinary `active_root` independently. Drag remains confined by pointer
-/// capture or the front eligible visual root, while wheel input follows the topmost eligible root
-/// under the pointer. Keyboard and text return to persistent focus in the active root; pointer
-/// capture does not replace that focus. Captured pointer release still returns to its widget so
-/// local drag state is cleaned up. The frontmost menu scope temporarily consumes keyboard and text
-/// while preserving the focused application widget that resumes after the menu closes.
+/// scope and records that concrete root or popup as the active surface independently. Drag remains
+/// confined by pointer capture or the front eligible visual root, while wheel input follows the
+/// topmost eligible root under the pointer. Keyboard and text return to persistent focus in the
+/// active surface; pointer capture does not replace that focus. Captured pointer release still
+/// returns to its widget so local drag state is cleaned up. The frontmost menu scope temporarily
+/// consumes keyboard and text while preserving the focused application widget that resumes after
+/// the menu closes.
 ///
 /// The frontmost visible dialog is modal. It occupies the dedicated band above all application
 /// layers, and the dialog with its active popup path forms the only eligible input group. Pointer

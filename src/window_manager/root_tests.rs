@@ -444,6 +444,48 @@ fn tab_and_shift_tab_move_window_focus_without_reaching_widget_input() {
 }
 
 #[test]
+/// Proves that a popup owns keyboard traversal until dismissal restores its parent's focus path.
+fn application_popup_takes_keyboard_focus_and_restores_its_parent_surface() {
+    let (owner_state, owner_body) = OrderedProbe::create(WidgetOption::NONE);
+    let (first_popup_state, first_popup) = OrderedProbe::create(WidgetOption::NONE);
+    let (second_popup_state, second_popup) = OrderedProbe::create(WidgetOption::NONE);
+    let (_, popup_body) = Linear::create(LinearParameters::vertical([first_popup, second_popup]));
+    let mut ctx = context();
+    let owner = ctx.ui().create_window(Window::new("owner", rect(10, 10, 120, 90), owner_body));
+    let popup = ctx.ui().create_popup(&owner, "popup", popup_body).unwrap();
+
+    // Establish a remembered owner focus before showing the popup. Showing commits geometry and
+    // selects the popup's first eligible target without an extra application-authored Tab press.
+    ctx.key(KeyEvent::pressed(Key::Tab, Modifiers::NONE));
+    ctx.text("owner");
+    ctx.update_and_render_ui();
+    ctx.ui().show_popup_at(&popup, rect(40, 40, 100, 80)).unwrap();
+    ctx.update_and_render_ui();
+    ctx.text("popup first");
+    ctx.update_and_render_ui();
+    assert_eq!(owner_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
+    assert_eq!(first_popup_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
+
+    // Tab remains inside the active popup surface and advances only its own root-owned focus path.
+    ctx.key(KeyEvent::pressed(Key::Tab, Modifiers::NONE));
+    ctx.key(KeyEvent::released(Key::Tab, Modifiers::NONE));
+    ctx.text("popup second");
+    ctx.update_and_render_ui();
+    assert_eq!(second_popup_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
+
+    // Escape owns both transitions, dismisses the popup, and restores the parent's remembered
+    // widget path before the following text event is routed.
+    ctx.key(KeyEvent::pressed(Key::Escape, Modifiers::NONE));
+    ctx.key(KeyEvent::released(Key::Escape, Modifiers::NONE));
+    ctx.text("owner again");
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_popup_visible(&popup), Some(false));
+    assert_eq!(owner_state.try_read(|state| state.events.clone()), Some(vec!["text", "text"]));
+    assert_eq!(first_popup_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
+    assert_eq!(second_popup_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
+}
+
+#[test]
 fn ctrl_f6_cycles_visible_windows_in_both_directions_and_wraps() {
     let mut ctx = context();
     let first = ctx.ui().create_window(Window::new("first", rect(10, 10, 80, 60), empty_content()));
@@ -537,14 +579,14 @@ fn ctrl_f6_dismisses_application_popups_but_cannot_escape_a_modal_dialog() {
     assert_eq!(ctx.debug_popup_visible(&popup), Some(false));
     assert_eq!(ctx.debug_active_root(), Some(other.id()));
 
-    // A visible dialog is the sole eligible keyboard group. The same recognized chord is consumed
-    // without changing the underlying ordinary activation or dismissing the modal root.
+    // A visible dialog becomes the concrete active keyboard surface. The same recognized chord is
+    // consumed without escaping or dismissing that modal root.
     ctx.ui().set_window_visible(&dialog, true).unwrap();
     ctx.key(KeyEvent::pressed(Key::Function(6), Modifiers::CTRL));
     ctx.key(KeyEvent::released(Key::Function(6), Modifiers::NONE));
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_modal_root(), Some(dialog.id()));
-    assert_eq!(ctx.debug_active_root(), Some(other.id()));
+    assert_eq!(ctx.debug_active_root(), Some(dialog.id()));
 }
 
 #[test]

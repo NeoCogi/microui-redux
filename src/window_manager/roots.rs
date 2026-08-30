@@ -444,7 +444,7 @@ impl SurfaceBody {
 /// compact process-unique typed key is sufficient for common layout, input, and paint traversal
 /// without an erased payload, trait object, or `(owner, popup)` adapter pair.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum SurfaceKey {
+pub(super) enum SurfaceKey {
     /// An independent window, structural child window, or modal dialog.
     Root(RootId),
     /// A window- or popup-owned transient surface.
@@ -497,6 +497,8 @@ enum PopupState {
         anchor: Recti,
         /// Strong owner of policy-driven popup lifecycle events.
         events: Rc<RefCell<crate::event::WidgetEventPort<PopupEvent>>>,
+        /// Whether the next committed layout must select this popup's first keyboard target.
+        focus_on_layout: bool,
     },
     /// Private menu popup positioned from one slot in its direct forest parent.
     Menu {
@@ -655,6 +657,15 @@ impl SurfaceNode {
             // Menu popups have no unobservable lifecycle port; their visibility is wholly internal.
             events.borrow_mut().emit(PopupEvent::Dismissed);
         }
+    }
+
+    /// Consumes the application-popup request to focus its first target after layout.
+    fn take_popup_focus_request(&mut self) -> bool {
+        let Some(PopupState::Application { focus_on_layout, .. }) = self.popup_mut() else {
+            return false;
+        };
+        // A request belongs to one visibility transition and must not reset focus every frame.
+        std::mem::take(focus_on_layout)
     }
 
     /// Lays out this node and its optional root-owned menu bar through concrete bodies.
@@ -1186,7 +1197,11 @@ impl WindowManager {
             key: SurfaceKey::Popup(id),
             parent: Some(parent),
             surface: Surface::new(name.to_owned(), Self::default_popup_options(), Recti::default(), content),
-            kind: SurfaceKind::Popup(PopupState::Application { anchor: Recti::default(), events }),
+            kind: SurfaceKind::Popup(PopupState::Application {
+                anchor: Recti::default(),
+                events,
+                focus_on_layout: false,
+            }),
         });
         self.invalidate_ui_commit();
         PopupHandle::new(id, event_handle)
@@ -1328,6 +1343,10 @@ impl WindowManager {
             }
             self.root_node_mut(root)?.set_root_visible(true);
             self.surfaces.move_root_to_front(root);
+            if mode == RootMode::Modal {
+                // A newly visible dialog is the concrete keyboard surface for its modal group.
+                self.active_surface = Some(SurfaceKey::Root(root));
+            }
         } else {
             // Descendant children retain their own visibility intent, but every modal descendant is
             // explicitly closed so showing the family again cannot resurrect a dismissed dialog.
@@ -1349,10 +1368,17 @@ impl WindowManager {
                     node.clear_transient_targets();
                 }
             }
-            if self.active_root.is_some_and(|active| affected.contains(&active)) {
-                self.active_root = None;
+            if self
+                .active_surface
+                .and_then(|active| self.surfaces.owning_root(active))
+                .is_some_and(|active| affected.contains(&active))
+            {
+                // Structural children and dialogs return to their direct owning root. Independent
+                // windows have no parent and leave front-surface fallback to choose the next root.
+                self.active_surface = self.surfaces.root_node(root).and_then(|node| node.parent);
             }
             self.surfaces.rebuild_visible_order();
+            self.reconcile_active_surface();
         }
         self.invalidate_ui_commit();
         Ok(())
@@ -1377,11 +1403,15 @@ impl WindowManager {
             self.finish_keyboard_menu(false);
         }
         let node = self.surfaces.popup_node_mut(popup).expect("authenticated popup must remain retained");
-        let PopupState::Application { anchor: current, .. } = node.popup_mut().expect("popup lookup must return popup policy") else {
+        let PopupState::Application { anchor: current, focus_on_layout, .. } = node.popup_mut().expect("popup lookup must return popup policy") else {
             return Err(SurfaceMutationError::UnknownPopup);
         };
         *current = anchor;
+        // Geometry is committed later in this transaction, so defer first-focus selection until
+        // the popup tree has valid allocations and clipping.
+        *focus_on_layout = true;
         node.surface.rect = anchor;
+        self.active_surface = Some(SurfaceKey::Popup(popup));
         self.invalidate_ui_commit();
         Ok(())
     }
@@ -1439,13 +1469,19 @@ impl WindowManager {
     /// Raises one already authenticated internal window identity inside its structural layer.
     fn bring_window_to_front_id(&mut self, root: RootId) -> Result<(), SurfaceMutationError> {
         let state = self.root_node(root)?.root().expect("root lookup must return root policy");
-        if state.mode == RootMode::Modal && state.visible && self.surfaces.active_modal_root() != Some(root) {
+        let mode = state.mode;
+        let visible = state.visible;
+        if mode == RootMode::Modal && visible && self.surfaces.active_modal_root() != Some(root) {
             if self.keyboard_menu_root.is_some_and(|menu_root| menu_root != root) {
                 self.finish_keyboard_menu(true);
             }
             self.dismiss_active_popups();
         }
         self.surfaces.move_root_to_front(root);
+        if mode == RootMode::Modal && visible {
+            // Fronting a visible dialog selects that concrete root as the modal keyboard surface.
+            self.active_surface = Some(SurfaceKey::Root(root));
+        }
         self.invalidate_ui_commit();
         Ok(())
     }
@@ -1462,10 +1498,15 @@ impl WindowManager {
         if self.active_popup_owner().is_some_and(|owner| removed.contains(&owner)) {
             self.dismiss_active_popups();
         }
-        if self.active_root.is_some_and(|active| removed.contains(&active)) {
-            self.active_root = None;
+        if self
+            .active_surface
+            .and_then(|active| self.surfaces.owning_root(active))
+            .is_some_and(|active| removed.contains(&active))
+        {
+            self.active_surface = self.surfaces.root_node(root).and_then(|node| node.parent);
         }
         self.surfaces.remove_roots(&removed);
+        self.reconcile_active_surface();
         self.invalidate_ui_commit();
         Ok(())
     }
@@ -1557,6 +1598,14 @@ impl WindowManager {
     /// Removes the active path suffix after `keep`, notifying deepest popups first.
     fn truncate_active_popup_path(&mut self, keep: usize) {
         let Some(mut current) = self.surfaces.active_popup else { return };
+        let restore_surface = match self.active_surface {
+            Some(SurfaceKey::Popup(active)) if self.surfaces.popup_depth(active).is_some_and(|depth| depth >= keep) => {
+                // The direct parent is the deterministic focus destination when the active popup
+                // leaves the visible branch. It is either the retained popup prefix or its root.
+                self.surfaces.popup_node(active).and_then(|node| node.parent)
+            }
+            _ => None,
+        };
         let mut revoked_capture = false;
         let mut retained_leaf = Some(current);
         while self.surfaces.popup_depth(current).is_some_and(|depth| depth >= keep) {
@@ -1575,6 +1624,9 @@ impl WindowManager {
         }
         self.discard_pointer_capture_tail |= revoked_capture;
         self.surfaces.set_active_popup(retained_leaf);
+        if let Some(restore_surface) = restore_surface {
+            self.active_surface = Some(restore_surface);
+        }
         self.invalidate_ui_commit();
     }
 
@@ -1629,6 +1681,19 @@ impl WindowManager {
                 .root_node(owner)
                 .and_then(SurfaceNode::root)
                 .is_some_and(|root| matches!(root.mode, RootMode::Normal { .. } | RootMode::Child)),
+        }
+    }
+
+    /// Repairs active-surface identity after visibility or ownership changes.
+    fn reconcile_active_surface(&mut self) {
+        let modal = self.surfaces.active_modal_root();
+        let retained = self
+            .active_surface
+            .is_some_and(|surface| self.surfaces.visible_order.contains(&surface) && self.surface_is_eligible(surface, modal));
+        if !retained {
+            // A modal root is the only mandatory fallback. Ordinary roots continue using the front
+            // visible surface lazily until a pointer or window-cycle command selects one exactly.
+            self.active_surface = modal.map(SurfaceKey::Root);
         }
     }
 
@@ -1953,6 +2018,45 @@ impl WindowManager {
         self.apply_keyboard_menu_key(root, *event)
     }
 
+    /// Dismisses the active application popup with Escape and owns the complete key transition.
+    fn route_application_popup_keyboard(&mut self, event: &UiInputEvent) -> bool {
+        let UiInputEvent::Key { event } = event else {
+            return false;
+        };
+        if event.key != crate::Key::Escape {
+            return false;
+        }
+
+        if self.popup_escape_key_down {
+            // The press already removed the popup. Keep its physical release out of the restored
+            // parent runtime, then close this small manager-owned command boundary.
+            if !event.is_pressed() {
+                self.popup_escape_key_down = false;
+            }
+            return true;
+        }
+        let Some(SurfaceKey::Popup(popup)) = self.active_surface else {
+            return false;
+        };
+        if !self.surfaces.popup_is_active(popup)
+            || !matches!(
+                self.surfaces.popup_node(popup).and_then(SurfaceNode::popup),
+                Some(PopupState::Application { .. })
+            )
+        {
+            return false;
+        }
+
+        if event.is_pressed() {
+            self.popup_escape_key_down = true;
+            if !event.repeat {
+                let depth = self.surfaces.popup_depth(popup).expect("active application popup must retain rooted ancestry");
+                self.truncate_active_popup_path(depth);
+            }
+        }
+        true
+    }
+
     /// Handles the Windows-style Ctrl+F6 window-cycle command before widget key routing.
     fn route_window_keyboard(&mut self, event: &UiInputEvent) -> bool {
         let UiInputEvent::Key { event } = event else {
@@ -1996,7 +2100,7 @@ impl WindowManager {
         let Some(target) = self.surfaces.window_cycle_target(current, event.modifiers == reverse_modifiers) else {
             return true;
         };
-        self.active_root = Some(target);
+        self.active_surface = Some(SurfaceKey::Root(target));
         self.bring_window_to_front_id(target)
             .expect("a visible cycle target collected from the forest must remain registered");
         true
@@ -2205,6 +2309,11 @@ impl WindowManager {
             let clip = self.resolved_surface_clip(key, viewport);
             let node = self.surfaces.node_mut(key).expect("visible surface must remain retained");
             node.layout(&style, atlas, clip);
+            if node.take_popup_focus_request() {
+                // The popup is now mounted with committed geometry, so its first eligible Tab stop
+                // can become the complete root-owned focus path without a speculative rectangle.
+                let _ = node.surface.body.advance_focus(false);
+            }
         }
     }
 
@@ -2213,8 +2322,9 @@ impl WindowManager {
         // Resolve event-wide dismissal and menu-toggle context before selecting a recipient. An
         // outside press may change the visible forest and must do so before hit testing below.
         let style = self.style;
-        let menu_keyboard_handled = self.route_menu_keyboard(event);
-        let window_keyboard_handled = self.route_window_keyboard(event);
+        let popup_keyboard_handled = self.route_application_popup_keyboard(event);
+        let menu_keyboard_handled = !popup_keyboard_handled && self.route_menu_keyboard(event);
+        let window_keyboard_handled = !popup_keyboard_handled && !menu_keyboard_handled && self.route_window_keyboard(event);
         let discard_pointer = self.discard_revoked_capture_event(event);
         let menu_press = matches!(event, UiInputEvent::MouseDown { button, .. } if button.intersects(MouseButton::LEFT));
         let previous_top = menu_press.then(|| self.surfaces.active_top_popup()).flatten();
@@ -2343,7 +2453,7 @@ impl WindowManager {
                     }
                 }
             }
-        } else if menu_keyboard_handled || window_keyboard_handled {
+        } else if popup_keyboard_handled || menu_keyboard_handled || window_keyboard_handled {
             // Manager keyboard routing mutated only scope and compact-surface state. The ordinary
             // full-tree update below still lets suspended application widgets observe stable focus.
         } else if tab_navigation {
@@ -2391,9 +2501,7 @@ impl WindowManager {
                     .update(&style, atlas.clone(), input);
             }
         }
-        if self.active_root.is_some_and(|root| !self.root_is_visible(root)) {
-            self.active_root = None;
-        }
+        self.reconcile_active_surface();
         if let Some((surface, action)) = staged_menu_action {
             // Direct routing has ended its concrete surface borrow before forest visibility changes.
             self.apply_menu_action(surface, action, previous_top);
@@ -2555,16 +2663,12 @@ impl WindowManager {
         self.truncate_active_popup_path(keep);
     }
 
-    /// Records ordinary-window keyboard activation for one pointer surface.
+    /// Records the exact keyboard surface selected by one pointer press.
     fn activate_pointer_surface(&mut self, surface: SurfaceKey) {
-        let Some(owner) = self.surfaces.owning_root(surface) else { return };
-        if self
-            .surfaces
-            .root_node(owner)
-            .and_then(SurfaceNode::root)
-            .is_some_and(|state| matches!(state.mode, RootMode::Normal { .. } | RootMode::Child))
-        {
-            self.active_root = Some(owner);
+        if self.surfaces.node(surface).is_some() {
+            // A popup is not collapsed to its owner: its independent widget runtime must receive
+            // subsequent Tab, key, and text transitions until focus leaves that surface.
+            self.active_surface = Some(surface);
         }
     }
 
@@ -2682,21 +2786,14 @@ impl WindowManager {
 
     /// Returns the sole surface receiving keyboard and text input.
     fn keyboard_input_surface(&self) -> Option<SurfaceKey> {
-        if let Some(modal) = self.surfaces.active_modal_root() {
-            return Some(SurfaceKey::Root(modal));
-        }
+        let modal = self.surfaces.active_modal_root();
         self.captured_input_surface()
-            .or_else(|| self.active_root.filter(|root| self.root_is_visible(*root)).map(SurfaceKey::Root))
             .or_else(|| {
-                self.front_input_surface().and_then(|surface| {
-                    let owner = self.surfaces.owning_root(surface)?;
-                    self.surfaces
-                        .root_node(owner)
-                        .and_then(SurfaceNode::root)
-                        .filter(|state| matches!(state.mode, RootMode::Normal { .. } | RootMode::Child))
-                        .map(|_| SurfaceKey::Root(owner))
-                })
+                self.active_surface
+                    .filter(|surface| self.surfaces.visible_order.contains(surface) && self.surface_is_eligible(*surface, modal))
             })
+            .or_else(|| modal.map(SurfaceKey::Root))
+            .or_else(|| self.front_input_surface())
     }
 
     /// Returns the popup options installed for new definitions.
@@ -2767,10 +2864,10 @@ impl WindowManager {
             .map(|state| state.interaction == RootInteraction::Resizing)
     }
 
-    /// Returns the active ordinary window for tests.
+    /// Returns the root that owns the active concrete surface for tests.
     #[cfg(test)]
     pub(crate) fn debug_active_root(&self) -> Option<RootId> {
-        self.active_root
+        self.active_surface.and_then(|surface| self.surfaces.owning_root(surface))
     }
 
     /// Returns the active modal dialog for tests.
