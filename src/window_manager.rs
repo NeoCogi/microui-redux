@@ -256,11 +256,6 @@ pub(crate) struct WindowManager {
     /// window even when the user releases Control before F6 and the platform modifier snapshot no
     /// longer identifies the original chord.
     window_cycle_key_down: bool,
-    /// Whether an application-popup Escape dismissal awaits the matching key release.
-    ///
-    /// The popup is absent immediately after the press, so this manager-owned bit prevents its
-    /// later release from leaking into the restored parent surface.
-    popup_escape_key_down: bool,
     /// Ordered input state owned and consumed directly by this window manager.
     input: Input,
     /// Dimensions of the most recent complete update/layout commit.
@@ -280,7 +275,6 @@ impl WindowManager {
             active_surface: None,
             pending_menu_alt: false,
             window_cycle_key_down: false,
-            popup_escape_key_down: false,
             input: Input::default(),
             ui_commit: None,
         }

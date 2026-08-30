@@ -2030,7 +2030,7 @@ impl WindowManager {
         self.apply_keyboard_menu_key(root, *event)
     }
 
-    /// Dismisses the active application popup with Escape and owns the complete key transition.
+    /// Dismisses the active application popup on an initial Escape press.
     fn route_application_popup_keyboard(&mut self, event: &UiInputEvent) -> bool {
         let UiInputEvent::Key { event } = event else {
             return false;
@@ -2039,12 +2039,9 @@ impl WindowManager {
             return false;
         }
 
-        if self.popup_escape_key_down {
-            // The press already removed the popup. Keep its physical release out of the restored
-            // parent runtime, then close this small manager-owned command boundary.
-            if !event.is_pressed() {
-                self.popup_escape_key_down = false;
-            }
+        if !event.is_pressed() || event.repeat {
+            // Releases and repeats are always inert manager transitions. This prevents a dismissed
+            // popup's physical key tail from reaching its restored parent without retaining state.
             return true;
         }
         let Some(SurfaceKey::Popup(popup)) = self.active_surface else {
@@ -2059,13 +2056,8 @@ impl WindowManager {
             return false;
         }
 
-        if event.is_pressed() {
-            self.popup_escape_key_down = true;
-            if !event.repeat {
-                let depth = self.surfaces.popup_depth(popup).expect("active application popup must retain rooted ancestry");
-                self.truncate_active_popup_path(depth);
-            }
-        }
+        let depth = self.surfaces.popup_depth(popup).expect("active application popup must retain rooted ancestry");
+        self.truncate_active_popup_path(depth);
         true
     }
 
