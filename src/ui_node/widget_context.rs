@@ -56,7 +56,7 @@ use rs_math3d::{Recti, Vec2i};
 
 use crate::atlas::{AtlasHandle, FontId, IconId};
 use crate::render::{DisplayList, Painter, TextureId};
-use crate::input::{KeyCode, KeyMode, MouseButton};
+use crate::input::{Modifiers, MouseButton};
 use crate::WidgetOption;
 use crate::theme::{Color, ControlColor, Style};
 use crate::ui_node::text_layout::control_text_position_with_font;
@@ -158,10 +158,8 @@ pub struct WidgetUpdateCtx<'a> {
     in_hover_root: bool,
     /// Mouse buttons held after applying the current raw input event.
     mouse_buttons: MouseButton,
-    /// Modifier/control keys held after applying the current raw input event.
-    key_modes: KeyMode,
-    /// Navigation keys held after applying the current raw input event.
-    key_codes: KeyCode,
+    /// Modifier state committed by the latest logical keyboard transition.
+    modifiers: Modifiers,
 }
 
 impl<'a> WidgetUpdateCtx<'a> {
@@ -179,8 +177,7 @@ impl<'a> WidgetUpdateCtx<'a> {
         clicked: bool,
         active: bool,
         mouse_buttons: MouseButton,
-        key_modes: KeyMode,
-        key_codes: KeyCode,
+        modifiers: Modifiers,
     ) -> Self {
         Self::new_with_content_geometry(
             rect,
@@ -193,8 +190,7 @@ impl<'a> WidgetUpdateCtx<'a> {
             clicked,
             active,
             mouse_buttons,
-            key_modes,
-            key_codes,
+            modifiers,
         )
     }
 
@@ -211,15 +207,13 @@ impl<'a> WidgetUpdateCtx<'a> {
         clicked: bool,
         active: bool,
         mouse_buttons: MouseButton,
-        key_modes: KeyMode,
-        key_codes: KeyCode,
+        modifiers: Modifiers,
     ) -> Self {
         Self {
             common: WidgetContextData::new(content_rect, screen_clip, style, atlas, hovered, focused, clicked, active),
             in_hover_root,
             mouse_buttons,
-            key_modes,
-            key_codes,
+            modifiers,
         }
     }
 
@@ -265,14 +259,9 @@ impl<'a> WidgetUpdateCtx<'a> {
         self.mouse_buttons
     }
 
-    /// Returns modifier/control keys held after applying the current input event.
-    pub fn key_modes(&self) -> KeyMode {
-        self.key_modes
-    }
-
-    /// Returns navigation keys held after applying the current input event.
-    pub fn key_codes(&self) -> KeyCode {
-        self.key_codes
+    /// Returns the modifier snapshot committed by the latest keyboard transition.
+    pub fn modifiers(&self) -> Modifiers {
+        self.modifiers
     }
 
     /// Returns this widget's resolved style for update logic.

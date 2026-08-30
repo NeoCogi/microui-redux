@@ -874,21 +874,16 @@ impl Widget for SuzanneWidget {
         if !handled_drag && !matches!(input, Some(UiInputEvent::Scroll { .. })) {
             let step = 20;
             let mut delta = Vec2i::new(0, 0);
-            let key_code = match input {
-                Some(UiInputEvent::KeyCodeDown { code }) => *code,
-                _ => KeyCode::NONE,
+            let pressed_key = match input {
+                Some(UiInputEvent::Key { event }) if event.is_pressed() => Some(event.key),
+                _ => None,
             };
-            if key_code.intersects(KeyCode::LEFT) {
-                delta.x -= step;
-            }
-            if key_code.intersects(KeyCode::RIGHT) {
-                delta.x += step;
-            }
-            if key_code.intersects(KeyCode::UP) {
-                delta.y -= step;
-            }
-            if key_code.intersects(KeyCode::DOWN) {
-                delta.y += step;
+            match pressed_key {
+                Some(Key::ArrowLeft) => delta.x -= step,
+                Some(Key::ArrowRight) => delta.x += step,
+                Some(Key::ArrowUp) => delta.y -= step,
+                Some(Key::ArrowDown) => delta.y += step,
+                _ => {}
             }
             if delta.x != 0 || delta.y != 0 {
                 let center = Vec2i::new(bounds.width / 2, bounds.height / 2);

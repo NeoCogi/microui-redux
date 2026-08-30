@@ -84,8 +84,7 @@ impl UiRuntime {
             node.state.clicked,
             node.state.active,
             input.mouse_buttons,
-            input.key_modes,
-            input.key_codes,
+            input.modifiers,
         );
         node.data.with_widget_mut(|widget| widget.update(&mut widget_ctx, event.as_ref()));
         if event.is_some() || was_focused != node.state.focused {

@@ -372,20 +372,7 @@ mod tests {
             events.push(UiInputEvent::Scroll { pos: Vec2i::default(), delta });
         }
         for event in &events {
-            let mut ctx = WidgetUpdateCtx::new_with_interaction(
-                rect,
-                rect,
-                &style,
-                &atlas,
-                true,
-                hovered,
-                focused,
-                false,
-                active,
-                held,
-                KeyMode::NONE,
-                KeyCode::NONE,
-            );
+            let mut ctx = WidgetUpdateCtx::new_with_interaction(rect, rect, &style, &atlas, true, hovered, focused, false, active, held, Modifiers::NONE);
             slider.update(&mut ctx, Some(event));
         }
     }
@@ -406,8 +393,7 @@ mod tests {
                 false,
                 true,
                 MouseButton::LEFT,
-                KeyMode::NONE,
-                KeyCode::NONE,
+                Modifiers::NONE,
             );
             number.update(&mut ctx, Some(event));
         }
@@ -449,20 +435,7 @@ mod tests {
             delta: vec2(5, 0),
             buttons: MouseButton::LEFT,
         }];
-        let mut ctx = WidgetUpdateCtx::new_with_interaction(
-            rect,
-            rect,
-            &style,
-            &atlas,
-            true,
-            true,
-            true,
-            false,
-            true,
-            MouseButton::LEFT,
-            KeyMode::NONE,
-            KeyCode::NONE,
-        );
+        let mut ctx = WidgetUpdateCtx::new_with_interaction(rect, rect, &style, &atlas, true, true, true, false, true, MouseButton::LEFT, Modifiers::NONE);
 
         let event = localize_event(Vec2i::new(rect.x, rect.y), input.into_iter().next().unwrap());
         slider.update(&mut ctx, Some(&event));
@@ -508,20 +481,7 @@ mod tests {
             delta: Vec2i::default(),
             buttons: MouseButton::LEFT,
         }];
-        let mut ctx = WidgetUpdateCtx::new_with_interaction(
-            rect,
-            rect,
-            &style,
-            &atlas,
-            true,
-            true,
-            true,
-            false,
-            true,
-            MouseButton::LEFT,
-            KeyMode::NONE,
-            KeyCode::NONE,
-        );
+        let mut ctx = WidgetUpdateCtx::new_with_interaction(rect, rect, &style, &atlas, true, true, true, false, true, MouseButton::LEFT, Modifiers::NONE);
 
         let event = localize_event(Vec2i::new(rect.x, rect.y), input.into_iter().next().unwrap());
         slider.update(&mut ctx, Some(&event));

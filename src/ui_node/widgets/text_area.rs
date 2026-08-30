@@ -465,13 +465,9 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>, 
         Some(UiInputEvent::Text { text }) => text.as_str(),
         _ => "",
     };
-    let key_pressed = match input {
-        Some(UiInputEvent::KeyDown { key }) => *key,
-        _ => KeyMode::NONE,
-    };
-    let key_code_pressed = match input {
-        Some(UiInputEvent::KeyCodeDown { code }) => *code,
-        _ => KeyCode::NONE,
+    let key_event = match input {
+        Some(UiInputEvent::Key { event }) => Some(*event),
+        _ => None,
     };
 
     if ctx.focused() {
@@ -481,9 +477,7 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>, 
             &mut state.buf,
             cursor_pos,
             text_input,
-            ctx.key_modes(),
-            key_pressed,
-            key_code_pressed,
+            key_event,
             true,
             ReturnBehavior::Newline { submit_on_ctrl: true },
         );
@@ -507,7 +501,7 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>, 
     let mut caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
 
     if ctx.focused() {
-        if key_code_pressed.intersects(KeyCode::END) {
+        if key_event.is_some_and(|event| event.is_pressed() && event.key == Key::End) {
             // End targets the current visual line, including wrapped segments.
             cursor_pos = layout.lines[cursor_line].end;
             caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
@@ -515,7 +509,7 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>, 
             reset_preferred = true;
         }
 
-        if key_code_pressed.intersects(KeyCode::UP) {
+        if key_event.is_some_and(|event| event.is_pressed() && event.key == Key::ArrowUp) {
             // Preserve the desired visual x while moving to the nearest scalar boundary above.
             let target_x = preferred_x.unwrap_or(caret_x);
             if cursor_line > 0 {
@@ -527,7 +521,7 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>, 
             vertical_moved = true;
         }
 
-        if key_code_pressed.intersects(KeyCode::DOWN) {
+        if key_event.is_some_and(|event| event.is_pressed() && event.key == Key::ArrowDown) {
             // Preserve the desired visual x while moving to the nearest scalar boundary below.
             let target_x = preferred_x.unwrap_or(caret_x);
             if cursor_line + 1 < layout.lines.len() {
@@ -718,17 +712,12 @@ mod tests {
         let atlas = test_atlas();
         let style = Style::default();
         let bounds = Recti::new(0, 0, 160, 80);
-        let mut keys = KeyMode::NONE;
-        let mut codes = KeyCode::NONE;
+        let mut modifiers = Modifiers::NONE;
         for event in &input {
-            match event {
-                UiInputEvent::KeyDown { key } => keys |= *key,
-                UiInputEvent::KeyUp { key } => keys &= !*key,
-                UiInputEvent::KeyCodeDown { code } => codes |= *code,
-                UiInputEvent::KeyCodeUp { code } => codes &= !*code,
-                _ => {}
+            if let UiInputEvent::Key { event } = event {
+                modifiers = event.modifiers;
             }
-            let mut ctx = WidgetUpdateCtx::new_with_interaction(bounds, bounds, &style, &atlas, true, true, true, false, false, MouseButton::NONE, keys, codes);
+            let mut ctx = WidgetUpdateCtx::new_with_interaction(bounds, bounds, &style, &atlas, true, true, true, false, false, MouseButton::NONE, modifiers);
             text_area.update(&mut ctx, Some(event));
         }
     }
@@ -744,8 +733,12 @@ mod tests {
             &mut text_area,
             vec![
                 UiInputEvent::Text { text: "line".into() },
-                UiInputEvent::KeyDown { key: KeyMode::CTRL },
-                UiInputEvent::KeyDown { key: KeyMode::RETURN },
+                UiInputEvent::Key {
+                    event: KeyEvent::pressed(Key::Control, Modifiers::CTRL),
+                },
+                UiInputEvent::Key {
+                    event: KeyEvent::pressed(Key::Enter, Modifiers::CTRL),
+                },
             ],
         );
         let mut events = Vec::new();

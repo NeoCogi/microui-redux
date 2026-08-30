@@ -252,7 +252,7 @@ pub mod prelude {
     pub use crate::file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};
     pub use crate::menu::{Menu, MenuBar, MenuItem, MenuItemAccessError, MenuItemHandle, MenuItemMark, MenuItemParameters, MenuItemSubmitted};
     pub use crate::image::{ImageSource, load_image_bytes};
-    pub use crate::input::{KeyCode, KeyMode, MouseButton};
+    pub use crate::input::{Key, KeyEvent, KeyState, Modifiers, MouseButton};
     pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame, TextureId};
     pub use crate::retained::{
         ChildParticipation, ChildWindowClip, Children, Container, ContainerLayoutCtx, ContainerWidget, Context, ContextFrame, Ui, CustomRenderArgs,
@@ -291,7 +291,7 @@ pub use event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventPortHandle}
 pub use file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};
 pub use menu::{Menu, MenuBar, MenuItem, MenuItemAccessError, MenuItemHandle, MenuItemMark, MenuItemParameters, MenuItemSubmitted};
 pub use image::{ImageSource, load_image_bytes};
-pub use input::{KeyCode, KeyMode, MouseButton};
+pub use input::{Key, KeyEvent, KeyState, Modifiers, MouseButton};
 pub use math::{expand_rect, rect, vec2};
 pub use render::TextureId;
 pub use theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, color};

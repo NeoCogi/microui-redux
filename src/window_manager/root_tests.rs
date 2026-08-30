@@ -33,10 +33,10 @@ use super::*;
 use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, test_atlas};
 use crate::{
     color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Combo, ComboParameters, ComboSubmitted, Custom,
-    CustomParameters, Constraints, Context, Dimensioni, Disclosure, DisclosureParameters, Ui, Grid, GridParameters, KeyMode, Linear, LinearItem,
+    CustomParameters, Constraints, Context, Dimensioni, Disclosure, DisclosureParameters, Ui, Grid, GridParameters, Key, KeyEvent, Linear, LinearItem,
     LinearParameters, Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted, MouseButton, Node, ScrollArea, ScrollAreaOption, ListItem,
     ListItemParameters, ScrollAreaParameters, Style, Textbox, TextboxChanged, TextBlock, TextBlockParameters, TextboxParameters, TrackSize, TypedWidgetHandle,
-    UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
+    UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, Modifiers,
 };
 use crate::render::{FrameInfo, RenderError};
 use std::{
@@ -109,7 +109,7 @@ fn event_counter<E: crate::WidgetEvent>(port: crate::WidgetEventPortHandle<E>) -
 struct OrderedProbe {
     events: Vec<&'static str>,
     held_buttons: Vec<u32>,
-    held_keys: Vec<u32>,
+    held_keys: Vec<u8>,
     measures: Cell<usize>,
     updates: usize,
     paints: usize,
@@ -140,7 +140,7 @@ impl Widget for OrderedProbe {
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, event: Option<&UiInputEvent>) {
         self.updates += 1;
         self.held_buttons.push(ctx.mouse_buttons().bits());
-        self.held_keys.push(ctx.key_modes().bits());
+        self.held_keys.push(ctx.modifiers().bits());
         self.hovered = ctx.hovered();
         if let Some(event) = event {
             self.events.push(match event {
@@ -149,10 +149,8 @@ impl Widget for OrderedProbe {
                 UiInputEvent::MouseDown { .. } => "down",
                 UiInputEvent::MouseUp { .. } => "up",
                 UiInputEvent::Scroll { .. } => "scroll",
-                UiInputEvent::KeyDown { .. } => "key-down",
-                UiInputEvent::KeyUp { .. } => "key-up",
-                UiInputEvent::KeyCodeDown { .. } => "code-down",
-                UiInputEvent::KeyCodeUp { .. } => "code-up",
+                UiInputEvent::Key { event } if event.is_pressed() => "key-down",
+                UiInputEvent::Key { .. } => "key-up",
                 UiInputEvent::Text { .. } => "text",
             });
         }
@@ -350,9 +348,9 @@ fn routed_recipient_gets_one_event_while_every_node_still_updates_in_fifo_order(
 
     ctx.mousemove(20, 20);
     ctx.mousedown(20, 20, MouseButton::LEFT);
-    ctx.keydown(KeyMode::SHIFT);
+    ctx.key(KeyEvent::pressed(Key::Shift, Modifiers::SHIFT));
     ctx.text("x");
-    ctx.keyup(KeyMode::SHIFT);
+    ctx.key(KeyEvent::released(Key::Shift, Modifiers::NONE));
     ctx.mouseup(20, 20, MouseButton::LEFT);
     ctx.update_ui(Dimensioni::new(320, 240));
 
@@ -374,12 +372,12 @@ fn routed_recipient_gets_one_event_while_every_node_still_updates_in_fifo_order(
             assert_eq!(
                 state.held_keys,
                 [
-                    KeyMode::NONE.bits(),
-                    KeyMode::NONE.bits(),
-                    KeyMode::SHIFT.bits(),
-                    KeyMode::SHIFT.bits(),
-                    KeyMode::NONE.bits(),
-                    KeyMode::NONE.bits(),
+                    Modifiers::NONE.bits(),
+                    Modifiers::NONE.bits(),
+                    Modifiers::SHIFT.bits(),
+                    Modifiers::SHIFT.bits(),
+                    Modifiers::NONE.bits(),
+                    Modifiers::NONE.bits(),
                 ]
             );
         })
@@ -395,7 +393,7 @@ fn update_drains_each_input_into_one_full_update_and_one_followup_layout() {
     let dimensions = Dimensioni::new(320, 240);
 
     ctx.mousemove(20, 20);
-    ctx.keydown(KeyMode::SHIFT);
+    ctx.key(KeyEvent::pressed(Key::Shift, Modifiers::SHIFT));
     ctx.text("x");
     ctx.update_ui(dimensions);
 
@@ -1732,7 +1730,7 @@ fn active_root_routes_keyboard_without_crossing_layer_boundaries() {
 
     // The higher-layer window remains visually frontmost, but keyboard input belongs to the root
     // explicitly activated by the completed pointer press.
-    ctx.keydown(KeyMode::SHIFT);
+    ctx.key(KeyEvent::pressed(Key::Shift, Modifiers::SHIFT));
     ctx.text("low layer");
     ctx.update_and_render_ui();
     assert_eq!(low_state.try_read(|state| state.events.clone()), Some(vec!["down", "up", "key-down", "text"]));
@@ -1810,7 +1808,7 @@ fn pointer_captured_root_remains_the_keyboard_and_text_input_root() {
     assert_eq!(ctx.debug_root_has_pointer_capture(first.id()), Some(true));
 
     ctx.ui().bring_window_to_front(&second).unwrap();
-    ctx.keydown(KeyMode::SHIFT);
+    ctx.key(KeyEvent::pressed(Key::Shift, Modifiers::SHIFT));
     ctx.text("captured");
     ctx.update_and_render_ui();
     assert_eq!(probe_state.try_read(|state| state.events.clone()), Some(vec!["down", "key-down", "text"]));
@@ -1931,9 +1929,9 @@ fn modal_activation_clears_underlying_focus_and_blocks_keyboard_input() {
 
     ctx.ui().set_window_visible(&dialog, true).unwrap();
     let updates_before_modal_input = state.try_read(|state| state.updates).unwrap();
-    ctx.keydown(KeyMode::SHIFT);
+    ctx.key(KeyEvent::pressed(Key::Shift, Modifiers::SHIFT));
     ctx.text("blocked");
-    ctx.keyup(KeyMode::SHIFT);
+    ctx.key(KeyEvent::released(Key::Shift, Modifiers::NONE));
     ctx.update_ui(Dimensioni::new(320, 240));
     assert_eq!(state.try_read(|state| state.updates), Some(updates_before_modal_input));
     assert_eq!(state.try_read(|state| state.events.clone()), Some(vec!["down", "up"]));

@@ -44,8 +44,8 @@ use crate::render::FrameInfo;
 use crate::test_support::{AllocationCount, AllocationMeasurement, NoopRenderer, test_atlas};
 use crate::ui_node::RuntimeMetrics;
 use crate::{
-    Context, Dimensioni, KeyMode, Linear, LinearParameters, Node, ScrollArea, ScrollAreaOption, ScrollAreaParameters, TextBlock, TextBlockParameters, color,
-    rect, Window,
+    Context, Dimensioni, Key, KeyEvent, Linear, LinearParameters, Modifiers, Node, ScrollArea, ScrollAreaOption, ScrollAreaParameters, TextBlock,
+    TextBlockParameters, color, rect, Window,
 };
 use std::hint::black_box;
 use std::time::{Duration, Instant};
@@ -234,7 +234,7 @@ fn retained_runtime_baseline() {
     let content = Linear::create(LinearParameters::vertical(std::iter::empty::<Node>())).1;
     let root = ctx.ui().create_window(Window::new("phase split", rect(0, 0, 120, 90), content));
     ctx.mousemove(20, 20);
-    ctx.keydown(KeyMode::SHIFT);
+    ctx.key(KeyEvent::pressed(Key::Shift, Modifiers::SHIFT));
     ctx.text("x");
     ctx.update_ui(dimensions());
     let committed = ctx.debug_root_runtime_metrics(root.id()).unwrap();

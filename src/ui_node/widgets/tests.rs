@@ -38,20 +38,7 @@ fn run_click<W: Widget>(widget: &mut W) {
     let atlas = make_test_atlas();
     let style = Style::default();
     let bounds = rect(0, 0, 100, 20);
-    let mut ctx = WidgetUpdateCtx::new_with_interaction(
-        bounds,
-        bounds,
-        &style,
-        &atlas,
-        true,
-        true,
-        true,
-        true,
-        true,
-        MouseButton::LEFT,
-        KeyMode::NONE,
-        KeyCode::NONE,
-    );
+    let mut ctx = WidgetUpdateCtx::new_with_interaction(bounds, bounds, &style, &atlas, true, true, true, true, true, MouseButton::LEFT, Modifiers::NONE);
     widget.update(&mut ctx, None)
 }
 
@@ -103,8 +90,7 @@ fn combo_run_toggles_open_state() {
         true,
         true,
         MouseButton::LEFT,
-        KeyMode::NONE,
-        KeyCode::NONE,
+        Modifiers::NONE,
     );
 
     combo.update(&mut ctx, None);
@@ -122,8 +108,7 @@ fn combo_run_toggles_open_state() {
         true,
         true,
         MouseButton::LEFT,
-        KeyMode::NONE,
-        KeyCode::NONE,
+        Modifiers::NONE,
     );
     combo.update(&mut ctx, None);
     assert!(!combo.is_open());
@@ -152,8 +137,7 @@ fn combo_submission_carries_update_anchor_while_paint_remains_observational() {
         true,
         false,
         MouseButton::NONE,
-        KeyMode::NONE,
-        KeyCode::NONE,
+        Modifiers::NONE,
     );
 
     // The submission owns the screen-space edge that its context-aware handler will consume.

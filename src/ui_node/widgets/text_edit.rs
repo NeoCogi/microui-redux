@@ -56,7 +56,7 @@
 //! input, and translate pointer positions into cursor locations. Cursor movement and deletion use
 //! Unicode scalar-value boundaries, not grapheme-cluster boundaries.
 use crate::ui_node::text_layout::TextLine;
-use crate::{rect, AtlasHandle, FontId, KeyCode, KeyMode, Recti};
+use crate::{rect, AtlasHandle, FontId, Key, KeyEvent, Modifiers, Recti};
 
 /// Determines what pressing return means for the active editor.
 pub(crate) enum ReturnBehavior {
@@ -210,9 +210,7 @@ pub(crate) fn apply_text_input(
     buf: &mut String,
     cursor: usize,
     text_input: &str,
-    key_mods: KeyMode,
-    key_pressed: KeyMode,
-    key_code_pressed: KeyCode,
+    key_event: Option<KeyEvent>,
     allow_leading_newline: bool,
     return_behavior: ReturnBehavior,
 ) -> TextEditOutcome {
@@ -225,33 +223,36 @@ pub(crate) fn apply_text_input(
         changed = true;
     }
 
-    if key_pressed.intersects(KeyMode::BACKSPACE) && delete_prev(buf, &mut cursor_pos, allow_leading_newline) {
+    // Releases never mutate editor state. Key repeat arrives as another pressed transition and
+    // therefore naturally repeats editing without a retained set of held navigation keys.
+    let pressed = key_event.filter(|event| event.is_pressed());
+
+    if pressed.is_some_and(|event| event.key == Key::Backspace) && delete_prev(buf, &mut cursor_pos, allow_leading_newline) {
         changed = true;
     }
 
-    let delete_pressed = key_pressed.intersects(KeyMode::DELETE) || key_code_pressed.intersects(KeyCode::DELETE);
-    if delete_pressed && delete_next(buf, cursor_pos) {
+    if pressed.is_some_and(|event| event.key == Key::Delete) && delete_next(buf, cursor_pos) {
         changed = true;
     }
 
-    if key_code_pressed.intersects(KeyCode::LEFT) && cursor_pos > 0 {
+    if pressed.is_some_and(|event| event.key == Key::ArrowLeft) && cursor_pos > 0 {
         cursor_pos = move_left(buf.as_str(), cursor_pos);
         moved = true;
     }
 
-    if key_code_pressed.intersects(KeyCode::RIGHT) && cursor_pos < buf.len() {
+    if pressed.is_some_and(|event| event.key == Key::ArrowRight) && cursor_pos < buf.len() {
         cursor_pos = move_right(buf.as_str(), cursor_pos);
         moved = true;
     }
 
-    if key_pressed.intersects(KeyMode::RETURN) {
+    if let Some(event) = pressed.filter(|event| event.key == Key::Enter) {
         match return_behavior {
             ReturnBehavior::Submit => {
                 submit = true;
             }
             ReturnBehavior::Newline { submit_on_ctrl } => {
                 // Text areas can use Ctrl+Enter for submit while plain Enter inserts a newline.
-                if submit_on_ctrl && key_mods.intersects(KeyMode::CTRL) {
+                if submit_on_ctrl && event.modifiers.intersects(Modifiers::CTRL) {
                     submit = true;
                 } else if insert_text(buf, &mut cursor_pos, "\n") {
                     changed = true;
@@ -337,12 +338,12 @@ mod tests {
     //! Tests for UTF-8 safe text editing primitives.
 
     use super::*;
-    use crate::{KeyCode, KeyMode};
+    use crate::{Key, KeyEvent, Modifiers};
 
     #[test]
     fn text_input_clamps_external_cursor_to_utf8_boundary() {
         let mut buf = String::from("éa");
-        let outcome = apply_text_input(&mut buf, 1, "x", KeyMode::NONE, KeyMode::NONE, KeyCode::NONE, false, ReturnBehavior::Submit);
+        let outcome = apply_text_input(&mut buf, 1, "x", None, false, ReturnBehavior::Submit);
 
         assert_eq!(buf, "xéa");
         assert_eq!(outcome.cursor, 1);
@@ -352,7 +353,14 @@ mod tests {
     #[test]
     fn delete_next_clamps_external_cursor_to_utf8_boundary() {
         let mut buf = String::from("éa");
-        let outcome = apply_text_input(&mut buf, 1, "", KeyMode::NONE, KeyMode::NONE, KeyCode::DELETE, false, ReturnBehavior::Submit);
+        let outcome = apply_text_input(
+            &mut buf,
+            1,
+            "",
+            Some(KeyEvent::pressed(Key::Delete, Modifiers::NONE)),
+            false,
+            ReturnBehavior::Submit,
+        );
 
         assert_eq!(buf, "a");
         assert_eq!(outcome.cursor, 0);

@@ -95,7 +95,7 @@ pub(super) fn number_textbox_update(
     value: &mut Real,
 ) -> bool {
     let shift_click = matches!(input, Some(UiInputEvent::MouseDown { button, .. }) if button.intersects(MouseButton::LEFT))
-        && ctx.key_modes().intersects(KeyMode::SHIFT)
+        && ctx.modifiers().intersects(Modifiers::SHIFT)
         && ctx.hovered();
 
     if shift_click {

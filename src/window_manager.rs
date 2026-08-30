@@ -313,31 +313,12 @@ impl WindowManager {
         self.invalidate_ui_commit();
     }
 
-    /// Queues one logical modifier-key press in input order.
-    pub(crate) fn keydown(&mut self, key: crate::KeyMode) {
-        // The input queue snapshots held state per event before retained routing.
-        self.input.keydown(key);
-        self.invalidate_ui_commit();
-    }
-
-    /// Queues one logical modifier-key release in input order.
-    pub(crate) fn keyup(&mut self, key: crate::KeyMode) {
-        // Releasing a held modifier changes the snapshot for every later queued event.
-        self.input.keyup(key);
-        self.invalidate_ui_commit();
-    }
-
-    /// Queues one physical key-code press in input order.
-    pub(crate) fn keydown_code(&mut self, code: crate::KeyCode) {
-        // Focus resolution remains deferred until the next complete retained update.
-        self.input.keydown_code(code);
-        self.invalidate_ui_commit();
-    }
-
-    /// Queues one physical key-code release in input order.
-    pub(crate) fn keyup_code(&mut self, code: crate::KeyCode) {
-        // Keep release ordering exact for widgets that track physical key state.
-        self.input.keyup_code(code);
+    /// Queues one logical keyboard transition in input order.
+    pub(crate) fn key(&mut self, event: crate::KeyEvent) {
+        // Focus resolution remains deferred until the next complete retained update. The single
+        // transition retains its own modifier snapshot, avoiding parallel key queues that could
+        // disagree about ordering.
+        self.input.key(event);
         self.invalidate_ui_commit();
     }
 

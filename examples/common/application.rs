@@ -32,7 +32,6 @@
 //! This module owns window/event setup, backend selection, input forwarding, and the example main
 //! loop used by retained-mode demos.
 use crate::*;
-use common::*;
 use microui_redux::{
     self as microui,
     prelude::{AtlasHandle, Dimensioni, FrameInfo},
@@ -48,7 +47,7 @@ use crate::common::vulkan_renderer;
 #[cfg(all(not(feature = "example-glow"), not(feature = "example-vulkan"), feature = "example-wgpu"))]
 use crate::common::wgpu_renderer;
 use sdl2::event::{Event, WindowEvent};
-use sdl2::keyboard::Keycode;
+use sdl2::keyboard::{Keycode, Mod};
 #[cfg(feature = "example-glow")]
 use sdl2::video::{GLContext, GLProfile, SwapInterval};
 use sdl2::video::Window;
@@ -163,28 +162,68 @@ impl<S: 'static> Application<S> {
                 }
             }
 
-            fn map_keymode(sdl_kc: Option<sdl2::keyboard::Keycode>) -> microui::KeyMode {
-                match sdl_kc {
-                    Some(sdl2::keyboard::Keycode::Delete) => microui::KeyMode::DELETE,
-                    Some(sdl2::keyboard::Keycode::Backspace) => microui::KeyMode::BACKSPACE,
-                    Some(sdl2::keyboard::Keycode::Return) => microui::KeyMode::RETURN,
-                    Some(sdl2::keyboard::Keycode::LAlt) | Some(sdl2::keyboard::Keycode::RAlt) => microui::KeyMode::ALT,
-                    Some(sdl2::keyboard::Keycode::LCtrl) | Some(sdl2::keyboard::Keycode::RCtrl) => microui::KeyMode::CTRL,
-                    Some(sdl2::keyboard::Keycode::LShift) | Some(sdl2::keyboard::Keycode::RShift) => microui::KeyMode::SHIFT,
-                    _ => microui::KeyMode::NONE,
-                }
+            /// Converts SDL's platform key identity into the crate's single logical key space.
+            fn map_key(keycode: Keycode) -> Option<microui::Key> {
+                let named = match keycode {
+                    Keycode::Backspace => Some(microui::Key::Backspace),
+                    Keycode::Delete => Some(microui::Key::Delete),
+                    Keycode::Return | Keycode::KpEnter => Some(microui::Key::Enter),
+                    Keycode::Escape => Some(microui::Key::Escape),
+                    Keycode::Space => Some(microui::Key::Space),
+                    Keycode::Tab => Some(microui::Key::Tab),
+                    Keycode::Insert => Some(microui::Key::Insert),
+                    Keycode::Home => Some(microui::Key::Home),
+                    Keycode::End => Some(microui::Key::End),
+                    Keycode::PageUp => Some(microui::Key::PageUp),
+                    Keycode::PageDown => Some(microui::Key::PageDown),
+                    Keycode::Up => Some(microui::Key::ArrowUp),
+                    Keycode::Down => Some(microui::Key::ArrowDown),
+                    Keycode::Left => Some(microui::Key::ArrowLeft),
+                    Keycode::Right => Some(microui::Key::ArrowRight),
+                    Keycode::F1 => Some(microui::Key::Function(1)),
+                    Keycode::F2 => Some(microui::Key::Function(2)),
+                    Keycode::F3 => Some(microui::Key::Function(3)),
+                    Keycode::F4 => Some(microui::Key::Function(4)),
+                    Keycode::F5 => Some(microui::Key::Function(5)),
+                    Keycode::F6 => Some(microui::Key::Function(6)),
+                    Keycode::F7 => Some(microui::Key::Function(7)),
+                    Keycode::F8 => Some(microui::Key::Function(8)),
+                    Keycode::F9 => Some(microui::Key::Function(9)),
+                    Keycode::F10 => Some(microui::Key::Function(10)),
+                    Keycode::F11 => Some(microui::Key::Function(11)),
+                    Keycode::F12 => Some(microui::Key::Function(12)),
+                    Keycode::LAlt | Keycode::RAlt => Some(microui::Key::Alt),
+                    Keycode::LCtrl | Keycode::RCtrl => Some(microui::Key::Control),
+                    Keycode::LShift | Keycode::RShift => Some(microui::Key::Shift),
+                    Keycode::LGui | Keycode::RGui => Some(microui::Key::Super),
+                    _ => None,
+                };
+                named.or_else(|| {
+                    // SDL assigns printable keycodes their Unicode scalar value. Preserve that
+                    // logical value for future accelerators while TextInput remains authoritative
+                    // for composed text.
+                    char::from_u32(keycode.into_i32() as u32)
+                        .filter(|character| !character.is_control())
+                        .map(microui::Key::Character)
+                })
             }
 
-            fn map_keycode(sdl_kc: Option<sdl2::keyboard::Keycode>) -> microui::KeyCode {
-                match sdl_kc {
-                    Some(sdl2::keyboard::Keycode::Delete) => microui::KeyCode::DELETE,
-                    Some(sdl2::keyboard::Keycode::End) => microui::KeyCode::END,
-                    Some(sdl2::keyboard::Keycode::Up) => microui::KeyCode::UP,
-                    Some(sdl2::keyboard::Keycode::Down) => microui::KeyCode::DOWN,
-                    Some(sdl2::keyboard::Keycode::Left) => microui::KeyCode::LEFT,
-                    Some(sdl2::keyboard::Keycode::Right) => microui::KeyCode::RIGHT,
-                    _ => microui::KeyCode::NONE,
+            /// Converts SDL's complete modifier snapshot without retaining backend-specific bits.
+            fn map_modifiers(keymod: Mod) -> microui::Modifiers {
+                let mut modifiers = microui::Modifiers::NONE;
+                if keymod.intersects(Mod::LALTMOD | Mod::RALTMOD) {
+                    modifiers |= microui::Modifiers::ALT;
                 }
+                if keymod.intersects(Mod::LCTRLMOD | Mod::RCTRLMOD) {
+                    modifiers |= microui::Modifiers::CTRL;
+                }
+                if keymod.intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD) {
+                    modifiers |= microui::Modifiers::SHIFT;
+                }
+                if keymod.intersects(Mod::LGUIMOD | Mod::RGUIMOD) {
+                    modifiers |= microui::Modifiers::SUPER;
+                }
+                modifiers
             }
             // SDL events are translated into the narrower microui input vocabulary here. This
             // keeps the rest of the demo code backend-agnostic.
@@ -206,7 +245,7 @@ impl<S: 'static> Application<S> {
                     self.ctx.mousemove(x, y);
                 }
                 match event {
-                    Event::Quit { .. } | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break 'running,
+                    Event::Quit { .. } => break 'running,
                     Event::Window { win_event: WindowEvent::Close, .. } => break 'running,
                     Event::MouseWheel { x, y, .. } => self.ctx.scroll(x * -30, y * -30),
                     Event::MouseButtonDown { x, y, mouse_btn, .. } => {
@@ -217,24 +256,18 @@ impl<S: 'static> Application<S> {
                         let mb = map_mouse_button(mouse_btn);
                         self.ctx.mouseup(x, y, mb);
                     }
-                    Event::KeyDown { keycode, .. } => {
-                        let km = map_keymode(keycode);
-                        if !km.is_empty() {
-                            self.ctx.keydown(km);
-                        }
-                        let kc = map_keycode(keycode);
-                        if !kc.is_empty() {
-                            self.ctx.keydown_code(kc);
+                    Event::KeyDown {
+                        keycode: Some(keycode), keymod, repeat, ..
+                    } => {
+                        if let Some(key) = map_key(keycode) {
+                            let mut event = microui::KeyEvent::pressed(key, map_modifiers(keymod));
+                            event.repeat = repeat;
+                            self.ctx.key(event);
                         }
                     }
-                    Event::KeyUp { keycode, .. } => {
-                        let km = map_keymode(keycode);
-                        if !km.is_empty() {
-                            self.ctx.keyup(km);
-                        }
-                        let kc = map_keycode(keycode);
-                        if !kc.is_empty() {
-                            self.ctx.keyup_code(kc);
+                    Event::KeyUp { keycode: Some(keycode), keymod, .. } => {
+                        if let Some(key) = map_key(keycode) {
+                            self.ctx.key(microui::KeyEvent::released(key, map_modifiers(keymod)));
                         }
                     }
                     Event::TextInput { text, .. } => {

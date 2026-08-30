@@ -40,7 +40,7 @@ use crate::window_manager::{LayerBinding, PopupHandle, SurfaceMutationError, Win
 #[cfg(test)]
 use crate::window_manager::RootId;
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, FrameInfo, RenderError, Renderer, RendererBackend};
-use crate::{Dimensioni, ImageSource, KeyCode, KeyMode, MouseButton, Node, Recti, Style, TextureId};
+use crate::{Dimensioni, ImageSource, KeyEvent, MouseButton, Node, Recti, Style, TextureId};
 
 /// Short-lived access to retained UI state owned by a [`Context`].
 ///
@@ -507,24 +507,13 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         self.window_manager.scroll(x, y);
     }
 
-    /// Queues one modifier/control-key press.
-    pub fn keydown(&mut self, key: KeyMode) {
-        self.window_manager.keydown(key);
-    }
-
-    /// Queues one modifier/control-key release.
-    pub fn keyup(&mut self, key: KeyMode) {
-        self.window_manager.keyup(key);
-    }
-
-    /// Queues one navigation-key press.
-    pub fn keydown_code(&mut self, code: KeyCode) {
-        self.window_manager.keydown_code(code);
-    }
-
-    /// Queues one navigation-key release.
-    pub fn keyup_code(&mut self, code: KeyCode) {
-        self.window_manager.keyup_code(code);
+    /// Queues one backend-normalized logical keyboard transition.
+    ///
+    /// Character keys identify shortcut candidates; composed UTF-8 input must still be forwarded
+    /// separately through [`Self::text`]. The supplied modifier snapshot is authoritative for this
+    /// transition and for later pointer updates until another key transition replaces it.
+    pub fn key(&mut self, event: KeyEvent) {
+        self.window_manager.key(event);
     }
 
     /// Queues one UTF-8 text transition, including an empty string.

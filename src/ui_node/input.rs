@@ -30,7 +30,7 @@
 
 //! Normalized input events routed through the retained UI tree.
 
-use crate::{KeyCode, KeyMode, MouseButton, Vec2i};
+use crate::{KeyEvent, MouseButton, Vec2i};
 
 /// Input event routed to one retained widget or container.
 #[derive(Clone, Debug)]
@@ -72,25 +72,10 @@ pub enum UiInputEvent {
         /// Requested scroll delta.
         delta: Vec2i,
     },
-    /// Modifier/control key state was pressed.
-    KeyDown {
-        /// Modifier/control key bits carried by this queued press transition.
-        key: KeyMode,
-    },
-    /// Modifier/control key state was released.
-    KeyUp {
-        /// Modifier/control key bits carried by this queued release transition.
-        key: KeyMode,
-    },
-    /// Navigation key state was pressed.
-    KeyCodeDown {
-        /// Navigation key bits carried by this queued press transition.
-        code: KeyCode,
-    },
-    /// Navigation key state was released.
-    KeyCodeUp {
-        /// Navigation key bits carried by this queued release transition.
-        code: KeyCode,
+    /// One logical keyboard press or release with its complete modifier snapshot.
+    Key {
+        /// Backend-normalized logical transition.
+        event: KeyEvent,
     },
     /// One queued UTF-8 text input transition.
     Text {
@@ -106,7 +91,7 @@ impl UiInputEvent {
             Self::MouseMove { pos, .. } | Self::MouseDrag { pos, .. } | Self::MouseDown { pos, .. } | Self::MouseUp { pos, .. } | Self::Scroll { pos, .. } => {
                 Some(*pos)
             }
-            Self::KeyDown { .. } | Self::KeyUp { .. } | Self::KeyCodeDown { .. } | Self::KeyCodeUp { .. } | Self::Text { .. } => None,
+            Self::Key { .. } | Self::Text { .. } => None,
         }
     }
 
@@ -120,10 +105,7 @@ impl UiInputEvent {
 
     /// Returns whether this event should be delivered to the focused node.
     pub(crate) fn is_focus_input(&self) -> bool {
-        matches!(
-            self,
-            Self::KeyDown { .. } | Self::KeyUp { .. } | Self::KeyCodeDown { .. } | Self::KeyCodeUp { .. } | Self::Text { .. }
-        )
+        matches!(self, Self::Key { .. } | Self::Text { .. })
     }
 
     /// Returns whether this event ends an active pointer capture when no buttons remain held.

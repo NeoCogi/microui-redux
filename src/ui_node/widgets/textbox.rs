@@ -319,30 +319,17 @@ pub(crate) fn textbox_update(
         ) => *pos,
         _ => Vec2i::default(),
     };
-    let key_pressed = match input {
-        Some(UiInputEvent::KeyDown { key }) => *key,
-        _ => KeyMode::NONE,
-    };
-    let key_code_pressed = match input {
-        Some(UiInputEvent::KeyCodeDown { code }) => *code,
-        _ => KeyCode::NONE,
+    let key_event = match input {
+        Some(UiInputEvent::Key { event }) => Some(*event),
+        _ => None,
     };
     let text_input = match input {
         Some(UiInputEvent::Text { text }) => text.as_str(),
         _ => "",
     };
-    let end_pressed = key_code_pressed.intersects(KeyCode::END);
+    let end_pressed = key_event.is_some_and(|event| event.is_pressed() && event.key == Key::End);
     let edit = if ctx.focused() {
-        apply_text_input(
-            buf,
-            cursor_pos,
-            text_input,
-            ctx.key_modes(),
-            key_pressed,
-            key_code_pressed,
-            false,
-            ReturnBehavior::Submit,
-        )
+        apply_text_input(buf, cursor_pos, text_input, key_event, false, ReturnBehavior::Submit)
     } else {
         // Without focus, the textbox ignores key/text input but keeps a consistent outcome.
         super::text_edit::TextEditOutcome {
@@ -497,30 +484,13 @@ mod tests {
         let atlas = test_atlas();
         let style = Style::default();
         let bounds = rect(0, 0, 120, 20);
-        let mut keys = KeyMode::NONE;
-        let mut codes = KeyCode::NONE;
+        let mut modifiers = Modifiers::NONE;
         for event in &input {
-            match event {
-                UiInputEvent::KeyDown { key } => keys |= *key,
-                UiInputEvent::KeyUp { key } => keys &= !*key,
-                UiInputEvent::KeyCodeDown { code } => codes |= *code,
-                UiInputEvent::KeyCodeUp { code } => codes &= !*code,
-                _ => {}
+            if let UiInputEvent::Key { event } = event {
+                modifiers = event.modifiers;
             }
-            let mut ctx = WidgetUpdateCtx::new_with_interaction(
-                bounds,
-                bounds,
-                &style,
-                &atlas,
-                true,
-                false,
-                focused,
-                false,
-                false,
-                MouseButton::NONE,
-                keys,
-                codes,
-            );
+            let mut ctx =
+                WidgetUpdateCtx::new_with_interaction(bounds, bounds, &style, &atlas, true, false, focused, false, false, MouseButton::NONE, modifiers);
             textbox.update(&mut ctx, Some(event));
         }
     }
@@ -536,7 +506,9 @@ mod tests {
             vec![
                 UiInputEvent::Text { text: "ab".into() },
                 UiInputEvent::Text { text: "cd".into() },
-                UiInputEvent::KeyDown { key: KeyMode::RETURN },
+                UiInputEvent::Key {
+                    event: KeyEvent::pressed(Key::Enter, Modifiers::NONE),
+                },
             ],
         );
         update_textbox(&mut textbox, true, vec![UiInputEvent::Text { text: "e".into() }]);

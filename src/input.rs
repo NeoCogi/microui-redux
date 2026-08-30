@@ -75,44 +75,127 @@ bitflags! {
 }
 
 bitflags! {
-    #[derive(Copy, Clone, Debug)]
-    /// Modifier and editing-control key state tracked by the input system.
-    pub struct KeyMode : u32 {
-        /// Delete key held.
-        const DELETE = 32;
-        /// Return/Enter key held.
-        const RETURN = 16;
-        /// Backspace key held.
-        const BACKSPACE = 8;
-        /// Alt key held.
-        const ALT = 4;
-        /// Control key held.
+    #[derive(Copy, Clone, Debug, Default, Eq, Hash, PartialEq)]
+    /// Modifier state accompanying one logical keyboard transition.
+    pub struct Modifiers: u8 {
+        /// Either Alt/Option key is held.
+        const ALT = 1;
+        /// Either Control key is held.
         const CTRL = 2;
-        /// Shift key held.
-        const SHIFT = 1;
-        /// No modifiers active.
+        /// Either Shift key is held.
+        const SHIFT = 4;
+        /// Either Windows/Command/Super key is held.
+        const SUPER = 8;
+        /// No modifiers are held.
         const NONE = 0;
     }
 }
 
-bitflags! {
-    #[derive(Copy, Clone, Debug)]
-    /// Logical navigation keys handled by the UI.
-    pub struct KeyCode : u32 {
-        /// Delete key.
-        const DELETE = 32;
-        /// End key.
-        const END = 16;
-        /// Right arrow key.
-        const RIGHT = 8;
-        /// Left arrow key.
-        const LEFT = 4;
-        /// Down arrow key.
-        const DOWN = 2;
-        /// Up arrow key.
-        const UP = 1;
-        /// No navigation keys pressed.
-        const NONE = 0;
+/// Backend-independent logical key identity.
+///
+/// Character keys describe the key's logical printable value and are deliberately separate from
+/// [`crate::UiInputEvent::Text`]. A `Character('a')` transition can therefore participate in a
+/// shortcut while composed UTF-8 text continues through the text-input channel exactly once.
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+pub enum Key {
+    /// Logical printable key used by accelerators and custom controls.
+    Character(char),
+    /// Backspace editing key.
+    Backspace,
+    /// Forward-delete editing key.
+    Delete,
+    /// Return or keypad-enter key.
+    Enter,
+    /// Escape or cancellation key.
+    Escape,
+    /// Space-bar key.
+    Space,
+    /// Tab traversal key.
+    Tab,
+    /// Insert editing key.
+    Insert,
+    /// Home navigation key.
+    Home,
+    /// End navigation key.
+    End,
+    /// Page-up navigation key.
+    PageUp,
+    /// Page-down navigation key.
+    PageDown,
+    /// Up-arrow navigation key.
+    ArrowUp,
+    /// Down-arrow navigation key.
+    ArrowDown,
+    /// Left-arrow navigation key.
+    ArrowLeft,
+    /// Right-arrow navigation key.
+    ArrowRight,
+    /// One numbered function key, conventionally in the inclusive range `1..=24`.
+    Function(u8),
+    /// Alt/Option modifier key itself, needed to distinguish an Alt tap from an Alt chord.
+    Alt,
+    /// Control modifier key itself.
+    Control,
+    /// Shift modifier key itself.
+    Shift,
+    /// Windows/Command/Super modifier key itself.
+    Super,
+}
+
+/// Direction of one queued logical key transition.
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+pub enum KeyState {
+    /// Key became held.
+    Pressed,
+    /// Key ceased being held.
+    Released,
+}
+
+/// Complete logical keyboard transition accepted from a platform backend.
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+pub struct KeyEvent {
+    /// Logical key whose state changed.
+    pub key: Key,
+    /// Whether this transition pressed or released the key.
+    pub state: KeyState,
+    /// Complete modifier snapshot after applying this transition.
+    pub modifiers: Modifiers,
+    /// Whether the platform generated this press through key-repeat.
+    ///
+    /// Release transitions should set this to `false`.
+    pub repeat: bool,
+}
+
+impl KeyEvent {
+    /// Constructs one non-repeated press with its resulting modifier snapshot.
+    pub const fn pressed(key: Key, modifiers: Modifiers) -> Self {
+        Self {
+            key,
+            state: KeyState::Pressed,
+            modifiers,
+            repeat: false,
+        }
+    }
+
+    /// Constructs one release with its resulting modifier snapshot.
+    pub const fn released(key: Key, modifiers: Modifiers) -> Self {
+        Self {
+            key,
+            state: KeyState::Released,
+            modifiers,
+            repeat: false,
+        }
+    }
+
+    /// Marks a press as platform-generated key repeat.
+    pub const fn repeated(mut self) -> Self {
+        self.repeat = true;
+        self
+    }
+
+    /// Returns whether this transition presses its key.
+    pub const fn is_pressed(self) -> bool {
+        matches!(self.state, KeyState::Pressed)
     }
 }
 
@@ -121,10 +204,7 @@ enum RawInputEvent {
     MouseDown { pos: Vec2i, button: MouseButton },
     MouseUp { pos: Vec2i, button: MouseButton },
     Scroll { delta: Vec2i },
-    KeyDown { key: KeyMode },
-    KeyUp { key: KeyMode },
-    KeyCodeDown { code: KeyCode },
-    KeyCodeUp { code: KeyCode },
+    Key { event: KeyEvent },
     Text { text: String },
 }
 
@@ -133,8 +213,8 @@ enum RawInputEvent {
 pub(crate) struct InputSnapshot {
     pub(crate) mouse_pos: Vec2i,
     pub(crate) mouse_buttons: MouseButton,
-    pub(crate) key_modes: KeyMode,
-    pub(crate) key_codes: KeyCode,
+    /// Modifier state committed by the latest consumed key transition.
+    pub(crate) modifiers: Modifiers,
 }
 
 /// Ordered raw input queue plus the state committed by events already consumed by the UI.
@@ -143,10 +223,8 @@ pub(crate) struct Input {
     mouse_pos: Vec2i,
     /// Mouse buttons held after the most recently consumed input event.
     mouse_down: MouseButton,
-    /// Modifier keys held after the most recently consumed input event.
-    key_down: KeyMode,
-    /// Navigation keys held after the most recently consumed input event.
-    key_code_down: KeyCode,
+    /// Modifier snapshot committed by the most recently consumed keyboard transition.
+    modifiers: Modifiers,
     /// Raw events waiting to be applied, in API call order.
     pending: VecDeque<RawInputEvent>,
 }
@@ -156,8 +234,7 @@ impl Default for Input {
         Self {
             mouse_pos: Vec2i::default(),
             mouse_down: MouseButton::NONE,
-            key_down: KeyMode::NONE,
-            key_code_down: KeyCode::NONE,
+            modifiers: Modifiers::NONE,
             pending: VecDeque::new(),
         }
     }
@@ -184,24 +261,11 @@ impl Input {
         self.pending.push_back(RawInputEvent::Scroll { delta: Vec2i::new(x, y) });
     }
 
-    /// Queues a modifier/control-key press.
-    pub(crate) fn keydown(&mut self, key: KeyMode) {
-        self.pending.push_back(RawInputEvent::KeyDown { key });
-    }
-
-    /// Queues a modifier/control-key release.
-    pub(crate) fn keyup(&mut self, key: KeyMode) {
-        self.pending.push_back(RawInputEvent::KeyUp { key });
-    }
-
-    /// Queues a navigation-key press.
-    pub(crate) fn keydown_code(&mut self, code: KeyCode) {
-        self.pending.push_back(RawInputEvent::KeyCodeDown { code });
-    }
-
-    /// Queues a navigation-key release.
-    pub(crate) fn keyup_code(&mut self, code: KeyCode) {
-        self.pending.push_back(RawInputEvent::KeyCodeUp { code });
+    /// Queues one complete logical keyboard transition.
+    pub(crate) fn key(&mut self, event: KeyEvent) {
+        // The event already carries the backend's authoritative modifier snapshot. Retaining one
+        // transition rather than parallel modifier/navigation streams preserves exact ordering.
+        self.pending.push_back(RawInputEvent::Key { event });
     }
 
     /// Queues one UTF-8 text input transition.
@@ -219,8 +283,7 @@ impl Input {
         InputSnapshot {
             mouse_pos: self.mouse_pos,
             mouse_buttons: self.mouse_down,
-            key_modes: self.key_down,
-            key_codes: self.key_code_down,
+            modifiers: self.modifiers,
         }
     }
 
@@ -248,21 +311,9 @@ impl Input {
                 UiInputEvent::MouseUp { pos, button }
             }
             RawInputEvent::Scroll { delta } => UiInputEvent::Scroll { pos: self.mouse_pos, delta },
-            RawInputEvent::KeyDown { key } => {
-                self.key_down |= key;
-                UiInputEvent::KeyDown { key }
-            }
-            RawInputEvent::KeyUp { key } => {
-                self.key_down &= !key;
-                UiInputEvent::KeyUp { key }
-            }
-            RawInputEvent::KeyCodeDown { code } => {
-                self.key_code_down |= code;
-                UiInputEvent::KeyCodeDown { code }
-            }
-            RawInputEvent::KeyCodeUp { code } => {
-                self.key_code_down &= !code;
-                UiInputEvent::KeyCodeUp { code }
+            RawInputEvent::Key { event } => {
+                self.modifiers = event.modifiers;
+                UiInputEvent::Key { event }
             }
             RawInputEvent::Text { text } => UiInputEvent::Text { text },
         })
@@ -279,7 +330,7 @@ mod tests {
         input.mousemove(4, 5);
         input.mousedown(4, 5, MouseButton::LEFT);
         input.mousemove(9, 12);
-        input.keydown(KeyMode::SHIFT);
+        input.key(KeyEvent::pressed(Key::Shift, Modifiers::SHIFT));
         input.text("x");
         input.mouseup(9, 12, MouseButton::LEFT);
 
@@ -300,9 +351,10 @@ mod tests {
         ));
         assert!(matches!(
             input.pop_event(),
-            Some(UiInputEvent::KeyDown { key }) if key.bits() == KeyMode::SHIFT.bits()
+            Some(UiInputEvent::Key { event })
+                if event == KeyEvent::pressed(Key::Shift, Modifiers::SHIFT)
         ));
-        assert_eq!(input.snapshot().key_modes.bits(), KeyMode::SHIFT.bits());
+        assert_eq!(input.snapshot().modifiers, Modifiers::SHIFT);
         assert!(matches!(input.pop_event(), Some(UiInputEvent::Text { text }) if text == "x"));
         assert!(matches!(
             input.pop_event(),
