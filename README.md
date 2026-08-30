@@ -10,8 +10,9 @@ edges encode structural child-window, dialog, and popup ownership, chronological
 carried by the forest itself, and one deepest-popup key derives the visible transient branch.
 Declarative menus are consumed directly into concrete `MenuSurface` values rather than a generic
 popup payload, a temporary menu tree, or a separate controller. Logical `KeyEvent` transitions,
-persistent retained focus, wrapping Tab traversal, shared control actions, and F10/Alt menu
-navigation provide one Windows-style keyboard contract across windows, widgets, and examples.
+persistent retained focus, wrapping Tab traversal, Ctrl+F6 window cycling, shared control actions,
+and F10/Alt menu navigation provide one Windows-style keyboard contract across windows, widgets,
+and examples.
 Explicit `Style::focus_color` and `Style::window_focus_color` accents make its sole active widget
 and window scope visible without exposing remembered focus in inactive windows.
 

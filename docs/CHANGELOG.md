@@ -29,6 +29,7 @@ add a general overlay graph, reparenting, local coordinate spaces, or a second o
     - [x] Made widget focus persistent and independent from pointer capture. `Tab` and `Shift+Tab` wrap through enabled, visible retained `TAB_STOP` surfaces in declaration order.
     - [x] Shared semantic activation, adjustment, hierarchy, and popup actions across built-in widgets instead of duplicating key interpretation in every control.
     - [x] Added F10/unchorded-Alt menu entry plus Windows-style heading, popup, submenu, activation, cancellation, disabled-row skipping, and application-focus restoration.
+    - [x] Added Ctrl+F6 and Ctrl+Shift+F6 traversal across visible independent and child windows, preserving per-window widget focus while respecting popup, menu, and modal scope.
     - [x] Replaced per-family `ButtonFocus`/`BaseFocus` colors with `Style::focus_color` and `Style::window_focus_color`; disclosure rows now prioritize keyboard focus over hover, only the active keyboard surface paints its remembered widget, and active title/frame chrome identifies the selected window.
     - [x] Updated the common SDL example adapter and every retained example's custom keyboard behavior so all example backends exercise the same logical input path.
 - [x] Updated crate/API documentation, architecture, menus, events, examples, README, and downstream public-API coverage for the new contract.

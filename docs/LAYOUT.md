@@ -65,6 +65,10 @@ suspends widget key/text delivery without discarding the widget that will regain
 menu closes. Custom widgets opt into focus, traversal, and the shared Windows-style action mapping
 through `Widget::keyboard_behavior`; their default behavior is keyboard-inert.
 
+At the window level, `Ctrl+F6` and `Ctrl+Shift+F6` cycle forward and backward through visible
+ordinary roots. Each root's runtime keeps its focused node while inactive; modal dialogs and open
+intrinsic menus retain their narrower keyboard scopes instead of participating in the cycle.
+
 Paint exposes focus only for the manager-selected keyboard surface even though every window runtime
 retains its own target. `Style::focus_color` fills selected controls such as disclosure rows and
 menus and records one clipped, inside-aligned outline around the focused widget after its complete

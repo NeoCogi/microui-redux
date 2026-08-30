@@ -168,7 +168,8 @@ The same surfaces provide Windows-style keyboard navigation without a parallel m
 Pointer-opened menus enter the same keyboard scope, so subsequent arrows and activation keys work
 without an extra F10 press. While that scope is active, application widget key and text delivery is
 suspended; closing the menu restores the exact persistent widget focus. Any non-Alt key cancels a
-pending Alt tap, allowing combinations such as Alt+Down to continue to a focused combo.
+pending Alt tap, allowing combinations such as Alt+Down to continue to a focused combo. The menu
+also consumes Ctrl+F6 window-cycle chords; window cycling resumes only after the menu scope closes.
 
 ## Style and current scope
 

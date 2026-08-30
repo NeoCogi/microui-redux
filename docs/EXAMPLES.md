@@ -36,6 +36,9 @@ separately through `Context::text`. The retained examples therefore share these 
 
 - `Tab` and `Shift+Tab` move persistent focus forward and backward through eligible controls in the
   active window, wrapping at either end.
+- `Ctrl+F6` and `Ctrl+Shift+F6` cycle forward and backward through visible application windows.
+  Each window restores its remembered control focus when selected; an active menu or modal dialog
+  retains keyboard ownership.
 - Enter and Space invoke buttons and list choices; Space toggles checkboxes; Left/Right adjust
   sliders; Up/Down adjust number controls; and arrow/activation keys operate disclosures and combos.
 - `F10` or a tap of Alt enters a window menu. Arrow keys, Home, End, Enter, Space, and Escape navigate

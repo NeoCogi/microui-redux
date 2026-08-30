@@ -128,8 +128,10 @@
 //! [`Context::text`] separately. Focus persists independently from pointer capture. In the active
 //! eligible window, Tab and Shift+Tab wrap through retained [`KeyboardBehavior::TAB_STOP`]
 //! surfaces; built-in controls derive Windows-style activation, adjustment, hierarchy, and popup
-//! actions from the same [`KeyboardAction`] mapping. F10 or an unchorded Alt tap transfers routing
-//! temporarily to the owning window's intrinsic menu without discarding application widget focus.
+//! actions from the same [`KeyboardAction`] mapping. Ctrl+F6 and Ctrl+Shift+F6 cycle visible
+//! ordinary windows while preserving each window's focused widget. F10 or an unchorded Alt tap
+//! transfers routing temporarily to the owning window's intrinsic menu without discarding
+//! application widget focus.
 //! Only the current keyboard scope paints that remembered focus: [`Style::focus_color`] supplies
 //! focused control fills, menu selection, and the final clipped widget outline, while
 //! [`Style::window_focus_color`] supplies the active title and framed-window outline.

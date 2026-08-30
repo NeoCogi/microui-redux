@@ -191,6 +191,12 @@ stores one persistent focused node independently from pointer capture. `Tab` and
 traverse that active runtime's eligible `KeyboardBehavior::TAB_STOP` surfaces in retained sibling
 order, wrap at the ends, and skip hidden, clipped, disabled, or pointer-focus-only surfaces.
 
+`Ctrl+F6` selects the next visible independent or child window in activation chronology and
+`Ctrl+Shift+F6` selects the previous one, wrapping at both ends. Selection reuses ordinary
+within-scope raising and changes only the manager's active root, so every window runtime preserves
+its focused widget. An application popup closes before the switch; hidden roots are skipped, an
+intrinsic menu retains its narrower keyboard scope, and an active modal dialog cannot be escaped.
+
 The frontmost dialog replaces the ordinary active window as the keyboard scope while modal. An
 intrinsic menu opened by pointer, F10, or an unchorded Alt tap creates a manager-owned keyboard
 scope above the owning window. Menu navigation consumes key/text delivery but preserves the
