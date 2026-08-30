@@ -270,8 +270,8 @@ impl<S: 'static> Application<S> {
                     }
                     Event::KeyUp { keycode: Some(keycode), keymod, .. } => {
                         // Releases are forwarded independently rather than inferred from held
-                        // state. This lets a popup consume only the tail it owns and leaves an
-                        // unmatched Escape release observable to a custom focused widget.
+                        // state. Popup dismissal consumes only its initial press, so the currently
+                        // focused surface—including a restored popup parent—receives the release.
                         if let Some(key) = map_key(keycode) {
                             self.ctx.key(microui::KeyEvent::released(key, map_modifiers(keymod)));
                         }

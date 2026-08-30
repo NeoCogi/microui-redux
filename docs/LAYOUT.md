@@ -72,9 +72,10 @@ is keyboard-inert.
 An application popup is a concrete keyboard surface with its own widget runtime. Showing it selects
 its first eligible target after layout; Tab wraps inside that tree, while Escape or focus transfer
 outside the popup restores the direct parent's remembered focused ID. When the popup accepts an
-initial Escape press, the manager owns only that command's repeats and matching release so they
-cannot leak into the restored parent. Without such a popup command, ordinary Escape press, repeat,
-and release transitions remain available to the focused application widget.
+initial non-repeated Escape press, only that press is manager-owned. Later repeats and the physical
+release use ordinary routing against the restored parent surface, keeping popup dismissal
+stateless. Without an active application popup, every Escape transition likewise remains available
+to the focused application widget.
 
 At the window level, `Ctrl+F6` and `Ctrl+Shift+F6` cycle forward and backward through visible
 ordinary roots. Each root's runtime keeps its focused ID while inactive; modal dialogs and open

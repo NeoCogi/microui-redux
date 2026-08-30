@@ -256,14 +256,6 @@ pub(crate) struct WindowManager {
     /// window even when the user releases Control before F6 and the platform modifier snapshot no
     /// longer identifies the original chord.
     window_cycle_key_down: bool,
-    /// Whether an application-popup Escape command owns the matching physical key release.
-    ///
-    /// Dismissing the popup on key-down immediately restores its parent as the active surface. The
-    /// later repeat and release transitions must nevertheless remain part of the popup command;
-    /// otherwise they would be delivered to a focused widget that never received the initiating
-    /// press. This bit is set only after an application popup actually accepts an initial Escape
-    /// press, so ordinary Escape transitions remain available to application widgets.
-    popup_escape_key_down: bool,
     /// Ordered input state owned and consumed directly by this window manager.
     input: Input,
     /// Dimensions of the most recent complete update/layout commit.
@@ -283,7 +275,6 @@ impl WindowManager {
             active_surface: None,
             pending_menu_alt: false,
             window_cycle_key_down: false,
-            popup_escape_key_down: false,
             input: Input::default(),
             ui_commit: None,
         }

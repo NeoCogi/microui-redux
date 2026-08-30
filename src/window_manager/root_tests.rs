@@ -478,20 +478,25 @@ fn application_popup_takes_keyboard_focus_and_restores_its_parent_surface() {
     assert_eq!(second_popup_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
 
     // The owner's unreleased pointer capture remains responsible only for its eventual pointer
-    // tail; it cannot steal keyboard activation from the popup. Escape owns both key transitions,
-    // dismisses the popup, and restores the parent's remembered focus before the following text.
+    // tail; it cannot steal keyboard activation from the popup. The initial Escape press dismisses
+    // the popup and restores the parent's remembered focus. Its later raw repeat and release are
+    // consequently delivered to that restored parent before the following text transition.
     ctx.key(KeyEvent::pressed(Key::Escape, Modifiers::NONE));
+    ctx.key(KeyEvent::pressed(Key::Escape, Modifiers::NONE).repeated());
     ctx.key(KeyEvent::released(Key::Escape, Modifiers::NONE));
     ctx.text("owner again");
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_popup_visible(&popup), Some(false));
-    assert_eq!(owner_state.try_read(|state| state.events.clone()), Some(vec!["text", "down", "text"]));
+    assert_eq!(
+        owner_state.try_read(|state| state.events.clone()),
+        Some(vec!["text", "down", "key-down", "key-up", "text"])
+    );
     assert_eq!(first_popup_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
     assert_eq!(second_popup_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
 }
 
 #[test]
-/// Proves that popup command ownership does not reserve ordinary Escape transitions globally.
+/// Proves that popup dismissal policy does not reserve ordinary Escape transitions globally.
 fn escape_transitions_reach_focused_widget_without_application_popup() {
     // Use the generic ordered probe because custom widgets receive raw press, repeat, and release
     // transitions even when built-in controls choose to act only on selected key-down events.

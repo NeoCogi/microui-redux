@@ -2030,31 +2030,17 @@ impl WindowManager {
         self.apply_keyboard_menu_key(root, *event)
     }
 
-    /// Dismisses an active application popup and owns only that command's Escape transitions.
+    /// Dismisses an active application popup on one initial non-repeated Escape press.
     fn route_application_popup_keyboard(&mut self, event: &UiInputEvent) -> bool {
         // Text and pointer events cannot participate in the popup's keyboard command. Keeping the
         // variant test at the boundary also leaves their normal routing entirely untouched.
         let UiInputEvent::Key { event } = event else {
             return false;
         };
-        if event.key != crate::Key::Escape {
-            return false;
-        }
-
-        if self.popup_escape_key_down {
-            // The accepted initial press already removed the popup. Continue swallowing its repeat
-            // and release tail so the newly restored parent never observes half of a key gesture.
-            // A release completes ownership; repeats leave it active for the eventual release.
-            if !event.is_pressed() {
-                self.popup_escape_key_down = false;
-            }
-            return true;
-        }
-
-        // Without an owned popup command, releases and repeats belong to ordinary focused-widget
-        // routing. In particular, never reserve every Escape key-up globally merely to avoid one
-        // small and explicitly representable transition state.
-        if !event.is_pressed() || event.repeat {
+        // Dismissal is deliberately a press-only command. Repeats and releases continue through
+        // ordinary routing to the surface active for those later transitions, avoiding retained
+        // key-tail state in WindowManager and avoiding a global reservation of Escape key-up.
+        if event.key != crate::Key::Escape || !event.is_pressed() || event.repeat {
             return false;
         }
 
@@ -2072,9 +2058,8 @@ impl WindowManager {
             return false;
         }
 
-        // Record command ownership before changing surface topology. The popup disappears below,
-        // so its existence cannot be consulted when repeat or release transitions arrive later.
-        self.popup_escape_key_down = true;
+        // Truncation immediately restores the direct parent as the active keyboard surface. Any
+        // later physical transitions are independent input and will resolve against that surface.
         let depth = self.surfaces.popup_depth(popup).expect("active application popup must retain rooted ancestry");
         self.truncate_active_popup_path(depth);
         true

@@ -37,7 +37,7 @@ superseded alpha APIs and their compatibility layers are not retained.
 - [x] Added one backend-neutral Windows-style keyboard contract.
     - [x] `KeyEvent` carries logical key identity, pressed/released state, modifiers, and repeat information; composed UTF-8 remains a separate ordered text event.
     - [x] Persistent widget focus is one stable runtime node identity independent from pointer capture. `Tab` and `Shift+Tab` wrap through eligible `TAB_STOP` surfaces, while built-in controls share activation, adjustment, hierarchy, and popup actions.
-    - [x] Application-popup Escape dismissal owns only the accepted press's repeat/release tail; ordinary Escape transitions remain focused-widget input when no popup began the command.
+    - [x] Application-popup Escape dismissal consumes only an initial non-repeated press; repeats and releases remain ordinary input for the subsequently active focused surface.
     - [x] F10 or an unchorded Alt tap enters intrinsic menu navigation with Windows-style heading, popup, submenu, activation, cancellation, and disabled-row skipping behavior.
     - [x] Ctrl+F6 and Ctrl+Shift+F6 cycle visible independent and child windows while preserving each runtime's focused widget and respecting popup, menu, and modal scope.
     - [x] `Style::focus_color` identifies the selected control/menu and its shared outline; `Style::window_focus_color` identifies the active title and framed window.

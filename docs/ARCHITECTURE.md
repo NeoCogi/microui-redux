@@ -197,8 +197,8 @@ Showing an application popup selects its concrete surface immediately and focuse
 stop after that popup's geometry is committed. Tab traversal then wraps inside the popup's own
 widget tree. Escape or an outside press dismisses the popup and restores its direct parent surface,
 whose independently retained focused widget ID was never discarded. An Escape dismissal retains
-one manager-owned transition bit until release, preventing that popup command's physical tail from
-reaching the restored parent without globally reserving ordinary Escape releases or repeats.
+no key-tail state: only the initial non-repeated press is the dismissal command, while later repeats
+and release transitions route normally against the restored parent surface.
 
 `Ctrl+F6` selects the next visible independent or child window in activation chronology and
 `Ctrl+Shift+F6` selects the previous one, wrapping at both ends. Selection reuses ordinary
