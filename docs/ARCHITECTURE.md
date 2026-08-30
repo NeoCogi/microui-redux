@@ -187,8 +187,10 @@ its dialogs because they occupy the separate modal band.
 Visual order is deliberately separate from keyboard activation. A pointer press records the active
 ordinary window (or a popup's ordinary source) without moving its family to a different fixed
 layer, and keyboard/text routing returns to that independent or child window. Each widget runtime
-stores one persistent focused node independently from pointer capture. `Tab` and `Shift+Tab`
-traverse that active runtime's eligible `KeyboardBehavior::TAB_STOP` surfaces in retained sibling
+stores one persistent root-to-target focus path independently from pointer capture. Every identity
+after the root names the next direct child, so validation and key routing follow the same explicit
+container path without searching for a detached leaf identity. `Tab` and `Shift+Tab` replace that
+path atomically with the next eligible `KeyboardBehavior::TAB_STOP` surface in retained sibling
 order, wrap at the ends, and skip hidden, clipped, disabled, or pointer-focus-only surfaces.
 
 `Ctrl+F6` selects the next visible independent or child window in activation chronology and

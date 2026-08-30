@@ -57,13 +57,15 @@ place it in a content, fixed, or flexible track.
 
 Built-in leaves and containers are mutated through their typed widget handles between commits. After programmatic state/topology changes, call `update_ui` even when no input is pending so layout is synchronized before paint. Feed raw input through methods such as `mousemove`, `mousedown`, `scroll`, `key`, and `text`; calls are queued without coalescing. `Context::key` accepts one backend-normalized `KeyEvent` containing logical identity, pressed/released state, the complete modifier snapshot, and repeat state. Printable key transitions remain distinct from `text`, which is the authoritative channel for composed UTF-8 input. A widget receives the current event as `Option<&UiInputEvent>`, while `WidgetUpdateCtx::{mouse_buttons,modifiers}` exposes held state after that event was applied.
 
-Keyboard focus persists after a pointer release and is independent of pointer capture. Within the
-active eligible window, `Tab` and `Shift+Tab` traverse enabled, visible `TAB_STOP` surfaces in
-retained sibling order and wrap at the ends. Hidden, clipped, disabled, and pointer-focus-only
-surfaces are skipped. A modal dialog suspends ordinary-window traversal, and an active menu scope
-suspends widget key/text delivery without discarding the widget that will regain focus when the
-menu closes. Custom widgets opt into focus, traversal, and the shared Windows-style action mapping
-through `Widget::keyboard_behavior`; their default behavior is keyboard-inert.
+Keyboard focus persists after a pointer release and is independent of pointer capture. A widget
+runtime owns one complete root-to-target focus path; nested containers do not maintain competing
+mutable focus pointers. Within the active eligible window, `Tab` and `Shift+Tab` replace that path
+with the next enabled, visible `TAB_STOP` surface in retained sibling order and wrap at the ends.
+Hidden, clipped, disabled, and pointer-focus-only surfaces are skipped. A modal dialog suspends
+ordinary-window traversal, and an active menu scope suspends widget key/text delivery without
+discarding the widget that will regain focus when the menu closes. Custom widgets opt into focus,
+traversal, and the shared Windows-style action mapping through `Widget::keyboard_behavior`; their
+default behavior is keyboard-inert.
 
 At the window level, `Ctrl+F6` and `Ctrl+Shift+F6` cycle forward and backward through visible
 ordinary roots. Each root's runtime keeps its focused node while inactive; modal dialogs and open
