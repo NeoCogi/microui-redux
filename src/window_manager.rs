@@ -244,6 +244,16 @@ pub(crate) struct WindowManager {
     /// Activation is deliberately independent of stacking. A user can therefore focus a control
     /// in a low layer without raising that root over windows in a higher layer.
     active_root: Option<RootId>,
+    /// Root whose intrinsic menu currently owns keyboard navigation.
+    ///
+    /// Application widget focus remains stored independently in that root's UiRuntime and resumes
+    /// unchanged when this manager-owned scope ends.
+    keyboard_menu_root: Option<RootId>,
+    /// Whether an unchorded Alt press is waiting for its matching release.
+    ///
+    /// A non-Alt key cancels this candidate so Alt+Down can reach a focused combo without first
+    /// entering the window menu.
+    pending_menu_alt: bool,
     /// Ordered input state owned and consumed directly by this window manager.
     input: Input,
     /// Dimensions of the most recent complete update/layout commit.
@@ -261,6 +271,8 @@ impl WindowManager {
             surfaces: SurfaceForest::new(),
             discard_pointer_capture_tail: false,
             active_root: None,
+            keyboard_menu_root: None,
+            pending_menu_alt: false,
             input: Input::default(),
             ui_commit: None,
         }

@@ -1037,7 +1037,10 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     let mut context: Context<NoopRenderer, Model> = Context::new_test_state(NoopRenderer { atlas: test_atlas() }, dimensions);
     let (combo, combo_node) = Combo::create(ComboParameters::new());
     let combo_id = combo_node.id();
-    let source = context.ui().create_window(Window::new("combo source", rect(10, 10, 140, 90), combo_node));
+    let (_, menu_item) = MenuItem::create(MenuItemParameters::new("Menu action"));
+    let source = context
+        .ui()
+        .create_window(Window::new("combo source", rect(10, 10, 140, 90), combo_node).menu_bar(MenuBar::new([Menu::new("File").item(menu_item)])));
     context.ui().set_window_options(&source, WindowOption::FRAME).unwrap();
     let popup = context
         .ui()
@@ -1110,6 +1113,16 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     context.update_ui_state(dimensions, &mut model);
     assert_eq!(context.debug_popup_visible(&popup), Some(false));
     assert_eq!(combo.is_open(), Some(false));
+
+    // Alt+Down is a combo chord, not an Alt tap. The intervening arrow cancels pending menu-bar
+    // activation, opens the composed popup, and leaves the intrinsic File menu closed.
+    context.key(KeyEvent::pressed(Key::Alt, Modifiers::ALT));
+    context.key(KeyEvent::pressed(Key::ArrowDown, Modifiers::ALT));
+    context.key(KeyEvent::released(Key::Alt, Modifiers::NONE));
+    context.update_ui_state(dimensions, &mut model);
+    assert_eq!(context.debug_popup_visible(&popup), Some(true));
+    assert_eq!(combo.is_open(), Some(true));
+    assert_eq!(context.debug_active_popup_names(), ["combo choices"]);
 }
 
 #[test]
@@ -2536,9 +2549,9 @@ fn opening_sibling_submenu_replaces_the_complete_descendant_suffix() {
     assert_eq!(ctx.debug_active_menu_row_rects().len(), 2);
 }
 
-/// Verifies that menu bar, submenu, and item presses preserve application keyboard focus.
+/// Verifies that pointer menus suspend application key delivery and restore its retained focus.
 #[test]
-fn menu_pointer_operations_preserve_preexisting_application_keyboard_focus() {
+fn menu_pointer_scope_suspends_and_restores_preexisting_application_keyboard_focus() {
     // The application body is an ordinary persistent keyboard target. Menu surfaces are passive,
     // so their independent pointer capture must never replace this retained identity.
     let (probe, body) = OrderedProbe::create(WidgetOption::NONE);
@@ -2551,8 +2564,8 @@ fn menu_pointer_operations_preserve_preexisting_application_keyboard_focus() {
         .create_window(Window::new("menu focus", rect(20, 20, 220, 150), body).menu_bar(menu_bar));
     ctx.update_and_render_ui();
 
-    // Establish application focus before any menu becomes visible, then verify the bar press leaves
-    // text routing on that body even while the top-level popup is active.
+    // Establish application focus before any menu becomes visible. Opening the bar starts a menu
+    // keyboard scope, so text must not edit the retained application target behind that menu.
     let body_rect = ctx.debug_root_node_rect(root.id(), body_id).unwrap();
     click_rect(&mut ctx, body_rect);
     assert_eq!(probe.try_read(|state| state.events.clone()), Some(vec!["down", "up"]));
@@ -2562,22 +2575,124 @@ fn menu_pointer_operations_preserve_preexisting_application_keyboard_focus() {
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_active_popup_names(), ["menu focus Actions Menu"]);
 
-    // Opening a nested popup exercises pointer capture on a popup-local MenuSurface. Keyboard input
-    // must still bypass both menu surfaces and reach the original application focus owner.
+    // Opening a nested popup changes the current menu surface without changing the suspended
+    // application focus identity. Text remains manager-owned because type-ahead is outside the MVP.
     let submenu_row = ctx.debug_active_menu_row_rects()[0][0];
     click_rect(&mut ctx, submenu_row);
     ctx.text("after submenu");
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_active_popup_names(), ["menu focus Actions Menu", "menu focus More Menu"]);
 
-    // Invoking the leaf dismisses the complete popup path during MouseDown. Neither dismissal nor
-    // the swallowed release tail may clear the application focus used by the following text event.
+    // Invoking the leaf dismisses the complete popup path during MouseDown. The following text event
+    // proves that application focus resumes after the swallowed release tail completes.
     let item_row = ctx.debug_active_menu_row_rects()[1][0];
     click_rect(&mut ctx, item_row);
     ctx.text("after item");
     ctx.update_and_render_ui();
     assert!(ctx.debug_active_popup_names().is_empty());
-    assert_eq!(probe.try_read(|state| state.events.clone()), Some(vec!["down", "up", "text", "text", "text"]));
+    assert_eq!(probe.try_read(|state| state.events.clone()), Some(vec!["down", "up", "text"]));
+}
+
+/// Verifies the complete Windows-style keyboard path through a nested declarative menu.
+#[test]
+fn f10_arrows_escape_and_enter_navigate_nested_menus_and_restore_application_focus() {
+    let (probe, body) = OrderedProbe::create(WidgetOption::NONE);
+    let body_id = body.id();
+    let (_, disabled_item) = MenuItem::create(MenuItemParameters::new("Disabled").disabled());
+    let (recent, recent_item) = MenuItem::create(MenuItemParameters::new("Recent document"));
+    let (_, open_item) = MenuItem::create(MenuItemParameters::new("Open"));
+    let (_, undo_item) = MenuItem::create(MenuItemParameters::new("Undo"));
+    let menu_bar = MenuBar::new([
+        Menu::new("File")
+            .item(disabled_item)
+            .separator()
+            .item(open_item)
+            .submenu(Menu::new("Recent").item(recent_item)),
+        Menu::new("Edit").item(undo_item),
+    ]);
+    let mut ctx = context();
+    let root = ctx
+        .ui()
+        .create_window(Window::new("keyboard menus", rect(20, 20, 240, 160), body).menu_bar(menu_bar));
+    ctx.update_and_render_ui();
+    let mut recent_submissions = 0;
+    let mut dispatcher = event_counter(recent.submitted());
+
+    // Preserve an ordinary application target before F10 transfers key ownership to the bar.
+    let body_rect = ctx.debug_root_node_rect(root.id(), body_id).unwrap();
+    click_rect(&mut ctx, body_rect);
+    ctx.key(KeyEvent::pressed(Key::Function(10), Modifiers::NONE));
+    ctx.text("blocked");
+    ctx.key(KeyEvent::pressed(Key::ArrowRight, Modifiers::NONE));
+    ctx.key(KeyEvent::pressed(Key::ArrowDown, Modifiers::NONE));
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_popup_names(), ["keyboard menus Edit Menu"]);
+    assert_eq!(probe.try_read(|state| state.events.clone()), Some(vec!["down", "up"]));
+
+    // Escape returns from the top-level popup to its heading. Move left to File, open it, skip the
+    // disabled item and separator, then descend from Open to the Recent branch.
+    ctx.key(KeyEvent::pressed(Key::Escape, Modifiers::NONE));
+    ctx.key(KeyEvent::pressed(Key::ArrowLeft, Modifiers::NONE));
+    ctx.key(KeyEvent::pressed(Key::ArrowDown, Modifiers::NONE));
+    ctx.key(KeyEvent::pressed(Key::ArrowDown, Modifiers::NONE));
+    ctx.key(KeyEvent::pressed(Key::ArrowRight, Modifiers::NONE));
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_popup_names(), ["keyboard menus File Menu", "keyboard menus Recent Menu"]);
+
+    // Enter invokes the selected nested item, queues its existing typed event, closes the whole
+    // path, and releases the menu scope. The application's earlier focus then receives text again.
+    ctx.key(KeyEvent::pressed(Key::Enter, Modifiers::NONE));
+    ctx.text("restored");
+    ctx.update_and_render_ui();
+    assert!(dispatcher.dispatch(&mut recent_submissions));
+    assert_eq!(recent_submissions, 1);
+    assert!(ctx.debug_active_popup_names().is_empty());
+    assert_eq!(probe.try_read(|state| state.events.clone()), Some(vec!["down", "up", "text"]));
+
+    // An unchorded Alt tap enters the first heading. After opening and backing out to the bar, a
+    // second tap exits the scope and again exposes the retained application focus.
+    ctx.key(KeyEvent::pressed(Key::Alt, Modifiers::ALT));
+    ctx.key(KeyEvent::released(Key::Alt, Modifiers::NONE));
+    ctx.key(KeyEvent::pressed(Key::ArrowDown, Modifiers::NONE));
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_popup_names(), ["keyboard menus File Menu"]);
+
+    ctx.key(KeyEvent::pressed(Key::Escape, Modifiers::NONE));
+    ctx.key(KeyEvent::pressed(Key::Alt, Modifiers::ALT));
+    ctx.key(KeyEvent::released(Key::Alt, Modifiers::NONE));
+    ctx.text("restored-again");
+    ctx.update_and_render_ui();
+    assert!(ctx.debug_active_popup_names().is_empty());
+    assert_eq!(probe.try_read(|state| state.events.clone()), Some(vec!["down", "up", "text", "text"]));
+}
+
+/// Verifies that removing a menu's owning window from traversal cannot leave a stale key scope.
+#[test]
+fn hiding_keyboard_menu_owner_releases_keys_to_the_next_eligible_focused_window() {
+    let (probe, fallback_body) = OrderedProbe::create(WidgetOption::NONE);
+    let fallback_id = fallback_body.id();
+    let (_, action) = MenuItem::create(MenuItemParameters::new("Action"));
+    let mut ctx = context();
+    let fallback = ctx.ui().create_window(Window::new("fallback", rect(10, 10, 120, 90), fallback_body));
+    let menu_owner = ctx
+        .ui()
+        .create_window(Window::new("menu owner", rect(150, 10, 140, 90), empty_content()).menu_bar(MenuBar::new([Menu::new("File").item(action)])));
+    ctx.update_and_render_ui();
+
+    // Retain focus in the lower window, then enter the other window's menu through its heading.
+    let fallback_rect = ctx.debug_root_node_rect(fallback.id(), fallback_id).unwrap();
+    click_rect(&mut ctx, fallback_rect);
+    let heading = ctx.debug_menu_anchor_rects(menu_owner.id()).unwrap()[0].unwrap();
+    click_rect(&mut ctx, heading);
+    assert_eq!(ctx.debug_active_popup_names(), ["menu owner File Menu"]);
+
+    // Hiding the owner closes its path and clears manager selection. With no stale scope left to
+    // consume text, the next eligible window's still-retained focus receives it immediately.
+    ctx.ui().set_window_visible(&menu_owner, false).unwrap();
+    ctx.text("fallback");
+    ctx.update_and_render_ui();
+    assert!(ctx.debug_active_popup_names().is_empty());
+    assert_eq!(probe.try_read(|state| state.events.clone()), Some(vec!["down", "up", "text"]));
 }
 
 /// Verifies direct item events, dispatch ordering, and disabled-row menu policy together.

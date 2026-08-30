@@ -63,7 +63,7 @@ pub enum MenuItemMark {
 pub struct MenuItemParameters {
     /// Initial user-visible label.
     pub label: String,
-    /// Whether the item initially accepts pointer submission.
+    /// Whether the item initially accepts pointer or keyboard submission.
     pub enabled: bool,
     /// Initial check or radio presentation.
     pub mark: MenuItemMark,
@@ -135,7 +135,7 @@ impl MenuItemParameters {
     }
 }
 
-/// Event emitted by one specific menu item after an enabled pointer submission.
+/// Event emitted by one specific menu item after an enabled pointer or keyboard submission.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct MenuItemSubmitted;
 
@@ -211,7 +211,7 @@ impl MenuItem {
 pub struct MenuItemHandle {
     /// Process-unique concrete identity used only by the owning menu surface manager.
     id: MenuItemId,
-    /// Weak endpoint for enabled pointer submissions from this same item.
+    /// Weak endpoint for enabled user submissions from this same item.
     submitted: WidgetEventPortHandle<MenuItemSubmitted>,
 }
 
@@ -344,12 +344,12 @@ pub(crate) enum MenuSlot {
     },
 }
 
-/// Concrete result of one left press routed to a menu surface.
-pub(crate) enum MenuPress {
+/// Semantic action produced by pointer or keyboard interaction with one menu slot.
+pub(crate) enum MenuAction {
     /// Open, toggle, or replace the child attached to this local branch slot.
     OpenSlot(usize),
     /// Close the complete active path after an enabled item queued its typed event.
-    Close,
+    SubmitAndClose,
 }
 
 /// Shared output of menu measurement, hit testing, anchoring, and paint geometry.
@@ -374,6 +374,11 @@ pub(crate) struct MenuSurface {
     /// Absence is represented structurally so no valid future slot index can collide with an
     /// out-of-band sentinel value.
     hovered_slot: Option<usize>,
+    /// Slot selected by the active keyboard-menu scope.
+    ///
+    /// Pointer hover stays independent so closing the scope can restore ordinary hover rendering
+    /// without reconstructing either state from the other.
+    keyboard_slot: Option<usize>,
     /// Slot whose child popup belongs to the active path, or `None` when this surface has no open
     /// child.
     ///
@@ -382,8 +387,8 @@ pub(crate) struct MenuSurface {
     open_slot: Option<usize>,
     /// Whether this surface consumed the current left-button gesture.
     ///
-    /// The manager uses this concrete bit only to keep drag/release away from application trees; menu
-    /// actions themselves remain press-only and never acquire keyboard focus.
+    /// The manager uses this concrete bit only to keep drag/release away from application trees.
+    /// Pointer actions remain press-only, while manager-owned keyboard selection is independent.
     captured: bool,
     /// Screen-space content rectangle assigned during the latest layout commit.
     rect: Recti,
@@ -401,6 +406,7 @@ impl MenuSurface {
             rows,
             popup,
             hovered_slot: None,
+            keyboard_slot: None,
             open_slot: None,
             captured: false,
             rect: Recti::default(),
@@ -449,6 +455,102 @@ impl MenuSurface {
         self.captured = false;
     }
 
+    /// Clears this surface's keyboard selection without changing pointer or open-path state.
+    pub(crate) fn clear_keyboard_target(&mut self) {
+        // WindowManager calls this across every menu surface when its single menu scope ends.
+        self.keyboard_slot = None;
+    }
+
+    /// Selects the first enabled item or branch in declaration order.
+    pub(crate) fn focus_first(&mut self) -> bool {
+        // Separators and disabled items remain visible but are never keyboard landing points.
+        self.keyboard_slot = self.rows.iter().position(Self::slot_accepts_keyboard);
+        self.keyboard_slot.is_some()
+    }
+
+    /// Selects the last enabled item or branch in declaration order.
+    pub(crate) fn focus_last(&mut self) -> bool {
+        // Reverse position preserves the original slot index without allocating a filtered list.
+        self.keyboard_slot = self.rows.iter().rposition(Self::slot_accepts_keyboard);
+        self.keyboard_slot.is_some()
+    }
+
+    /// Moves selection by one eligible slot with wrapping.
+    pub(crate) fn move_keyboard_focus(&mut self, forward: bool) -> bool {
+        let count = self.rows.len();
+        if count == 0 {
+            self.keyboard_slot = None;
+            return false;
+        }
+
+        // Inspect at most every row once. Starting just beyond the current slot gives stable wrap
+        // behavior, while a missing selection starts at the direction-appropriate edge.
+        let start = match (self.keyboard_slot, forward) {
+            (Some(slot), true) => (slot + 1) % count,
+            (Some(0), false) => count - 1,
+            (Some(slot), false) => slot - 1,
+            (None, true) => 0,
+            (None, false) => count - 1,
+        };
+        for offset in 0..count {
+            let slot = if forward {
+                (start + offset) % count
+            } else {
+                (start + count - offset) % count
+            };
+            if Self::slot_accepts_keyboard(&self.rows[slot]) {
+                self.keyboard_slot = Some(slot);
+                return true;
+            }
+        }
+        self.keyboard_slot = None;
+        false
+    }
+
+    /// Selects one exact enabled item or branch, usually after returning from its child popup.
+    pub(crate) fn focus_slot(&mut self, slot: usize) -> bool {
+        // Validate the row role at the concrete owner boundary so manager topology cannot install
+        // selection on a separator or disabled item.
+        let selectable = self.rows.get(slot).is_some_and(Self::slot_accepts_keyboard);
+        self.keyboard_slot = selectable.then_some(slot);
+        selectable
+    }
+
+    /// Returns the currently selected keyboard slot.
+    pub(crate) const fn keyboard_slot(&self) -> Option<usize> {
+        self.keyboard_slot
+    }
+
+    /// Returns the selected slot only when it owns a submenu branch.
+    pub(crate) fn keyboard_branch_slot(&self) -> Option<usize> {
+        let slot = self.keyboard_slot?;
+        matches!(self.rows.get(slot), Some(MenuSlot::Branch { .. })).then_some(slot)
+    }
+
+    /// Activates the selected branch or enabled item and queues the item's typed event.
+    pub(crate) fn activate_keyboard_slot(&mut self) -> Option<MenuAction> {
+        let slot = self.keyboard_slot?;
+        match self.rows.get_mut(slot)? {
+            MenuSlot::Branch { .. } => Some(MenuAction::OpenSlot(slot)),
+            MenuSlot::Item(item) if item.parameters.enabled => {
+                // Queue only the semantic event; WindowManager closes the complete path after this
+                // mutable surface borrow ends and before application dispatch begins.
+                item.submitted_event.borrow_mut().emit(MenuItemSubmitted);
+                Some(MenuAction::SubmitAndClose)
+            }
+            MenuSlot::Item(_) | MenuSlot::Separator => None,
+        }
+    }
+
+    /// Returns whether one slot may participate in menu keyboard traversal.
+    fn slot_accepts_keyboard(slot: &MenuSlot) -> bool {
+        match slot {
+            MenuSlot::Branch { .. } => true,
+            MenuSlot::Item(item) => item.parameters.enabled,
+            MenuSlot::Separator => false,
+        }
+    }
+
     /// Routes one pointer event and returns a concrete manager action plus consumption state.
     pub(crate) fn route_pointer(&mut self, input: &UiInputEvent) -> MenuRoute {
         let Some(position) = input.position() else {
@@ -465,22 +567,30 @@ impl MenuSurface {
         let local = Vec2i::new(position.x.saturating_sub(self.rect.x), position.y.saturating_sub(self.rect.y));
         let slot = inside.then(|| self.geometry.slots.iter().position(|bounds| bounds.contains(&local))).flatten();
         self.hovered_slot = slot;
+        if self.keyboard_slot.is_some()
+            && let Some(slot) = slot
+            && self.rows.get(slot).is_some_and(Self::slot_accepts_keyboard)
+        {
+            // Pointer movement inside an active keyboard scope updates the same visible selection
+            // without making pointer hover the persistent source of keyboard state.
+            self.keyboard_slot = Some(slot);
+        }
 
         // Only the left press commits policy. Capture keeps the remainder of that physical gesture
         // out of the application tree even when popup closure removes this surface from traversal.
         if matches!(input, UiInputEvent::MouseDown { button, .. } if button.intersects(MouseButton::LEFT)) {
             self.captured = true;
-            let press = slot.and_then(|slot| match self.rows.get_mut(slot)? {
-                MenuSlot::Branch { .. } => Some(MenuPress::OpenSlot(slot)),
+            let action = slot.and_then(|slot| match self.rows.get_mut(slot)? {
+                MenuSlot::Branch { .. } => Some(MenuAction::OpenSlot(slot)),
                 MenuSlot::Item(item) if item.parameters.enabled => {
                     // Emission only queues a typed value. Application code cannot run until the
-                    // manager has consumed `Close` and released every concrete surface borrow.
+                    // manager has consumed `SubmitAndClose` and released every surface borrow.
                     item.submitted_event.borrow_mut().emit(MenuItemSubmitted);
-                    Some(MenuPress::Close)
+                    Some(MenuAction::SubmitAndClose)
                 }
                 MenuSlot::Item(_) | MenuSlot::Separator => None,
             });
-            return MenuRoute::handled(press);
+            return MenuRoute::handled(action);
         }
         if matches!(input, UiInputEvent::MouseUp { button, .. } if button.intersects(MouseButton::LEFT)) {
             self.captured = false;
@@ -510,7 +620,9 @@ impl MenuSurface {
             let row = self.geometry.slots[slot];
             match entry {
                 MenuSlot::Item(item) => {
-                    if item.parameters.enabled && self.hovered_slot == Some(slot) {
+                    if item.parameters.enabled && self.keyboard_slot == Some(slot) {
+                        ctx.draw_rect(row, style.colors[ControlColor::ButtonFocus as usize]);
+                    } else if item.parameters.enabled && self.hovered_slot == Some(slot) {
                         ctx.draw_rect(row, style.colors[ControlColor::ButtonHover as usize]);
                     }
                     let marker = Recti::new(row.x, row.y, self.geometry.marker_width.max(0), row.height);
@@ -530,7 +642,7 @@ impl MenuSurface {
                 }
                 MenuSlot::Separator => paint_separator(&mut ctx, row),
                 MenuSlot::Branch { label } => {
-                    if self.open_slot == Some(slot) {
+                    if self.open_slot == Some(slot) || self.keyboard_slot == Some(slot) {
                         ctx.draw_rect(row, style.colors[ControlColor::ButtonFocus as usize]);
                     } else if self.hovered_slot == Some(slot) {
                         ctx.draw_rect(row, style.colors[ControlColor::ButtonHover as usize]);
@@ -611,19 +723,19 @@ impl MenuSurface {
 pub(crate) struct MenuRoute {
     /// Whether the menu surface occluded or captured this pointer event.
     pub(crate) handled: bool,
-    /// Optional semantic press policy for the manager to apply after releasing the surface borrow.
-    pub(crate) press: Option<MenuPress>,
+    /// Optional semantic action for the manager to apply after releasing the surface borrow.
+    pub(crate) action: Option<MenuAction>,
 }
 
 impl MenuRoute {
     /// Constructs a result for an event outside a non-captured menu surface.
     fn unhandled() -> Self {
-        Self { handled: false, press: None }
+        Self { handled: false, action: None }
     }
 
-    /// Constructs a consumed result with an optional press-only semantic action.
-    fn handled(press: Option<MenuPress>) -> Self {
-        Self { handled: true, press }
+    /// Constructs a consumed result with an optional pointer-produced semantic action.
+    fn handled(action: Option<MenuAction>) -> Self {
+        Self { handled: true, action }
     }
 }
 

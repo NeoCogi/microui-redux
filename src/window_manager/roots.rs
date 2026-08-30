@@ -33,7 +33,7 @@
 use std::{cell::RefCell, fmt, rc::Rc};
 
 use super::*;
-use crate::menu::{MenuEntry, MenuPress, MenuSlot, MenuSurface};
+use crate::menu::{MenuAction, MenuEntry, MenuSlot, MenuSurface};
 use crate::{MouseButton, Node, UiInputEvent, Vec2i, rect};
 
 use super::root_chrome::{RootChromeGeometry, RootChromePart, RootInteraction, record_root_background, record_root_overlay, root_chrome_geometry};
@@ -1281,6 +1281,11 @@ impl WindowManager {
                 if !self.root_is_visible(owner) {
                     return Err(SurfaceMutationError::InvalidDialogOwner);
                 }
+                if self.keyboard_menu_root.is_some_and(|menu_root| menu_root != root) {
+                    // A newly active modal owns the only keyboard scope; an underlying menu cannot
+                    // remain highlighted or consume keys through that boundary.
+                    self.finish_keyboard_menu(true);
+                }
                 if self.surfaces.active_modal_root() != Some(root) {
                     self.dismiss_active_popups();
                 }
@@ -1291,6 +1296,9 @@ impl WindowManager {
             // Descendant children retain their own visibility intent, but every modal descendant is
             // explicitly closed so showing the family again cannot resurrect a dismissed dialog.
             let affected = self.owned_root_ids(root);
+            if self.keyboard_menu_root.is_some_and(|menu_root| affected.contains(&menu_root)) {
+                self.finish_keyboard_menu(true);
+            }
             if self.active_popup_owner().is_some_and(|owner| affected.contains(&owner)) {
                 self.dismiss_active_popups();
             }
@@ -1327,6 +1335,11 @@ impl WindowManager {
         let popup = self.popup_id(popup)?;
         // Open first so an invalid child path cannot partially replace its retained anchor.
         self.open_popup_id(popup)?;
+        if self.keyboard_menu_root.is_some() {
+            // Successful application-popup replacement already dismissed the menu ancestry. Clear
+            // only its keyboard selection so the newly opened popup remains active.
+            self.finish_keyboard_menu(false);
+        }
         let node = self.surfaces.popup_node_mut(popup).expect("authenticated popup must remain retained");
         let PopupState::Application { anchor: current, .. } = node.popup_mut().expect("popup lookup must return popup policy") else {
             return Err(SurfaceMutationError::UnknownPopup);
@@ -1391,6 +1404,9 @@ impl WindowManager {
     fn bring_window_to_front_id(&mut self, root: RootId) -> Result<(), SurfaceMutationError> {
         let state = self.root_node(root)?.root().expect("root lookup must return root policy");
         if state.mode == RootMode::Modal && state.visible && self.surfaces.active_modal_root() != Some(root) {
+            if self.keyboard_menu_root.is_some_and(|menu_root| menu_root != root) {
+                self.finish_keyboard_menu(true);
+            }
             self.dismiss_active_popups();
         }
         self.surfaces.move_root_to_front(root);
@@ -1404,6 +1420,9 @@ impl WindowManager {
         // Materialize the root subtree before mutating storage so popup dismissal and active-window
         // cleanup can use one stable membership set.
         let removed = self.owned_root_ids(root);
+        if self.keyboard_menu_root.is_some_and(|menu_root| removed.contains(&menu_root)) {
+            self.finish_keyboard_menu(true);
+        }
         if self.active_popup_owner().is_some_and(|owner| removed.contains(&owner)) {
             self.dismiss_active_popups();
         }
@@ -1659,32 +1678,267 @@ impl WindowManager {
         self.menu_surface_mut(key).map(|menu| menu.route_pointer(event))
     }
 
-    /// Applies one concrete menu press after releasing the surface borrow that produced it.
-    fn apply_menu_press(&mut self, surface: SurfaceKey, press: MenuPress, previous_top: Option<PopupId>) {
-        match press {
-            MenuPress::OpenSlot(slot) => {
+    /// Returns the direct menu-popup child opened by one branch slot.
+    fn menu_popup_for_slot(&self, surface: SurfaceKey, slot: usize) -> Option<PopupId> {
+        // Forest parent edges are authoritative, so no parallel submenu map is needed for keyboard
+        // or pointer activation.
+        self.surfaces
+            .nodes
+            .iter()
+            .find(|node| node.parent == Some(surface) && matches!(node.popup(), Some(PopupState::Menu { trigger_slot }) if *trigger_slot == slot))
+            .and_then(|node| match node.key {
+                SurfaceKey::Popup(popup) => Some(popup),
+                SurfaceKey::Root(_) => None,
+            })
+    }
+
+    /// Clears every derived keyboard selection and releases the manager-owned menu scope.
+    fn finish_keyboard_menu(&mut self, dismiss_popups: bool) {
+        if dismiss_popups {
+            // Item submission and explicit Alt/F10 cancellation close the complete menu ancestry.
+            self.dismiss_active_popups();
+        }
+        for node in &mut self.surfaces.nodes {
+            if let Some(root) = node.root_mut()
+                && let Some(bar) = root.menu_bar.as_mut()
+            {
+                bar.clear_keyboard_target();
+            }
+            if let Some(menu) = node.surface.body.menu_mut() {
+                menu.clear_keyboard_target();
+            }
+        }
+        self.keyboard_menu_root = None;
+        self.pending_menu_alt = false;
+    }
+
+    /// Opens one branch popup and selects an edge item for continued keyboard navigation.
+    fn open_menu_slot(&mut self, surface: SurfaceKey, slot: usize, select_last: bool) -> bool {
+        let Some(target) = self.menu_popup_for_slot(surface, slot) else {
+            return false;
+        };
+        let _ = self.menu_surface_mut(surface).is_some_and(|menu| menu.focus_slot(slot));
+        if self.open_popup_id(target).is_err() {
+            return false;
+        }
+        let child = self
+            .menu_surface_mut(SurfaceKey::Popup(target))
+            .expect("a menu branch must own a compact menu-popup surface");
+        if select_last { child.focus_last() } else { child.focus_first() }
+    }
+
+    /// Returns the current menu keyboard surface for one active root scope.
+    fn keyboard_menu_surface(&self, root: RootId) -> SurfaceKey {
+        // The deepest active menu popup is the current scope. With no popup, the intrinsic bar owns
+        // navigation; an unrelated application popup is excluded by session validation.
+        if let Some(popup) = self.surfaces.active_popup
+            && self.surfaces.owning_root(SurfaceKey::Popup(popup)) == Some(root)
+            && matches!(self.surfaces.popup_node(popup).and_then(SurfaceNode::popup), Some(PopupState::Menu { .. }))
+        {
+            SurfaceKey::Popup(popup)
+        } else {
+            SurfaceKey::Root(root)
+        }
+    }
+
+    /// Enters the active window's intrinsic menu bar while preserving application widget focus.
+    fn begin_keyboard_menu(&mut self) -> bool {
+        let Some(SurfaceKey::Root(root)) = self.keyboard_input_surface() else {
+            return false;
+        };
+        if !self
+            .surfaces
+            .root_node(root)
+            .and_then(SurfaceNode::root)
+            .and_then(|state| state.menu_bar.as_ref())
+            .is_some()
+        {
+            return false;
+        }
+
+        // An application popup and an intrinsic menu cannot share the sole transient branch.
+        // Dismiss it before borrowing the bar and installing the first selection.
+        self.dismiss_active_popups();
+        let selected = self.menu_surface_mut(SurfaceKey::Root(root)).is_some_and(MenuSurface::focus_first);
+        if selected {
+            self.keyboard_menu_root = Some(root);
+        }
+        selected
+    }
+
+    /// Moves the selected bar heading and optionally replaces the open top-level popup.
+    fn move_keyboard_menu_heading(&mut self, root: RootId, forward: bool, open: bool) -> bool {
+        let bar = SurfaceKey::Root(root);
+        let Some(menu) = self.menu_surface_mut(bar) else {
+            return false;
+        };
+        if !menu.move_keyboard_focus(forward) {
+            return false;
+        }
+        let Some(slot) = menu.keyboard_slot() else { return false };
+        !open || self.open_menu_slot(bar, slot, false)
+    }
+
+    /// Closes one popup level and restores selection to its parent trigger.
+    fn close_keyboard_menu_level(&mut self, root: RootId) -> bool {
+        let Some(popup) = self.surfaces.active_popup else {
+            self.finish_keyboard_menu(false);
+            return true;
+        };
+        let Some(node) = self.surfaces.popup_node(popup) else {
+            self.finish_keyboard_menu(true);
+            return true;
+        };
+        let Some(parent) = node.parent else {
+            self.finish_keyboard_menu(true);
+            return true;
+        };
+        let PopupState::Menu { trigger_slot } = node.popup().expect("popup key must retain popup policy") else {
+            self.finish_keyboard_menu(true);
+            return true;
+        };
+        let trigger_slot = *trigger_slot;
+        let depth = self.surfaces.popup_depth(popup).expect("active menu popup must retain rooted ancestry");
+        self.truncate_active_popup_path(depth);
+        let _ = self.menu_surface_mut(parent).is_some_and(|menu| menu.focus_slot(trigger_slot));
+        self.keyboard_menu_root = Some(root);
+        true
+    }
+
+    /// Applies a key press inside the current bar or popup scope.
+    fn apply_keyboard_menu_key(&mut self, root: RootId, event: crate::KeyEvent) -> bool {
+        if !event.is_pressed() {
+            // All releases remain manager-owned while the menu scope is active.
+            return true;
+        }
+        let surface = self.keyboard_menu_surface(root);
+        let popup = matches!(surface, SurfaceKey::Popup(_));
+        match event.key {
+            crate::Key::ArrowDown if popup => self.menu_surface_mut(surface).is_some_and(|menu| menu.move_keyboard_focus(true)),
+            crate::Key::ArrowUp if popup => self.menu_surface_mut(surface).is_some_and(|menu| menu.move_keyboard_focus(false)),
+            crate::Key::Home => self.menu_surface_mut(surface).is_some_and(MenuSurface::focus_first),
+            crate::Key::End => self.menu_surface_mut(surface).is_some_and(MenuSurface::focus_last),
+            crate::Key::ArrowRight if !popup => self.move_keyboard_menu_heading(root, true, false),
+            crate::Key::ArrowLeft if !popup => self.move_keyboard_menu_heading(root, false, false),
+            crate::Key::ArrowDown if !popup => {
+                let Some(slot) = self.menu_surface(surface).and_then(MenuSurface::keyboard_slot) else {
+                    return true;
+                };
+                self.open_menu_slot(surface, slot, false)
+            }
+            crate::Key::Enter | crate::Key::Space if !popup && !event.repeat => {
+                let Some(slot) = self.menu_surface(surface).and_then(MenuSurface::keyboard_slot) else {
+                    return true;
+                };
+                self.open_menu_slot(surface, slot, false)
+            }
+            crate::Key::ArrowUp if !popup => {
+                let Some(slot) = self.menu_surface(surface).and_then(MenuSurface::keyboard_slot) else {
+                    return true;
+                };
+                self.open_menu_slot(surface, slot, true)
+            }
+            crate::Key::ArrowRight if popup => match self.menu_surface(surface).and_then(MenuSurface::keyboard_branch_slot) {
+                Some(slot) => self.open_menu_slot(surface, slot, false),
+                None if self.surfaces.popup_depth(match surface {
+                    SurfaceKey::Popup(id) => id,
+                    SurfaceKey::Root(_) => unreachable!(),
+                }) == Some(0) =>
+                {
+                    self.move_keyboard_menu_heading(root, true, true)
+                }
+                None => true,
+            },
+            crate::Key::ArrowLeft if popup => {
+                let SurfaceKey::Popup(popup) = surface else { unreachable!() };
+                if self.surfaces.popup_depth(popup) == Some(0) {
+                    self.move_keyboard_menu_heading(root, false, true)
+                } else {
+                    self.close_keyboard_menu_level(root)
+                }
+            }
+            crate::Key::Enter | crate::Key::Space if popup && !event.repeat => {
+                let action = self.menu_surface_mut(surface).and_then(MenuSurface::activate_keyboard_slot);
+                match action {
+                    Some(MenuAction::OpenSlot(slot)) => self.open_menu_slot(surface, slot, false),
+                    Some(MenuAction::SubmitAndClose) => {
+                        self.finish_keyboard_menu(true);
+                        true
+                    }
+                    None => true,
+                }
+            }
+            crate::Key::Escape => self.close_keyboard_menu_level(root),
+            _ => true,
+        }
+    }
+
+    /// Handles Alt/F10 scope transitions and active menu navigation before widget key routing.
+    fn route_menu_keyboard(&mut self, event: &UiInputEvent) -> bool {
+        let UiInputEvent::Key { event } = event else {
+            // Text input belongs to neither mnemonics nor type-ahead in this MVP, but an active
+            // menu still consumes it so suspended application focus cannot edit behind the menu.
+            return self.keyboard_menu_root.is_some() && matches!(event, UiInputEvent::Text { .. });
+        };
+
+        if event.key == crate::Key::Alt {
+            if event.is_pressed() {
+                self.pending_menu_alt = !event.repeat;
+            } else if std::mem::take(&mut self.pending_menu_alt) {
+                if self.keyboard_menu_root.is_some() {
+                    self.finish_keyboard_menu(true);
+                } else {
+                    let _ = self.begin_keyboard_menu();
+                }
+            }
+            return true;
+        }
+        if event.is_pressed() && self.pending_menu_alt {
+            // Any chorded key cancels Alt-tap activation; this event may continue to a focused
+            // widget when no keyboard menu is already active.
+            self.pending_menu_alt = false;
+        }
+
+        let plain_f10 = event.key == crate::Key::Function(10) && event.modifiers == crate::Modifiers::NONE;
+        if plain_f10 {
+            if event.is_pressed() && !event.repeat {
+                if self.keyboard_menu_root.is_some() {
+                    self.finish_keyboard_menu(true);
+                } else {
+                    let _ = self.begin_keyboard_menu();
+                }
+            }
+            return true;
+        }
+
+        let Some(root) = self.keyboard_menu_root else {
+            return false;
+        };
+        self.apply_keyboard_menu_key(root, *event)
+    }
+
+    /// Applies one pointer-produced menu action after releasing the originating surface borrow.
+    fn apply_menu_action(&mut self, surface: SurfaceKey, action: MenuAction, previous_top: Option<PopupId>) {
+        match action {
+            MenuAction::OpenSlot(slot) => {
                 let target = self
-                    .surfaces
-                    .nodes
-                    .iter()
-                    .find(|node| node.parent == Some(surface) && matches!(node.popup(), Some(PopupState::Menu { trigger_slot }) if *trigger_slot == slot))
-                    .and_then(|node| match node.key {
-                        SurfaceKey::Popup(popup) => Some(popup),
-                        SurfaceKey::Root(_) => None,
-                    })
+                    .menu_popup_for_slot(surface, slot)
                     .expect("a menu branch slot must retain one direct popup child");
                 // Outside dismissal already closed the old path before this bar press reached the
-                // window. A repeated heading press therefore toggles closed instead of reopening.
+                // window. A repeated heading press therefore closes the keyboard scope as well.
                 if matches!(surface, SurfaceKey::Root(_)) && previous_top == Some(target) {
+                    self.finish_keyboard_menu(false);
                     return;
                 }
-                self.open_popup_id(target).expect("a staged menu action must retain an eligible declared popup");
+                let owner = self.surfaces.owning_root(surface).expect("a menu surface must retain one root owner");
+                self.keyboard_menu_root = Some(owner);
+                let _ = self.open_menu_slot(surface, slot, false);
             }
-            MenuPress::Close => {
+            MenuAction::SubmitAndClose => {
                 // The surface already queued the typed event. Arm tail suppression before removing
                 // its popup so the physical release cannot fall through to newly exposed content.
                 self.discard_pointer_capture_tail = true;
-                self.dismiss_active_popups();
+                self.finish_keyboard_menu(true);
             }
         }
     }
@@ -1874,6 +2128,7 @@ impl WindowManager {
         // Resolve event-wide dismissal and menu-toggle context before selecting a recipient. An
         // outside press may change the visible forest and must do so before hit testing below.
         let style = self.style;
+        let menu_keyboard_handled = self.route_menu_keyboard(event);
         let discard_pointer = self.discard_revoked_capture_event(event);
         let menu_press = matches!(event, UiInputEvent::MouseDown { button, .. } if button.intersects(MouseButton::LEFT));
         let previous_top = menu_press.then(|| self.surfaces.active_top_popup()).flatten();
@@ -1889,6 +2144,14 @@ impl WindowManager {
         let hover = (event.is_pointer() && !discard_pointer)
             .then(|| self.input_surface_at(input.mouse_pos))
             .flatten();
+        if matches!(event, UiInputEvent::MouseDown { .. })
+            && self.keyboard_menu_root.is_some()
+            && !hover.is_some_and(|surface| self.menu_contains(surface, input.mouse_pos))
+        {
+            // The outside press already truncated the popup path above. Release only menu keyboard
+            // selection here so the same click can continue into application content.
+            self.finish_keyboard_menu(false);
+        }
         if matches!(event, UiInputEvent::MouseDown { .. })
             && let Some(surface) = hover
         {
@@ -1938,7 +2201,7 @@ impl WindowManager {
 
         // Captured gestures take priority; otherwise route exactly one pointer hit or keyboard
         // target. Menu policy is staged until its concrete surface borrow has been released.
-        let mut staged_menu_press = None;
+        let mut staged_menu_action = None;
         if event.is_pointer() && !discard_pointer {
             let captured = matches!(event, UiInputEvent::MouseDrag { .. } | UiInputEvent::MouseUp { .. })
                 .then(|| self.captured_input_surface())
@@ -1947,7 +2210,7 @@ impl WindowManager {
             if let Some(surface) = captured {
                 if self.menu_surface(surface).is_some_and(MenuSurface::has_capture) {
                     let route = self.route_menu_pointer(surface, event).expect("captured menu surface must remain retained");
-                    staged_menu_press = route.press.map(|press| (surface, press));
+                    staged_menu_action = route.action.map(|action| (surface, action));
                     handled = route.handled;
                 } else {
                     handled = match surface {
@@ -1984,7 +2247,7 @@ impl WindowManager {
                 handled = matches!(surface, SurfaceKey::Root(root) if self.route_chrome_event(root, event));
                 if !handled && self.menu_contains(surface, input.mouse_pos) {
                     let route = self.route_menu_pointer(surface, event).expect("hit menu surface must remain retained");
-                    staged_menu_press = route.press.map(|press| (surface, press));
+                    staged_menu_action = route.action.map(|action| (surface, action));
                     handled = route.handled;
                 }
                 if !handled {
@@ -1994,6 +2257,9 @@ impl WindowManager {
                     }
                 }
             }
+        } else if menu_keyboard_handled {
+            // Menu routing mutated only manager-owned compact surfaces. The ordinary full-tree
+            // update below still lets suspended application widgets observe stable focus state.
         } else if tab_navigation {
             // Both transitions belong to the scope command, so neither Tab press nor release leaks
             // into a newly focused widget. Only the press advances; a held key may still advance
@@ -2042,9 +2308,9 @@ impl WindowManager {
         if self.active_root.is_some_and(|root| !self.root_is_visible(root)) {
             self.active_root = None;
         }
-        if let Some((surface, press)) = staged_menu_press {
+        if let Some((surface, action)) = staged_menu_action {
             // Direct routing has ended its concrete surface borrow before forest visibility changes.
-            self.apply_menu_press(surface, press, previous_top);
+            self.apply_menu_action(surface, action, previous_top);
         }
     }
 

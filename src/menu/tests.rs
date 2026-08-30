@@ -84,3 +84,27 @@ fn popup_text_region_separates_labels_from_shortcuts_and_submenu_arrows() {
     assert!(arrow.x >= branch_region.x && arrow.x + arrow.width <= branch_region.x + branch_region.width);
     assert!(arrow.y >= branch_row.y && arrow.y + arrow.height <= branch_row.y + branch_row.height);
 }
+
+/// Proves that compact menu traversal skips inert rows and wraps without a parallel index list.
+#[test]
+fn keyboard_selection_skips_disabled_items_and_separators_with_wrapping() {
+    let (_, disabled) = MenuItem::create(MenuItemParameters::new("disabled").disabled());
+    let (_, enabled) = MenuItem::create(MenuItemParameters::new("enabled"));
+    let rows = vec![
+        MenuSlot::Item(disabled.record),
+        MenuSlot::Separator,
+        MenuSlot::Branch { label: "branch".into() },
+        MenuSlot::Item(enabled.record),
+    ];
+    let mut surface = MenuSurface::new(rows, true);
+
+    assert!(surface.focus_first());
+    assert_eq!(surface.keyboard_slot(), Some(2));
+    assert!(matches!(surface.activate_keyboard_slot(), Some(MenuAction::OpenSlot(2))));
+    assert!(surface.move_keyboard_focus(true));
+    assert_eq!(surface.keyboard_slot(), Some(3));
+    assert!(surface.move_keyboard_focus(true));
+    assert_eq!(surface.keyboard_slot(), Some(2), "forward traversal must wrap");
+    assert!(surface.move_keyboard_focus(false));
+    assert_eq!(surface.keyboard_slot(), Some(3), "reverse traversal must wrap");
+}
