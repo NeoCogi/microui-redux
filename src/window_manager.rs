@@ -254,6 +254,12 @@ pub(crate) struct WindowManager {
     /// A non-Alt key cancels this candidate so Alt+Down can reach a focused combo without first
     /// entering the window menu.
     pending_menu_alt: bool,
+    /// Whether a manager-owned Ctrl+F6 chord is waiting for its physical F6 release.
+    ///
+    /// Retaining this one transition bit prevents the release from reaching the newly activated
+    /// window even when the user releases Control before F6 and the platform modifier snapshot no
+    /// longer identifies the original chord.
+    window_cycle_key_down: bool,
     /// Ordered input state owned and consumed directly by this window manager.
     input: Input,
     /// Dimensions of the most recent complete update/layout commit.
@@ -273,6 +279,7 @@ impl WindowManager {
             active_root: None,
             keyboard_menu_root: None,
             pending_menu_alt: false,
+            window_cycle_key_down: false,
             input: Input::default(),
             ui_commit: None,
         }

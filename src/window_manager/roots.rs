@@ -834,6 +834,42 @@ impl SurfaceForest {
         }
     }
 
+    /// Selects the adjacent visible ordinary root in activation chronology, with wrapping.
+    fn window_cycle_target(&self, current: Option<RootId>, reverse: bool) -> Option<RootId> {
+        // A keyboard window switch is rare, so materializing only the compact root identities keeps
+        // the wrap and direction policy obvious. Forest chronology remains authoritative even for
+        // structural children whose visible traversal is nested beneath a parent.
+        let roots: Vec<RootId> = self
+            .nodes
+            .iter()
+            .filter_map(|node| match (node.key, node.root()) {
+                (SurfaceKey::Root(root), Some(state))
+                    if matches!(state.mode, RootMode::Normal { .. } | RootMode::Child) && self.root_is_effectively_visible(root) =>
+                {
+                    Some(root)
+                }
+                _ => None,
+            })
+            .collect();
+        let count = roots.len();
+        if count == 0 {
+            return None;
+        }
+
+        // A manager without an explicit active root starts at the appropriate chronological edge.
+        // Normally `current` is the front keyboard surface, so this fallback matters only while no
+        // eligible surface currently owns keyboard routing.
+        let Some(index) = current.and_then(|current| roots.iter().position(|root| *root == current)) else {
+            return Some(if reverse { roots[count - 1] } else { roots[0] });
+        };
+        let target = if reverse {
+            index.checked_sub(1).unwrap_or(count - 1)
+        } else {
+            (index + 1) % count
+        };
+        Some(roots[target])
+    }
+
     /// Appends one visible child-window family in parent-first base traversal order.
     fn append_visible_root_tree(&self, root: RootId, output: &mut Vec<SurfaceKey>) {
         // The caller admits only an effectively visible root. Descending through direct Child
@@ -1917,6 +1953,55 @@ impl WindowManager {
         self.apply_keyboard_menu_key(root, *event)
     }
 
+    /// Handles the Windows-style Ctrl+F6 window-cycle command before widget key routing.
+    fn route_window_keyboard(&mut self, event: &UiInputEvent) -> bool {
+        let UiInputEvent::Key { event } = event else {
+            return false;
+        };
+        if event.key != crate::Key::Function(6) {
+            return false;
+        }
+
+        // Once a qualifying press is accepted, every later F6 transition remains manager-owned
+        // until release. This closes the command boundary even if Control is released first.
+        if self.window_cycle_key_down {
+            if !event.is_pressed() {
+                self.window_cycle_key_down = false;
+            }
+            return true;
+        }
+        let forward_modifiers = crate::Modifiers::CTRL;
+        let reverse_modifiers = crate::Modifiers::CTRL | crate::Modifiers::SHIFT;
+        let is_cycle_chord = event.modifiers == forward_modifiers || event.modifiers == reverse_modifiers;
+        if !is_cycle_chord {
+            return false;
+        }
+        if !event.is_pressed() {
+            // Consume an isolated matching release defensively without inventing an activation.
+            return true;
+        }
+        self.window_cycle_key_down = true;
+
+        // Repeated presses belong to the accepted physical chord but do not race through windows.
+        // An active intrinsic menu or modal dialog likewise retains its current keyboard scope.
+        if event.repeat || self.keyboard_menu_root.is_some() || self.surfaces.active_modal_root().is_some() {
+            return true;
+        }
+
+        // Resolve the source before closing an application popup because that popup may currently
+        // own capture and therefore identify the active ordinary window. Each candidate runtime
+        // remains mounted, preserving its remembered widget focus across the switch.
+        let current = self.keyboard_input_surface().and_then(|surface| self.surfaces.owning_root(surface));
+        self.dismiss_active_popups();
+        let Some(target) = self.surfaces.window_cycle_target(current, event.modifiers == reverse_modifiers) else {
+            return true;
+        };
+        self.active_root = Some(target);
+        self.bring_window_to_front_id(target)
+            .expect("a visible cycle target collected from the forest must remain registered");
+        true
+    }
+
     /// Applies one pointer-produced menu action after releasing the originating surface borrow.
     fn apply_menu_action(&mut self, surface: SurfaceKey, action: MenuAction, previous_top: Option<PopupId>) {
         match action {
@@ -2129,6 +2214,7 @@ impl WindowManager {
         // outside press may change the visible forest and must do so before hit testing below.
         let style = self.style;
         let menu_keyboard_handled = self.route_menu_keyboard(event);
+        let window_keyboard_handled = self.route_window_keyboard(event);
         let discard_pointer = self.discard_revoked_capture_event(event);
         let menu_press = matches!(event, UiInputEvent::MouseDown { button, .. } if button.intersects(MouseButton::LEFT));
         let previous_top = menu_press.then(|| self.surfaces.active_top_popup()).flatten();
@@ -2257,9 +2343,9 @@ impl WindowManager {
                     }
                 }
             }
-        } else if menu_keyboard_handled {
-            // Menu routing mutated only manager-owned compact surfaces. The ordinary full-tree
-            // update below still lets suspended application widgets observe stable focus state.
+        } else if menu_keyboard_handled || window_keyboard_handled {
+            // Manager keyboard routing mutated only scope and compact-surface state. The ordinary
+            // full-tree update below still lets suspended application widgets observe stable focus.
         } else if tab_navigation {
             // Both transitions belong to the scope command, so neither Tab press nor release leaks
             // into a newly focused widget. Only the press advances; a held key may still advance

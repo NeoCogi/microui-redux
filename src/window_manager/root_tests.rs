@@ -444,6 +444,110 @@ fn tab_and_shift_tab_move_window_focus_without_reaching_widget_input() {
 }
 
 #[test]
+fn ctrl_f6_cycles_visible_windows_in_both_directions_and_wraps() {
+    let mut ctx = context();
+    let first = ctx.ui().create_window(Window::new("first", rect(10, 10, 80, 60), empty_content()));
+    let second = ctx.ui().create_window(Window::new("second", rect(110, 10, 80, 60), empty_content()));
+    let third = ctx.ui().create_window(Window::new("third", rect(210, 10, 80, 60), empty_content()));
+    ctx.update_and_render_ui();
+
+    // With no explicit activation, the newest visible root supplies keyboard routing. Forward
+    // traversal wraps from that third root to the oldest and raises the selected root in its layer.
+    ctx.key(KeyEvent::pressed(Key::Function(6), Modifiers::CTRL));
+    ctx.key(KeyEvent::released(Key::Function(6), Modifiers::NONE));
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_root(), Some(first.id()));
+    assert_eq!(ctx.debug_rendered_root_names(), ["second", "third", "first"]);
+
+    // Raising rotates the same activation chronology, so another forward command reaches the next
+    // root. Reverse traversal then returns to the preceding root using Ctrl+Shift+F6.
+    ctx.key(KeyEvent::pressed(Key::Function(6), Modifiers::CTRL));
+    ctx.key(KeyEvent::released(Key::Function(6), Modifiers::CTRL));
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_root(), Some(second.id()));
+    ctx.key(KeyEvent::pressed(Key::Function(6), Modifiers::CTRL | Modifiers::SHIFT));
+    ctx.key(KeyEvent::released(Key::Function(6), Modifiers::NONE));
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_root(), Some(first.id()));
+
+    // Hidden roots retain their window state but leave the cycle immediately. Starting from the
+    // front fallback after hiding the active root therefore wraps directly to the third root.
+    ctx.ui().set_window_visible(&first, false).unwrap();
+    ctx.key(KeyEvent::pressed(Key::Function(6), Modifiers::CTRL));
+    ctx.key(KeyEvent::released(Key::Function(6), Modifiers::NONE));
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_root(), Some(third.id()));
+}
+
+#[test]
+fn ctrl_f6_preserves_each_window_focus_and_consumes_the_complete_chord() {
+    let (first_state, first_body) = OrderedProbe::create(WidgetOption::NONE);
+    let (second_state, second_body) = OrderedProbe::create(WidgetOption::NONE);
+    let mut ctx = context();
+    let first = ctx.ui().create_window(Window::new("first", rect(10, 10, 100, 80), first_body));
+    let second = ctx.ui().create_window(Window::new("second", rect(150, 10, 100, 80), second_body));
+
+    // The newest window initially owns keyboard routing. Focus its probe and establish observable
+    // text delivery before changing the active root entirely through the keyboard.
+    ctx.key(KeyEvent::pressed(Key::Tab, Modifiers::NONE));
+    ctx.text("second");
+    ctx.update_and_render_ui();
+    assert_eq!(second_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
+
+    // One physical chord selects the first root. Repeat and release remain manager-owned even after
+    // Control is absent from the release snapshot, so neither probe sees raw F6 transitions.
+    ctx.key(KeyEvent::pressed(Key::Function(6), Modifiers::CTRL));
+    ctx.key(KeyEvent::pressed(Key::Function(6), Modifiers::CTRL).repeated());
+    ctx.key(KeyEvent::released(Key::Function(6), Modifiers::NONE));
+    ctx.key(KeyEvent::pressed(Key::Tab, Modifiers::NONE));
+    ctx.text("first");
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_root(), Some(first.id()));
+    assert_eq!(first_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
+
+    // Returning to the second root immediately restores its retained probe focus without another
+    // Tab command. Text proves the inactive runtime remembered rather than discarded that target.
+    ctx.key(KeyEvent::pressed(Key::Function(6), Modifiers::CTRL));
+    ctx.key(KeyEvent::released(Key::Function(6), Modifiers::NONE));
+    ctx.text("second again");
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_root(), Some(second.id()));
+    assert_eq!(first_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
+    assert_eq!(second_state.try_read(|state| state.events.clone()), Some(vec!["text", "text"]));
+}
+
+#[test]
+fn ctrl_f6_dismisses_application_popups_but_cannot_escape_a_modal_dialog() {
+    let mut ctx = context();
+    let owner = ctx.ui().create_window(Window::new("owner", rect(10, 10, 100, 80), empty_content()));
+    let other = ctx.ui().create_window(Window::new("other", rect(150, 10, 100, 80), empty_content()));
+    let popup = ctx.ui().create_popup(&owner, "popup", empty_content()).unwrap();
+    let dialog = ctx
+        .ui()
+        .create_dialog(&owner, Window::new("dialog", rect(60, 60, 120, 90), empty_content()))
+        .unwrap();
+    ctx.ui().show_popup_at(&popup, rect(20, 20, 60, 40)).unwrap();
+    ctx.update_and_render_ui();
+
+    // The popup identifies its ordinary owner as the source scope. Cycling closes that transient
+    // branch first and activates the adjacent ordinary window.
+    ctx.key(KeyEvent::pressed(Key::Function(6), Modifiers::CTRL));
+    ctx.key(KeyEvent::released(Key::Function(6), Modifiers::NONE));
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_popup_visible(&popup), Some(false));
+    assert_eq!(ctx.debug_active_root(), Some(other.id()));
+
+    // A visible dialog is the sole eligible keyboard group. The same recognized chord is consumed
+    // without changing the underlying ordinary activation or dismissing the modal root.
+    ctx.ui().set_window_visible(&dialog, true).unwrap();
+    ctx.key(KeyEvent::pressed(Key::Function(6), Modifiers::CTRL));
+    ctx.key(KeyEvent::released(Key::Function(6), Modifiers::NONE));
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_modal_root(), Some(dialog.id()));
+    assert_eq!(ctx.debug_active_root(), Some(other.id()));
+}
+
+#[test]
 fn tab_focused_builtins_share_windows_activation_and_arrow_adjustment() {
     let (button, button_node) = Button::create(ButtonParameters::new("submit"));
     let (checkbox, checkbox_node) = Checkbox::create(CheckboxParameters::new("enabled", false));
@@ -2741,6 +2845,13 @@ fn f10_arrows_escape_and_enter_navigate_nested_menus_and_restore_application_foc
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_active_popup_names(), ["keyboard menus Edit Menu"]);
     assert_eq!(probe.try_read(|state| state.events.clone()), Some(vec!["down", "up"]));
+
+    // Window cycling is itself a manager command, but an open intrinsic menu is the narrower
+    // keyboard scope. It consumes the complete chord without closing or leaving its active branch.
+    ctx.key(KeyEvent::pressed(Key::Function(6), Modifiers::CTRL));
+    ctx.key(KeyEvent::released(Key::Function(6), Modifiers::NONE));
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_popup_names(), ["keyboard menus Edit Menu"]);
 
     // Escape returns from the top-level popup to its heading. Move left to File, open it, skip the
     // disabled item and separator, then descend from Open to the Recent branch.
