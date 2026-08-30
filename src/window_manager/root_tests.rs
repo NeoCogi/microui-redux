@@ -32,7 +32,7 @@ use super::*;
 
 use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, test_atlas};
 use crate::{
-    color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Combo, ComboParameters, ComboSubmitted, Custom,
+    color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Combo, ComboParameters, ComboSubmitted, Custom, Color,
     CustomParameters, Constraints, Context, Dimensioni, Disclosure, DisclosureParameters, Ui, Grid, GridParameters, Key, KeyEvent, KeyboardBehavior, Linear,
     LinearItem, LinearParameters, Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted, MouseButton, Node, ScrollArea,
     ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Slider, SliderParameters, Style, Textbox, TextboxChanged, TextBlock,
@@ -66,6 +66,27 @@ fn empty_content() -> Node {
 
 fn frame_info(dimensions: Dimensioni) -> FrameInfo {
     FrameInfo::try_new(dimensions, color(0, 0, 0, 255)).unwrap()
+}
+
+/// Converts a Style color into the byte representation recorded by the renderer fixture.
+fn recorded_color(color: Color) -> [u8; 4] {
+    // Rendering preserves the public eight-bit color channels without normalization loss.
+    [color.r, color.g, color.b, color.a]
+}
+
+/// Returns the uniform tint of one recorded atlas quad.
+fn atlas_quad_color(event: &RenderEvent) -> Option<[u8; 4]> {
+    let RenderEvent::AtlasQuad(vertices) = event else {
+        return None;
+    };
+    let color = vertices[0].color;
+    vertices.iter().all(|vertex| vertex.color == color).then_some(color)
+}
+
+/// Collects atlas quads whose complete tint matches one semantic Style color.
+fn atlas_quads_with_color(events: &[RenderEvent], color: Color) -> Vec<&RenderEvent> {
+    let expected = recorded_color(color);
+    events.iter().filter(|event| atlas_quad_color(event) == Some(expected)).collect()
 }
 
 /// Converts external rectangle geometry into an equality-friendly test representation.
@@ -455,6 +476,98 @@ fn tab_focused_builtins_share_windows_activation_and_arrow_adjustment() {
     ctx.key(KeyEvent::pressed(Key::ArrowRight, Modifiers::NONE));
     ctx.update_ui(Dimensioni::new(320, 240));
     assert_eq!(slider.value(), Some(6.0));
+}
+
+#[test]
+fn active_window_and_only_its_remembered_widget_use_style_focus_accents() {
+    let (backend, log) = recording_backend(test_atlas());
+    let mut ctx = Context::<_>::new(backend);
+    let style = Style {
+        focus_color: color(7, 17, 29, 255),
+        window_focus_color: color(31, 47, 61, 255),
+        ..Style::default()
+    };
+    ctx.set_style(&style);
+
+    let (_, first_node) = OrderedProbe::create(WidgetOption::NONE);
+    let first_id = first_node.id();
+    let (_, second_node) = OrderedProbe::create(WidgetOption::NONE);
+    let second_id = second_node.id();
+    let first = ctx.ui().create_window(Window::new("first", rect(10, 10, 140, 100), first_node));
+    let second = ctx.ui().create_window(Window::new("second", rect(220, 10, 140, 100), second_node));
+    let dimensions = Dimensioni::new(400, 240);
+    ctx.update_ui(dimensions);
+    let first_rect = ctx.debug_root_node_rect(first.id(), first_id).unwrap();
+    let second_rect = ctx.debug_root_node_rect(second.id(), second_id).unwrap();
+
+    // Focus both independent runtimes, then return activation to the first. The second runtime must
+    // remember its target without painting a second fill, caret, or outline.
+    for target in [first_rect, second_rect, first_rect] {
+        let x = target.x + target.width / 2;
+        let y = target.y + target.height / 2;
+        ctx.mousedown(x, y, MouseButton::LEFT);
+        ctx.mouseup(x, y, MouseButton::LEFT);
+        ctx.update_ui(dimensions);
+    }
+
+    log.clear();
+    ctx.frame(frame_info(dimensions)).render_ui().unwrap();
+    let events = log.snapshot();
+    let widget_focus = atlas_quads_with_color(&events, style.focus_color);
+    assert_eq!(widget_focus.len(), 4, "one inside-aligned widget outline has four rectangles");
+    assert!(
+        widget_focus.iter().all(|event| {
+            let RenderEvent::AtlasQuad(vertices) = event else { unreachable!() };
+            vertices.iter().all(|vertex| vertex.position[0] <= 150.0)
+        }),
+        "the inactive second runtime must not expose its remembered focus"
+    );
+
+    let window_focus = atlas_quads_with_color(&events, style.window_focus_color);
+    assert_eq!(
+        window_focus.len(),
+        5,
+        "the active framed/title window records four border rectangles and one title fill"
+    );
+    assert!(
+        window_focus.iter().all(|event| {
+            let RenderEvent::AtlasQuad(vertices) = event else { unreachable!() };
+            vertices.iter().all(|vertex| vertex.position[0] <= 150.0)
+        }),
+        "only the reactivated first window may use the window focus accent"
+    );
+}
+
+#[test]
+fn tab_focused_disclosure_uses_focus_fill_in_addition_to_the_shared_outline() {
+    let (backend, log) = recording_backend(test_atlas());
+    let mut ctx = Context::<_>::new(backend);
+    let style = Style {
+        focus_color: color(67, 83, 101, 255),
+        window_focus_color: color(109, 127, 149, 255),
+        ..Style::default()
+    };
+    ctx.set_style(&style);
+
+    let (_, disclosure) = Disclosure::create(DisclosureParameters::tree("focused tree row", false, std::iter::empty::<LinearItem>()));
+    let root = ctx.ui().create_window(Window::new("disclosure", rect(20, 20, 180, 100), disclosure));
+    ctx.ui()
+        .set_window_options(&root, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+    let dimensions = Dimensioni::new(320, 240);
+    ctx.update_ui(dimensions);
+    ctx.key(KeyEvent::pressed(Key::Tab, Modifiers::NONE));
+    ctx.update_ui(dimensions);
+
+    log.clear();
+    ctx.frame(frame_info(dimensions)).render_ui().unwrap();
+    let events = log.snapshot();
+    let focus_quads = atlas_quads_with_color(&events, style.focus_color);
+    assert_eq!(
+        focus_quads.len(),
+        5,
+        "the disclosure row fill plus the four-rectangle retained outline must use one focus color"
+    );
 }
 
 #[test]

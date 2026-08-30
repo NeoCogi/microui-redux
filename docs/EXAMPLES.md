@@ -46,6 +46,11 @@ surfaces stay out of Tab order, while the Suzanne viewport remains a Tab stop be
 arrow-key orbiting and text-input W/S zoom. This keeps example-specific interaction consistent with
 the same focus contract as built-in widgets.
 
+The full demo's live Style editor exposes `focus` and `window focus` independently. The former
+updates focused control fills, menu selection, and widget outlines; the latter updates the active
+window title and frame. Every other example inherits their Windows-blue defaults without requiring
+widget-specific focus painting.
+
 ## Full demo
 
 Clone the repository and run the demo with one backend feature:

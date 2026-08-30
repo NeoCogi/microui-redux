@@ -200,6 +200,13 @@ under the pointer. This lets exposed regions of a fullscreen family root scroll 
 child window remains active. Hiding or destroying the active window or one of its structural
 ancestors clears its manager record and any associated menu scope.
 
+The manager projects that same routing decision into paint. Only the current keyboard surface
+receives a visible focused state; inactive runtimes preserve their target without drawing duplicate
+carets, fills, or outlines. Retained traversal defers one `Style::focus_color` widget outline until
+the complete tree, including custom-render barriers, has recorded. The active owner window uses
+`Style::window_focus_color` for its title and framed outer outline. During menu navigation the menu
+selection replaces the suspended widget cue while the owning window remains visibly active.
+
 A fullscreen application surface remains an ordinary independent window, not a special surface
 kind. Give its `Window` a content clip policy, put the root in the desired fixed layer, remove its
 title/resize/padding chrome, keep its rectangle synchronized with the drawable viewport, and create

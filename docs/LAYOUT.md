@@ -65,6 +65,13 @@ suspends widget key/text delivery without discarding the widget that will regain
 menu closes. Custom widgets opt into focus, traversal, and the shared Windows-style action mapping
 through `Widget::keyboard_behavior`; their default behavior is keyboard-inert.
 
+Paint exposes focus only for the manager-selected keyboard surface even though every window runtime
+retains its own target. `Style::focus_color` fills selected controls such as disclosure rows and
+menus and records one clipped, inside-aligned outline around the focused widget after its complete
+ordinary, child, and custom-render output. The outline reuses `max(frame_border_width, 1)` and does
+not affect measurement or hit geometry. `Style::window_focus_color` fills the active title and
+outlines an active framed window; inactive windows retain their ordinary title and border colors.
+
 `ContextFrame` holds the Context borrow needed to serialize paint/submission, but it does not lock independent typed widget or root handles and there is no Context access token. Do not keep a typed-access closure active while retained update/layout/paint can reach that same widget. Framework recursion through a container's scoped child visitor is the intentional exception. If layout-affecting state changes after the last commit, drop any unsubmitted frame and call `update_ui` again before paint.
 
 The application owns `Context` and its weak typed handles as independent Rust values, so the

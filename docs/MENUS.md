@@ -175,7 +175,9 @@ pending Alt tap, allowing combinations such as Alt+Down to continue to a focused
 `Style::menu_foreground` colors menu labels, item text, marks, arrows, and separators.
 `Style::menu_background` fills the persistent bar and popup surfaces. Menu surfaces receive the
 resolved owning window style and paint directly; because they are not widget nodes, they do not run
-a separate menu-node style cascade.
+a separate menu-node style cascade. `Style::focus_color` fills the current keyboard-selected
+heading or row, and `Style::window_focus_color` continues to mark the owning window while menu scope
+suspends its application widget cue.
 
 Keyboard navigation is intrinsic to menu surfaces, but mnemonics and shortcut dispatch remain
 outside the menu component. Shortcut hints are presentation only, and applications still own

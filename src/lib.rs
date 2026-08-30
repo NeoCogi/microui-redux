@@ -130,6 +130,9 @@
 //! surfaces; built-in controls derive Windows-style activation, adjustment, hierarchy, and popup
 //! actions from the same [`KeyboardAction`] mapping. F10 or an unchorded Alt tap transfers routing
 //! temporarily to the owning window's intrinsic menu without discarding application widget focus.
+//! Only the current keyboard scope paints that remembered focus: [`Style::focus_color`] supplies
+//! focused control fills, menu selection, and the final clipped widget outline, while
+//! [`Style::window_focus_color`] supplies the active title and framed-window outline.
 //!
 //! # Text encoding and glyph coverage
 //!

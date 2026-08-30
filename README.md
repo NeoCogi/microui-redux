@@ -12,6 +12,8 @@ Declarative menus are consumed directly into concrete `MenuSurface` values rathe
 popup payload, a temporary menu tree, or a separate controller. Logical `KeyEvent` transitions,
 persistent retained focus, wrapping Tab traversal, shared control actions, and F10/Alt menu
 navigation provide one Windows-style keyboard contract across windows, widgets, and examples.
+Explicit `Style::focus_color` and `Style::window_focus_color` accents make its sole active widget
+and window scope visible without exposing remembered focus in inactive windows.
 
 > **Alpha status:** `0.8.0-alpha.6` is the current alpha of the breaking retained-API
 > redesign. The 0.8 line is not API-compatible with 0.7 and may continue to evolve before the
