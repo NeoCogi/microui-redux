@@ -124,6 +124,13 @@
 //! dispatcher through an accessor into application state. Each event port owns its pending
 //! payloads and accepts one state method.
 //!
+//! Backends forward one logical [`KeyEvent`] per press or release and send composed UTF-8 through
+//! [`Context::text`] separately. Focus persists independently from pointer capture. In the active
+//! eligible window, Tab and Shift+Tab wrap through retained [`KeyboardBehavior::TAB_STOP`]
+//! surfaces; built-in controls derive Windows-style activation, adjustment, hierarchy, and popup
+//! actions from the same [`KeyboardAction`] mapping. F10 or an unchorded Alt tap transfers routing
+//! temporarily to the owning window's intrinsic menu without discarding application widget focus.
+//!
 //! # Text encoding and glyph coverage
 //!
 //! Public text uses Rust [`str`] and [`String`] values and is therefore valid UTF-8. Textbox and

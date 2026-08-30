@@ -55,7 +55,15 @@ place it in a content, fixed, or flexible track.
 - `LinearCrossSize` gives every direction the same shared-line choices: desired content, stretching across exact allocation, or an exact fixed cross extent. `LinearDirection` combines axis and leading edge.
 - Negative desired extents are normalized to zero at the node boundary. A desired zero remains zero; generic containers do not substitute Style-owned fallback cells.
 
-Built-in leaves and containers are mutated through their typed widget handles between commits. After programmatic state/topology changes, call `update_ui` even when no input is pending so layout is synchronized before paint. Feed raw input through methods such as `mousemove`, `mousedown`, `scroll`, `keydown_code`, and `text`; calls are queued without coalescing. A widget receives the current event as `Option<&UiInputEvent>`, while `WidgetUpdateCtx::{mouse_buttons,key_modes,key_codes}` exposes held state after that event was applied.
+Built-in leaves and containers are mutated through their typed widget handles between commits. After programmatic state/topology changes, call `update_ui` even when no input is pending so layout is synchronized before paint. Feed raw input through methods such as `mousemove`, `mousedown`, `scroll`, `key`, and `text`; calls are queued without coalescing. `Context::key` accepts one backend-normalized `KeyEvent` containing logical identity, pressed/released state, the complete modifier snapshot, and repeat state. Printable key transitions remain distinct from `text`, which is the authoritative channel for composed UTF-8 input. A widget receives the current event as `Option<&UiInputEvent>`, while `WidgetUpdateCtx::{mouse_buttons,modifiers}` exposes held state after that event was applied.
+
+Keyboard focus persists after a pointer release and is independent of pointer capture. Within the
+active eligible window, `Tab` and `Shift+Tab` traverse enabled, visible `TAB_STOP` surfaces in
+retained sibling order and wrap at the ends. Hidden, clipped, disabled, and pointer-focus-only
+surfaces are skipped. A modal dialog suspends ordinary-window traversal, and an active menu scope
+suspends widget key/text delivery without discarding the widget that will regain focus when the
+menu closes. Custom widgets opt into focus, traversal, and the shared Windows-style action mapping
+through `Widget::keyboard_behavior`; their default behavior is keyboard-inert.
 
 `ContextFrame` holds the Context borrow needed to serialize paint/submission, but it does not lock independent typed widget or root handles and there is no Context access token. Do not keep a typed-access closure active while retained update/layout/paint can reach that same widget. Framework recursion through a container's scoped child visitor is the intentional exception. If layout-affecting state changes after the last commit, drop any unsubmitted frame and call `update_ui` again before paint.
 

@@ -264,8 +264,10 @@ impl<'a> Ui<'a> {
 /// precede earlier ones. A press raises its target only within the corresponding top-level or sibling
 /// scope and records the ordinary `active_root` independently. Drag remains confined by pointer
 /// capture or the front eligible visual root, while wheel input follows the topmost eligible root
-/// under the pointer. Keyboard and text return to the captured or active root. Captured pointer
-/// release still returns to its widget so local drag state is cleaned up.
+/// under the pointer. Keyboard and text return to persistent focus in the active root; pointer
+/// capture does not replace that focus. Captured pointer release still returns to its widget so
+/// local drag state is cleaned up. The frontmost menu scope temporarily consumes keyboard and text
+/// while preserving the focused application widget that resumes after the menu closes.
 ///
 /// The frontmost visible dialog is modal. It occupies the dedicated band above all application
 /// layers, and the dialog with its active popup path forms the only eligible input group. Pointer

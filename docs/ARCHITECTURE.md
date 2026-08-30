@@ -186,12 +186,19 @@ its dialogs because they occupy the separate modal band.
 
 Visual order is deliberately separate from keyboard activation. A pointer press records the active
 ordinary window (or a popup's ordinary source) without moving its family to a different fixed
-layer. Keyboard and text input return to that exact independent or child window after the press,
-while pointer overlap still follows the visual stack. Pointer drags remain with their captured
-window, but wheel input has no capture lifecycle and goes to the topmost eligible window under the
-pointer. This lets exposed regions of a fullscreen family root scroll or zoom while a child window
-remains active. Modal policy and active pointer capture take precedence. Hiding or destroying the
-active window or one of its structural ancestors clears the record.
+layer, and keyboard/text routing returns to that independent or child window. Each widget runtime
+stores one persistent focused node independently from pointer capture. `Tab` and `Shift+Tab`
+traverse that active runtime's eligible `KeyboardBehavior::TAB_STOP` surfaces in retained sibling
+order, wrap at the ends, and skip hidden, clipped, disabled, or pointer-focus-only surfaces.
+
+The frontmost dialog replaces the ordinary active window as the keyboard scope while modal. An
+intrinsic menu opened by pointer, F10, or an unchorded Alt tap creates a manager-owned keyboard
+scope above the owning window. Menu navigation consumes key/text delivery but preserves the
+runtime's focused widget so closing the menu resumes it exactly. Pointer drags remain with their
+captured window, while wheel input has no capture lifecycle and goes to the topmost eligible window
+under the pointer. This lets exposed regions of a fullscreen family root scroll or zoom while a
+child window remains active. Hiding or destroying the active window or one of its structural
+ancestors clears its manager record and any associated menu scope.
 
 A fullscreen application surface remains an ordinary independent window, not a special surface
 kind. Give its `Window` a content clip policy, put the root in the desired fixed layer, remove its

@@ -153,6 +153,23 @@ menu. The popup remains one retained input surface, so disabled rows and separat
 content behind it while resolving to no menu action. Moving across headings changes hover
 presentation but does not open or switch menus.
 
+The same surfaces provide Windows-style keyboard navigation without a parallel menu model:
+
+- `F10` or an unchorded Alt press and release enters the active window's menu bar; repeating either
+  gesture leaves menu navigation.
+- Left and Right traverse top-level headings; Down opens the selected heading at its first row and
+  Up opens it at its last row. In a popup, Down and Up wrap through enabled items and submenus, Home
+  and End select the first and last eligible rows, Right opens a selected submenu, and Left returns
+  to its parent or moves to the preceding heading.
+- Enter or Space opens the selected heading/submenu or invokes the selected enabled item. Escape
+  closes one popup level and finally leaves the menu bar.
+- Disabled items and separators remain visible and occluding but are skipped by keyboard selection.
+
+Pointer-opened menus enter the same keyboard scope, so subsequent arrows and activation keys work
+without an extra F10 press. While that scope is active, application widget key and text delivery is
+suspended; closing the menu restores the exact persistent widget focus. Any non-Alt key cancels a
+pending Alt tap, allowing combinations such as Alt+Down to continue to a focused combo.
+
 ## Style and current scope
 
 `Style::menu_foreground` colors menu labels, item text, marks, arrows, and separators.
@@ -160,6 +177,6 @@ presentation but does not open or switch menus.
 resolved owning window style and paint directly; because they are not widget nodes, they do not run
 a separate menu-node style cascade.
 
-Menu operation is currently pointer-driven. Keyboard navigation, mnemonics, and shortcut dispatch
-remain outside the menu component. The bar preserves application keyboard focus while pointer menus
-operate.
+Keyboard navigation is intrinsic to menu surfaces, but mnemonics and shortcut dispatch remain
+outside the menu component. Shortcut hints are presentation only, and applications still own
+check/radio state transitions and accelerator policy.

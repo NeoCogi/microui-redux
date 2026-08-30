@@ -28,6 +28,24 @@
   modal eligibility, and stacking; exact non-menu anchors remain in screen space. Live item
   presentation is borrowed through `Ui::menu_item` or `Ui::menu_item_mut`.
 
+## Keyboard controls
+
+Every example uses the shared SDL adapter, which forwards logical key identity, pressed/released
+state, modifier snapshots, and repeat state through `Context::key`; SDL text composition continues
+separately through `Context::text`. The retained examples therefore share these controls:
+
+- `Tab` and `Shift+Tab` move persistent focus forward and backward through eligible controls in the
+  active window, wrapping at either end.
+- Enter and Space invoke buttons and list choices; Space toggles checkboxes; Left/Right adjust
+  sliders; Up/Down adjust number controls; and arrow/activation keys operate disclosures and combos.
+- `F10` or a tap of Alt enters a window menu. Arrow keys, Home, End, Enter, Space, and Escape navigate
+  the active menu branch using the bindings described in the [menu guide](MENUS.md).
+
+Custom drawing in `demo-full` declares its keyboard role explicitly. Pointer-only grid and graph
+surfaces stay out of Tab order, while the Suzanne viewport remains a Tab stop because it implements
+arrow-key orbiting and text-input W/S zoom. This keeps example-specific interaction consistent with
+the same focus contract as built-in widgets.
+
 ## Full demo
 
 Clone the repository and run the demo with one backend feature:

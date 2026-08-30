@@ -9,7 +9,9 @@ context-owned surface forest stores every widget tree and menu surface exactly o
 edges encode structural child-window, dialog, and popup ownership, chronological window order is
 carried by the forest itself, and one deepest-popup key derives the visible transient branch.
 Declarative menus are consumed directly into concrete `MenuSurface` values rather than a generic
-popup payload, a temporary menu tree, or a separate controller.
+popup payload, a temporary menu tree, or a separate controller. Logical `KeyEvent` transitions,
+persistent retained focus, wrapping Tab traversal, shared control actions, and F10/Alt menu
+navigation provide one Windows-style keyboard contract across windows, widgets, and examples.
 
 > **Alpha status:** `0.8.0-alpha.6` is the current alpha of the breaking retained-API
 > redesign. The 0.8 line is not API-compatible with 0.7 and may continue to evolve before the

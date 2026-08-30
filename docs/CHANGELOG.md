@@ -1,7 +1,7 @@
 # Version history and roadmap
 
 ## Roadmap to Version 0.9
-- [ ] Key navigation
+- [x] Key navigation
 - [ ] Async/Multi-Threading?
 - [ ] Theming/Skinning
     - [ ] Win311 Theme
@@ -24,6 +24,12 @@ add a general overlay graph, reparenting, local coordinate spaces, or a second o
     - [x] Hiding a parent removes its descendants from effective visibility while preserving child visibility intent; destruction recursively removes child windows, dialogs, popups, widget trees, and event ports.
     - [x] Dialogs may be owned by independent or child windows and remain in the dedicated modal band. Popup paths retain the transient tier of their effective fixed or modal owner band.
 - [x] Converted `demo-full` to one layer-0 grid family root whose floating windows are content-clipped children below the root Grid/Help menu.
+- [x] Added one backend-neutral keyboard contract and Windows-style retained navigation.
+    - [x] Replaced split key-mode/key-code input with one logical `KeyEvent` carrying transition state, modifiers, and repeat information; composed text remains a separate ordered event.
+    - [x] Made widget focus persistent and independent from pointer capture. `Tab` and `Shift+Tab` wrap through enabled, visible retained `TAB_STOP` surfaces in declaration order.
+    - [x] Shared semantic activation, adjustment, hierarchy, and popup actions across built-in widgets instead of duplicating key interpretation in every control.
+    - [x] Added F10/unchorded-Alt menu entry plus Windows-style heading, popup, submenu, activation, cancellation, disabled-row skipping, and application-focus restoration.
+    - [x] Updated the common SDL example adapter and every retained example's custom keyboard behavior so all example backends exercise the same logical input path.
 - [x] Updated crate/API documentation, architecture, menus, events, examples, README, and downstream public-API coverage for the new contract.
 
 ## Version 0.8.0-alpha.5
@@ -80,7 +86,7 @@ layer.
     - [x] Each item owns its typed `MenuItemSubmitted` source and live enabled/check/radio presentation; top-level menus retain independent auto-sized popup trees.
     - [x] `PopupHandle` gives `show_popup_at` compile-time root-kind safety for anchored placement and popup exclusivity.
     - [x] `demo-full` includes File, View, and Help menus that invoke application behavior and update live item state.
-    - [x] Shortcut hints are presentation-only; keyboard navigation, mnemonics, and automatic check/radio behavior are not implemented in this alpha.
+    - [x] Shortcut hints are presentation-only; keyboard navigation, mnemonics, and automatic check/radio behavior were not implemented in alpha.4.
 
 ## Version 0.8.0-alpha.3
 

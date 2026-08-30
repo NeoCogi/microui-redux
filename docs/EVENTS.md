@@ -460,8 +460,8 @@ heading and submenu-row slots cached by direct `MenuSurface` bodies, then closes
 branch before dispatching an invoked item's event. Item presentation is manager-owned and borrowed
 through `Ui::menu_item` or `Ui::menu_item_mut`; the handle's stable ID selects that record while
 `submitted()` supplies its independent typed endpoint. No command payload, menu coordinator, or public menu-popup handle
-intervenes. See the [menu guide](MENUS.md) for construction, state mutation, and current
-keyboard-navigation scope.
+intervenes. See the [menu guide](MENUS.md) for construction, state mutation, and the shared pointer
+and Windows-style keyboard navigation contract.
 
 ```rust,ignore
 impl Model {
