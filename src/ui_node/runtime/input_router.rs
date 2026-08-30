@@ -28,7 +28,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-//! Input target selection, routing, and transient focus, hover, and capture lifecycle.
+//! Input target selection plus persistent focus and transient pointer-target lifecycle.
 
 use super::*;
 
@@ -44,7 +44,7 @@ use super::*;
 /// `UiRuntime` begins its full mutable update traversal and lets layout or topology changes validate
 /// stale targets without re-entering widget code.
 pub(super) struct InputRouter {
-    /// Node that receives keyboard and text input until focus policy releases it.
+    /// Node that persistently receives keyboard and text input while it remains eligible.
     focus: Option<RuntimeNodeId>,
     /// Deepest topmost node under the pointer for the current committed geometry.
     hover: Option<RuntimeNodeId>,
@@ -56,12 +56,12 @@ pub(super) struct InputRouter {
     pointer_input_enabled: bool,
     /// Whether the current raw event is a pointer event and therefore refreshes hover.
     pointer_event_active: bool,
-    /// Whether the current raw event releases a pointer button.
-    pointer_release_active: bool,
     /// Node receiving the one-update `clicked` transition from the current pointer press.
     clicked: Option<RuntimeNodeId>,
     /// Sole localized raw event waiting for its selected node's update.
     routed_event: Option<(RuntimeNodeId, UiInputEvent)>,
+    /// Allocation-reusing retained-order workspace for sequential keyboard traversal.
+    tab_stops: Vec<RuntimeNodeId>,
     /// Number of already-selected node surfaces examined by routing in the current test cycle.
     #[cfg(test)]
     routed_input_routes: u64,
@@ -77,9 +77,9 @@ impl Default for InputRouter {
             discard_invalidated_capture_events: false,
             pointer_input_enabled: false,
             pointer_event_active: false,
-            pointer_release_active: false,
             clicked: None,
             routed_event: None,
+            tab_stops: Vec::new(),
             #[cfg(test)]
             routed_input_routes: 0,
         }
@@ -114,7 +114,6 @@ impl InputRouter {
         self.routed_event = None;
         self.clicked = None;
         self.pointer_event_active = false;
-        self.pointer_release_active = false;
         #[cfg(test)]
         {
             self.routed_input_routes = 0;
@@ -128,14 +127,13 @@ impl InputRouter {
         debug_assert!(self.routed_event.is_none(), "the previous routed event was not consumed by update");
         self.pointer_input_enabled = pointer_input_enabled;
         self.pointer_event_active = event.is_pointer();
-        self.pointer_release_active = event.is_pointer_release();
         self.clicked = None;
         if self.pointer_event_active {
             // Pointer routing recomputes hover from current committed geometry for every event.
             self.hover = None;
         }
-        // Do not clear focus before target selection. Ordinary pointer-down recipients replace the
-        // current focus below, while PRESERVE_FOCUS controls such as scrollbars leave it untouched.
+        // Do not clear focus before target selection. Focusable pointer-down recipients replace it
+        // below, while passive surfaces such as scrollbars leave it untouched.
     }
 
     /// Clears every transient target while preserving no reference to a retained node.
@@ -143,6 +141,16 @@ impl InputRouter {
         // Widgets reconcile their private interaction modes from the next inactive update
         // snapshot. Clearing router identities therefore needs no out-of-band widget callback.
         self.focus = None;
+        self.hover = None;
+        self.routed_event = None;
+        self.clicked = None;
+        self.invalidate_pointer_capture();
+    }
+
+    /// Clears pointer-derived targets while retaining this tree's keyboard focus identity.
+    pub(super) fn clear_pointer_targets(&mut self) {
+        // Modal exclusion and a competing surface gesture revoke capture and stale hover without
+        // erasing the control that should regain keyboard ownership when its scope is active again.
         self.hover = None;
         self.routed_event = None;
         self.clicked = None;
@@ -168,14 +176,13 @@ impl InputRouter {
     }
 
     /// Records an accepted pointer press and conditionally replaces the keyboard focus owner.
-    fn claim_pointer_press(&mut self, node: RuntimeNodeId, button: MouseButton, preserve_focus: bool) {
-        // Pointer capture is acquired separately from the route result, so a focus-preserving
-        // control can still own a complete drag gesture without receiving keyboard input.
-        if !preserve_focus {
+    fn claim_pointer_press(&mut self, node: RuntimeNodeId, button: MouseButton, focusable: bool) {
+        // Pointer capture is acquired separately from keyboard focus. An explicitly focusable
+        // control replaces the persistent owner; a passive pointer target preserves it naturally.
+        if focusable {
             self.focus = Some(node);
         }
-        // The clicked transition describes pointer targeting rather than keyboard focus and must
-        // therefore still be committed for focus-preserving controls.
+        // The clicked transition describes pointer targeting and is independent from focusability.
         if button.intersects(MouseButton::LEFT) {
             self.clicked = Some(node);
         }
@@ -198,7 +205,6 @@ impl InputRouter {
         prior_hovered: bool,
         input: InputSnapshot,
         opt: WidgetOption,
-        focus_policy: FocusPolicy,
     ) -> (bool, bool, bool, bool) {
         // A disabled surface must observe a completely inactive snapshot even if its identity was
         // selected before a state change disabled it.
@@ -208,14 +214,6 @@ impl InputRouter {
 
         // Pointer events recompute hover during routing; keyboard-only updates preserve it.
         let hovered = if self.pointer_event_active { self.hover == Some(id) } else { prior_hovered };
-
-        if self.focus == Some(id) {
-            // Momentary and drag focus release with the final button; hold-focus widgets retain it.
-            let released_without_hold_focus = self.pointer_release_active && input.mouse_buttons.is_empty() && focus_policy.releases_on_mouse_up();
-            if released_without_hold_focus {
-                self.focus = None;
-            }
-        }
 
         // Active derives from router-owned capture rather than a widget-local drag flag. This lets
         // capture invalidation reconcile every widget through the ordinary update traversal.
@@ -288,6 +286,7 @@ impl InputRouter {
         rect: Recti,
         clip: Recti,
         opt: WidgetOption,
+        keyboard: KeyboardBehavior,
         accepts_event: bool,
         event: &UiInputEvent,
     ) -> RouteResult {
@@ -316,9 +315,9 @@ impl InputRouter {
         let event_hits_rect = event.position().is_some_and(|pos| rect.contains(&pos) && clip.contains(&pos));
         match event {
             UiInputEvent::MouseDown { button, .. } if event_hits_rect => {
-                // Record the click while allowing pointer-only controls to preserve the current
-                // keyboard owner. The Captured result independently establishes drag ownership.
-                self.claim_pointer_press(id, *button, opt.intersects(WidgetOption::PRESERVE_FOCUS));
+                // Focusability controls persistent keyboard ownership; the Captured result below
+                // independently establishes drag ownership for every accepted pointer press.
+                self.claim_pointer_press(id, *button, keyboard.is_focusable());
                 self.push_routed_event(id, event.clone());
                 RouteResult::Captured
             }
@@ -349,7 +348,7 @@ impl InputRouter {
     pub(super) fn sanitize_transient_targets(&mut self, roots: &mut [Node], root_transform: Transform) {
         // The transform remains owned by UiRuntime's committed layout. Passing it in keeps the
         // router independent of measurement, placement, and paint state.
-        self.focus = self.focus.filter(|id| contains_active_node_in(roots, *id, root_transform));
+        self.focus = self.focus.filter(|id| contains_focusable_node_in(roots, *id, root_transform));
         self.hover = self.hover.filter(|id| contains_active_node_in(roots, *id, root_transform));
         if self
             .routed_event
@@ -364,7 +363,7 @@ impl InputRouter {
             self.invalidate_pointer_capture();
         }
 
-        debug_assert!(self.focus.is_none_or(|id| contains_active_node_in(roots, id, root_transform)));
+        debug_assert!(self.focus.is_none_or(|id| contains_focusable_node_in(roots, id, root_transform)));
         debug_assert!(self.hover.is_none_or(|id| contains_active_node_in(roots, id, root_transform)));
         debug_assert!(
             self.routed_event
@@ -398,6 +397,32 @@ impl InputRouter {
     pub(super) fn route_focus_input_event(&mut self, roots: &mut [Node], root_transform: Transform, style: &Style, event: &UiInputEvent) -> bool {
         self.sanitize_transient_targets(roots, root_transform);
         self.route_focus_input_event_to_target(roots, root_transform, style, event)
+    }
+
+    /// Advances persistent keyboard focus through eligible Tab stops in retained tree order.
+    pub(super) fn advance_focus(&mut self, roots: &mut [Node], root_transform: Transform, reverse: bool) -> bool {
+        self.sanitize_transient_targets(roots, root_transform);
+        self.tab_stops.clear();
+        for root in roots.iter() {
+            collect_tab_stops(root, root_transform, &mut self.tab_stops);
+        }
+        if self.tab_stops.is_empty() {
+            self.focus = None;
+            return false;
+        }
+
+        // A missing current identity starts at the direction-appropriate edge. Otherwise move one
+        // position with explicit wrap so behavior does not depend on numeric node identities.
+        let current = self.focus.and_then(|focus| self.tab_stops.iter().position(|candidate| *candidate == focus));
+        let next = match (current, reverse) {
+            (Some(0), true) | (None, true) => self.tab_stops.len() - 1,
+            (Some(index), true) => index - 1,
+            (Some(index), false) if index + 1 == self.tab_stops.len() => 0,
+            (Some(index), false) => index + 1,
+            (None, false) => 0,
+        };
+        self.focus = Some(self.tab_stops[next]);
+        true
     }
 
     /// Routes one pointer event to the capturing node, if there is one.
@@ -629,13 +654,11 @@ impl InputRouter {
             NodeKind::Widget(widget) => {
                 // Leaf event-kind policy is completely router-owned; no Widget query widens
                 // the public trait or permits a handler to influence geometric target selection.
-                let opt = widget
-                    .widget
-                    .try_borrow()
-                    .expect("retained widget invariant violated during input routing")
-                    .widget
-                    .effective_widget_opt();
-                self.route_widget_input(&node.state, local_rect, local_clip, opt, true, &local_event)
+                let (opt, keyboard) = {
+                    let widget = widget.widget.try_borrow().expect("retained widget invariant violated during input routing");
+                    (widget.widget.effective_widget_opt(), widget.widget.keyboard_behavior())
+                };
+                self.route_widget_input(&node.state, local_rect, local_clip, opt, keyboard, true, &local_event)
             }
             NodeKind::Container(container) => {
                 // An overloaded container surface may add a state-dependent filter after target
@@ -643,10 +666,33 @@ impl InputRouter {
                 // owns this target; this also prevents stale surface-local modes from affecting
                 // routing.
                 let opt = container.effective_widget_opt();
+                let keyboard = container.with_widget(|widget| widget.keyboard_behavior());
                 let captured_continuation = captured && matches!(&local_event, UiInputEvent::MouseDrag { .. } | UiInputEvent::MouseUp { .. });
                 let accepts_event = captured_continuation || container.accepts_event(&local_event);
-                self.route_widget_input(&node.state, content_rect, content_clip, opt, accepts_event, &local_event)
+                self.route_widget_input(&node.state, content_rect, content_clip, opt, keyboard, accepts_event, &local_event)
             }
         }
     }
+}
+
+/// Collects eligible Tab stops in stable parent-first retained order.
+fn collect_tab_stops(node: &Node, parent_transform: Transform, output: &mut Vec<RuntimeNodeId>) {
+    // Participation and clipping are the same gates used by pointer and focused-key routing. The
+    // MVP deliberately skips fully clipped descendants until scroll-to-focus policy is introduced.
+    if !node_accepts_input(node) || !node.intersects_clip(parent_transform) {
+        return;
+    }
+    let (opt, keyboard) = node_interaction_config(node);
+    if !opt.intersects(WidgetOption::NO_INTERACT) && keyboard.is_tab_stop() {
+        output.push(node.id());
+    }
+    if !node_children_visible(node) {
+        return;
+    }
+    let child_transform = parent_transform.push(node.state.layout);
+    let _ = node.with_children(|children| {
+        for child in children.iter() {
+            collect_tab_stops(child, child_transform, output);
+        }
+    });
 }

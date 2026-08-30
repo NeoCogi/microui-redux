@@ -55,10 +55,10 @@ impl UiRuntime {
             .unwrap_or_else(|| Recti::new(content_rect.x, content_rect.y, 0, 0));
 
         // Snapshot interaction before invoking user code so all reads during this update are stable.
-        let (opt, focus_policy) = node_interaction_config(node);
+        let (opt, _keyboard) = node_interaction_config(node);
         let id = node.id();
         let was_focused = node.state.focused;
-        let (hovered, focused, clicked, active) = self.input_router.commit_interaction_snapshot(id, node.state.hovered, input, opt, focus_policy);
+        let (hovered, focused, clicked, active) = self.input_router.commit_interaction_snapshot(id, node.state.hovered, input, opt);
         node.state.hovered = hovered;
         node.state.focused = focused;
         node.state.clicked = clicked;

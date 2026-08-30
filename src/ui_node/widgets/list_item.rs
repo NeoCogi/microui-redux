@@ -250,6 +250,10 @@ impl Widget for ListItem {
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         self.paint_widget(ctx);
     }
+
+    fn keyboard_behavior(&self) -> KeyboardBehavior {
+        KeyboardBehavior::TAB_STOP
+    }
 }
 
 impl crate::TypedWidget<ListItemSubmitted> for ListItem {

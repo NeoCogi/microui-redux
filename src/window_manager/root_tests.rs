@@ -33,10 +33,10 @@ use super::*;
 use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, test_atlas};
 use crate::{
     color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Combo, ComboParameters, ComboSubmitted, Custom,
-    CustomParameters, Constraints, Context, Dimensioni, Disclosure, DisclosureParameters, Ui, Grid, GridParameters, Key, KeyEvent, Linear, LinearItem,
-    LinearParameters, Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted, MouseButton, Node, ScrollArea, ScrollAreaOption, ListItem,
-    ListItemParameters, ScrollAreaParameters, Style, Textbox, TextboxChanged, TextBlock, TextBlockParameters, TextboxParameters, TrackSize, TypedWidgetHandle,
-    UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, Modifiers,
+    CustomParameters, Constraints, Context, Dimensioni, Disclosure, DisclosureParameters, Ui, Grid, GridParameters, Key, KeyEvent, KeyboardBehavior, Linear,
+    LinearItem, LinearParameters, Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted, MouseButton, Node, ScrollArea,
+    ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Style, Textbox, TextboxChanged, TextBlock, TextBlockParameters, TextboxParameters,
+    TrackSize, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, Modifiers,
 };
 use crate::render::{FrameInfo, RenderError};
 use std::{
@@ -158,6 +158,12 @@ impl Widget for OrderedProbe {
 
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {
         self.paints += 1;
+    }
+
+    fn keyboard_behavior(&self) -> KeyboardBehavior {
+        // Root routing probes model an ordinary focusable application control. Individual tests
+        // can still disable the complete surface through WidgetOption::NO_INTERACT.
+        KeyboardBehavior::TAB_STOP
     }
 }
 
@@ -387,6 +393,36 @@ fn routed_recipient_gets_one_event_while_every_node_still_updates_in_fifo_order(
 }
 
 #[test]
+fn tab_and_shift_tab_move_window_focus_without_reaching_widget_input() {
+    let (first_state, first) = OrderedProbe::create(WidgetOption::NONE);
+    let (second_state, second) = OrderedProbe::create(WidgetOption::NONE);
+    let (_, content) = Linear::create(LinearParameters::vertical([first, second]));
+    let mut ctx = context();
+    let root = ctx.ui().create_window(Window::new("window", rect(10, 10, 100, 80), content));
+    ctx.ui()
+        .set_window_options(&root, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+
+    // The first forward command starts at the first eligible retained node. Tab's release is also
+    // manager-owned and must not appear as a raw key-up on the newly focused widget.
+    ctx.key(KeyEvent::pressed(Key::Tab, Modifiers::NONE));
+    ctx.key(KeyEvent::released(Key::Tab, Modifiers::NONE));
+    ctx.text("first");
+    ctx.update_ui(Dimensioni::new(320, 240));
+    assert_eq!(first_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
+    assert_eq!(second_state.try_read(|state| state.events.clone()), Some(Vec::new()));
+
+    // A second forward command selects the second control, and Shift+Tab returns to the first.
+    ctx.key(KeyEvent::pressed(Key::Tab, Modifiers::NONE));
+    ctx.text("second");
+    ctx.key(KeyEvent::pressed(Key::Tab, Modifiers::SHIFT));
+    ctx.text("first-again");
+    ctx.update_ui(Dimensioni::new(320, 240));
+    assert_eq!(first_state.try_read(|state| state.events.clone()), Some(vec!["text", "text"]));
+    assert_eq!(second_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
+}
+
+#[test]
 fn update_drains_each_input_into_one_full_update_and_one_followup_layout() {
     let mut ctx = context();
     let root = ctx.ui().create_window(Window::new("window", rect(10, 10, 120, 90), empty_content()));
@@ -510,7 +546,7 @@ fn collapsed_disclosure_skips_descendant_phases_and_drops_targets_only_on_remova
     let (backend, log) = recording_backend(test_atlas());
     let mut ctx = Context::new_test(backend, Dimensioni::new(320, 240));
 
-    let (probe_state, probe_node) = OrderedProbe::create(WidgetOption::HOLD_FOCUS);
+    let (probe_state, probe_node) = OrderedProbe::create(WidgetOption::NONE);
     let probe_id = probe_node.id();
 
     let custom = ctx
@@ -1714,7 +1750,7 @@ fn owner_destruction_stales_popup_handles_and_expires_their_endpoints() {
 
 #[test]
 fn active_root_routes_keyboard_without_crossing_layer_boundaries() {
-    let (low_state, low_content) = OrderedProbe::create(WidgetOption::HOLD_FOCUS);
+    let (low_state, low_content) = OrderedProbe::create(WidgetOption::NONE);
     let mut ctx = context();
     let low = ctx.ui().create_window(Window::new("low", rect(0, 0, 100, 80), low_content));
     let _high = ctx.ui().create_window(Window::new("high", rect(160, 120, 100, 80), empty_content()));
@@ -1907,8 +1943,8 @@ fn active_dialog_accepts_only_its_own_popup_in_the_modal_input_group() {
 }
 
 #[test]
-fn modal_activation_clears_underlying_focus_and_blocks_keyboard_input() {
-    let (state, probe) = OrderedProbe::create(WidgetOption::HOLD_FOCUS);
+fn modal_activation_suspends_underlying_focus_and_restores_it_when_closed() {
+    let (state, probe) = OrderedProbe::create(WidgetOption::NONE);
     let mut ctx = context();
     let window = ctx.ui().create_window(Window::new("window", rect(0, 0, 100, 80), probe));
     ctx.ui()
@@ -1937,14 +1973,14 @@ fn modal_activation_clears_underlying_focus_and_blocks_keyboard_input() {
     assert_eq!(state.try_read(|state| state.events.clone()), Some(vec!["down", "up"]));
 
     ctx.ui().set_window_visible(&dialog, false).unwrap();
-    ctx.text("still unfocused");
+    ctx.text("restored");
     ctx.update_ui(Dimensioni::new(320, 240));
-    assert_eq!(state.try_read(|state| state.events.clone()), Some(vec!["down", "up"]));
+    assert_eq!(state.try_read(|state| state.events.clone()), Some(vec!["down", "up", "text"]));
 
     ctx.mousedown(10, 10, MouseButton::LEFT);
     ctx.text("accepted");
     ctx.update_ui(Dimensioni::new(320, 240));
-    assert_eq!(state.try_read(|state| state.events.clone()), Some(vec!["down", "up", "down", "text"]));
+    assert_eq!(state.try_read(|state| state.events.clone()), Some(vec!["down", "up", "text", "down", "text"]));
 }
 
 #[test]
@@ -2455,9 +2491,9 @@ fn opening_sibling_submenu_replaces_the_complete_descendant_suffix() {
 /// Verifies that menu bar, submenu, and item presses preserve application keyboard focus.
 #[test]
 fn menu_pointer_operations_preserve_preexisting_application_keyboard_focus() {
-    // HOLD_FOCUS gives the application body a persistent keyboard target. Every menu surface uses
-    // PRESERVE_FOCUS, so its independent pointer capture must never replace this retained identity.
-    let (probe, body) = OrderedProbe::create(WidgetOption::HOLD_FOCUS);
+    // The application body is an ordinary persistent keyboard target. Menu surfaces are passive,
+    // so their independent pointer capture must never replace this retained identity.
+    let (probe, body) = OrderedProbe::create(WidgetOption::NONE);
     let body_id = body.id();
     let (_, invoke_item) = MenuItem::create(MenuItemParameters::new("Invoke"));
     let menu_bar = MenuBar::new([Menu::new("Actions").submenu(Menu::new("More").item(invoke_item))]);

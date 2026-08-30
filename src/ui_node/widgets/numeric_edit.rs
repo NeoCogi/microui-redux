@@ -64,16 +64,6 @@ pub(super) fn number_preferred_size(
     Dimensioni::new(width, height)
 }
 
-/// Adds hold-focus while the inline numeric textbox is active.
-pub(super) fn number_effective_widget_opt(opt: WidgetOption, editing: bool) -> WidgetOption {
-    if editing { opt | WidgetOption::HOLD_FOCUS } else { opt }
-}
-
-/// Chooses drag or text-edit focus behavior for numeric widgets.
-pub(super) fn number_focus_policy(editing: bool) -> FocusPolicy {
-    if editing { FocusPolicy::HoldUntilBlur } else { FocusPolicy::DragCapture }
-}
-
 #[derive(Clone, Default, PartialEq)]
 /// Editing buffer for number-style widgets.
 pub(super) struct NumberEditState {

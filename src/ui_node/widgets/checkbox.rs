@@ -215,6 +215,10 @@ impl Widget for Checkbox {
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         self.paint_widget(self.checked, ctx);
     }
+
+    fn keyboard_behavior(&self) -> KeyboardBehavior {
+        KeyboardBehavior::TAB_STOP
+    }
 }
 
 impl crate::TypedWidget<CheckboxChanged> for Checkbox {

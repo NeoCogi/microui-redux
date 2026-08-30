@@ -266,6 +266,12 @@ impl Widget for Button {
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         self.paint_widget(ctx);
     }
+
+    fn keyboard_behavior(&self) -> KeyboardBehavior {
+        // Buttons are ordinary sequential focus targets. Shared activation capabilities are added
+        // independently so focus traversal does not depend on button-specific routing knowledge.
+        KeyboardBehavior::TAB_STOP
+    }
 }
 
 impl crate::TypedWidget<ButtonSubmitted> for Button {

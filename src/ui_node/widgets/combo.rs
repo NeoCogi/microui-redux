@@ -370,6 +370,10 @@ impl Widget for Combo {
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         self.paint_widget(ctx);
     }
+
+    fn keyboard_behavior(&self) -> KeyboardBehavior {
+        KeyboardBehavior::TAB_STOP
+    }
 }
 
 /// Builder associating combo parameters with the concrete runtime.

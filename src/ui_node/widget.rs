@@ -133,10 +133,6 @@ bitflags! {
     pub struct WidgetOption : u32 {
         /// Gives the widget a Style-owned outer border and inset content rectangle.
         const FRAME = 512;
-        /// Keeps keyboard focus after release until routing moves it or the node becomes unavailable.
-        const HOLD_FOCUS = 256;
-        /// Allows pointer interaction and capture without replacing an existing keyboard focus owner.
-        const PRESERVE_FOCUS = 1024;
         /// Consumes scroll input while the widget is hovered.
         const GRAB_SCROLL = 32;
         /// Disables interaction with this widget's own surface; eligible descendants remain interactive.
@@ -150,30 +146,35 @@ bitflags! {
     }
 }
 
-/// High-level focus behavior requested by a widget.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum FocusPolicy {
-    /// Focus is only needed for the click interaction and clears when the button is released.
-    Momentary,
-    /// Focus remains after release until routing moves it to another widget or the node is hidden or removed.
-    HoldUntilBlur,
-    /// Focus captures a pointer drag and clears when the drag button is released.
-    DragCapture,
+bitflags! {
+    #[derive(Copy, Clone, Debug, Default, Eq, Hash, PartialEq)]
+    /// Declarative keyboard capabilities exposed by one retained widget surface.
+    ///
+    /// These flags describe routing eligibility only. Pointer capture remains an independent
+    /// runtime concern, and concrete widgets continue to own their semantic values and typed event
+    /// ports. Built-in controls opt into the smallest applicable set; custom widgets are inert by
+    /// default and can expose explicit behavior through their own [`Widget`] implementation.
+    pub struct KeyboardBehavior: u8 {
+        /// The surface can own persistent keyboard focus after an eligible pointer press.
+        const FOCUSABLE = 1;
+        /// Sequential Tab traversal includes this surface.
+        ///
+        /// Every Tab stop is also treated as focusable; callers need not combine both flags.
+        const TAB_STOP = 2;
+        /// No keyboard focus or traversal behavior.
+        const NONE = 0;
+    }
 }
 
-impl FocusPolicy {
-    /// Derives a policy from widget options.
-    pub fn from_widget_options(opt: WidgetOption) -> Self {
-        if opt.intersects(WidgetOption::HOLD_FOCUS) {
-            Self::HoldUntilBlur
-        } else {
-            Self::Momentary
-        }
+impl KeyboardBehavior {
+    /// Returns whether pointer or programmatic routing may assign keyboard focus to this surface.
+    pub const fn is_focusable(self) -> bool {
+        self.intersects(Self::FOCUSABLE.union(Self::TAB_STOP))
     }
 
-    /// Returns whether focus should clear when the pointer button is released.
-    pub(crate) fn releases_on_mouse_up(self) -> bool {
-        matches!(self, Self::Momentary | Self::DragCapture)
+    /// Returns whether sequential traversal should visit this surface.
+    pub const fn is_tab_stop(self) -> bool {
+        self.intersects(Self::TAB_STOP)
     }
 }
 
@@ -300,9 +301,9 @@ pub trait WidgetBuilder: Sized + 'static {
 /// measurement implementation.
 ///
 /// The runtime routes an event before running that event's complete update traversal, then commits
-/// layout before considering the next queued event. [`Widget::focus_policy`] is the sole focus
-/// policy query. Event-kind filtering belongs to the dispatcher for ordinary widgets and to
-/// [`crate::ContainerWidget`] for an overloaded container surface.
+/// layout before considering the next queued event. [`Widget::keyboard_behavior`] is the sole
+/// keyboard-eligibility query. Event-kind filtering belongs to the dispatcher for ordinary widgets
+/// and to [`crate::ContainerWidget`] for an overloaded container surface.
 pub trait Widget {
     /// Returns the widget options for this state.
     fn widget_opt(&self) -> &WidgetOption;
@@ -333,13 +334,13 @@ pub trait Widget {
     fn effective_widget_opt(&self) -> WidgetOption {
         *self.widget_opt()
     }
-    /// Returns the focus behavior used by generic dispatch.
+    /// Returns declarative keyboard routing capabilities for this widget surface.
     ///
-    /// Override this when options alone do not describe the runtime's focus lifecycle. The
-    /// retained tree owns focused-node identity; widgets can request policy but cannot read,
-    /// replace, or transfer that identity.
-    fn focus_policy(&self) -> FocusPolicy {
-        FocusPolicy::from_widget_options(self.effective_widget_opt())
+    /// Keyboard focus is persistent and owned by retained routing rather than by pointer capture.
+    /// Override this method for focusable custom widgets; the default keeps passive drawing and
+    /// structural containers out of Tab order without another opt-out flag.
+    fn keyboard_behavior(&self) -> KeyboardBehavior {
+        KeyboardBehavior::NONE
     }
 }
 

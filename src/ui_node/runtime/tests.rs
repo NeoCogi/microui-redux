@@ -53,6 +53,7 @@ struct Probe {
     counts: Rc<ProbeCounts>,
     log: Rc<RefCell<Vec<String>>>,
     opt: WidgetOption,
+    keyboard: KeyboardBehavior,
 }
 
 #[derive(Default)]
@@ -103,6 +104,7 @@ impl Probe {
                 counts: counts.clone(),
                 log,
                 opt: WidgetOption::NONE,
+                keyboard: KeyboardBehavior::FOCUSABLE,
             },
             counts,
         )
@@ -125,6 +127,10 @@ impl Widget for Probe {
         self.counts.paints.set(self.counts.paints.get() + 1);
         self.log.borrow_mut().push(format!("{}:paint", self.name));
     }
+
+    fn keyboard_behavior(&self) -> KeyboardBehavior {
+        self.keyboard
+    }
 }
 
 impl crate::LeafWidget for Probe {
@@ -134,11 +140,11 @@ impl crate::LeafWidget for Probe {
     }
 }
 
-struct HoldFocusProbe {
+struct FocusProbe {
     opt: WidgetOption,
 }
 
-impl Widget for HoldFocusProbe {
+impl Widget for FocusProbe {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
     }
@@ -147,12 +153,12 @@ impl Widget for HoldFocusProbe {
 
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 
-    fn focus_policy(&self) -> FocusPolicy {
-        FocusPolicy::HoldUntilBlur
+    fn keyboard_behavior(&self) -> KeyboardBehavior {
+        KeyboardBehavior::TAB_STOP
     }
 }
 
-impl crate::LeafWidget for HoldFocusProbe {
+impl crate::LeafWidget for FocusProbe {
     fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(20, 20)
     }
@@ -269,8 +275,9 @@ impl Widget for CaptureContainer {
 
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 
-    fn focus_policy(&self) -> FocusPolicy {
-        FocusPolicy::DragCapture
+    fn keyboard_behavior(&self) -> KeyboardBehavior {
+        // This overloaded container accepts pointer drag focus but is not a sequential Tab stop.
+        KeyboardBehavior::FOCUSABLE
     }
 }
 
@@ -882,8 +889,8 @@ fn ignored_topmost_pointer_target_never_exposes_a_covered_sibling() {
 }
 
 #[test]
-fn widget_focus_policy_is_authoritative_after_routing_cleanup() {
-    let mut root = Node::widget(HoldFocusProbe { opt: WidgetOption::NONE });
+fn focusable_widget_retains_focus_after_pointer_capture_ends() {
+    let mut root = Node::widget(FocusProbe { opt: WidgetOption::NONE });
     let id = root.id();
     let mut runtime = UiRuntime::new();
     let style = Style::default();
@@ -916,8 +923,51 @@ fn widget_focus_policy_is_authoritative_after_routing_cleanup() {
     assert_eq!(
         runtime.debug_focus_target(),
         Some(id),
-        "the Widget override, not a routing helper argument, must retain focus"
+        "keyboard focus must remain independent from the completed pointer capture"
     );
+}
+
+#[test]
+fn sequential_focus_uses_retained_order_wraps_and_skips_ineligible_nodes() {
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let first = Node::widget(FocusProbe { opt: WidgetOption::NONE });
+    let first_id = first.id();
+
+    // A focusable surface need not be a sequential stop. This distinction lets custom controls
+    // accept explicit pointer focus without unexpectedly joining the window's Tab order.
+    let (mut pointer_focus_only, _) = Probe::new("pointer-focus-only", log.clone());
+    pointer_focus_only.keyboard = KeyboardBehavior::FOCUSABLE;
+    let pointer_focus_only = Node::widget(pointer_focus_only);
+
+    // Disabled nodes remain in the retained tree but are excluded from every input path.
+    let disabled = Node::widget(FocusProbe { opt: WidgetOption::NO_INTERACT });
+
+    // Hidden descendants retain their state and relative position without participating until
+    // their structural parent makes them active again.
+    let hidden = Node::widget(FocusProbe { opt: WidgetOption::NONE });
+    let hidden_id = hidden.id();
+    let (hidden_branch, hidden_branch_state) = TraversalContainer::new([hidden], log.clone());
+    hidden_branch_state.try_update(|branch| branch.visible = false).unwrap();
+
+    let last = Node::widget(FocusProbe { opt: WidgetOption::NONE });
+    let last_id = last.id();
+    let (container, _) = TraversalContainer::new([first, pointer_focus_only, disabled, Node::container(hidden_branch), last], log);
+    let mut root = Node::container(container);
+    let mut runtime = UiRuntime::new();
+    let style = Style::default();
+
+    runtime.begin_update();
+    layout_root(&mut runtime, &mut root, &style, test_atlas());
+
+    assert!(runtime.advance_focus(std::slice::from_mut(&mut root), false));
+    assert_eq!(runtime.debug_focus_target(), Some(first_id));
+    assert!(runtime.advance_focus(std::slice::from_mut(&mut root), false));
+    assert_eq!(runtime.debug_focus_target(), Some(last_id));
+    assert!(runtime.advance_focus(std::slice::from_mut(&mut root), false));
+    assert_eq!(runtime.debug_focus_target(), Some(first_id), "forward traversal must wrap");
+    assert!(runtime.advance_focus(std::slice::from_mut(&mut root), true));
+    assert_eq!(runtime.debug_focus_target(), Some(last_id), "reverse traversal must wrap");
+    assert_ne!(runtime.debug_focus_target(), Some(hidden_id));
 }
 
 /// Verifies that pointer-only capture and persistent keyboard focus can belong to sibling widgets.
@@ -926,10 +976,10 @@ fn focus_preserving_pointer_target_captures_without_replacing_keyboard_focus() {
     // Overlap two children so reverse paint-order targeting selects the second child while the
     // first child remains a valid retained keyboard-focus owner.
     let log = Rc::new(RefCell::new(Vec::new()));
-    let first = Node::widget(HoldFocusProbe { opt: WidgetOption::NONE });
+    let first = Node::widget(FocusProbe { opt: WidgetOption::NONE });
     let first_id = first.id();
     let (mut pointer_only, _) = Probe::new("pointer-only", log.clone());
-    pointer_only.opt = WidgetOption::PRESERVE_FOCUS;
+    pointer_only.keyboard = KeyboardBehavior::NONE;
     let pointer_only = Node::widget(pointer_only);
     let pointer_only_id = pointer_only.id();
     let (container, _) = TraversalContainer::new([first, pointer_only], log);

@@ -43,6 +43,8 @@ pub struct CustomParameters {
     pub font: FontChoice,
     /// Base widget options.
     pub opt: WidgetOption,
+    /// Explicit keyboard capabilities for this otherwise behavior-free surface.
+    pub keyboard: KeyboardBehavior,
 }
 
 impl crate::LeafWidget for Custom {
@@ -60,6 +62,7 @@ impl CustomParameters {
             name: name.into(),
             font: FontChoice::Role(FontRole::Body),
             opt: WidgetOption::NONE,
+            keyboard: KeyboardBehavior::NONE,
         }
     }
 
@@ -69,12 +72,19 @@ impl CustomParameters {
             name: name.into(),
             font: FontChoice::Role(FontRole::Body),
             opt,
+            keyboard: KeyboardBehavior::NONE,
         }
     }
 
     /// Replaces the font used for default measurement.
     pub const fn font(mut self, font: FontChoice) -> Self {
         self.font = font;
+        self
+    }
+
+    /// Replaces the custom surface's explicit keyboard routing capabilities.
+    pub const fn keyboard_behavior(mut self, keyboard: KeyboardBehavior) -> Self {
+        self.keyboard = keyboard;
         self
     }
 }
@@ -87,6 +97,8 @@ pub struct Custom {
     font: FontChoice,
     /// Base widget options.
     opt: WidgetOption,
+    /// Keyboard behavior copied from the one-shot construction parameters.
+    keyboard: KeyboardBehavior,
 }
 
 impl Custom {
@@ -117,6 +129,10 @@ impl Widget for Custom {
     fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {}
 
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+
+    fn keyboard_behavior(&self) -> KeyboardBehavior {
+        self.keyboard
+    }
 }
 
 /// Builder associating custom-render parameters with the concrete runtime.
@@ -131,6 +147,7 @@ impl WidgetBuilder for CustomBuilder {
             name: parameters.name,
             font: parameters.font,
             opt: parameters.opt,
+            keyboard: parameters.keyboard,
         }
     }
 }

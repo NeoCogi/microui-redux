@@ -147,11 +147,11 @@ impl WidgetBuilder for Grid3dWidgetBuilder {
     type Parameters = Grid3dWidgetParameters;
     type W = Grid3dWidget;
 
-    /// Creates a focus-holding, scroll-grabbing leaf over the complete grid body.
+    /// Creates a scroll-grabbing leaf over the complete grid body.
     fn create_widget(parameters: Self::Parameters) -> Self::W {
         Self::W {
             data: parameters.data,
-            opt: WidgetOption::HOLD_FOCUS | WidgetOption::GRAB_SCROLL,
+            opt: WidgetOption::GRAB_SCROLL,
         }
     }
 }
@@ -160,6 +160,10 @@ impl Widget for Grid3dWidget {
     /// Exposes the interaction capabilities used by retained hit testing and routing.
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
+    }
+
+    fn keyboard_behavior(&self) -> KeyboardBehavior {
+        KeyboardBehavior::TAB_STOP
     }
 
     /// Applies left-button arcball motion and wheel zoom to the shared grid camera.
@@ -418,7 +422,7 @@ impl WidgetBuilder for FalloffEditorBuilder {
             ],
             active: None,
             hovered: None,
-            opt: WidgetOption::HOLD_FOCUS,
+            opt: WidgetOption::NONE,
         };
         editor.sanitize();
         editor
@@ -639,6 +643,10 @@ impl Widget for FalloffEditor {
         &self.opt
     }
 
+    fn keyboard_behavior(&self) -> KeyboardBehavior {
+        KeyboardBehavior::TAB_STOP
+    }
+
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         let bounds = ctx.local_rect();
         let graph = Self::graph_rect(bounds);
@@ -833,7 +841,7 @@ impl WidgetBuilder for SuzanneWidgetBuilder {
     fn create_widget(parameters: Self::Parameters) -> Self::W {
         SuzanneWidget {
             data: parameters.data,
-            opt: WidgetOption::HOLD_FOCUS | WidgetOption::GRAB_SCROLL,
+            opt: WidgetOption::GRAB_SCROLL,
         }
     }
 }
@@ -841,6 +849,10 @@ impl WidgetBuilder for SuzanneWidgetBuilder {
 impl Widget for SuzanneWidget {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
+    }
+
+    fn keyboard_behavior(&self) -> KeyboardBehavior {
+        KeyboardBehavior::TAB_STOP
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
@@ -1833,7 +1845,7 @@ impl State {
             ],
             triangle_renderer,
             suzanne_renderer,
-            triangle_widget: Custom::create(CustomParameters::with_opt("Triangle", WidgetOption::HOLD_FOCUS)),
+            triangle_widget: Custom::create(CustomParameters::new("Triangle")),
             painter_widget: PainterDemoBuilder::create_widget(PainterDemoParameters),
             falloff_widget: FalloffEditorBuilder::create_widget(FalloffEditorParameters),
             suzanne_widget: SuzanneWidgetBuilder::create_widget(SuzanneWidgetParameters { data: suzanne_data.clone() }),

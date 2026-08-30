@@ -300,9 +300,9 @@ impl SurfaceBody {
     fn clear_pointer_targets(&mut self) {
         match self {
             Self::Widgets { runtime, .. } => {
-                // Menu presses may preempt an application drag, but must preserve the independent
-                // keyboard-focus identity retained by the application runtime.
-                runtime.clear_pointer_capture();
+                // Manager-owned overlays may preempt an application gesture while preserving the
+                // independent keyboard-focus identity retained by the application runtime.
+                runtime.clear_pointer_targets();
             }
             Self::Menu(menu) => menu.clear_pointer_targets(),
         }
@@ -375,6 +375,14 @@ impl SurfaceBody {
         if let Self::Widgets { root, runtime } = self {
             runtime.route_focus_input_event(std::slice::from_mut(root), style, event);
         }
+    }
+
+    /// Advances focus inside a retained widget body and reports whether it contains a Tab stop.
+    fn advance_focus(&mut self, reverse: bool) -> bool {
+        let Self::Widgets { root, runtime } = self else {
+            return false;
+        };
+        runtime.advance_focus(std::slice::from_mut(root), reverse)
     }
 
     /// Updates widget bodies; menu state is committed synchronously by direct pointer routing.
@@ -574,6 +582,19 @@ impl SurfaceNode {
             menu.clear_pointer_targets();
         }
         self.surface.body.clear_transient_targets();
+    }
+
+    /// Clears chrome and body pointer targets without erasing retained keyboard focus.
+    fn clear_pointer_targets(&mut self) {
+        if let Some(root) = self.root_mut() {
+            root.interaction = RootInteraction::None;
+        }
+        if let Some(root) = self.root_mut()
+            && let Some(menu) = root.menu_bar.as_mut()
+        {
+            menu.clear_pointer_targets();
+        }
+        self.surface.body.clear_pointer_targets();
     }
 
     /// Shows or hides a root without dropping its application state.
@@ -1614,26 +1635,11 @@ impl WindowManager {
         }
     }
 
-    /// Clears capture and focus from every surface except `keep`.
-    fn clear_other_captures(&mut self, keep: SurfaceKey) {
-        // Global capture policy permits at most one concrete surface to retain transient ownership.
-        for node in &mut self.surfaces.nodes {
-            if node.key != keep && node.has_capture() {
-                node.clear_transient_targets();
-            }
-        }
-    }
-
-    /// Revokes competing pointer gestures without clearing any application keyboard focus.
+    /// Revokes competing pointer gestures without clearing any scope's remembered keyboard focus.
     fn clear_other_pointer_captures(&mut self, keep: SurfaceKey) {
         for node in &mut self.surfaces.nodes {
             if node.key != keep {
-                node.surface.body.clear_pointer_targets();
-                if let Some(root) = node.root_mut()
-                    && let Some(menu) = root.menu_bar.as_mut()
-                {
-                    menu.clear_pointer_targets();
-                }
+                node.clear_pointer_targets();
             }
         }
         // A root menu bar and its application body share one forest key, so revoke same-root widget
@@ -1889,12 +1895,10 @@ impl WindowManager {
             self.activate_pointer_surface(surface);
             let owner = self.surfaces.owning_root(surface).expect("visible surface must retain a root ancestor");
             self.bring_window_to_front_id(owner).expect("pointer target owner must remain registered");
-            if self.menu_contains(surface, input.mouse_pos) {
-                // A pointer-only menu gesture may preempt application capture but never keyboard focus.
-                self.clear_other_pointer_captures(surface);
-            } else {
-                self.clear_other_captures(surface);
-            }
+            // A fresh gesture preempts every competing pointer capture but never any scope's
+            // remembered keyboard focus. The selected focusable body target may replace its own
+            // focus during routing below.
+            self.clear_other_pointer_captures(surface);
         }
 
         let drag = (!discard_pointer).then(|| self.drag_input_surface()).flatten();
@@ -1903,6 +1907,20 @@ impl WindowManager {
             _ => hover,
         };
         let keyboard = self.keyboard_input_surface();
+        let tab_navigation = matches!(
+            event,
+            UiInputEvent::Key { event }
+                if event.key == crate::Key::Tab
+                    && !event
+                        .modifiers
+                        .intersects(crate::Modifiers::ALT | crate::Modifiers::CTRL | crate::Modifiers::SUPER)
+        );
+        let focus_traversal = tab_navigation
+            .then(|| match event {
+                UiInputEvent::Key { event } if event.is_pressed() => Some(event.modifiers.intersects(crate::Modifiers::SHIFT)),
+                _ => None,
+            })
+            .flatten();
         let modal = self.surfaces.active_modal_root();
 
         // Stage pointer eligibility in every participating widget runtime before routing one target.
@@ -1976,6 +1994,17 @@ impl WindowManager {
                     }
                 }
             }
+        } else if tab_navigation {
+            // Both transitions belong to the scope command, so neither Tab press nor release leaks
+            // into a newly focused widget. Only the press advances; a held key may still advance
+            // through ordinary repeated press events supplied by the platform.
+            if let (Some(surface), Some(reverse)) = (keyboard, focus_traversal) {
+                self.surfaces
+                    .surface_mut(surface)
+                    .expect("keyboard surface must remain retained")
+                    .body
+                    .advance_focus(reverse);
+            }
         } else if event.is_focus_input()
             && let Some(surface) = keyboard
         {
@@ -1991,9 +2020,13 @@ impl WindowManager {
         let modal = self.surfaces.active_modal_root();
         for index in 0..self.surfaces.nodes.len() {
             let key = self.surfaces.nodes[index].key;
-            let participates = self.surfaces.visible_order.contains(&key) && self.surface_is_eligible(key, modal);
-            if !participates {
+            let visible = self.surfaces.visible_order.contains(&key);
+            if !visible {
                 self.surfaces.nodes[index].clear_transient_targets();
+            } else if !self.surface_is_eligible(key, modal) {
+                // A modal scope suspends underlying keyboard focus rather than destroying it.
+                // Pointer state cannot survive the exclusion and is revoked independently.
+                self.surfaces.nodes[index].clear_pointer_targets();
             }
         }
         for index in 0..self.surfaces.visible_order.len() {

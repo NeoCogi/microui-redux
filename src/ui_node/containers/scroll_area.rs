@@ -34,8 +34,8 @@ use bitflags::bitflags;
 
 use crate::ui_node::widgets::{Scrollbar, ScrollbarAxis, ScrollbarParameters};
 use crate::{
-    ChildParticipation, Container, ContainerWidget, ControlColor, Dimensioni, FocusPolicy, MeasureCtx, Recti, TypedWidgetHandle, UiInputEvent, Vec2i, Widget,
-    WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
+    ChildParticipation, Container, ContainerWidget, ControlColor, Dimensioni, MeasureCtx, Recti, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption,
+    WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
 use super::{Children, ContainerLayoutCtx, Node};
@@ -345,11 +345,6 @@ impl Widget for ScrollArea {
         if let Some(corner) = corner {
             ctx.draw_rect(corner, ctx.style().colors[ControlColor::PanelBG as usize]);
         }
-    }
-
-    fn focus_policy(&self) -> FocusPolicy {
-        // The surface accepts only wheel events, so it never creates persistent pointer focus.
-        FocusPolicy::Momentary
     }
 }
 

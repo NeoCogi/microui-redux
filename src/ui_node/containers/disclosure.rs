@@ -175,8 +175,10 @@ impl Disclosure {
         self.content.try_update_with(items, Linear::replace)?
     }
 
-    const BODY: usize = 0;
-    const HEADER: usize = 1;
+    // Structural child order is also retained keyboard traversal order. Keeping the visible
+    // header first makes Tab reach it before any expanded descendants without a parallel order.
+    const HEADER: usize = 0;
+    const BODY: usize = 1;
 
     fn indent(&self, style: &Style) -> i32 {
         if matches!(self.variant, DisclosureVariant::Tree) {
@@ -281,9 +283,10 @@ impl Widget for DisclosureHeader {
         self.opt & !WidgetOption::FRAME
     }
 
-    fn focus_policy(&self) -> crate::FocusPolicy {
-        // Reuse ordinary option-derived press/release behavior for the addressable header child.
-        crate::FocusPolicy::from_widget_options(self.opt)
+    fn keyboard_behavior(&self) -> crate::KeyboardBehavior {
+        // The addressable header, rather than the structural disclosure container, participates in
+        // sequential focus and later shared activation.
+        crate::KeyboardBehavior::TAB_STOP
     }
 }
 
@@ -372,7 +375,9 @@ fn create_container(parameters: DisclosureParameters) -> (TypedWidgetHandle<Disc
         variant: parameters.variant,
         opt: parameters.opt,
     };
-    let children = Rc::new(RefCell::new([body, Node::widget_internal(header)].into_iter().collect()));
+    // Retained child order mirrors visual order so hit testing, paint, and Tab traversal share one
+    // authoritative topology. Role constants keep layout independent from representation details.
+    let children = Rc::new(RefCell::new([Node::widget_internal(header), body].into_iter().collect()));
     let (_, container) = Container::from_shared_owner(children, widget);
     (handle, container)
 }

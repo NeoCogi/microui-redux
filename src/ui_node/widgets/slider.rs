@@ -320,12 +320,8 @@ impl Widget for Slider {
         self.paint_widget(ctx);
     }
 
-    fn effective_widget_opt(&self) -> WidgetOption {
-        number_effective_widget_opt(self.opt, self.edit.editing)
-    }
-
-    fn focus_policy(&self) -> FocusPolicy {
-        number_focus_policy(self.edit.editing)
+    fn keyboard_behavior(&self) -> KeyboardBehavior {
+        KeyboardBehavior::TAB_STOP
     }
 }
 

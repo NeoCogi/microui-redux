@@ -425,12 +425,8 @@ impl Widget for Textbox {
         self.paint_widget(ctx);
     }
 
-    fn effective_widget_opt(&self) -> WidgetOption {
-        self.opt | WidgetOption::HOLD_FOCUS
-    }
-
-    fn focus_policy(&self) -> FocusPolicy {
-        FocusPolicy::HoldUntilBlur
+    fn keyboard_behavior(&self) -> KeyboardBehavior {
+        KeyboardBehavior::TAB_STOP
     }
 }
 

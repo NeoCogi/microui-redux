@@ -631,8 +631,7 @@ fn textarea_paint(ctx: &mut WidgetPaintCtx<'_>, state: &TextArea, font: FontId) 
 impl Widget for TextArea {
     /// Returns the editable leaf's base options without outer framing or wheel policy.
     fn widget_opt(&self) -> &WidgetOption {
-        // ScrollArea owns frame and GRAB_SCROLL. The inner leaf contributes only dynamic hold focus
-        // through effective_widget_opt below.
+        // ScrollArea owns frame and GRAB_SCROLL. Keyboard focus is declared separately below.
         &WidgetOption::NONE
     }
 
@@ -648,17 +647,10 @@ impl Widget for TextArea {
         self.paint_widget(ctx);
     }
 
-    /// Adds persistent keyboard focus without claiming wheel input from ScrollArea.
-    fn effective_widget_opt(&self) -> WidgetOption {
-        // Pointer presses focus the editor; subsequent scrollbar presses preserve that focus through
-        // their own option while wheel events bubble to the containing ScrollArea.
-        WidgetOption::HOLD_FOCUS
-    }
-
-    /// Retains keyboard focus until another non-preserving pointer target claims it.
-    fn focus_policy(&self) -> FocusPolicy {
-        // The runtime owns focus identity; the editor only requests its standard hold lifecycle.
-        FocusPolicy::HoldUntilBlur
+    fn keyboard_behavior(&self) -> KeyboardBehavior {
+        // The inner editor is the composed control's one Tab stop. Its containing ScrollArea and
+        // structural scrollbars remain passive pointer surfaces and therefore preserve this focus.
+        KeyboardBehavior::TAB_STOP
     }
 }
 

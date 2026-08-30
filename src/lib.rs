@@ -227,8 +227,8 @@ pub mod retained {
     pub use crate::menu::{Menu, MenuBar, MenuItem, MenuItemAccessError, MenuItemHandle, MenuItemMark, MenuItemParameters, MenuItemSubmitted};
     pub use crate::render::{CustomRenderArgs, CustomRenderHandle};
     pub use crate::ui_node::{
-        AvailableSpace, ChildParticipation, Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, Disclosure, DisclosureParameters,
-        FocusPolicy, Grid, GridItem, GridParameters, GridSpan, LeafWidget, Linear, LinearCrossSize, LinearDirection, LinearItem, LinearParameters, MeasureCtx,
+        AvailableSpace, ChildParticipation, Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, Disclosure, DisclosureParameters, Grid,
+        GridItem, GridParameters, GridSpan, KeyboardBehavior, LeafWidget, Linear, LinearCrossSize, LinearDirection, LinearItem, LinearParameters, MeasureCtx,
         Node, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Scrollbar, ScrollbarAxis, ScrollbarChanged, ScrollbarParameters, TrackSize, UiInputEvent,
         Widget, TextWrap, TypedWidgetHandle, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
     };
@@ -256,7 +256,7 @@ pub mod prelude {
     pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame, TextureId};
     pub use crate::retained::{
         ChildParticipation, ChildWindowClip, Children, Container, ContainerLayoutCtx, ContainerWidget, Context, ContextFrame, Ui, CustomRenderArgs,
-        AvailableSpace, Constraints, CustomRenderHandle, Disclosure, DisclosureParameters, FocusPolicy, Grid, GridItem, GridParameters, GridSpan, Linear,
+        AvailableSpace, Constraints, CustomRenderHandle, Disclosure, DisclosureParameters, Grid, GridItem, GridParameters, GridSpan, KeyboardBehavior, Linear,
         LinearCrossSize, LinearDirection, LinearItem, LinearParameters, Node, PopupEvent, PopupHandle, MeasureCtx, SurfaceMutationError, WindowEvent,
         WindowHandle, LayerBinding, DEFAULT_LAYER, MAX_LAYER, MIN_LAYER, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Scrollbar, ScrollbarAxis,
         ScrollbarChanged, ScrollbarParameters, TrackSize, LeafWidget, TextWrap, UiInputEvent, TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption,
@@ -296,10 +296,10 @@ pub use math::{expand_rect, rect, vec2};
 pub use render::TextureId;
 pub use theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, color};
 pub use ui_node::{
-    AvailableSpace, ChildParticipation, Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, Disclosure, DisclosureParameters, FocusPolicy,
-    Grid, GridItem, GridParameters, GridSpan, LeafWidget, Linear, LinearCrossSize, LinearDirection, LinearItem, LinearParameters, MeasureCtx, Node, ScrollArea,
-    ScrollAreaOption, ScrollAreaParameters, Scrollbar, ScrollbarAxis, ScrollbarChanged, ScrollbarParameters, TextWrap, TrackSize, UiInputEvent, Widget,
-    TypedWidgetHandle, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
+    AvailableSpace, ChildParticipation, Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, Disclosure, DisclosureParameters, Grid,
+    GridItem, GridParameters, GridSpan, KeyboardBehavior, LeafWidget, Linear, LinearCrossSize, LinearDirection, LinearItem, LinearParameters, MeasureCtx, Node,
+    ScrollArea, ScrollAreaOption, ScrollAreaParameters, Scrollbar, ScrollbarAxis, ScrollbarChanged, ScrollbarParameters, TextWrap, TrackSize, UiInputEvent,
+    Widget, TypedWidgetHandle, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 pub use widgets::{
     Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters, ColorSwatch,

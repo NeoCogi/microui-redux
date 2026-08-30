@@ -57,8 +57,8 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    ControlColor, Dimensioni, FocusPolicy, MouseButton, Node, Recti, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx,
-    WidgetParameters, WidgetUpdateCtx,
+    ControlColor, Dimensioni, MouseButton, Node, Recti, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters,
+    WidgetUpdateCtx,
 };
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -284,7 +284,7 @@ impl Scrollbar {
             viewport_len,
             content_len,
             offset: parameters.offset.clamp(0, maximum),
-            opt: parameters.opt | WidgetOption::PRESERVE_FOCUS,
+            opt: parameters.opt,
             changed_event: Rc::new(RefCell::new(crate::event::WidgetEventPort::new())),
         };
         Node::typed_widget(widget)
@@ -438,13 +438,6 @@ impl Widget for Scrollbar {
         let geometry = self.geometry(ctx.local_rect(), ctx.style().thumb_size.max(0));
         ctx.draw_rect(geometry.track(), ctx.style().colors[ControlColor::ScrollBase as usize]);
         ctx.draw_rect(geometry.thumb(), ctx.style().colors[ControlColor::ScrollThumb as usize]);
-    }
-
-    /// Requests drag capture without changing the scrollbar's preserve-focus option.
-    fn focus_policy(&self) -> FocusPolicy {
-        // Pointer capture and keyboard focus are independent runtime identities. The scrollbar uses
-        // capture for drags while WidgetOption::PRESERVE_FOCUS leaves an editor focused.
-        FocusPolicy::DragCapture
     }
 }
 

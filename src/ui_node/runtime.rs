@@ -116,11 +116,11 @@ impl UiRuntime {
         self.input_router.clear_transient_targets();
     }
 
-    /// Revokes pointer capture while preserving this tree's keyboard focus owner.
-    pub(crate) fn clear_pointer_capture(&mut self) {
-        // Manager-owned menu interaction must swallow the displaced gesture without making a
-        // pointer-only overlay erase the application's independent keyboard target.
-        self.input_router.invalidate_pointer_capture();
+    /// Revokes every pointer-derived target while preserving persistent keyboard focus.
+    pub(crate) fn clear_pointer_targets(&mut self) {
+        // Manager-owned overlays and modal exclusion may preempt a gesture without erasing the
+        // application's independent keyboard target for this retained scope.
+        self.input_router.clear_pointer_targets();
     }
 
     /// Measures one persistent root node for auto-size without introducing a parallel projection.
@@ -210,6 +210,11 @@ impl UiRuntime {
         self.input_router.route_focus_input_event(roots, self.root_transform, style, event)
     }
 
+    /// Moves keyboard focus to the next or previous eligible Tab stop.
+    pub(crate) fn advance_focus(&mut self, roots: &mut [Node], reverse: bool) -> bool {
+        self.input_router.advance_focus(roots, self.root_transform, reverse)
+    }
+
     /// Commits pointer-capture ownership after the selected target has classified an event.
     pub(crate) fn update_pointer_capture(&mut self, owner: RuntimeNodeId, result: input_router::RouteResult, event: &UiInputEvent, mouse_buttons: MouseButton) {
         self.input_router.update_pointer_capture(owner, result, event, mouse_buttons);
@@ -297,6 +302,27 @@ fn contains_active_node_in(roots: &[Node], id: RuntimeNodeId, root_transform: Tr
     roots.iter().any(|root| contains_active_node(root, id, root_transform))
 }
 
+/// Returns whether one identity remains an eligible persistent keyboard-focus owner.
+fn contains_focusable_node_in(roots: &[Node], id: RuntimeNodeId, root_transform: Transform) -> bool {
+    roots.iter().any(|root| contains_focusable_node(root, id, root_transform))
+}
+
+/// Searches one active branch for a focusable identity without retaining widget borrows.
+fn contains_focusable_node(node: &Node, id: RuntimeNodeId, parent_transform: Transform) -> bool {
+    if !node_accepts_input(node) || !node.intersects_clip(parent_transform) {
+        return false;
+    }
+    if node.id() == id {
+        let (opt, keyboard) = node_interaction_config(node);
+        return !opt.intersects(WidgetOption::NO_INTERACT) && keyboard.is_focusable();
+    }
+    if !node_children_visible(node) {
+        return false;
+    }
+    let child_transform = parent_transform.push(node.state.layout);
+    node.with_children(|children| children.iter().any(|child| contains_focusable_node(child, id, child_transform)))
+}
+
 /// Searches one retained branch while enforcing every layout participation and clip gate.
 fn contains_active_node(node: &Node, id: RuntimeNodeId, parent_transform: Transform) -> bool {
     // A disabled or hidden child filters its complete subtree from router-owned identities.
@@ -341,14 +367,14 @@ fn node_is_framed(node: &Node) -> bool {
     node.data.with_widget(|widget| widget.effective_widget_opt().intersects(WidgetOption::FRAME))
 }
 
-/// Resolves effective event options and focus behavior for the current update pass.
-fn node_interaction_config(node: &Node) -> (WidgetOption, FocusPolicy) {
-    let (mut opt, focus_policy) = node.data.with_widget(|widget| (widget.effective_widget_opt(), widget.focus_policy()));
+/// Resolves effective pointer options and keyboard behavior for the current update pass.
+fn node_interaction_config(node: &Node) -> (WidgetOption, KeyboardBehavior) {
+    let (mut opt, keyboard) = node.data.with_widget(|widget| (widget.effective_widget_opt(), widget.keyboard_behavior()));
     if !node_accepts_input(node) {
         // Keep layout eligibility authoritative without mutating the concrete widget's options.
         opt |= WidgetOption::NO_INTERACT;
     }
-    (opt, focus_policy)
+    (opt, keyboard)
 }
 
 #[cfg(test)]
