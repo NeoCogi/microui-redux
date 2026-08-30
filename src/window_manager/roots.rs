@@ -2030,8 +2030,10 @@ impl WindowManager {
         self.apply_keyboard_menu_key(root, *event)
     }
 
-    /// Dismisses the active application popup on an initial Escape press.
+    /// Dismisses an active application popup and owns only that command's Escape transitions.
     fn route_application_popup_keyboard(&mut self, event: &UiInputEvent) -> bool {
+        // Text and pointer events cannot participate in the popup's keyboard command. Keeping the
+        // variant test at the boundary also leaves their normal routing entirely untouched.
         let UiInputEvent::Key { event } = event else {
             return false;
         };
@@ -2039,11 +2041,25 @@ impl WindowManager {
             return false;
         }
 
-        if !event.is_pressed() || event.repeat {
-            // Releases and repeats are always inert manager transitions. This prevents a dismissed
-            // popup's physical key tail from reaching its restored parent without retaining state.
+        if self.popup_escape_key_down {
+            // The accepted initial press already removed the popup. Continue swallowing its repeat
+            // and release tail so the newly restored parent never observes half of a key gesture.
+            // A release completes ownership; repeats leave it active for the eventual release.
+            if !event.is_pressed() {
+                self.popup_escape_key_down = false;
+            }
             return true;
         }
+
+        // Without an owned popup command, releases and repeats belong to ordinary focused-widget
+        // routing. In particular, never reserve every Escape key-up globally merely to avoid one
+        // small and explicitly representable transition state.
+        if !event.is_pressed() || event.repeat {
+            return false;
+        }
+
+        // Only the concrete active application-popup surface may begin this command. Menu popups,
+        // ordinary roots, and modal scopes retain their independent Escape policies.
         let Some(SurfaceKey::Popup(popup)) = self.active_surface else {
             return false;
         };
@@ -2056,6 +2072,9 @@ impl WindowManager {
             return false;
         }
 
+        // Record command ownership before changing surface topology. The popup disappears below,
+        // so its existence cannot be consulted when repeat or release transitions arrive later.
+        self.popup_escape_key_down = true;
         let depth = self.surfaces.popup_depth(popup).expect("active application popup must retain rooted ancestry");
         self.truncate_active_popup_path(depth);
         true

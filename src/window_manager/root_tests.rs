@@ -479,7 +479,7 @@ fn application_popup_takes_keyboard_focus_and_restores_its_parent_surface() {
 
     // The owner's unreleased pointer capture remains responsible only for its eventual pointer
     // tail; it cannot steal keyboard activation from the popup. Escape owns both key transitions,
-    // dismisses the popup, and restores the parent's remembered path before the following text.
+    // dismisses the popup, and restores the parent's remembered focus before the following text.
     ctx.key(KeyEvent::pressed(Key::Escape, Modifiers::NONE));
     ctx.key(KeyEvent::released(Key::Escape, Modifiers::NONE));
     ctx.text("owner again");
@@ -488,6 +488,35 @@ fn application_popup_takes_keyboard_focus_and_restores_its_parent_surface() {
     assert_eq!(owner_state.try_read(|state| state.events.clone()), Some(vec!["text", "down", "text"]));
     assert_eq!(first_popup_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
     assert_eq!(second_popup_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
+}
+
+#[test]
+/// Proves that popup command ownership does not reserve ordinary Escape transitions globally.
+fn escape_transitions_reach_focused_widget_without_application_popup() {
+    // Use the generic ordered probe because custom widgets receive raw press, repeat, and release
+    // transitions even when built-in controls choose to act only on selected key-down events.
+    let (state, body) = OrderedProbe::create(WidgetOption::NONE);
+    let mut ctx = context();
+    ctx.ui().create_window(Window::new("escape routing", rect(10, 10, 120, 90), body));
+
+    // Establish persistent widget focus through the same public Tab path used by applications.
+    // Tab itself is manager-owned, so it does not contribute an event to the probe's log.
+    ctx.key(KeyEvent::pressed(Key::Tab, Modifiers::NONE));
+    ctx.key(KeyEvent::released(Key::Tab, Modifiers::NONE));
+
+    // With no active application popup, all three Escape transitions belong to the focused widget.
+    // This distinguishes scoped popup command state from a global policy that swallows every
+    // Escape repeat and release after inspecting only the key identity.
+    ctx.key(KeyEvent::pressed(Key::Escape, Modifiers::NONE));
+    ctx.key(KeyEvent::pressed(Key::Escape, Modifiers::NONE).repeated());
+    ctx.key(KeyEvent::released(Key::Escape, Modifiers::NONE));
+    ctx.update_and_render_ui();
+
+    assert_eq!(
+        state.try_read(|state| state.events.clone()),
+        Some(vec!["key-down", "key-down", "key-up"]),
+        "ordinary Escape press, repeat, and release must remain raw focused-widget input"
+    );
 }
 
 #[test]
