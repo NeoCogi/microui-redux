@@ -1332,7 +1332,7 @@ impl WindowManager {
                 if !self.root_is_visible(owner) {
                     return Err(SurfaceMutationError::InvalidDialogOwner);
                 }
-                if self.keyboard_menu_root.is_some_and(|menu_root| menu_root != root) {
+                if self.active_menu_root().is_some_and(|menu_root| menu_root != root) {
                     // A newly active modal owns the only keyboard scope; an underlying menu cannot
                     // remain highlighted or consume keys through that boundary.
                     self.finish_keyboard_menu(true);
@@ -1351,7 +1351,7 @@ impl WindowManager {
             // Descendant children retain their own visibility intent, but every modal descendant is
             // explicitly closed so showing the family again cannot resurrect a dismissed dialog.
             let affected = self.owned_root_ids(root);
-            if self.keyboard_menu_root.is_some_and(|menu_root| affected.contains(&menu_root)) {
+            if self.active_menu_root().is_some_and(|menu_root| affected.contains(&menu_root)) {
                 self.finish_keyboard_menu(true);
             }
             if self.active_popup_owner().is_some_and(|owner| affected.contains(&owner)) {
@@ -1397,7 +1397,7 @@ impl WindowManager {
         let popup = self.popup_id(popup)?;
         // Open first so an invalid child path cannot partially replace its retained anchor.
         self.open_popup_id(popup)?;
-        if self.keyboard_menu_root.is_some() {
+        if self.active_menu_surface().is_some() {
             // Successful application-popup replacement already dismissed the menu ancestry. Clear
             // only its keyboard selection so the newly opened popup remains active.
             self.finish_keyboard_menu(false);
@@ -1472,7 +1472,7 @@ impl WindowManager {
         let mode = state.mode;
         let visible = state.visible;
         if mode == RootMode::Modal && visible && self.surfaces.active_modal_root() != Some(root) {
-            if self.keyboard_menu_root.is_some_and(|menu_root| menu_root != root) {
+            if self.active_menu_root().is_some_and(|menu_root| menu_root != root) {
                 self.finish_keyboard_menu(true);
             }
             self.dismiss_active_popups();
@@ -1492,7 +1492,7 @@ impl WindowManager {
         // Materialize the root subtree before mutating storage so popup dismissal and active-window
         // cleanup can use one stable membership set.
         let removed = self.owned_root_ids(root);
-        if self.keyboard_menu_root.is_some_and(|menu_root| removed.contains(&menu_root)) {
+        if self.active_menu_root().is_some_and(|menu_root| removed.contains(&menu_root)) {
             self.finish_keyboard_menu(true);
         }
         if self.active_popup_owner().is_some_and(|owner| removed.contains(&owner)) {
@@ -1669,6 +1669,29 @@ impl WindowManager {
         }
     }
 
+    /// Returns the exact active surface when it denotes a concrete menu container.
+    fn active_menu_surface(&self) -> Option<SurfaceKey> {
+        let surface = self.active_surface?;
+        match surface {
+            SurfaceKey::Root(_) => {
+                // The root key is shared with its intrinsic bar, so a selected direct child marks
+                // that concrete container as the active route.
+                self.menu_surface(surface)?.keyboard_slot().map(|_| surface)
+            }
+            SurfaceKey::Popup(popup) if matches!(self.surfaces.popup_node(popup).and_then(SurfaceNode::popup), Some(PopupState::Menu { .. })) => {
+                // A menu popup retains its own forest identity even when an empty row collection
+                // provides no direct child to select; Escape must still be able to close it.
+                Some(surface)
+            }
+            SurfaceKey::Popup(_) => None,
+        }
+    }
+
+    /// Returns the root derived from the active concrete menu surface.
+    fn active_menu_root(&self) -> Option<RootId> {
+        self.active_menu_surface().and_then(|surface| self.surfaces.owning_root(surface))
+    }
+
     /// Returns whether a traversal surface belongs to the current input group.
     fn surface_is_eligible(&self, key: SurfaceKey, modal: Option<RootId>) -> bool {
         let Some(owner) = self.surfaces.owning_root(key) else {
@@ -1793,7 +1816,7 @@ impl WindowManager {
             })
     }
 
-    /// Clears every derived keyboard selection and releases the manager-owned menu scope.
+    /// Clears every derived menu-child selection after restoring the parent surface.
     fn finish_keyboard_menu(&mut self, dismiss_popups: bool) {
         if dismiss_popups {
             // Item submission and explicit Alt/F10 cancellation close the complete menu ancestry.
@@ -1809,7 +1832,6 @@ impl WindowManager {
                 menu.clear_keyboard_target();
             }
         }
-        self.keyboard_menu_root = None;
         self.pending_menu_alt = false;
     }
 
@@ -1825,28 +1847,17 @@ impl WindowManager {
         let child = self
             .menu_surface_mut(SurfaceKey::Popup(target))
             .expect("a menu branch must own a compact menu-popup surface");
-        if select_last { child.focus_last() } else { child.focus_first() }
-    }
-
-    /// Returns the current menu keyboard surface for one active root scope.
-    fn keyboard_menu_surface(&self, root: RootId) -> SurfaceKey {
-        // The deepest active menu popup is the current scope. With no popup, the intrinsic bar owns
-        // navigation; an unrelated application popup is excluded by session validation.
-        if let Some(popup) = self.surfaces.active_popup
-            && self.surfaces.owning_root(SurfaceKey::Popup(popup)) == Some(root)
-            && matches!(self.surfaces.popup_node(popup).and_then(SurfaceNode::popup), Some(PopupState::Menu { .. }))
-        {
-            SurfaceKey::Popup(popup)
-        } else {
-            SurfaceKey::Root(root)
-        }
+        let selected = if select_last { child.focus_last() } else { child.focus_first() };
+        // The popup forest identity and the selected local child now describe the complete menu
+        // focus route; no separate manager-owned menu-root mirror is necessary.
+        self.active_surface = Some(SurfaceKey::Popup(target));
+        selected
     }
 
     /// Enters the active window's intrinsic menu bar while preserving application widget focus.
     fn begin_keyboard_menu(&mut self) -> bool {
-        let Some(SurfaceKey::Root(root)) = self.keyboard_input_surface() else {
-            return false;
-        };
+        let Some(surface) = self.keyboard_input_surface() else { return false };
+        let Some(root) = self.surfaces.owning_root(surface) else { return false };
         if !self
             .surfaces
             .root_node(root)
@@ -1862,7 +1873,7 @@ impl WindowManager {
         self.dismiss_active_popups();
         let selected = self.menu_surface_mut(SurfaceKey::Root(root)).is_some_and(MenuSurface::focus_first);
         if selected {
-            self.keyboard_menu_root = Some(root);
+            self.active_surface = Some(SurfaceKey::Root(root));
         }
         selected
     }
@@ -1881,7 +1892,7 @@ impl WindowManager {
     }
 
     /// Closes one popup level and restores selection to its parent trigger.
-    fn close_keyboard_menu_level(&mut self, root: RootId) -> bool {
+    fn close_keyboard_menu_level(&mut self) -> bool {
         let Some(popup) = self.surfaces.active_popup else {
             self.finish_keyboard_menu(false);
             return true;
@@ -1902,7 +1913,6 @@ impl WindowManager {
         let depth = self.surfaces.popup_depth(popup).expect("active menu popup must retain rooted ancestry");
         self.truncate_active_popup_path(depth);
         let _ = self.menu_surface_mut(parent).is_some_and(|menu| menu.focus_slot(trigger_slot));
-        self.keyboard_menu_root = Some(root);
         true
     }
 
@@ -1912,7 +1922,9 @@ impl WindowManager {
             // All releases remain manager-owned while the menu scope is active.
             return true;
         }
-        let surface = self.keyboard_menu_surface(root);
+        let Some(surface) = self.active_menu_surface() else {
+            return false;
+        };
         let popup = matches!(surface, SurfaceKey::Popup(_));
         match event.key {
             crate::Key::ArrowDown if popup => self.menu_surface_mut(surface).is_some_and(|menu| menu.move_keyboard_focus(true)),
@@ -1955,7 +1967,7 @@ impl WindowManager {
                 if self.surfaces.popup_depth(popup) == Some(0) {
                     self.move_keyboard_menu_heading(root, false, true)
                 } else {
-                    self.close_keyboard_menu_level(root)
+                    self.close_keyboard_menu_level()
                 }
             }
             crate::Key::Enter | crate::Key::Space if popup && !event.repeat => {
@@ -1969,7 +1981,7 @@ impl WindowManager {
                     None => true,
                 }
             }
-            crate::Key::Escape => self.close_keyboard_menu_level(root),
+            crate::Key::Escape => self.close_keyboard_menu_level(),
             _ => true,
         }
     }
@@ -1979,14 +1991,14 @@ impl WindowManager {
         let UiInputEvent::Key { event } = event else {
             // Text input belongs to neither mnemonics nor type-ahead in this MVP, but an active
             // menu still consumes it so suspended application focus cannot edit behind the menu.
-            return self.keyboard_menu_root.is_some() && matches!(event, UiInputEvent::Text { .. });
+            return self.active_menu_surface().is_some() && matches!(event, UiInputEvent::Text { .. });
         };
 
         if event.key == crate::Key::Alt {
             if event.is_pressed() {
                 self.pending_menu_alt = !event.repeat;
             } else if std::mem::take(&mut self.pending_menu_alt) {
-                if self.keyboard_menu_root.is_some() {
+                if self.active_menu_surface().is_some() {
                     self.finish_keyboard_menu(true);
                 } else {
                     let _ = self.begin_keyboard_menu();
@@ -2003,7 +2015,7 @@ impl WindowManager {
         let plain_f10 = event.key == crate::Key::Function(10) && event.modifiers == crate::Modifiers::NONE;
         if plain_f10 {
             if event.is_pressed() && !event.repeat {
-                if self.keyboard_menu_root.is_some() {
+                if self.active_menu_surface().is_some() {
                     self.finish_keyboard_menu(true);
                 } else {
                     let _ = self.begin_keyboard_menu();
@@ -2012,7 +2024,7 @@ impl WindowManager {
             return true;
         }
 
-        let Some(root) = self.keyboard_menu_root else {
+        let Some(root) = self.active_menu_root() else {
             return false;
         };
         self.apply_keyboard_menu_key(root, *event)
@@ -2088,7 +2100,7 @@ impl WindowManager {
 
         // Repeated presses belong to the accepted physical chord but do not race through windows.
         // An active intrinsic menu or modal dialog likewise retains its current keyboard scope.
-        if event.repeat || self.keyboard_menu_root.is_some() || self.surfaces.active_modal_root().is_some() {
+        if event.repeat || self.active_menu_surface().is_some() || self.surfaces.active_modal_root().is_some() {
             return true;
         }
 
@@ -2119,8 +2131,6 @@ impl WindowManager {
                     self.finish_keyboard_menu(false);
                     return;
                 }
-                let owner = self.surfaces.owning_root(surface).expect("a menu surface must retain one root owner");
-                self.keyboard_menu_root = Some(owner);
                 let _ = self.open_menu_slot(surface, slot, false);
             }
             MenuAction::SubmitAndClose => {
@@ -2341,7 +2351,7 @@ impl WindowManager {
             .then(|| self.input_surface_at(input.mouse_pos))
             .flatten();
         if matches!(event, UiInputEvent::MouseDown { .. })
-            && self.keyboard_menu_root.is_some()
+            && self.active_menu_surface().is_some()
             && !hover.is_some_and(|surface| self.menu_contains(surface, input.mouse_pos))
         {
             // The outside press already truncated the popup path above. Release only menu keyboard
@@ -2592,16 +2602,11 @@ impl WindowManager {
         let active_mode = self.active_popup_owner().and_then(|owner| self.surfaces.stacking_mode(owner));
         // A menu owns keyboard presentation without discarding application focus. Otherwise the
         // same surface selected by routing is the only runtime allowed to paint remembered focus.
-        let focus_surface = if self.keyboard_menu_root.is_some() {
-            None
-        } else {
-            self.keyboard_input_surface()
-        };
+        let menu_root = self.active_menu_root();
+        let focus_surface = if menu_root.is_some() { None } else { self.keyboard_input_surface() };
         // Window activation follows the current modal/menu/keyboard scope and is independent from
         // fixed-layer stacking. Popup focus projects to its sole owning window for chrome paint.
-        let active_window = self
-            .keyboard_menu_root
-            .or_else(|| focus_surface.and_then(|surface| self.surfaces.owning_root(surface)));
+        let active_window = menu_root.or_else(|| focus_surface.and_then(|surface| self.surfaces.owning_root(surface)));
 
         // Only parentless Normal roots enter global layer scans. Each recursive call paints one
         // structurally atomic family while still sandwiching children between parent content and

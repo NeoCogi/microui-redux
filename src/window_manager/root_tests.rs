@@ -486,6 +486,47 @@ fn application_popup_takes_keyboard_focus_and_restores_its_parent_surface() {
 }
 
 #[test]
+/// Proves that entering a menu replaces an application popup and retains one surface focus route.
+fn menu_keyboard_scope_replaces_an_application_popup_surface() {
+    let (owner_state, owner_body) = OrderedProbe::create(WidgetOption::NONE);
+    let (_, menu_item) = MenuItem::create(MenuItemParameters::new("Open"));
+    let menu_bar = MenuBar::new([Menu::new("File").item(menu_item)]);
+    let mut ctx = context();
+    let owner = ctx
+        .ui()
+        .create_window(Window::new("surface switching", rect(10, 10, 160, 100), owner_body).menu_bar(menu_bar));
+    let popup = ctx.ui().create_popup(&owner, "choices", empty_content()).unwrap();
+
+    // Preserve application focus, then make the application popup the exact active surface.
+    ctx.key(KeyEvent::pressed(Key::Tab, Modifiers::NONE));
+    ctx.text("owner");
+    ctx.update_and_render_ui();
+    ctx.ui().show_popup_at(&popup, rect(40, 40, 80, 50)).unwrap();
+    ctx.update_and_render_ui();
+
+    // F10 transfers selection to the root-owned menu container and closes the incompatible popup
+    // branch. Text is consumed by that menu focus route rather than reaching the owner widget.
+    ctx.key(KeyEvent::pressed(Key::Function(10), Modifiers::NONE));
+    ctx.text("blocked");
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_popup_visible(&popup), Some(false));
+    assert!(ctx.debug_active_popup_names().is_empty());
+    assert_eq!(owner_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
+
+    // ArrowDown moves the same active route into the concrete menu-popup surface. Escape restores
+    // the bar, and a second F10 exits to the owner's independently remembered widget path.
+    ctx.key(KeyEvent::pressed(Key::ArrowDown, Modifiers::NONE));
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_popup_names(), ["surface switching File Menu"]);
+    ctx.key(KeyEvent::pressed(Key::Escape, Modifiers::NONE));
+    ctx.key(KeyEvent::pressed(Key::Function(10), Modifiers::NONE));
+    ctx.text("owner again");
+    ctx.update_and_render_ui();
+    assert!(ctx.debug_active_popup_names().is_empty());
+    assert_eq!(owner_state.try_read(|state| state.events.clone()), Some(vec!["text", "text"]));
+}
+
+#[test]
 fn ctrl_f6_cycles_visible_windows_in_both_directions_and_wraps() {
     let mut ctx = context();
     let first = ctx.ui().create_window(Window::new("first", rect(10, 10, 80, 60), empty_content()));

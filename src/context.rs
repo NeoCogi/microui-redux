@@ -267,9 +267,9 @@ impl<'a> Ui<'a> {
 /// confined by pointer capture or the front eligible visual root, while wheel input follows the
 /// topmost eligible root under the pointer. Keyboard and text return to persistent focus in the
 /// active surface; pointer capture does not replace that focus. Captured pointer release still
-/// returns to its widget so local drag state is cleaned up. The frontmost menu scope temporarily
-/// consumes keyboard and text while preserving the focused application widget that resumes after
-/// the menu closes.
+/// returns to its widget so local drag state is cleaned up. An active menu uses the same surface
+/// identity plus its concrete container's selected direct child; it temporarily consumes keyboard
+/// and text while preserving the focused application widget that resumes after the menu closes.
 ///
 /// The frontmost visible dialog is modal. It occupies the dedicated band above all application
 /// layers, and the dialog with its active popup path forms the only eligible input group. Pointer

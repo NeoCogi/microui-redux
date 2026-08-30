@@ -205,13 +205,15 @@ its focused widget. An application popup closes before the switch; hidden roots 
 intrinsic menu retains its narrower keyboard scope, and an active modal dialog cannot be escaped.
 
 The frontmost dialog replaces the ordinary active window as the keyboard scope while modal. An
-intrinsic menu opened by pointer, F10, or an unchorded Alt tap creates a manager-owned keyboard
-scope above the owning window. Menu navigation consumes key/text delivery but preserves the
-runtime's focused widget so closing the menu resumes it exactly. Pointer drags remain with their
-captured window, while wheel input has no capture lifecycle and goes to the topmost eligible window
-under the pointer. This lets exposed regions of a fullscreen family root scroll or zoom while a
-child window remains active. Hiding or destroying the active window or one of its structural
-ancestors clears its manager record and any associated menu scope.
+intrinsic menu opened by pointer, F10, or an unchorded Alt tap uses the same active `SurfaceKey` as
+windows and application popups. The root key denotes its intrinsic menu bar; each menu-popup key
+denotes the concrete popup container. A `MenuSurface` retains only its selected direct-child slot,
+so the active surface plus that slot is the menu's complete focus route and no parallel
+`keyboard_menu_root` exists. Menu navigation consumes key/text delivery but preserves the widget
+runtime's path so closing the menu resumes it exactly. Pointer drags remain with their captured
+surface, while wheel input has no capture lifecycle and goes to the topmost eligible surface under
+the pointer. Hiding or destroying an active surface or structural ancestor repairs that same
+identity from the retained forest.
 
 The manager projects that same routing decision into paint. Only the current keyboard surface
 receives a visible focused state; inactive runtimes preserve their target without drawing duplicate

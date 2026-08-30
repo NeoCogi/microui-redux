@@ -62,10 +62,11 @@ runtime owns one complete root-to-target focus path; nested containers do not ma
 mutable focus pointers. Within the active eligible surface, `Tab` and `Shift+Tab` replace that path
 with the next enabled, visible `TAB_STOP` surface in retained sibling order and wrap at the ends.
 Hidden, clipped, disabled, and pointer-focus-only surfaces are skipped. A modal dialog suspends
-ordinary-window traversal, and an active menu scope suspends widget key/text delivery without
-discarding the widget that will regain focus when the menu closes. Custom widgets opt into focus,
-traversal, and the shared Windows-style action mapping through `Widget::keyboard_behavior`; their
-default behavior is keyboard-inert.
+ordinary-window traversal. A menu uses the common active surface identity plus its concrete
+container's selected direct-child slot; it suspends widget key/text delivery without discarding the
+widget path that will resume when the menu closes. Custom widgets opt into focus, traversal, and
+the shared Windows-style action mapping through `Widget::keyboard_behavior`; their default behavior
+is keyboard-inert.
 
 An application popup is a concrete keyboard surface with its own widget runtime. Showing it selects
 its first eligible target after layout; Tab wraps inside that tree, while Escape or focus transfer

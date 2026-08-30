@@ -30,9 +30,10 @@
 //! Compact declarative window menus.
 //!
 //! A menu bar is consumed into one manager-owned surface for the bar and one surface for each popup.
-//! Each surface measures, hit-tests, anchors, and paints all logical slots from the same concrete
-//! data. Menu rows are values rather than retained widget subtrees: there is no per-row container,
-//! interaction node, or three-cell presentation tree.
+//! Each [`MenuSurface`] is a concrete one-level container whose row values are its direct children;
+//! it measures, hit-tests, anchors, and paints those children from the same data. There is no
+//! per-row widget subtree, interaction node, or three-cell presentation tree. Keyboard focus is the
+//! manager's active surface identity plus that container's selected direct-child slot.
 
 use std::{cell::RefCell, fmt, rc::Rc};
 
@@ -374,7 +375,7 @@ pub(crate) struct MenuSurface {
     /// Absence is represented structurally so no valid future slot index can collide with an
     /// out-of-band sentinel value.
     hovered_slot: Option<usize>,
-    /// Slot selected by the active keyboard-menu scope.
+    /// Direct child selected while this menu container is the active keyboard surface.
     ///
     /// Pointer hover stays independent so closing the scope can restore ordinary hover rendering
     /// without reconstructing either state from the other.
