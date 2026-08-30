@@ -65,13 +65,16 @@ enabled, visible `TAB_STOP` surface in retained sibling order and wrap at the en
 Hidden, clipped, disabled, and pointer-focus-only surfaces are skipped. A modal dialog suspends
 ordinary-window traversal. A menu uses the common active surface identity plus its concrete
 container's selected direct-child slot; it suspends widget key/text delivery without discarding the
-widget path that will resume when the menu closes. Custom widgets opt into focus, traversal, and
+focused node ID that will resume when the menu closes. Custom widgets opt into focus, traversal, and
 the shared Windows-style action mapping through `Widget::keyboard_behavior`; their default behavior
 is keyboard-inert.
 
 An application popup is a concrete keyboard surface with its own widget runtime. Showing it selects
 its first eligible target after layout; Tab wraps inside that tree, while Escape or focus transfer
-outside the popup restores the direct parent's remembered focused ID.
+outside the popup restores the direct parent's remembered focused ID. When the popup accepts an
+initial Escape press, the manager owns only that command's repeats and matching release so they
+cannot leak into the restored parent. Without such a popup command, ordinary Escape press, repeat,
+and release transitions remain available to the focused application widget.
 
 At the window level, `Ctrl+F6` and `Ctrl+Shift+F6` cycle forward and backward through visible
 ordinary roots. Each root's runtime keeps its focused ID while inactive; modal dialogs and open
@@ -83,6 +86,22 @@ menus and records one clipped, inside-aligned outline around the focused widget 
 ordinary, child, and custom-render output. The outline reuses `max(frame_border_width, 1)` and does
 not affect measurement or hit geometry. `Style::window_focus_color` fills the active title and
 outlines an active framed window; inactive windows retain their ordinary title and border colors.
+
+## Focus performance validation
+
+The retained-runtime baseline isolates both repeated Tab traversal and focused-key delivery on a
+single node and a 128-deep production container tree:
+
+```bash
+cargo test --release retained_runtime_baseline \
+  -- --ignored --nocapture --test-threads=1
+```
+
+It warms the Tab-stop workspace and routing state before measurement, asserts that both operations
+perform zero allocations, and prints nanoseconds per call for local comparison. Timing has no
+platform-dependent pass threshold. This provides evidence for the focused-ID representation while
+keeping a future route-cache decision dependent on measured tree shapes rather than embedding a
+second persistent ancestry model preemptively.
 
 `ContextFrame` holds the Context borrow needed to serialize paint/submission, but it does not lock independent typed widget or root handles and there is no Context access token. Do not keep a typed-access closure active while retained update/layout/paint can reach that same widget. Framework recursion through a container's scoped child visitor is the intentional exception. If layout-affecting state changes after the last commit, drop any unsubmitted frame and call `update_ui` again before paint.
 

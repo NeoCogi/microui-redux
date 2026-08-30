@@ -41,6 +41,9 @@ separately through `Context::text`. The retained examples therefore share these 
   retains keyboard ownership.
 - Enter and Space invoke buttons and list choices; Space toggles checkboxes; Left/Right adjust
   sliders; Up/Down adjust number controls; and arrow/activation keys operate disclosures and combos.
+- Escape dismisses an active application popup without forwarding the accepted command's repeats
+  or release to the restored parent. When no popup begins that command, custom focused widgets keep
+  receiving the complete raw Escape transition stream forwarded by the shared SDL adapter.
 - `F10` or a tap of Alt enters a window menu. Arrow keys, Home, End, Enter, Space, and Escape navigate
   the active menu branch using the bindings described in the [menu guide](MENUS.md).
 

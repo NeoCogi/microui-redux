@@ -259,6 +259,9 @@ impl<S: 'static> Application<S> {
                     Event::KeyDown {
                         keycode: Some(keycode), keymod, repeat, ..
                     } => {
+                        // Forward every logical press with SDL's complete modifier and repeat
+                        // snapshot. The UI manager can then scope popup/menu commands precisely,
+                        // while ordinary focused widgets retain presses that no command accepts.
                         if let Some(key) = map_key(keycode) {
                             let mut event = microui::KeyEvent::pressed(key, map_modifiers(keymod));
                             event.repeat = repeat;
@@ -266,6 +269,9 @@ impl<S: 'static> Application<S> {
                         }
                     }
                     Event::KeyUp { keycode: Some(keycode), keymod, .. } => {
+                        // Releases are forwarded independently rather than inferred from held
+                        // state. This lets a popup consume only the tail it owns and leaves an
+                        // unmatched Escape release observable to a custom focused widget.
                         if let Some(key) = map_key(keycode) {
                             self.ctx.key(microui::KeyEvent::released(key, map_modifiers(keymod)));
                         }
