@@ -44,8 +44,8 @@ use super::*;
 /// `UiRuntime` begins its full mutable update traversal and lets layout or topology changes validate
 /// stale targets without re-entering widget code.
 pub(super) struct InputRouter {
-    /// Root-to-target path that persistently receives keyboard and text input while eligible.
-    focus: Option<FocusPath>,
+    /// Node that persistently receives keyboard and text input while it remains eligible.
+    focus: Option<RuntimeNodeId>,
     /// Deepest topmost node under the pointer for the current committed geometry.
     hover: Option<RuntimeNodeId>,
     /// Node that owns drag continuation and the matching pointer release.
@@ -65,33 +65,6 @@ pub(super) struct InputRouter {
     /// Number of already-selected node surfaces examined by routing in the current test cycle.
     #[cfg(test)]
     routed_input_routes: u64,
-}
-
-/// One authoritative root-to-target route through a retained widget tree.
-///
-/// Each identity after the first names a direct child of the preceding identity. Storing the
-/// complete path in the root runtime is logically equivalent to a focus pointer on every
-/// container, while keeping focus replacement and invalidation atomic. Containers therefore own
-/// only their semantic state and child collection; the input router owns the sole active route.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-struct FocusPath {
-    /// Stable retained identities in root-to-target order.
-    nodes: Vec<RuntimeNodeId>,
-}
-
-impl FocusPath {
-    /// Returns the final focusable node selected by this path.
-    fn target(&self) -> Option<RuntimeNodeId> {
-        // An empty path represents no usable route and is never installed as active focus.
-        self.nodes.last().copied()
-    }
-
-    /// Replaces this path with one validated root-to-target identity slice.
-    fn replace(&mut self, nodes: &[RuntimeNodeId]) {
-        // Retain the existing allocation so repeated pointer and Tab focus changes remain warm.
-        self.nodes.clear();
-        self.nodes.extend_from_slice(nodes);
-    }
 }
 
 impl Default for InputRouter {
@@ -202,17 +175,16 @@ impl InputRouter {
         self.routed_event = Some((node, event));
     }
 
-    /// Records an accepted pointer press and conditionally replaces the keyboard focus path.
-    fn claim_pointer_press(&mut self, path: &[RuntimeNodeId], button: MouseButton, focusable: bool) {
+    /// Records an accepted pointer press and conditionally replaces the keyboard focus owner.
+    fn claim_pointer_press(&mut self, node: RuntimeNodeId, button: MouseButton, focusable: bool) {
         // Pointer capture is acquired separately from keyboard focus. An explicitly focusable
-        // control replaces the complete persistent route; a passive target preserves it naturally.
+        // control replaces the persistent owner; a passive pointer target preserves it naturally.
         if focusable {
-            let focus = self.focus.get_or_insert_with(FocusPath::default);
-            focus.replace(path);
+            self.focus = Some(node);
         }
         // The clicked transition describes pointer targeting and is independent from focusability.
         if button.intersects(MouseButton::LEFT) {
-            self.clicked = path.last().copied();
+            self.clicked = Some(node);
         }
     }
 
@@ -245,7 +217,7 @@ impl InputRouter {
 
         // Active derives from router-owned capture rather than a widget-local drag flag. This lets
         // capture invalidation reconcile every widget through the ordinary update traversal.
-        let focused = self.focus.as_ref().and_then(FocusPath::target) == Some(id);
+        let focused = self.focus == Some(id);
         let active = self.capture == Some(id) && input.mouse_buttons.intersects(MouseButton::LEFT);
         let clicked = self.clicked == Some(id);
         (hovered, focused, clicked, active)
@@ -259,16 +231,8 @@ impl InputRouter {
 
     /// Returns the focused identity for retained routing tests.
     #[cfg(test)]
-    pub(super) fn debug_focus_target(&self) -> Option<RuntimeNodeId> {
-        // Tests inspect only the leaf target while the router retains the complete private path.
-        self.focus.as_ref().and_then(FocusPath::target)
-    }
-
-    /// Returns the number of direct-child identities in the retained focus path for tests.
-    #[cfg(test)]
-    pub(super) fn debug_focus_depth(&self) -> usize {
-        // Depth exposes path structure without leaking or permitting mutation of private IDs.
-        self.focus.as_ref().map_or(0, |path| path.nodes.len())
+    pub(super) const fn debug_focus_target(&self) -> Option<RuntimeNodeId> {
+        self.focus
     }
 
     /// Returns the hovered identity for retained routing tests.
@@ -285,16 +249,8 @@ impl InputRouter {
 
     /// Installs explicit transient identities for tests that exercise invalidation boundaries.
     #[cfg(test)]
-    pub(super) fn debug_set_transient_targets(
-        &mut self,
-        roots: &[Node],
-        root_transform: Transform,
-        focus: Option<RuntimeNodeId>,
-        hover: Option<RuntimeNodeId>,
-        capture: Option<RuntimeNodeId>,
-    ) {
-        // Resolve a realistic direct-child path so tests exercise the same validation as routing.
-        self.focus = focus.and_then(|target| find_focus_path_in(roots, target, root_transform));
+    pub(super) fn debug_set_transient_targets(&mut self, focus: Option<RuntimeNodeId>, hover: Option<RuntimeNodeId>, capture: Option<RuntimeNodeId>) {
+        self.focus = focus;
         self.hover = hover;
         self.capture = capture;
     }
@@ -327,7 +283,6 @@ impl InputRouter {
     fn route_widget_input(
         &mut self,
         state: &NodeRuntime,
-        node_path: &[RuntimeNodeId],
         rect: Recti,
         clip: Recti,
         opt: WidgetOption,
@@ -345,8 +300,12 @@ impl InputRouter {
         }
 
         if event.is_focus_input() {
-            // Keyboard/text routing reaches this function only after following the validated
-            // root-owned focus path, so no second identity lookup is needed at the leaf.
+            // Keyboard/text events have no meaningful rectangle. Deliver them only to the
+            // router-owned focus identity selected by an earlier pointer or programmatic
+            // transition.
+            if self.focus != Some(id) {
+                return RouteResult::Ignored;
+            }
             self.push_routed_event(id, event.clone());
             return RouteResult::Consumed;
         }
@@ -358,7 +317,7 @@ impl InputRouter {
             UiInputEvent::MouseDown { button, .. } if event_hits_rect => {
                 // Focusability controls persistent keyboard ownership; the Captured result below
                 // independently establishes drag ownership for every accepted pointer press.
-                self.claim_pointer_press(node_path, *button, keyboard.is_focusable());
+                self.claim_pointer_press(id, *button, keyboard.is_focusable());
                 self.push_routed_event(id, event.clone());
                 RouteResult::Captured
             }
@@ -389,7 +348,7 @@ impl InputRouter {
     pub(super) fn sanitize_transient_targets(&mut self, roots: &mut [Node], root_transform: Transform) {
         // The transform remains owned by UiRuntime's committed layout. Passing it in keeps the
         // router independent of measurement, placement, and paint state.
-        self.focus = self.focus.take().filter(|path| focus_path_is_valid(roots, path, root_transform));
+        self.focus = self.focus.filter(|id| contains_focusable_node_in(roots, *id, root_transform));
         self.hover = self.hover.filter(|id| contains_active_node_in(roots, *id, root_transform));
         if self
             .routed_event
@@ -404,7 +363,7 @@ impl InputRouter {
             self.invalidate_pointer_capture();
         }
 
-        debug_assert!(self.focus.as_ref().is_none_or(|path| focus_path_is_valid(roots, path, root_transform)));
+        debug_assert!(self.focus.is_none_or(|id| contains_focusable_node_in(roots, id, root_transform)));
         debug_assert!(self.hover.is_none_or(|id| contains_active_node_in(roots, id, root_transform)));
         debug_assert!(
             self.routed_event
@@ -454,8 +413,7 @@ impl InputRouter {
 
         // A missing current identity starts at the direction-appropriate edge. Otherwise move one
         // position with explicit wrap so behavior does not depend on numeric node identities.
-        let current_target = self.focus.as_ref().and_then(FocusPath::target);
-        let current = current_target.and_then(|focus| self.tab_stops.iter().position(|candidate| *candidate == focus));
+        let current = self.focus.and_then(|focus| self.tab_stops.iter().position(|candidate| *candidate == focus));
         let next = match (current, reverse) {
             (Some(0), true) | (None, true) => self.tab_stops.len() - 1,
             (Some(index), true) => index - 1,
@@ -463,9 +421,7 @@ impl InputRouter {
             (Some(index), false) => index + 1,
             (None, false) => 0,
         };
-        let target = self.tab_stops[next];
-        self.focus = find_focus_path_in(roots, target, root_transform);
-        debug_assert!(self.focus.is_some(), "a collected Tab stop must retain one direct-child path");
+        self.focus = Some(self.tab_stops[next]);
         true
     }
 
@@ -505,16 +461,11 @@ impl InputRouter {
 
     /// Routes keyboard/text input to the focused node only.
     fn route_focus_input_event_to_target(&mut self, roots: &mut [Node], root_transform: Transform, style: &Style, event: &UiInputEvent) -> bool {
-        let Some(path) = self.focus.take().filter(|path| focus_path_is_valid(roots, path, root_transform)) else {
+        let Some(focus) = self.focus.filter(|id| contains_active_node_in(roots, *id, root_transform)) else {
             return false;
         };
-        // Temporarily move the path out so mutable routing can borrow the router without cloning
-        // or reallocating the retained identity vector on every keyboard transition.
-        let handled = self
-            .route_input_event_along_path(roots, &path.nodes, root_transform, style, event)
-            .is_consumed();
-        self.focus = Some(path);
-        handled
+        // Focus input bypasses pointer targeting and goes directly to the retained focus owner.
+        self.route_input_event_to_target(roots, focus, root_transform, style, event).is_consumed()
     }
 
     /// Applies runtime pointer-capture ownership from one routed event result.
@@ -543,20 +494,18 @@ impl InputRouter {
         let pos = event.position()?;
         // Select exactly one target before any handler runs so ignored events cannot reveal a
         // covered sibling.
-        let mut path = Vec::new();
-        let target = self.hit_test_pointer_node_ref(node, parent_transform, pos, &mut path)?;
+        let target = self.hit_test_pointer_node_ref(node, parent_transform, pos)?;
         self.hover = Some(target);
-        self.route_input_event_to_target_path_from(node, &path, 0, parent_transform, style, event)
+        self.route_input_event_to_target_path_from(node, target, parent_transform, style, event)
     }
 
-    /// Selects the deepest topmost node and records its complete direct-child path.
-    fn hit_test_pointer_node_ref(&self, node: &Node, parent_transform: Transform, pos: Vec2i, path: &mut Vec<RuntimeNodeId>) -> Option<RuntimeNodeId> {
+    /// Selects the deepest topmost node whose clipped allocation contains the pointer.
+    fn hit_test_pointer_node_ref(&self, node: &Node, parent_transform: Transform, pos: Vec2i) -> Option<RuntimeNodeId> {
         // Layout eligibility filters the whole branch before any geometry or widget policy is
         // considered. The router, not layout, remains responsible for target selection.
         if !node_accepts_input(node) {
             return None;
         }
-        path.push(node.id());
         let child_transform = parent_transform.push(node.state.layout);
         // Children paint after their ordinary parent surface, so inspect them in reverse paint
         // order before considering the current node.
@@ -566,19 +515,13 @@ impl InputRouter {
                     .iter()
                     .rev()
                     .filter(|child| child.intersects_clip(child_transform))
-                    .find_map(|child| self.hit_test_pointer_node_ref(child, child_transform, pos, path))
+                    .find_map(|child| self.hit_test_pointer_node_ref(child, child_transform, pos))
             })
         {
             return Some(target);
         }
 
-        if self.pointer_hits_node(node, parent_transform, pos) {
-            return Some(node.id());
-        }
-        // This branch did not contain the target; leave the caller's ancestor prefix intact.
-        let removed = path.pop();
-        debug_assert_eq!(removed, Some(node.id()));
-        None
+        self.pointer_hits_node(node, parent_transform, pos).then(|| node.id())
     }
 
     /// Tests one node's own allocation using only router-owned geometry and options.
@@ -601,37 +544,33 @@ impl InputRouter {
     fn route_input_event_to_target_path_from(
         &mut self,
         current: &mut Node,
-        path: &[RuntimeNodeId],
-        depth: usize,
+        target: RuntimeNodeId,
         parent_transform: Transform,
         style: &Style,
         event: &UiInputEvent,
     ) -> Option<(RuntimeNodeId, RouteResult)> {
-        // Every recursive step follows one exact direct-child identity from the selected hit path.
-        debug_assert_eq!(path.get(depth), Some(&current.id()));
         let style = current.resolve_style(style);
         let style = &style;
-        if depth + 1 == path.len() {
+        if current.id() == target {
             // The target was already selected geometrically; its result only controls handling.
-            let result = self.route_input_event_to_node_only_ref(current, &path[..=depth], parent_transform, style, event);
-            return Some((current.id(), result));
+            let result = self.route_input_event_to_node_only_ref(current, parent_transform, style, event);
+            return Some((target, result));
         }
 
         // Follow the unique target path without revisiting sibling hit testing.
         let child_transform = parent_transform.push(current.state.layout);
-        let child_id = path[depth + 1];
         let (owner, result) = current.with_children_mut(|children| {
             children
                 .iter_mut()
-                .find(|child| child.id() == child_id && child.intersects_clip(child_transform))
-                .and_then(|child| self.route_input_event_to_target_path_from(child, path, depth + 1, child_transform, style, event))
+                .filter(|child| child.intersects_clip(child_transform))
+                .find_map(|child| self.route_input_event_to_target_path_from(child, target, child_transform, style, event))
         })??;
         if result.is_consumed() {
             return Some((owner, result));
         }
 
         // Ignored delivery bubbles to the structural parent regardless of the parent's own hit.
-        let parent_result = self.route_input_event_to_node_only_ref(current, &path[..=depth], parent_transform, style, event);
+        let parent_result = self.route_input_event_to_node_only_ref(current, parent_transform, style, event);
         Some(if parent_result.is_consumed() {
             (current.id(), parent_result)
         } else {
@@ -639,7 +578,7 @@ impl InputRouter {
         })
     }
 
-    /// Resolves one active target identity and routes directly along its retained path.
+    /// Routes directly to one target during a single transform-carrying tree traversal.
     fn route_input_event_to_target(
         &mut self,
         roots: &mut [Node],
@@ -648,71 +587,44 @@ impl InputRouter {
         style: &Style,
         event: &UiInputEvent,
     ) -> RouteResult {
-        // Capture stores only its leaf identity, so reconstruct its direct-child path once before
-        // delivery. Keyboard focus already retains this route and bypasses this lookup.
-        let Some(path) = find_active_path_in(roots, target, root_transform) else {
-            return RouteResult::Ignored;
-        };
-        self.route_input_event_along_path(roots, &path.nodes, root_transform, style, event)
+        // Roots are independent transform origins; stop as soon as the unique target is found.
+        for root in roots {
+            if let Some(result) = self.route_input_event_to_target_from(root, target, root_transform, style, event) {
+                return result;
+            }
+        }
+        RouteResult::Ignored
     }
 
-    /// Routes directly along one already validated root-to-target identity path.
-    fn route_input_event_along_path(
-        &mut self,
-        roots: &mut [Node],
-        path: &[RuntimeNodeId],
-        root_transform: Transform,
-        style: &Style,
-        event: &UiInputEvent,
-    ) -> RouteResult {
-        let Some(root_id) = path.first().copied() else {
-            return RouteResult::Ignored;
-        };
-        // Independent roots share one transform origin; the first identity selects exactly one.
-        let Some(root) = roots.iter_mut().find(|root| root.id() == root_id) else {
-            return RouteResult::Ignored;
-        };
-        self.route_input_event_along_path_from(root, path, 0, root_transform, style, event)
-            .unwrap_or(RouteResult::Ignored)
-    }
-
-    /// Descends through direct children while carrying the exact transform for each path level.
-    fn route_input_event_along_path_from(
+    /// Descends toward one target while carrying the exact parent transform for each level.
+    ///
+    /// This replaces recursive parent lookup and transform reconstruction with one forward walk.
+    fn route_input_event_to_target_from(
         &mut self,
         current: &mut Node,
-        path: &[RuntimeNodeId],
-        depth: usize,
+        target: RuntimeNodeId,
         parent_transform: Transform,
         style: &Style,
         event: &UiInputEvent,
     ) -> Option<RouteResult> {
-        debug_assert_eq!(path.get(depth), Some(&current.id()));
         let style = current.resolve_style(style);
         let style = &style;
-        if depth + 1 == path.len() {
+        if current.id() == target {
             // Direct focus/capture delivery stops at the target and never bubbles.
-            return Some(self.route_input_event_to_node_only_ref(current, &path[..=depth], parent_transform, style, event));
+            return Some(self.route_input_event_to_node_only_ref(current, parent_transform, style, event));
         }
         // Children share the transform produced by their current parent layout.
         let child_parent = parent_transform.push(current.state.layout);
-        let child_id = path[depth + 1];
         current.with_children_mut(|children| {
             children
                 .iter_mut()
-                .find(|child| child.id() == child_id && child.intersects_clip(child_parent))
-                .and_then(|child| self.route_input_event_along_path_from(child, path, depth + 1, child_parent, style, event))
+                .filter(|child| child.intersects_clip(child_parent))
+                .find_map(|child| self.route_input_event_to_target_from(child, target, child_parent, style, event))
         })?
     }
 
     /// Routes an event to exactly one borrowed node without traversing descendants.
-    fn route_input_event_to_node_only_ref(
-        &mut self,
-        node: &mut Node,
-        node_path: &[RuntimeNodeId],
-        parent_transform: Transform,
-        style: &Style,
-        event: &UiInputEvent,
-    ) -> RouteResult {
+    fn route_input_event_to_node_only_ref(&mut self, node: &mut Node, parent_transform: Transform, style: &Style, event: &UiInputEvent) -> RouteResult {
         #[cfg(test)]
         {
             self.routed_input_routes += 1;
@@ -746,7 +658,7 @@ impl InputRouter {
                     let widget = widget.widget.try_borrow().expect("retained widget invariant violated during input routing");
                     (widget.widget.effective_widget_opt(), widget.widget.keyboard_behavior())
                 };
-                self.route_widget_input(&node.state, node_path, local_rect, local_clip, opt, keyboard, true, &local_event)
+                self.route_widget_input(&node.state, local_rect, local_clip, opt, keyboard, true, &local_event)
             }
             NodeKind::Container(container) => {
                 // An overloaded container surface may add a state-dependent filter after target
@@ -757,86 +669,10 @@ impl InputRouter {
                 let keyboard = container.with_widget(|widget| widget.keyboard_behavior());
                 let captured_continuation = captured && matches!(&local_event, UiInputEvent::MouseDrag { .. } | UiInputEvent::MouseUp { .. });
                 let accepts_event = captured_continuation || container.accepts_event(&local_event);
-                self.route_widget_input(&node.state, node_path, content_rect, content_clip, opt, keyboard, accepts_event, &local_event)
+                self.route_widget_input(&node.state, content_rect, content_clip, opt, keyboard, accepts_event, &local_event)
             }
         }
     }
-}
-
-/// Returns whether every edge in one stored focus path remains active and focusable.
-fn focus_path_is_valid(roots: &[Node], path: &FocusPath, root_transform: Transform) -> bool {
-    let Some(root_id) = path.nodes.first().copied() else {
-        return false;
-    };
-    // The first identity selects one root; every remaining identity must be its direct descendant.
-    roots
-        .iter()
-        .find(|root| root.id() == root_id)
-        .is_some_and(|root| focus_path_is_valid_from(root, &path.nodes, 0, root_transform))
-}
-
-/// Validates one direct-child suffix while accumulating the committed screen transform.
-fn focus_path_is_valid_from(current: &Node, path: &[RuntimeNodeId], depth: usize, parent_transform: Transform) -> bool {
-    if path.get(depth) != Some(&current.id()) || !node_accepts_input(current) || !current.intersects_clip(parent_transform) {
-        return false;
-    }
-    if depth + 1 == path.len() {
-        // Only the final node owns focus; structural ancestors merely make its route explicit.
-        let (opt, keyboard) = node_interaction_config(current);
-        return !opt.intersects(WidgetOption::NO_INTERACT) && keyboard.is_focusable();
-    }
-    if !node_children_visible(current) {
-        return false;
-    }
-    let child_id = path[depth + 1];
-    let child_transform = parent_transform.push(current.state.layout);
-    current.with_children(|children| {
-        children
-            .iter()
-            .find(|child| child.id() == child_id)
-            .is_some_and(|child| focus_path_is_valid_from(child, path, depth + 1, child_transform))
-    })
-}
-
-/// Resolves one active retained identity to its complete root-owned path.
-fn find_active_path_in(roots: &[Node], target: RuntimeNodeId, root_transform: Transform) -> Option<FocusPath> {
-    let mut nodes = Vec::new();
-    for root in roots {
-        if find_active_path_from(root, target, root_transform, &mut nodes) {
-            return Some(FocusPath { nodes });
-        }
-        debug_assert!(nodes.is_empty(), "a failed root search must restore the path workspace");
-    }
-    None
-}
-
-/// Resolves one focusable identity to its complete root-owned path.
-fn find_focus_path_in(roots: &[Node], target: RuntimeNodeId, root_transform: Transform) -> Option<FocusPath> {
-    // First resolve structural ancestry, then apply the stricter focusability rule to its leaf.
-    let path = find_active_path_in(roots, target, root_transform)?;
-    focus_path_is_valid(roots, &path, root_transform).then_some(path)
-}
-
-/// Searches one active branch while retaining only the successful direct-child identities.
-fn find_active_path_from(current: &Node, target: RuntimeNodeId, parent_transform: Transform, path: &mut Vec<RuntimeNodeId>) -> bool {
-    if !node_accepts_input(current) || !current.intersects_clip(parent_transform) {
-        return false;
-    }
-    path.push(current.id());
-    if current.id() == target {
-        return true;
-    }
-    if node_children_visible(current) {
-        let child_transform = parent_transform.push(current.state.layout);
-        let found = current.with_children(|children| children.iter().any(|child| find_active_path_from(child, target, child_transform, path)));
-        if found {
-            return true;
-        }
-    }
-    // No descendant matched, so restore the caller's path prefix before trying a sibling.
-    let removed = path.pop();
-    debug_assert_eq!(removed, Some(current.id()));
-    false
 }
 
 /// Collects eligible Tab stops in stable parent-first retained order.

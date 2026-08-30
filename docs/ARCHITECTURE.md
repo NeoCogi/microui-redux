@@ -187,16 +187,16 @@ its dialogs because they occupy the separate modal band.
 Visual order is deliberately separate from keyboard activation. A pointer press records its exact
 root or popup `SurfaceKey` without moving the owning family to a different fixed layer, and
 keyboard/text routing returns to that concrete surface. Each widget runtime stores one persistent
-root-to-target focus path independently from pointer capture. Every identity after the root names
-the next direct child, so validation and key routing follow the same explicit container path
-without searching for a detached leaf identity. `Tab` and `Shift+Tab` replace that path atomically
-with the next eligible `KeyboardBehavior::TAB_STOP` surface in retained sibling order, wrap at the
-ends, and skip hidden, clipped, disabled, or pointer-focus-only surfaces.
+focused `RuntimeNodeId` independently from pointer capture. Validation and key routing walk the
+retained tree to that identity while enforcing every ancestor's participation and clip gates.
+`Tab` and `Shift+Tab` replace the ID with the next eligible `KeyboardBehavior::TAB_STOP` surface in
+retained sibling order, wrap at the ends, and skip hidden, clipped, disabled, or
+pointer-focus-only surfaces.
 
 Showing an application popup selects its concrete surface immediately and focuses its first Tab
 stop after that popup's geometry is committed. Tab traversal then wraps inside the popup's own
 widget tree. Escape or an outside press dismisses the popup and restores its direct parent surface,
-whose independently retained widget focus path was never discarded.
+whose independently retained focused widget ID was never discarded.
 
 `Ctrl+F6` selects the next visible independent or child window in activation chronology and
 `Ctrl+Shift+F6` selects the previous one, wrapping at both ends. Selection reuses ordinary

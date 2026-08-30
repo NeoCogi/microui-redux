@@ -58,9 +58,10 @@ place it in a content, fixed, or flexible track.
 Built-in leaves and containers are mutated through their typed widget handles between commits. After programmatic state/topology changes, call `update_ui` even when no input is pending so layout is synchronized before paint. Feed raw input through methods such as `mousemove`, `mousedown`, `scroll`, `key`, and `text`; calls are queued without coalescing. `Context::key` accepts one backend-normalized `KeyEvent` containing logical identity, pressed/released state, the complete modifier snapshot, and repeat state. Printable key transitions remain distinct from `text`, which is the authoritative channel for composed UTF-8 input. A widget receives the current event as `Option<&UiInputEvent>`, while `WidgetUpdateCtx::{mouse_buttons,modifiers}` exposes held state after that event was applied.
 
 Keyboard focus persists after a pointer release and is independent of pointer capture. A widget
-runtime owns one complete root-to-target focus path; nested containers do not maintain competing
-mutable focus pointers. Within the active eligible surface, `Tab` and `Shift+Tab` replace that path
-with the next enabled, visible `TAB_STOP` surface in retained sibling order and wrap at the ends.
+runtime owns one focused node ID; nested containers do not maintain competing mutable focus
+pointers. Routing walks the retained tree to that identity and rejects it when an ancestor is no
+longer eligible. Within the active surface, `Tab` and `Shift+Tab` replace the ID with the next
+enabled, visible `TAB_STOP` surface in retained sibling order and wrap at the ends.
 Hidden, clipped, disabled, and pointer-focus-only surfaces are skipped. A modal dialog suspends
 ordinary-window traversal. A menu uses the common active surface identity plus its concrete
 container's selected direct-child slot; it suspends widget key/text delivery without discarding the
@@ -70,10 +71,10 @@ is keyboard-inert.
 
 An application popup is a concrete keyboard surface with its own widget runtime. Showing it selects
 its first eligible target after layout; Tab wraps inside that tree, while Escape or focus transfer
-outside the popup restores the direct parent's remembered path.
+outside the popup restores the direct parent's remembered focused ID.
 
 At the window level, `Ctrl+F6` and `Ctrl+Shift+F6` cycle forward and backward through visible
-ordinary roots. Each root's runtime keeps its focus path while inactive; modal dialogs and open
+ordinary roots. Each root's runtime keeps its focused ID while inactive; modal dialogs and open
 intrinsic menus retain their narrower keyboard scopes instead of participating in the cycle.
 
 Paint exposes focus only for the manager-selected keyboard surface even though every window runtime

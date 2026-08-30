@@ -244,13 +244,6 @@ impl UiRuntime {
         self.input_router.debug_focus_target()
     }
 
-    /// Returns the number of retained nodes in the router's root-owned focus path.
-    #[cfg(test)]
-    pub(crate) fn debug_focus_depth(&self) -> usize {
-        // Keep the path itself private while allowing structural routing tests to verify ancestry.
-        self.input_router.debug_focus_depth()
-    }
-
     /// Returns the router's hovered identity for integration tests.
     #[cfg(test)]
     pub(crate) fn debug_hover_target(&self) -> Option<RuntimeNodeId> {
@@ -265,15 +258,8 @@ impl UiRuntime {
 
     /// Installs explicit router targets for topology-invalidation tests.
     #[cfg(test)]
-    pub(crate) fn debug_set_transient_targets(
-        &mut self,
-        roots: &[Node],
-        focus: Option<RuntimeNodeId>,
-        hover: Option<RuntimeNodeId>,
-        capture: Option<RuntimeNodeId>,
-    ) {
-        // Test setup resolves the same root-owned path that production pointer and Tab routing use.
-        self.input_router.debug_set_transient_targets(roots, self.root_transform, focus, hover, capture);
+    pub(crate) fn debug_set_transient_targets(&mut self, focus: Option<RuntimeNodeId>, hover: Option<RuntimeNodeId>, capture: Option<RuntimeNodeId>) {
+        self.input_router.debug_set_transient_targets(focus, hover, capture);
     }
 
     /// Installs one capture owner for gesture-transition tests.
@@ -310,6 +296,27 @@ impl UiRuntime {
 /// Returns whether a node participates in traversal through every ancestor visibility gate.
 fn contains_active_node_in(roots: &[Node], id: RuntimeNodeId, root_transform: Transform) -> bool {
     roots.iter().any(|root| contains_active_node(root, id, root_transform))
+}
+
+/// Returns whether one identity remains an eligible persistent keyboard-focus owner.
+fn contains_focusable_node_in(roots: &[Node], id: RuntimeNodeId, root_transform: Transform) -> bool {
+    roots.iter().any(|root| contains_focusable_node(root, id, root_transform))
+}
+
+/// Searches one active branch for a focusable identity without retaining widget borrows.
+fn contains_focusable_node(node: &Node, id: RuntimeNodeId, parent_transform: Transform) -> bool {
+    if !node_accepts_input(node) || !node.intersects_clip(parent_transform) {
+        return false;
+    }
+    if node.id() == id {
+        let (opt, keyboard) = node_interaction_config(node);
+        return !opt.intersects(WidgetOption::NO_INTERACT) && keyboard.is_focusable();
+    }
+    if !node_children_visible(node) {
+        return false;
+    }
+    let child_transform = parent_transform.push(node.state.layout);
+    node.with_children(|children| children.iter().any(|child| contains_focusable_node(child, id, child_transform)))
 }
 
 /// Searches one retained branch while enforcing every layout participation and clip gate.

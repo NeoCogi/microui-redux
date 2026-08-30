@@ -444,7 +444,7 @@ fn tab_and_shift_tab_move_window_focus_without_reaching_widget_input() {
 }
 
 #[test]
-/// Proves that a popup owns keyboard traversal until dismissal restores its parent's focus path.
+/// Proves that a popup owns keyboard traversal until dismissal restores its parent's focused node.
 fn application_popup_takes_keyboard_focus_and_restores_its_parent_surface() {
     let (owner_state, owner_body) = OrderedProbe::create(WidgetOption::NONE);
     let owner_body_id = owner_body.id();
@@ -470,7 +470,7 @@ fn application_popup_takes_keyboard_focus_and_restores_its_parent_surface() {
     assert_eq!(owner_state.try_read(|state| state.events.clone()), Some(vec!["text", "down"]));
     assert_eq!(first_popup_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
 
-    // Tab remains inside the active popup surface and advances only its own root-owned focus path.
+    // Tab remains inside the active popup surface and advances only its own focused node ID.
     ctx.key(KeyEvent::pressed(Key::Tab, Modifiers::NONE));
     ctx.key(KeyEvent::released(Key::Tab, Modifiers::NONE));
     ctx.text("popup second");

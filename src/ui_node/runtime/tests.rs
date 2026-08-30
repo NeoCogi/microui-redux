@@ -961,7 +961,6 @@ fn sequential_focus_uses_retained_order_wraps_and_skips_ineligible_nodes() {
 
     assert!(runtime.advance_focus(std::slice::from_mut(&mut root), false));
     assert_eq!(runtime.debug_focus_target(), Some(first_id));
-    assert_eq!(runtime.debug_focus_depth(), 2, "the root container and focused child form one retained path");
     assert!(runtime.advance_focus(std::slice::from_mut(&mut root), false));
     assert_eq!(runtime.debug_focus_target(), Some(last_id));
     assert!(runtime.advance_focus(std::slice::from_mut(&mut root), false));
@@ -992,7 +991,7 @@ fn focus_preserving_pointer_target_captures_without_replacing_keyboard_focus() {
     // Commit geometry before installing a valid existing focus identity and routing the press.
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
-    runtime.debug_set_transient_targets(std::slice::from_ref(&root), Some(first_id), None, None);
+    runtime.debug_set_transient_targets(Some(first_id), None, None);
 
     let mut input = Input::default();
     input.mousedown(20, 30, MouseButton::LEFT);
@@ -1148,7 +1147,7 @@ fn ancestor_gate_clears_targets_and_next_active_update_reconciles_local_mode() {
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, test_atlas());
-    runtime.debug_set_transient_targets(std::slice::from_ref(&root), Some(captured_id), Some(captured_id), Some(captured_id));
+    runtime.debug_set_transient_targets(Some(captured_id), Some(captured_id), Some(captured_id));
     runtime.push_routed_event(
         captured_id,
         UiInputEvent::MouseMove {
@@ -1198,7 +1197,7 @@ fn removed_target_does_not_notify_or_transfer_state_to_same_index_replacement() 
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, test_atlas());
-    runtime.debug_set_transient_targets(std::slice::from_ref(&root), Some(removed_id), Some(removed_id), Some(removed_id));
+    runtime.debug_set_transient_targets(Some(removed_id), Some(removed_id), Some(removed_id));
     runtime.push_routed_event(
         removed_id,
         UiInputEvent::MouseMove {
@@ -1269,7 +1268,7 @@ fn cross_subtree_removal_during_update_sanitizes_before_later_delivery() {
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
-    runtime.debug_set_transient_targets(std::slice::from_ref(&root), Some(captured_id), Some(captured_id), Some(captured_id));
+    runtime.debug_set_transient_targets(Some(captured_id), Some(captured_id), Some(captured_id));
     runtime.push_routed_event(
         captured_id,
         UiInputEvent::MouseMove {

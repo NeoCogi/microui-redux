@@ -2321,7 +2321,7 @@ impl WindowManager {
             node.layout(&style, atlas, clip);
             if node.take_popup_focus_request() {
                 // The popup is now mounted with committed geometry, so its first eligible Tab stop
-                // can become the complete root-owned focus path without a speculative rectangle.
+                // can become the runtime's focused node without a speculative rectangle.
                 let _ = node.surface.body.advance_focus(false);
             }
         }
