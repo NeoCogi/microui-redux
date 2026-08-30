@@ -395,8 +395,18 @@ impl InputRouter {
 
     /// Routes one keyboard/text event to the focused node.
     pub(super) fn route_focus_input_event(&mut self, roots: &mut [Node], root_transform: Transform, style: &Style, event: &UiInputEvent) -> bool {
+        // Sanitization is the single authoritative eligibility check for this transaction. It
+        // clears focus unless the identity still exists beneath active, intersecting ancestors and
+        // the target itself remains interactive and focusable.
         self.sanitize_transient_targets(roots, root_transform);
-        self.route_focus_input_event_to_target(roots, root_transform, style, event)
+        let Some(focus) = self.focus else {
+            return false;
+        };
+
+        // Keyboard and text events have no pointer target. Deliver directly by stable identity;
+        // the search also accumulates the target's current transform and inherited style without
+        // retaining either as parallel state between layout commits.
+        self.route_input_event_to_target(roots, focus, root_transform, style, event).is_consumed()
     }
 
     /// Advances persistent keyboard focus through eligible Tab stops in retained tree order.
@@ -457,15 +467,6 @@ impl InputRouter {
         let result = self.route_input_event_to_target(roots, capture, root_transform, style, event);
         self.update_pointer_capture(capture, result, event, mouse_buttons);
         Some(result.is_consumed())
-    }
-
-    /// Routes keyboard/text input to the focused node only.
-    fn route_focus_input_event_to_target(&mut self, roots: &mut [Node], root_transform: Transform, style: &Style, event: &UiInputEvent) -> bool {
-        let Some(focus) = self.focus.filter(|id| contains_active_node_in(roots, *id, root_transform)) else {
-            return false;
-        };
-        // Focus input bypasses pointer targeting and goes directly to the retained focus owner.
-        self.route_input_event_to_target(roots, focus, root_transform, style, event).is_consumed()
     }
 
     /// Applies runtime pointer-capture ownership from one routed event result.
