@@ -666,7 +666,7 @@ impl LeafWidget for TextArea {
 mod tests {
     use super::*;
     use crate::input::Input;
-    use crate::test_support::test_atlas;
+    use crate::test_support::{test_atlas, test_style};
     use crate::ui_node::UiRuntime;
     use crate::UNCLIPPED_RECT;
 
@@ -702,7 +702,7 @@ mod tests {
         // Reproduce held key state across the supplied FIFO events while keeping one stable content
         // allocation and focused interaction snapshot.
         let atlas = test_atlas();
-        let style = Style::default();
+        let style = test_style(&atlas);
         let bounds = Recti::new(0, 0, 160, 80);
         let mut modifiers = Modifiers::NONE;
         for event in &input {
@@ -778,13 +778,13 @@ mod tests {
         // unframed, zero-padding viewport.
         let document = (0..20).map(|index| format!("line {index}")).collect::<Vec<_>>().join("\n");
         let (text_area, mut root) = TextArea::create(TextAreaParameters::new(document.clone()).scroll_options(ScrollAreaOption::ENABLE_SCROLL));
+        let atlas = test_atlas();
         let style = Style {
             padding: 0,
             scrollbar_size: 10,
-            ..Style::default()
+            ..test_style(&atlas)
         };
         let viewport = Recti::new(0, 0, 100, 60);
-        let atlas = test_atlas();
         let mut runtime = UiRuntime::new();
         let mut input = Input::default();
         runtime.begin_update();
@@ -855,13 +855,13 @@ mod tests {
         // wheel event must follow ancestor-only bubbling to its containing ScrollArea.
         let document = (0..20).map(|index| format!("line {index}")).collect::<Vec<_>>().join("\n");
         let (text_area, mut root) = TextArea::create(TextAreaParameters::new(document).scroll_options(ScrollAreaOption::ENABLE_SCROLL));
+        let atlas = test_atlas();
         let style = Style {
             padding: 0,
             scrollbar_size: 10,
-            ..Style::default()
+            ..test_style(&atlas)
         };
         let viewport = Recti::new(0, 0, 100, 60);
-        let atlas = test_atlas();
         let mut runtime = UiRuntime::new();
         runtime.begin_update();
         runtime.layout_tree_root(&mut root, &style, atlas.clone(), viewport, UNCLIPPED_RECT);
@@ -892,13 +892,13 @@ mod tests {
         // A narrow multiline document overflows vertically without requiring a horizontal bar.
         let document = (0..20).map(|index| format!("line {index}"));
         let (text_area, mut root) = TextArea::create(TextAreaParameters::new(document.collect::<Vec<_>>().join("\n")));
+        let atlas = test_atlas();
         let style = Style {
             padding: 0,
             scrollbar_size: 10,
-            ..Style::default()
+            ..test_style(&atlas)
         };
         let viewport = Recti::new(0, 0, 100, 60);
-        let atlas = test_atlas();
         let mut runtime = UiRuntime::new();
 
         // Commit initial ranges, schedule an end-cursor reveal, then let the ordinary child update

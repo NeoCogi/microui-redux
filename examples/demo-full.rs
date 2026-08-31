@@ -1374,7 +1374,7 @@ impl State {
         let image_texture = None;
         let white_uv = {
             let atlas = ctx.renderer().atlas();
-            let rect = atlas.get_icon_rect(WHITE_ICON);
+            let rect = atlas.get_icon_rect(atlas.white_icon());
             let dim = atlas.get_texture_dimension();
             let rect_min = Vec2f::new(rect.x as f32, rect.y as f32);
             let rect_extent = Vec2f::new(rect.width as f32, rect.height as f32);
@@ -1596,7 +1596,8 @@ impl State {
             )
             .font(FontRole::Body.into()),
         );
-        let style = Style::default().with_named_fonts(&ctx.renderer().atlas());
+        // Context already resolved every font and icon capability from its renderer atlas.
+        let style = *ctx.style();
         let (demo_content, demo_node) = root_content();
         let (style_content, style_node) = root_content();
         let (log_content, log_node) = root_content();
@@ -2670,7 +2671,7 @@ impl State {
         for (swatch, color) in self.style_color_swatch_states.iter().zip(colors) {
             swatch.try_update(|swatch| swatch.set_fill(color)).expect("style swatch state unavailable");
         }
-        ctx.set_style(&self.style);
+        ctx.set_style(self.style);
     }
 
     fn typography_window(&mut self, _ctx: &mut Context<SelectedBackend, Self>) {}

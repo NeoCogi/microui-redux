@@ -204,6 +204,10 @@ Textbox and text-area cursor operations also work on scalar-value boundaries rat
 user-perceived grapheme clusters. `TextWrap::Word` uses ASCII spaces as wrap opportunities and does
 not split an overlong individual word.
 
+`FontId` is an opaque capability containing one runtime atlas owner and one local font slot.
+Cloned handles to the same atlas mint equal IDs; separately loading identical metadata does not.
+Renderer preflight rejects a foreign font before acquiring a backend frame.
+
 Retained text widgets center the font baseline inside their cells, and each line receives a small
 vertical pad so glyphs do not touch widget borders. `TextBlock` supports wrapped multi-line content
 while preserving outer padding without inserting additional spacing between lines.
@@ -307,8 +311,10 @@ vertices likewise append into renderer-owned scratch storage.
 ## Images and textures
 
 The atlas is immutable after construction and contains fonts plus named bitmap
-icons addressed by `IconId`. A `ThemeIcons` binding selects the semantic icons
-used by built-in components, while applications may use other named icons.
+icons addressed by atlas-owned `IconId` capabilities. `ThemeIcons::from_atlas`
+resolves the semantic icons used by built-in components, while applications may
+look up other named icons. Like fonts, foreign icon IDs are rejected during
+renderer preflight before backend acquisition.
 General images are external textures owned through `Renderer` and addressed
 directly by `TextureId`; `ImageSource` describes upload input, but there is no
 persistent image-resource wrapper or atlas-slot path.
@@ -463,9 +469,10 @@ impl RendererBackend for Backend {
 
 Backend rules:
 
-- `get_atlas` must return a non-empty atlas whose icon at `WHITE_ICON` (index
-  zero) is an opaque white rendering tile; the renderer samples it for solid
-  geometry.
+- `get_atlas` must return a non-empty atlas with an opaque white rendering tile
+  named `white`; the renderer resolves its atlas-owned `IconId` by name.
+  `Context` backends additionally provide the `body` font and all lowercase
+  semantic names consumed by `ThemeIcons::from_atlas`.
 - `frame` acquires all fallible native frame resources and returns a value
   that exclusively borrows the backend.
 - `push_quad` and `push_triangle` receive final atlas-backed

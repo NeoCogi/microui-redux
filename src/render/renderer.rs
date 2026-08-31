@@ -44,7 +44,7 @@ use super::{
     texture::RendererId,
 };
 use crate::{
-    atlas::{AtlasHandle, FontId, IconId, WHITE_ICON},
+    atlas::{AtlasHandle, FontId, IconId},
     math::RectExt,
     render::{Color, TextureId},
 };
@@ -66,6 +66,20 @@ pub enum RenderError {
         /// Painter-order operation index containing the reference.
         operation_index: usize,
     },
+    /// A text operation references a font not owned by this Renderer atlas.
+    UnknownFont {
+        /// Foreign font capability recorded by the painter.
+        id: FontId,
+        /// Painter-order operation index containing the reference.
+        operation_index: usize,
+    },
+    /// An icon operation references an icon not owned by this Renderer atlas.
+    UnknownIcon {
+        /// Foreign icon capability recorded by the painter.
+        id: IconId,
+        /// Painter-order operation index containing the reference.
+        operation_index: usize,
+    },
     /// A custom operation references a removed or foreign registry entry.
     UnknownCustomRenderer {
         /// Painter-order operation index containing the reference.
@@ -80,6 +94,12 @@ impl fmt::Display for RenderError {
             Self::Frame(error) => write!(f, "backend frame acquisition failed: {error}"),
             Self::UnknownTexture { id, operation_index } => {
                 write!(f, "unknown texture {:?} in display-list operation {operation_index}", id)
+            }
+            Self::UnknownFont { id, operation_index } => {
+                write!(f, "unknown atlas font {:?} in display-list operation {operation_index}", id)
+            }
+            Self::UnknownIcon { id, operation_index } => {
+                write!(f, "unknown atlas icon {:?} in display-list operation {operation_index}", id)
             }
             Self::UnknownCustomRenderer { operation_index } => {
                 write!(f, "unknown custom renderer in display-list operation {operation_index}")
@@ -131,13 +151,20 @@ pub struct Renderer<B: RendererBackend> {
 
 impl<B: RendererBackend> Renderer<B> {
     /// Creates a renderer with unique ownership of the provided backend.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the backend atlas does not contain the exact icon name `white`, which is the
+    /// required opaque texel source for solid-color geometry.
     pub fn new(backend: B) -> Self {
         // Allocate provenance once at the concrete Renderer ownership boundary. Textures and custom
         // callbacks copy this same identity rather than maintaining independent global namespaces.
         let id = RendererId::allocate();
         let atlas = backend.get_atlas();
         let atlas_dim = atlas.get_texture_dimension();
-        let white_icon_rect = atlas.get_icon_rect(WHITE_ICON);
+        // Resolve the solid-rendering source by its required semantic name; no positional icon ID
+        // exists independently of this atlas allocation.
+        let white_icon_rect = atlas.get_icon_rect(atlas.white_icon());
         let white_icon_min = Vec2f::new(white_icon_rect.x as f32, white_icon_rect.y as f32);
         let white_icon_extent = Vec2f::new(white_icon_rect.width as f32, white_icon_rect.height as f32);
         // atlas_extent = max(actual_extent, 1) on each axis, keeping UV division non-zero.
@@ -191,6 +218,12 @@ impl<B: RendererBackend> Renderer<B> {
     fn validate_display_list(&self, list: &DisplayList) -> Result<(), RenderError> {
         for (operation_index, operation) in list.ops.iter().enumerate() {
             match &operation.kind {
+                DrawKind::Text { font, .. } if !self.atlas.contains_font(*font) => {
+                    return Err(RenderError::UnknownFont { id: *font, operation_index });
+                }
+                DrawKind::Icon { id, .. } if !self.atlas.contains_icon(*id) => {
+                    return Err(RenderError::UnknownIcon { id: *id, operation_index });
+                }
                 DrawKind::Image { id, .. } if !self.textures.contains(id) => {
                     return Err(RenderError::UnknownTexture { id: *id, operation_index });
                 }

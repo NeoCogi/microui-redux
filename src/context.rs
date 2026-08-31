@@ -338,10 +338,16 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// Creates a new UI context with unique ownership of the provided backend.
     ///
     /// The default style binds conventional semantic font and icon names from the backend atlas.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the backend atlas lacks the `white` rendering tile, `body` font, or any semantic
+    /// icon required by [`crate::ThemeIcons::from_atlas`].
     pub fn new(backend: B) -> Self {
-        // The backend supplies the atlas; the default style then binds semantic assets from it.
+        // The backend supplies the sole atlas; style construction mints every retained font and
+        // icon capability from that exact allocation before WindowManager can retain them.
         let renderer = Renderer::new(backend);
-        let style = Style::default().with_named_assets(&renderer.atlas());
+        let style = Style::from_atlas(&renderer.atlas());
         Self {
             renderer,
             window_manager: WindowManager::new(style),
@@ -584,15 +590,18 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
 
     /// Replaces the current UI style.
     ///
-    /// Unset/default font and icon fields are rebound automatically from the current atlas when it
-    /// exposes their conventional semantic names. Use [`Style::with_named_assets`] or
-    /// [`Style::bind_named_assets`] when you want to force all semantic roles to those atlas
-    /// bindings explicitly.
-    pub fn set_style(&mut self, style: &Style) {
-        let mut resolved = *style;
-        resolved.bind_default_named_fonts(&self.renderer.atlas());
-        resolved.bind_default_named_icons(&self.renderer.atlas());
-        self.window_manager.set_style(resolved);
+    /// Every font and icon capability must originate from this Context's atlas. Start from
+    /// `*context.style()` when changing scalar values, or use [`Style::from_atlas`] with the handle
+    /// returned by `context.renderer().atlas()`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when any font or icon capability belongs to another atlas allocation.
+    pub fn set_style(&mut self, style: Style) {
+        // Reject a mixed-atlas style at the mutation boundary instead of allowing layout or paint
+        // to select a same-slot resource from the wrong atlas.
+        assert!(style.belongs_to(&self.renderer.atlas()), "style contains font or icon IDs from another atlas");
+        self.window_manager.set_style(style);
     }
 
     /// Returns the resolved UI style currently used by this context.

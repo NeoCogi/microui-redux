@@ -38,6 +38,7 @@ use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 
 use super::*;
+use crate::identity::ProcessUniqueId;
 
 #[derive(Debug, Clone)]
 /// Metrics and atlas coordinates for a glyph.
@@ -80,17 +81,80 @@ impl Debug for Font {
     }
 }
 
-#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, Hash)]
-/// Handle referencing a font stored in the atlas.
-pub struct FontId(usize);
+/// Concrete identity assigned once to one immutable runtime atlas.
+///
+/// The wrapper keeps atlas provenance distinct from renderer and retained-object identities even
+/// though all of them share the same non-reusing process-wide allocator.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+struct AtlasId(
+    /// Shared process identity hidden behind the atlas-specific type boundary.
+    ProcessUniqueId,
+);
 
-#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, Hash)]
-/// Handle referencing a bitmap icon stored in the atlas.
-pub struct IconId(usize);
+impl AtlasId {
+    /// Allocates the owner identity retained by one newly constructed runtime atlas.
+    fn allocate() -> Self {
+        // Construction is the sole allocation boundary. Every FontId and IconId minted from this
+        // atlas copies the identity, so a local table slot is never accepted without provenance.
+        Self(ProcessUniqueId::allocate())
+    }
+}
 
-impl From<IconId> for u32 {
-    fn from(value: IconId) -> Self {
-        value.0 as _
+/// Opaque capability referencing one font in one concrete runtime atlas.
+///
+/// Passing an ID to metric or drawing methods on another [`AtlasHandle`] is an invariant violation
+/// and panics; renderer submission reports the same mistake as a typed render error during
+/// preflight.
+///
+/// IDs cannot be fabricated without an atlas owner:
+///
+/// ```compile_fail
+/// use microui_redux::FontId;
+/// let _font = FontId::default();
+/// ```
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FontId {
+    /// Identity of the atlas that minted this capability.
+    atlas: AtlasId,
+    /// Font-table slot meaningful only within `atlas`.
+    slot: usize,
+}
+
+impl FontId {
+    /// Creates a font capability at the atlas construction or lookup boundary.
+    fn new(atlas: AtlasId, slot: usize) -> Self {
+        // Fields stay private so application code can obtain only validated slots from an atlas or
+        // from the builder that owns the future atlas.
+        Self { atlas, slot }
+    }
+}
+
+/// Opaque capability referencing one bitmap icon in one concrete runtime atlas.
+///
+/// Passing an ID to rectangle or size methods on another [`AtlasHandle`] is an invariant violation
+/// and panics; renderer submission reports the same mistake as a typed render error during
+/// preflight.
+///
+/// IDs cannot be fabricated without an atlas owner:
+///
+/// ```compile_fail
+/// use microui_redux::IconId;
+/// let _icon = IconId::default();
+/// ```
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct IconId {
+    /// Identity of the atlas that minted this capability.
+    atlas: AtlasId,
+    /// Icon-table slot meaningful only within `atlas`.
+    slot: usize,
+}
+
+impl IconId {
+    /// Creates an icon capability at the atlas construction or lookup boundary.
+    fn new(atlas: AtlasId, slot: usize) -> Self {
+        // Fields stay private so numeric positions cannot be forged or reused with another atlas.
+        Self { atlas, slot }
     }
 }
 
@@ -103,6 +167,8 @@ struct Icon {
 
 /// Immutable atlas storage shared through [`AtlasHandle`].
 struct Atlas {
+    /// Process-unique provenance copied into every font and icon capability.
+    id: AtlasId,
     /// Width of the atlas texture in pixels.
     width: usize,
     /// Height of the atlas texture in pixels.
@@ -118,25 +184,6 @@ struct Atlas {
 #[derive(Clone)]
 /// Shared read-only handle to a fully constructed atlas.
 pub struct AtlasHandle(Rc<Atlas>);
-
-/// Identifier of the solid white icon baked into the default atlas.
-pub const WHITE_ICON: IconId = IconId(0);
-/// Identifier of the close icon baked into the default atlas.
-pub const CLOSE_ICON: IconId = IconId(1);
-/// Identifier of the expand icon baked into the default atlas.
-pub const EXPAND_ICON: IconId = IconId(2);
-/// Identifier of the collapse icon baked into the default atlas.
-pub const COLLAPSE_ICON: IconId = IconId(3);
-/// Identifier of the checkbox icon baked into the default atlas.
-pub const CHECK_ICON: IconId = IconId(4);
-/// Identifier of the combo-box expand icon baked into the default atlas.
-pub const EXPAND_DOWN_ICON: IconId = IconId(5);
-/// Identifier of the open-folder icon baked into the default atlas.
-pub const OPEN_FOLDER_16_ICON: IconId = IconId(6);
-/// Identifier of the closed-folder icon baked into the default atlas.
-pub const CLOSED_FOLDER_16_ICON: IconId = IconId(7);
-/// Identifier of the file icon baked into the default atlas.
-pub const FILE_16_ICON: IconId = IconId(8);
 
 #[cfg(feature = "builder")]
 /// Helpers for constructing atlas textures at build time.

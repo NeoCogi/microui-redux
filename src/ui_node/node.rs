@@ -623,8 +623,10 @@ mod tests {
     #[test]
     fn measurement_reports_content_independently_of_exact_parent_allocation() {
         let (_, mut node) = text_node("same content");
-        let style = crate::Style::default();
         let atlas = test_atlas();
+        // Resolve the measurement style from the exact handle passed to both measurement and
+        // layout so same-slot resources from another atlas can never satisfy this regression.
+        let style = crate::test_support::test_style(&atlas);
 
         let preferred = node.measure(&style, &atlas, Constraints::unbounded());
         let mut runtime = crate::ui_node::UiRuntime::new();

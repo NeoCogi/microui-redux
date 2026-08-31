@@ -28,11 +28,9 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-//! Semantic icon bindings used by built-in UI components.
+//! Atlas-bound semantic icon capabilities used by built-in UI components.
 
-use crate::atlas::{
-    AtlasHandle, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, IconId, OPEN_FOLDER_16_ICON,
-};
+use crate::atlas::{AtlasHandle, IconId};
 
 /// Atlas icon IDs selected for the semantic roles used by built-in components.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -55,88 +53,63 @@ pub struct ThemeIcons {
     pub file: IconId,
 }
 
-impl Default for ThemeIcons {
-    fn default() -> Self {
-        Self {
-            close: CLOSE_ICON,
-            expand: EXPAND_ICON,
-            collapse: COLLAPSE_ICON,
-            check: CHECK_ICON,
-            expand_down: EXPAND_DOWN_ICON,
-            open_folder: OPEN_FOLDER_16_ICON,
-            closed_folder: CLOSED_FOLDER_16_ICON,
-            file: FILE_16_ICON,
-        }
-    }
-}
-
 impl ThemeIcons {
-    /// Rebinds every semantic role whose conventional name exists in `atlas`.
-    pub fn bind_named(&mut self, atlas: &AtlasHandle) {
-        self.close = atlas.icon_id("close").or_else(|| atlas.icon_id("CLOSE")).unwrap_or(self.close);
-        self.expand = atlas.icon_id("expand").or_else(|| atlas.icon_id("PLUS")).unwrap_or(self.expand);
-        self.collapse = atlas.icon_id("collapse").or_else(|| atlas.icon_id("MINUS")).unwrap_or(self.collapse);
-        self.check = atlas.icon_id("check").or_else(|| atlas.icon_id("CHECK")).unwrap_or(self.check);
-        self.expand_down = atlas
-            .icon_id("expand_down")
-            .or_else(|| atlas.icon_id("EXPAND_DOWN"))
-            .unwrap_or(self.expand_down);
-        self.open_folder = atlas
-            .icon_id("open_folder")
-            .or_else(|| atlas.icon_id("OPEN_FOLDER_16"))
-            .unwrap_or(self.open_folder);
-        self.closed_folder = atlas
-            .icon_id("closed_folder")
-            .or_else(|| atlas.icon_id("CLOSED_FOLDER_16"))
-            .unwrap_or(self.closed_folder);
-        self.file = atlas.icon_id("file").or_else(|| atlas.icon_id("FILE_16")).unwrap_or(self.file);
+    /// Resolves the built-in semantic roles into capabilities minted by `atlas`.
+    ///
+    /// Conventional lowercase names are used directly. Missing roles are configuration errors:
+    /// built-in widgets retain these concrete capabilities and must never manufacture positional
+    /// fallbacks or defer lookup until paint.
+    ///
+    /// # Panics
+    ///
+    /// Panics with the missing role name when any required semantic icon is absent.
+    pub fn from_atlas(atlas: &AtlasHandle) -> Self {
+        /// Resolves one required semantic role with a precise construction diagnostic.
+        fn required(atlas: &AtlasHandle, name: &'static str) -> IconId {
+            // Resolve exact lowercase names only; accepting historic uppercase aliases would keep
+            // two naming conventions alive and hide stale generated metadata.
+            atlas
+                .icon_id(name)
+                .unwrap_or_else(|| panic!("atlas does not contain required theme icon `{name}`"))
+        }
+
+        // Every field is minted by this exact atlas, making the resulting bundle safe to retain in
+        // WindowManager and FileDialog without carrying the AtlasHandle beside it.
+        Self {
+            close: required(atlas, "close"),
+            expand: required(atlas, "expand"),
+            collapse: required(atlas, "collapse"),
+            check: required(atlas, "check"),
+            expand_down: required(atlas, "expand_down"),
+            open_folder: required(atlas, "open_folder"),
+            closed_folder: required(atlas, "closed_folder"),
+            file: required(atlas, "file"),
+        }
     }
 
-    pub(crate) fn bind_default_named(&mut self, atlas: &AtlasHandle) {
-        let defaults = Self::default();
-        if self.close == defaults.close {
-            self.close = atlas.icon_id("close").or_else(|| atlas.icon_id("CLOSE")).unwrap_or(self.close);
-        }
-        if self.expand == defaults.expand {
-            self.expand = atlas.icon_id("expand").or_else(|| atlas.icon_id("PLUS")).unwrap_or(self.expand);
-        }
-        if self.collapse == defaults.collapse {
-            self.collapse = atlas.icon_id("collapse").or_else(|| atlas.icon_id("MINUS")).unwrap_or(self.collapse);
-        }
-        if self.check == defaults.check {
-            self.check = atlas.icon_id("check").or_else(|| atlas.icon_id("CHECK")).unwrap_or(self.check);
-        }
-        if self.expand_down == defaults.expand_down {
-            self.expand_down = atlas
-                .icon_id("expand_down")
-                .or_else(|| atlas.icon_id("EXPAND_DOWN"))
-                .unwrap_or(self.expand_down);
-        }
-        if self.open_folder == defaults.open_folder {
-            self.open_folder = atlas
-                .icon_id("open_folder")
-                .or_else(|| atlas.icon_id("OPEN_FOLDER_16"))
-                .unwrap_or(self.open_folder);
-        }
-        if self.closed_folder == defaults.closed_folder {
-            self.closed_folder = atlas
-                .icon_id("closed_folder")
-                .or_else(|| atlas.icon_id("CLOSED_FOLDER_16"))
-                .unwrap_or(self.closed_folder);
-        }
-        if self.file == defaults.file {
-            self.file = atlas.icon_id("file").or_else(|| atlas.icon_id("FILE_16")).unwrap_or(self.file);
-        }
+    /// Reports whether every semantic icon capability belongs to `atlas`.
+    pub(crate) fn belongs_to(&self, atlas: &AtlasHandle) -> bool {
+        // Keep the ownership check explicit so adding a future semantic field requires updating the
+        // validation list instead of being silently omitted by type erasure or iteration metadata.
+        atlas.contains_icon(self.close)
+            && atlas.contains_icon(self.expand)
+            && atlas.contains_icon(self.collapse)
+            && atlas.contains_icon(self.check)
+            && atlas.contains_icon(self.expand_down)
+            && atlas.contains_icon(self.open_folder)
+            && atlas.contains_icon(self.closed_folder)
+            && atlas.contains_icon(self.file)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AtlasSource, Recti, SourceFormat};
+    use crate::{AtlasSource, CharEntry, FontEntry, Recti, SourceFormat, Vec2i};
 
+    /// Verifies semantic construction is name-based and independent of table position.
     #[test]
-    fn named_binding_does_not_depend_on_legacy_slot_order() {
+    fn from_atlas_resolves_semantic_icons_independent_of_slot_order() {
         let pixels = [0xFF, 0xFF, 0xFF, 0xFF];
         let icons = [
             ("white", Recti::new(0, 0, 1, 1)),
@@ -149,17 +122,33 @@ mod tests {
             ("closed_folder", Recti::new(0, 0, 1, 1)),
             ("open_folder", Recti::new(0, 0, 1, 1)),
         ];
+        let glyphs = [(
+            '_',
+            CharEntry {
+                offset: Vec2i::new(0, 0),
+                advance: Vec2i::new(1, 0),
+                rect: Recti::new(0, 0, 1, 1),
+            },
+        )];
+        let fonts = [(
+            "body",
+            FontEntry {
+                line_size: 1,
+                baseline: 1,
+                font_size: 1,
+                entries: &glyphs,
+            },
+        )];
         let atlas = AtlasHandle::from(&AtlasSource {
             width: 1,
             height: 1,
             pixels: &pixels,
             icons: &icons,
-            fonts: &[],
+            fonts: &fonts,
             format: SourceFormat::Raw,
         });
 
-        let mut bindings = ThemeIcons::default();
-        bindings.bind_named(&atlas);
+        let bindings = ThemeIcons::from_atlas(&atlas);
 
         assert_eq!(bindings.close, atlas.icon_id("close").unwrap());
         assert_eq!(bindings.expand, atlas.icon_id("expand").unwrap());

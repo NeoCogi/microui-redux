@@ -117,7 +117,7 @@ impl GLRenderer {
     /// Returns the atlas UV used as a "white texel" when drawing solid-colored primitives.
     fn white_uv_center(&self) -> Vec2f {
         let atlas = self.get_atlas();
-        let rect = atlas.get_icon_rect(WHITE_ICON);
+        let rect = atlas.get_icon_rect(atlas.white_icon());
         let dim = atlas.get_texture_dimension();
         let rect_min = Vec2f::new(rect.x as f32, rect.y as f32);
         let rect_extent = Vec2f::new(rect.width as f32, rect.height as f32);

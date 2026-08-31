@@ -898,8 +898,8 @@ mod linear_widget_tests {
     fn measure_content_linear(width: AvailableSpace) -> Dimensioni {
         let child = Node::widget(Custom::create(CustomParameters::new("content")));
         let (children, linear) = Linear::mount(LinearParameters::horizontal([child]));
-        let style = Style::default();
         let atlas = test_atlas();
+        let style = crate::test_support::test_style(&atlas);
         let mut children = children.borrow_mut();
         let mut ctx = MeasureCtx::new(&style, &atlas, &mut children);
 

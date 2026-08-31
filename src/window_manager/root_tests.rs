@@ -30,7 +30,7 @@
 
 use super::*;
 
-use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, test_atlas};
+use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, test_atlas, test_style};
 use crate::{
     color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Combo, ComboParameters, ComboSubmitted, Custom, Color,
     CustomParameters, Constraints, Context, Dimensioni, Disclosure, DisclosureParameters, Ui, Grid, GridParameters, Key, KeyEvent, KeyboardBehavior, Linear,
@@ -706,14 +706,17 @@ fn tab_focused_builtins_share_windows_activation_and_arrow_adjustment() {
 
 #[test]
 fn active_window_and_only_its_remembered_widget_use_style_focus_accents() {
-    let (backend, log) = recording_backend(test_atlas());
-    let mut ctx = Context::<_>::new(backend);
+    // Preserve one atlas identity across backend construction and the customized Style so the
+    // focus-color assertions cannot accidentally rely on globally meaningful resource slots.
+    let atlas = test_atlas();
     let style = Style {
         focus_color: color(7, 17, 29, 255),
         window_focus_color: color(31, 47, 61, 255),
-        ..Style::default()
+        ..test_style(&atlas)
     };
-    ctx.set_style(&style);
+    let (backend, log) = recording_backend(atlas);
+    let mut ctx = Context::<_>::new(backend);
+    ctx.set_style(style);
 
     let (_, first_node) = OrderedProbe::create(WidgetOption::NONE);
     let first_id = first_node.id();
@@ -766,14 +769,16 @@ fn active_window_and_only_its_remembered_widget_use_style_focus_accents() {
 
 #[test]
 fn tab_focused_disclosure_uses_focus_fill_in_addition_to_the_shared_outline() {
-    let (backend, log) = recording_backend(test_atlas());
-    let mut ctx = Context::<_>::new(backend);
+    // Resolve the customized palette from the exact atlas moved into the recording backend.
+    let atlas = test_atlas();
     let style = Style {
         focus_color: color(67, 83, 101, 255),
         window_focus_color: color(109, 127, 149, 255),
-        ..Style::default()
+        ..test_style(&atlas)
     };
-    ctx.set_style(&style);
+    let (backend, log) = recording_backend(atlas);
+    let mut ctx = Context::<_>::new(backend);
+    ctx.set_style(style);
 
     let (_, disclosure) = Disclosure::create(DisclosureParameters::tree("focused tree row", false, std::iter::empty::<LinearItem>()));
     let root = ctx.ui().create_window(Window::new("disclosure", rect(20, 20, 180, 100), disclosure));
@@ -2756,7 +2761,9 @@ fn declarative_menu_popups_follow_heading_and_submenu_edges_when_the_window_move
     // Both popup levels use the shared frame and place their compact rows directly inside it. Root
     // padding must not create a second inset around either a top-level menu or a recursive submenu.
     let popup_rows = ctx.debug_active_menu_row_rects();
-    let border = Style::default().frame_border().width;
+    // Context already owns an atlas-bound Style; use its actual frame metric rather than creating
+    // a disconnected resource-bearing value solely to read one scalar.
+    let border = ctx.style().frame_border().width;
     for (popup, rows) in open_popups.iter().zip(&popup_rows) {
         let first = rows.first().expect("each declared test menu must contain a row");
         let last = rows.last().unwrap();

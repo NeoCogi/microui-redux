@@ -158,7 +158,7 @@ impl WgpuRenderer {
     fn white_uv_center(&self) -> Vec2f {
         // Colored primitives sample the center of the white icon in the atlas and rely on
         // vertex color for final shading.
-        let rect = self.atlas.get_icon_rect(WHITE_ICON);
+        let rect = self.atlas.get_icon_rect(self.atlas.white_icon());
         let dim = self.atlas.get_texture_dimension();
         let rect_min = Vec2f::new(rect.x as f32, rect.y as f32);
         let rect_extent = Vec2f::new(rect.width as f32, rect.height as f32);

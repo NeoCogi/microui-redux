@@ -84,23 +84,29 @@ pub struct Config<'a> {
     pub white_icon: String,
     /// Named semantic or application icons packed after the white rendering tile.
     pub icons: &'a [IconAsset<'a>],
-    /// Legacy fallback font path used when [`Config::fonts`] is empty.
-    pub default_font: String,
-    /// Legacy fallback font size used when [`Config::fonts`] is empty.
-    pub default_font_size: usize,
     /// Fonts baked into the atlas for the printable ASCII range.
     ///
-    /// Use the conventional keys `body`, `small`, `title`, `heading`, and `mono`
-    /// to populate the built-in semantic roles through [`Style::bind_named_fonts`].
-    /// When this slice is empty, [`Config::default_font`] and
-    /// [`Config::default_font_size`] are used instead for single-font atlases.
+    /// A standard Context atlas must include the `body` key. The optional conventional keys
+    /// `small`, `title`, `heading`, and `mono` populate their corresponding style roles; missing
+    /// optional roles use `body`.
     pub fonts: &'a [FontAsset<'a>],
 }
 
 impl Builder {
     /// Creates a builder using the provided configuration and assets.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error before reading any assets when `config.fonts` is empty. Also returns an
+    /// error when a configured font or icon cannot be read, decoded, rasterized, or packed into
+    /// the configured texture dimensions.
     #[cfg(feature = "builder")]
     pub fn from_config(config: &Config) -> Result<Builder> {
+        if config.fonts.is_empty() {
+            // Reject incomplete configuration before reading or packing any asset, keeping Builder
+            // free of a second unnamed-font convention.
+            return Err(Error::other("Atlas config must provide at least one named font"));
+        }
         let rp_config = PackerConfig {
             width: config.texture_width as _,
             height: config.texture_height as _,
@@ -110,6 +116,9 @@ impl Builder {
         };
 
         let atlas = Atlas {
+            // Builder owns the future atlas identity immediately because IDs returned by add_font
+            // and add_icon must remain valid after to_atlas consumes the builder.
+            id: AtlasId::allocate(),
             width: config.texture_width,
             height: config.texture_height,
             pixels: vec![Color4b::default(); config.texture_height * config.texture_width],
@@ -123,15 +132,8 @@ impl Builder {
         for icon in config.icons {
             builder.add_icon_named(icon.name, icon.path)?;
         }
-        if config.fonts.is_empty() {
-            if config.default_font.is_empty() {
-                return Err(Error::other("Atlas config must provide either `fonts` or `default_font`"));
-            }
-            builder.add_font(config.default_font.as_str(), config.default_font_size)?;
-        } else {
-            for font in config.fonts {
-                builder.add_font_named(font.name, font.path, font.size)?;
-            }
+        for font in config.fonts {
+            builder.add_font_named(font.name, font.path, font.size)?;
         }
 
         Ok(builder)
@@ -150,10 +152,11 @@ impl Builder {
         }
         let (width, height, pixels) = Self::load_icon(path)?;
         let rect = self.add_tile(width, height, pixels.as_slice())?;
-        let id = self.atlas.icons.len();
+        let slot = self.atlas.icons.len();
         let icon = Icon { rect };
         self.atlas.icons.push((name.to_string(), icon.clone()));
-        Ok(IconId(id))
+        // The returned capability already belongs to the same Atlas moved out by to_atlas.
+        Ok(IconId::new(self.atlas.id, slot))
     }
 
     /// Adds the printable ASCII range of a font at the requested size and returns its [`FontId`].
@@ -192,7 +195,7 @@ impl Builder {
             max_y = max_y.max(size as i32 - metrics.ymin - metrics.height as i32);
         }
 
-        let id = self.atlas.fonts.len();
+        let slot = self.atlas.fonts.len();
         let line_metrics = font.horizontal_line_metrics(size as f32);
         let line_size = line_metrics
             .as_ref()
@@ -206,7 +209,8 @@ impl Builder {
             entries,
         };
         self.atlas.fonts.push((name.to_string(), font.clone()));
-        Ok(FontId(id))
+        // The returned capability already belongs to the same Atlas moved out by to_atlas.
+        Ok(FontId::new(self.atlas.id, slot))
     }
 
     /// Serializes the atlas texture into PNG bytes.
@@ -302,5 +306,52 @@ impl Builder {
     /// Consumes the builder and returns an [`AtlasHandle`].
     pub fn to_atlas(self) -> AtlasHandle {
         AtlasHandle(Rc::new(self.atlas))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WHITE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/WHITE.png");
+    const FONT_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/NORMAL.ttf");
+
+    /// Verifies incomplete named-font configuration fails before any asset path is accessed.
+    #[test]
+    fn config_requires_at_least_one_named_font() {
+        let config = Config {
+            texture_width: 32,
+            texture_height: 32,
+            white_icon: String::from("path-that-must-not-be-read"),
+            icons: &[],
+            fonts: &[],
+        };
+
+        let error = Builder::from_config(&config).err().expect("empty named fonts must be rejected");
+        assert_eq!(error.to_string(), "Atlas config must provide at least one named font");
+    }
+
+    /// Verifies capabilities returned during construction retain the finalized atlas owner.
+    #[test]
+    fn builder_resource_ids_remain_valid_after_finalization() {
+        let fonts = [FontAsset { name: "body", path: FONT_PATH, size: 10 }];
+        let config = Config {
+            texture_width: 512,
+            texture_height: 256,
+            white_icon: String::from(WHITE_PATH),
+            icons: &[],
+            fonts: &fonts,
+        };
+        let mut builder = Builder::from_config(&config).expect("fixture assets must build an atlas");
+
+        // These IDs are minted before to_atlas moves the internal Atlas into its shared handle.
+        let icon = builder.add_icon_named("extra", WHITE_PATH).expect("extra icon must fit");
+        let font = builder.add_font_named("extra", FONT_PATH, 8).expect("extra font must fit");
+        let atlas = builder.to_atlas();
+
+        assert!(atlas.contains_icon(icon));
+        assert!(atlas.contains_font(font));
+        assert_eq!(atlas.icon_id("extra"), Some(icon));
+        assert_eq!(atlas.font_id("extra"), Some(font));
     }
 }

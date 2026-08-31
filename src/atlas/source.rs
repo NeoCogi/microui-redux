@@ -68,8 +68,9 @@ pub struct AtlasSource<'a> {
     pub pixels: &'a [u8],
     /// Icon lookup table.
     ///
-    /// Entry zero must be an opaque white rendering tile. [`crate::render::Renderer`] samples that
-    /// entry, identified by [`crate::WHITE_ICON`], when drawing solid geometry.
+    /// An entry named `white` must be an opaque white rendering tile.
+    /// [`crate::render::Renderer`] resolves that atlas-owned capability by name when drawing solid
+    /// geometry; table position has no public meaning.
     pub icons: &'a [(&'a str, Recti)],
     /// Fonts baked into the atlas.
     ///
@@ -83,6 +84,9 @@ pub struct AtlasSource<'a> {
 impl AtlasHandle {
     /// Rehydrates atlas tables from serialized metadata and already-decoded pixels.
     fn from_parts<'a>(source: &AtlasSource<'a>, pixels: Vec<Color4b>) -> Self {
+        // Loading serialized metadata creates a new runtime ownership domain even when another
+        // AtlasHandle was reconstructed from byte-for-byte identical source data.
+        let id = AtlasId::allocate();
         let icons: Vec<(String, Icon)> = source.icons.iter().map(|(name, rect)| (name.to_string(), Icon { rect: *rect })).collect();
         let fonts: Vec<(String, Font)> = source
             .fonts
@@ -98,6 +102,7 @@ impl AtlasHandle {
             })
             .collect();
         Self(Rc::new(Atlas {
+            id,
             width: source.width,
             height: source.height,
             icons,
@@ -132,7 +137,7 @@ impl AtlasHandle {
     ///
     /// This validates pixel decoding and the declared image dimensions. It does not currently
     /// validate icon/glyph rectangles, semantic asset names, font metrics, or the required opaque
-    /// white tile at icon index zero. Treat metadata as trusted and satisfy the [`AtlasSource`]
+    /// icon named `white`. Treat metadata as trusted and satisfy the [`AtlasSource`]
     /// field contracts before constructing the handle.
     pub fn try_from<'a>(source: &AtlasSource<'a>) -> std::io::Result<Self> {
         let width = i32::try_from(source.width).map_err(|_| Error::other("Atlas width exceeds i32::MAX"))?;

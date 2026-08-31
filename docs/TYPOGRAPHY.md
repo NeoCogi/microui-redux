@@ -1,7 +1,7 @@
 # Fonts and typography
 
 - Atlas building supports multiple baked fonts and sizes through `atlas::builder::FontAsset`, and the same config can drive both runtime atlas construction and offline/prebuilt atlas export.
-- `Context::new(...)` binds the conventional atlas font keys `body`, `small`, `title`, `heading`, and `mono`, plus the built-in semantic icon keys, onto the default `Style`. `Context::set_style(...)` also rebinds font and icon fields that are still left at their default values, so tweaking colors or spacing on top of `Style::default()` preserves the atlas's semantic bindings.
+- `Context::new(...)` constructs its `Style` directly from the conventional atlas font keys `body`, `small`, `title`, `heading`, and `mono`, plus the built-in semantic icon keys. To customize it, copy `*context.style()`, change scalar fields, and pass the complete value to `Context::set_style(...)`; no placeholder IDs or rebinding pass exists.
 - Text-bearing widget Parameters expose `.font(FontChoice)`, so you can either select a semantic role (`FontRole::Heading.into()`) or a concrete baked font ID (`atlas.font_id("caption").unwrap().into()`).
 - Font sizes are selected by choosing another baked font variant, not by scaling one bitmap font at runtime.
 - `examples/demo-full` uses this directly: `NORMAL.ttf` for control/body text, `BOLD.ttf` for window titles, and `CONSOLE.ttf` for the log window’s input/output text.
@@ -36,11 +36,15 @@ The text pipeline does not perform grapheme segmentation, script shaping, bidire
 reordering, kerning, or fallback-font selection. `TextWrap::Word` wraps only at ASCII space
 boundaries; an individual word is not split when it exceeds the available width.
 
-An application-provided atlas must have at least one font and must reserve icon index zero for an
-opaque white tile used by solid geometry. The standard style also expects the semantic icon names
+An application-provided atlas must have a `body` font and an opaque white tile named `white` for
+solid geometry; neither resource depends on a numeric table position. The standard style also expects the semantic icon names
 `close`, `expand`, `collapse`, `check`, `expand_down`, `open_folder`, `closed_folder`, and `file`.
 The current loader does not validate the complete contract, so treat atlas metadata as trusted
 input and keep every glyph/icon rectangle within the declared texture dimensions.
+
+`FontId` and `IconId` are opaque capabilities scoped to one runtime atlas allocation. Cloning an
+`AtlasHandle` preserves their owner, while loading identical source metadata again creates a
+different owner. A renderer rejects foreign font and icon IDs during display-list preflight.
 
 ```rust
 use microui_redux::{atlas::builder, prelude::*};
@@ -94,8 +98,6 @@ let config = builder::Config {
     texture_height: 256,
     white_icon: "assets/WHITE.png".into(),
     icons: ICONS,
-    default_font: "assets/NORMAL.ttf".into(),
-    default_font_size: 12,
     fonts: FONTS,
 };
 
@@ -104,4 +106,5 @@ let (_title, title_node) = TextBlock::create(
 );
 ```
 
-If `fonts` is empty, `builder::Config` falls back to `default_font` + `default_font_size` for the old single-font atlas layout.
+`builder::Config::fonts` must be non-empty. Standard Context atlases name one entry `body`; optional
+roles that are absent fall back to that same atlas-owned body font.

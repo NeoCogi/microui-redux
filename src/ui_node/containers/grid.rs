@@ -1042,11 +1042,12 @@ mod tests {
 
     #[test]
     fn grid_preferred_tracks_include_spans_spacing_and_explicit_empty_tracks() {
+        let atlas = test_atlas();
         let style = Style {
             padding: 0,
             spacing: 2,
             default_cell_width: 0,
-            ..Style::default()
+            ..crate::test_support::test_style(&atlas)
         };
         let columns = [TrackSize::Fixed(10), TrackSize::Content, TrackSize::Flex(1.0)];
         assert_eq!(contribution_for_track(&columns, 0, 0, 3, style.spacing, 70), 10);
@@ -1065,7 +1066,6 @@ mod tests {
             row_tracks: vec![TrackSize::Fixed(8), TrackSize::Content],
             layout: GridLayout::default(),
         };
-        let atlas = test_atlas();
         let mut ctx = MeasureCtx::new(&style, &atlas, &mut children);
         let measured = grid_size(&mut ctx, &empty, crate::Constraints::unbounded());
         assert_eq!(measured.width, 12);

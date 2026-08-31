@@ -272,6 +272,7 @@ impl<'a> Painter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::test_atlas;
     use crate::{color, TextureId};
     use super::super::display_list::DrawKind;
 
@@ -398,11 +399,17 @@ mod tests {
 
     #[test]
     fn semantic_primitives_translate_and_reject_fully_hidden_bounds() {
+        // Resolve semantic resources from one concrete atlas even though this focused test stops
+        // after recording. Real atlas-scoped capabilities ensure Painter is exercised through the
+        // same typed API used by renderer-bound application code.
+        let atlas = test_atlas();
+        let font = atlas.font_id("body").unwrap();
+        let icon = atlas.white_icon();
         let mut list = DisplayList::new();
         {
             let mut painter = Painter::for_widget(&mut list, Recti::new(10, 20, 100, 100), Recti::new(10, 20, 20, 20));
-            painter.text(FontId::default(), "label", Vec2i::new(1, 2), color(255, 255, 255, 255));
-            painter.icon(IconId::default(), Recti::new(2, 3, 4, 5), color(255, 255, 255, 255));
+            painter.text(font, "label", Vec2i::new(1, 2), color(255, 255, 255, 255));
+            painter.icon(icon, Recti::new(2, 3, 4, 5), color(255, 255, 255, 255));
             painter.image(TextureId::new_test(1, 10, 10), Recti::new(100, 100, 10, 10), color(255, 255, 255, 255));
         }
 

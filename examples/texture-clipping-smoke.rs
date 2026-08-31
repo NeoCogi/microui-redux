@@ -34,6 +34,18 @@
 use microui_redux::{prelude::*, render::Vertex, AtlasSource, Constraints};
 use std::{cell::RefCell, rc::Rc};
 
+const THEME_ICON_NAMES: [&str; 9] = [
+    "white",
+    "close",
+    "expand",
+    "collapse",
+    "check",
+    "expand_down",
+    "open_folder",
+    "closed_folder",
+    "file",
+];
+
 enum SmokeEvent {
     AtlasBatch { quads: usize },
     Texture { id: TextureId, vertices: [Vertex; 4] },
@@ -131,13 +143,30 @@ impl RendererBackend for SmokeRenderer {
 
 fn make_smoke_atlas() -> AtlasHandle {
     let pixels = [0xFF; 16];
-    let icons = [("white", Recti::new(0, 0, 1, 1))];
+    let icons: Vec<_> = THEME_ICON_NAMES.iter().map(|name| (*name, Recti::new(0, 0, 1, 1))).collect();
+    let entries = [(
+        '_',
+        CharEntry {
+            offset: Vec2i::new(0, 0),
+            advance: Vec2i::new(1, 0),
+            rect: Recti::new(0, 0, 1, 1),
+        },
+    )];
+    let fonts = [(
+        "body",
+        FontEntry {
+            line_size: 1,
+            baseline: 1,
+            font_size: 1,
+            entries: &entries,
+        },
+    )];
     let source = AtlasSource {
         width: 2,
         height: 2,
         pixels: &pixels,
         icons: &icons,
-        fonts: &[],
+        fonts: &fonts,
         format: SourceFormat::Raw,
     };
     AtlasHandle::from(&source)
@@ -150,12 +179,16 @@ fn assert_vec2f_eq(actual: Vec2f, expected: Vec2f) {
 
 struct TextureClippingProbe {
     texture: TextureId,
+    /// Atlas-owned white tile recorded on both sides of the external texture draw.
+    white_icon: IconId,
     options: WidgetOption,
     screen_content: Rc<RefCell<Option<Recti>>>,
 }
 
 struct TextureClippingParameters {
     texture: TextureId,
+    /// Concrete icon capability minted by the renderer's atlas before widget construction.
+    white_icon: IconId,
     screen_content: Rc<RefCell<Option<Recti>>>,
 }
 
@@ -170,6 +203,7 @@ impl WidgetBuilder for TextureClippingBuilder {
     fn create_widget(parameters: Self::Parameters) -> Self::W {
         TextureClippingProbe {
             texture: parameters.texture,
+            white_icon: parameters.white_icon,
             options: WidgetOption::NO_INTERACT,
             screen_content: parameters.screen_content,
         }
@@ -187,11 +221,11 @@ impl Widget for TextureClippingProbe {
         *self.screen_content.borrow_mut() = Some(ctx.screen_content_rect());
         let white = color(255, 255, 255, 255);
         let mut painter = ctx.painter();
-        painter.icon(WHITE_ICON, rect(0, 0, 4, 4), white);
+        painter.icon(self.white_icon, rect(0, 0, 4, 4), white);
         painter.with_clip(rect(10, 12, 8, 6), |painter| {
             painter.image(self.texture, rect(6, 9, 16, 12), white);
         });
-        painter.icon(WHITE_ICON, rect(30, 0, 4, 4), white);
+        painter.icon(self.white_icon, rect(30, 0, 4, 4), white);
     }
 }
 
@@ -203,12 +237,15 @@ impl LeafWidget for TextureClippingProbe {
 
 fn main() -> Result<(), String> {
     let events = Rc::new(RefCell::new(Vec::new()));
-    let backend = SmokeRenderer::new(make_smoke_atlas(), events.clone());
+    let atlas = make_smoke_atlas();
+    let white_icon = atlas.white_icon();
+    let backend = SmokeRenderer::new(atlas, events.clone());
     let mut ctx = Context::<_>::new(backend);
     let texture = ctx.try_load_image_rgba(16, 12, &[0xFF; 16 * 12 * 4])?;
     let screen_content = Rc::new(RefCell::new(None));
     let probe = TextureClippingBuilder::create_widget(TextureClippingParameters {
         texture,
+        white_icon,
         screen_content: screen_content.clone(),
     });
     let tree = Node::widget(probe);
@@ -219,9 +256,9 @@ fn main() -> Result<(), String> {
 
     // Keep the window background out of the recording log so the assertions isolate the widget's
     // atlas/texture ordering while still exercising the retained public rendering path.
-    let mut style = Style::default();
+    let mut style = *ctx.style();
     style.colors[ControlColor::WindowBG as usize] = color(0, 0, 0, 0);
-    ctx.set_style(&style);
+    ctx.set_style(style);
 
     let dimensions = Dimensioni::new(64, 64);
     let info = FrameInfo::try_new(dimensions, color(0, 0, 0, 255)).map_err(|error| error.to_string())?;

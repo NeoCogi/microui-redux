@@ -50,7 +50,7 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! UI style values and compatibility helpers used across the crate.
+//! Atlas-bound UI style values used across the crate.
 
 use crate::atlas::{AtlasHandle, FontId};
 use super::{Color, FontChoice, FontRole, ThemeIcons};
@@ -111,15 +111,26 @@ pub struct Style {
     pub colors: [Color; 12],
 }
 
-impl Default for Style {
-    fn default() -> Self {
+impl Style {
+    /// Constructs the default visual metrics and resolves every retained asset from `atlas`.
+    ///
+    /// The required `body` font and semantic theme icon names form the standard Context atlas
+    /// contract. Optional font roles fall back to that same atlas's body font.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `body` or any icon required by [`ThemeIcons::from_atlas`] is absent.
+    pub fn from_atlas(atlas: &AtlasHandle) -> Self {
+        // Resolve the required body capability first so every optional role has one valid,
+        // owner-matched fallback instead of an ownerless default identifier.
+        let font = atlas.font_id(FontRole::Body.atlas_name()).expect("atlas does not contain required font `body`");
         Self {
-            font: FontId::default(),
-            small_font: FontId::default(),
-            title_font: FontId::default(),
-            heading_font: FontId::default(),
-            mono_font: FontId::default(),
-            icons: ThemeIcons::default(),
+            font,
+            small_font: atlas.font_id(FontRole::Small.atlas_name()).unwrap_or(font),
+            title_font: atlas.font_id(FontRole::Title.atlas_name()).unwrap_or(font),
+            heading_font: atlas.font_id(FontRole::Heading.atlas_name()).unwrap_or(font),
+            mono_font: atlas.font_id(FontRole::Mono.atlas_name()).unwrap_or(font),
+            icons: ThemeIcons::from_atlas(atlas),
             default_cell_width: 68,
             padding: 5,
             spacing: 4,
@@ -148,10 +159,22 @@ impl Default for Style {
             ],
         }
     }
-}
 
-impl Style {
+    /// Reports whether every retained font and icon capability belongs to `atlas`.
+    pub(crate) fn belongs_to(&self, atlas: &AtlasHandle) -> bool {
+        // List each concrete field so a new style asset cannot bypass validation through erased or
+        // reflective storage. Ordinary scalar theme values need no atlas validation.
+        atlas.contains_font(self.font)
+            && atlas.contains_font(self.small_font)
+            && atlas.contains_font(self.title_font)
+            && atlas.contains_font(self.heading_font)
+            && atlas.contains_font(self.mono_font)
+            && self.icons.belongs_to(atlas)
+    }
+
+    /// Resolves the inside-aligned frame geometry and color used by built-in widgets.
     pub(crate) fn frame_border(&self) -> FrameBorder {
+        // Negative widths are normalized at the sole geometry boundary rather than at every caller.
         FrameBorder {
             width: self.frame_border_width.max(0),
             color: self.colors[crate::ControlColor::Border as usize],
@@ -176,77 +199,6 @@ impl Style {
             FontChoice::Id(font) => font,
         }
     }
-
-    /// Binds semantic font roles only for fields that still use default/unset font IDs.
-    ///
-    /// This is intended for compatibility paths such as [`crate::Context::set_style`], where callers
-    /// often start from [`Style::default`] and only tweak colors or spacing. Explicit non-default
-    /// font IDs are preserved.
-    pub fn bind_default_named_fonts(&mut self, atlas: &AtlasHandle) {
-        let default_font = FontId::default();
-        if self.font == default_font
-            && let Some(font) = atlas.font_id(FontRole::Body.atlas_name())
-        {
-            self.font = font;
-        }
-        if self.small_font == default_font {
-            self.small_font = atlas.font_id(FontRole::Small.atlas_name()).unwrap_or(self.font);
-        }
-        if self.title_font == default_font {
-            self.title_font = atlas.font_id(FontRole::Title.atlas_name()).unwrap_or(self.font);
-        }
-        if self.heading_font == default_font {
-            self.heading_font = atlas.font_id(FontRole::Heading.atlas_name()).unwrap_or(self.font);
-        }
-        if self.mono_font == default_font {
-            self.mono_font = atlas.font_id(FontRole::Mono.atlas_name()).unwrap_or(self.font);
-        }
-    }
-
-    /// Binds default semantic icon roles from conventional atlas names.
-    ///
-    /// Explicit icon selections that differ from the default fixed IDs are preserved.
-    pub fn bind_default_named_icons(&mut self, atlas: &AtlasHandle) {
-        self.icons.bind_default_named(atlas);
-    }
-
-    /// Returns a copy of the style with semantic font roles rebound from `atlas`.
-    pub fn with_named_fonts(mut self, atlas: &AtlasHandle) -> Self {
-        self.bind_named_fonts(atlas);
-        self
-    }
-
-    /// Returns a copy with both semantic font and icon roles rebound from `atlas`.
-    pub fn with_named_assets(mut self, atlas: &AtlasHandle) -> Self {
-        self.bind_named_assets(atlas);
-        self
-    }
-
-    /// Binds semantic font and icon roles from their conventional atlas names.
-    pub fn bind_named_assets(&mut self, atlas: &AtlasHandle) {
-        self.bind_named_fonts(atlas);
-        self.icons.bind_named(atlas);
-    }
-
-    /// Binds semantic font roles from conventional atlas names when they exist.
-    ///
-    /// The lookup names are:
-    /// - [`FontRole::Body`] => `body`
-    /// - [`FontRole::Small`] => `small`
-    /// - [`FontRole::Title`] => `title`
-    /// - [`FontRole::Heading`] => `heading`
-    /// - [`FontRole::Mono`] => `mono`
-    ///
-    /// Missing roles fall back to the resolved body font.
-    pub fn bind_named_fonts(&mut self, atlas: &AtlasHandle) {
-        if let Some(font) = atlas.font_id(FontRole::Body.atlas_name()) {
-            self.font = font;
-        }
-        self.small_font = atlas.font_id(FontRole::Small.atlas_name()).unwrap_or(self.font);
-        self.title_font = atlas.font_id(FontRole::Title.atlas_name()).unwrap_or(self.font);
-        self.heading_font = atlas.font_id(FontRole::Heading.atlas_name()).unwrap_or(self.font);
-        self.mono_font = atlas.font_id(FontRole::Mono.atlas_name()).unwrap_or(self.font);
-    }
 }
 
 #[cfg(test)]
@@ -254,6 +206,7 @@ mod tests {
     use super::*;
     use crate::test_support::test_atlas_with_font_sizes as make_test_atlas;
 
+    /// Verifies semantic and explicit font choices preserve their concrete atlas capability.
     #[test]
     fn font_choice_conversions_preserve_selected_font() {
         let atlas = make_test_atlas(&[(FontRole::Body.atlas_name(), 12), (FontRole::Heading.atlas_name(), 18)]);
@@ -263,51 +216,74 @@ mod tests {
         assert_eq!(FontChoice::from(heading), FontChoice::id(heading));
     }
 
+    /// Verifies one-pass style construction resolves named roles and uses body for missing roles.
     #[test]
-    fn bind_named_fonts_uses_conventional_role_names() {
+    fn from_atlas_resolves_named_fonts_and_falls_back_to_body() {
         let atlas = make_test_atlas(&[
-            (FontRole::Body.atlas_name(), 12),
             (FontRole::Small.atlas_name(), 10),
-            (FontRole::Title.atlas_name(), 16),
+            (FontRole::Body.atlas_name(), 12),
             (FontRole::Heading.atlas_name(), 18),
+            (FontRole::Title.atlas_name(), 16),
         ]);
 
-        let style = Style::default().with_named_fonts(&atlas);
+        let style = Style::from_atlas(&atlas);
 
         assert_eq!(style.font, atlas.font_id(FontRole::Body.atlas_name()).unwrap());
         assert_eq!(style.small_font, atlas.font_id(FontRole::Small.atlas_name()).unwrap());
         assert_eq!(style.title_font, atlas.font_id(FontRole::Title.atlas_name()).unwrap());
         assert_eq!(style.heading_font, atlas.font_id(FontRole::Heading.atlas_name()).unwrap());
         assert_eq!(style.mono_font, style.font);
+        assert!(style.belongs_to(&atlas));
     }
 
+    /// Verifies every concrete retained capability participates in the ownership predicate.
     #[test]
-    fn bind_default_named_fonts_replaces_unset_font_fields_only() {
-        let atlas = make_test_atlas(&[
-            (FontRole::Small.atlas_name(), 10),
-            (FontRole::Body.atlas_name(), 12),
-            (FontRole::Title.atlas_name(), 16),
-            (FontRole::Heading.atlas_name(), 18),
-        ]);
+    fn belongs_to_rejects_each_foreign_font_and_icon_field_individually() {
+        let local_atlas = make_test_atlas(&[(FontRole::Body.atlas_name(), 12)]);
+        let foreign_atlas = make_test_atlas(&[(FontRole::Body.atlas_name(), 12)]);
+        let local = Style::from_atlas(&local_atlas);
+        let foreign = Style::from_atlas(&foreign_atlas);
 
-        let mut style = Style::default();
-        style.bind_default_named_fonts(&atlas);
-        assert_eq!(style.font, atlas.font_id(FontRole::Body.atlas_name()).unwrap());
-        assert_eq!(style.small_font, atlas.font_id(FontRole::Small.atlas_name()).unwrap());
-        assert_eq!(style.title_font, atlas.font_id(FontRole::Title.atlas_name()).unwrap());
-        assert_eq!(style.heading_font, atlas.font_id(FontRole::Heading.atlas_name()).unwrap());
+        // Each candidate differs from the valid local style in exactly one capability. Keeping the
+        // cases explicit makes a newly added field fail this regression until belongs_to validates
+        // it, without introducing erased reflection or `Any`-based field traversal.
+        let mut candidates = [local; 13];
+        candidates[0].font = foreign.font;
+        candidates[1].small_font = foreign.small_font;
+        candidates[2].title_font = foreign.title_font;
+        candidates[3].heading_font = foreign.heading_font;
+        candidates[4].mono_font = foreign.mono_font;
+        candidates[5].icons.close = foreign.icons.close;
+        candidates[6].icons.expand = foreign.icons.expand;
+        candidates[7].icons.collapse = foreign.icons.collapse;
+        candidates[8].icons.check = foreign.icons.check;
+        candidates[9].icons.expand_down = foreign.icons.expand_down;
+        candidates[10].icons.open_folder = foreign.icons.open_folder;
+        candidates[11].icons.closed_folder = foreign.icons.closed_folder;
+        candidates[12].icons.file = foreign.icons.file;
 
-        let explicit_title = atlas.font_id(FontRole::Title.atlas_name()).unwrap();
-        style.font = explicit_title;
-        style.bind_default_named_fonts(&atlas);
-        assert_eq!(style.font, explicit_title);
+        for candidate in candidates {
+            assert!(!candidate.belongs_to(&local_atlas));
+        }
     }
 
+    /// Verifies standard style construction never substitutes a positional font for missing body.
+    #[test]
+    #[should_panic(expected = "atlas does not contain required font `body`")]
+    fn from_atlas_requires_the_exact_body_font_name() {
+        let atlas = make_test_atlas(&[("caption", 12)]);
+
+        // Even though slot zero is a valid font, its unrelated name cannot satisfy the body role.
+        let _ = Style::from_atlas(&atlas);
+    }
+
+    /// Verifies frame normalization remains independent of atlas-bound asset construction.
     #[test]
     fn frame_border_resolves_geometry_and_color_without_role_policy() {
+        let atlas = make_test_atlas(&[(FontRole::Body.atlas_name(), 12)]);
         let style = Style {
             frame_border_width: -4,
-            ..Style::default()
+            ..Style::from_atlas(&atlas)
         };
         let border = style.frame_border();
         let expected = style.colors[crate::ControlColor::Border as usize];

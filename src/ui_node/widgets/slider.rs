@@ -366,13 +366,13 @@ mod tests {
     //! Tests for slider and numeric editing behavior.
 
     use super::*;
-    use crate::test_support::test_atlas as make_test_atlas;
+    use crate::test_support::{test_atlas as make_test_atlas, test_style};
     use crate::ui_node::{UiInputEvent, widget_context::localize_event};
     use crate::{Number, NumberBuilder, NumberParameters};
 
     fn run_slider_once(slider: &mut Slider, rect: Recti, events: Vec<UiInputEvent>, hovered: bool, focused: bool, active: bool, scroll: Option<Vec2i>) {
         let atlas = make_test_atlas();
-        let style = Style::default();
+        let style = test_style(&atlas);
         let held = if active { MouseButton::LEFT } else { MouseButton::NONE };
         let mut events = events
             .into_iter()
@@ -389,7 +389,7 @@ mod tests {
 
     fn run_number_once(number: &mut Number, events: Vec<UiInputEvent>) {
         let atlas = make_test_atlas();
-        let style = Style::default();
+        let style = test_style(&atlas);
         let bounds = rect(0, 0, 100, 20);
         for event in &events {
             let mut ctx = WidgetUpdateCtx::new_with_interaction(
@@ -436,7 +436,7 @@ mod tests {
     #[test]
     fn slider_zero_range_keeps_value() {
         let atlas = make_test_atlas();
-        let style = Style::default();
+        let style = test_style(&atlas);
 
         let mut slider = SliderBuilder::create_widget(SliderParameters::new(5.0, 5.0, 5.0));
         let rect = rect(0, 0, 100, 20);
@@ -482,7 +482,7 @@ mod tests {
     #[test]
     fn slider_uses_widget_local_mouse_position() {
         let atlas = make_test_atlas();
-        let style = Style::default();
+        let style = test_style(&atlas);
 
         let mut slider = SliderBuilder::create_widget(SliderParameters::new(0.0, 0.0, 100.0));
         let rect = rect(40, 20, 100, 20);

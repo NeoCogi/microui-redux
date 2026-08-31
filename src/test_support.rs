@@ -31,7 +31,7 @@
 //! Shared fixtures, renderer recordings, and no-op helpers used by unit tests.
 
 use crate::render::{FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex};
-use crate::{AtlasHandle, AtlasSource, CharEntry, FontEntry, Recti, SourceFormat, TextureId, Vec2i};
+use crate::{AtlasHandle, AtlasSource, CharEntry, FontEntry, Recti, SourceFormat, Style, TextureId, Vec2i};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -133,10 +133,13 @@ const ICON_NAMES: [&str; 9] = [
     "file",
 ];
 
+/// Constructs the standard immutable atlas shared within one test's ownership domain.
 pub(crate) fn test_atlas() -> AtlasHandle {
-    test_atlas_with_font_sizes(&[("default", 10)])
+    // Use the required semantic body name so Context and Style exercise production construction.
+    test_atlas_with_font_sizes(&[("body", 10)])
 }
 
+/// Constructs a standard icon set plus caller-selected named font metrics.
 pub(crate) fn test_atlas_with_font_sizes(fonts: &[(&str, usize)]) -> AtlasHandle {
     let pixels: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
     let icons: Vec<(&str, Recti)> = ICON_NAMES.iter().map(|name| (*name, Recti::new(0, 0, 1, 1))).collect();
@@ -189,6 +192,13 @@ pub(crate) fn test_atlas_with_font_sizes(fonts: &[(&str, usize)]) -> AtlasHandle
         format: SourceFormat::Raw,
     };
     AtlasHandle::from(&source)
+}
+
+/// Constructs a resolved style whose resource capabilities belong to `atlas`.
+pub(crate) fn test_style(atlas: &AtlasHandle) -> Style {
+    // Tests must retain and pass this same handle allocation; reconstructing identical metadata is
+    // intentionally a different ownership domain after atlas IDs become scoped.
+    Style::from_atlas(atlas)
 }
 
 pub(crate) struct NoopRenderer {

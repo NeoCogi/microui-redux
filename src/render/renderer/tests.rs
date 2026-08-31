@@ -36,7 +36,7 @@ use crate::render::{
     geometry::{SolidTriangle, SolidVertex},
 };
 use crate::test_support::{RecordedVertex, RenderEvent, recording_backend};
-use crate::{AtlasSource, CharEntry, CLOSE_ICON, FontEntry, SourceFormat, color, color4b};
+use crate::{AtlasSource, CharEntry, FontEntry, SourceFormat, color, color4b};
 use std::{
     cell::{Cell, RefCell},
     collections::HashSet,
@@ -166,7 +166,7 @@ fn make_atlas() -> AtlasHandle {
         ),
     ];
     let fonts = [(
-        "default",
+        "body",
         FontEntry {
             line_size: 4,
             baseline: 4,
@@ -309,13 +309,18 @@ fn semantic_atlas_operations_use_the_cached_atlas_and_one_executor() {
         stats: stats.clone(),
     };
     let mut renderer = Renderer::new(backend);
+    // Resolve both capabilities from the renderer's cached atlas. This makes ownership explicit
+    // while retaining the test's original purpose: one cached read and one execution pass.
+    let atlas = renderer.atlas();
+    let font = atlas.font_id("body").unwrap();
+    let white_icon = atlas.white_icon();
     let white = color(255, 255, 255, 255);
     let mut list = DisplayList::new();
     {
         let mut painter = painter(&mut list, viewport());
         painter.fill_rect(Recti::new(0, 0, 1, 1), white);
-        painter.text(FontId::default(), "aa", Vec2i::new(0, 0), white);
-        painter.icon(WHITE_ICON, Recti::new(0, 0, 3, 3), white);
+        painter.text(font, "aa", Vec2i::new(0, 0), white);
+        painter.icon(white_icon, Recti::new(0, 0, 3, 3), white);
     }
 
     renderer.render(frame_info(32, 32), &mut list).unwrap();
@@ -332,8 +337,10 @@ fn semantic_atlas_operations_use_the_cached_atlas_and_one_executor() {
 fn streamed_glyphs_preserve_order_fallback_and_newline_positioning() {
     let (backend, log) = recording_backend(make_atlas());
     let mut renderer = Renderer::new(backend);
+    // The selected font must be minted by the exact atlas used to stream these glyphs.
+    let font = renderer.atlas().font_id("body").unwrap();
     let mut list = DisplayList::new();
-    painter(&mut list, viewport()).text(FontId::default(), "a?\na", Vec2i::new(10, 10), color(255, 255, 255, 255));
+    painter(&mut list, viewport()).text(font, "a?\na", Vec2i::new(10, 10), color(255, 255, 255, 255));
 
     renderer.render(frame_info(32, 32), &mut list).unwrap();
 
@@ -414,11 +421,14 @@ fn renderer_and_display_list_reuse_recording_and_clipping_storage_after_executio
         stats: Rc::new(CountingStats::default()),
     };
     let mut renderer = Renderer::new(backend);
+    // Reuse one renderer-owned font capability across both submissions along with the storage the
+    // test measures; cloning or reconstructing atlas metadata would create a foreign capability.
+    let font = renderer.atlas().font_id("body").unwrap();
     let white = color(255, 255, 255, 255);
     let mut list = DisplayList::new();
     let long_text = "a".repeat(256);
 
-    painter(&mut list, viewport()).text(FontId::default(), &long_text, Vec2i::new(0, 0), white);
+    painter(&mut list, viewport()).text(font, &long_text, Vec2i::new(0, 0), white);
     painter(&mut list, viewport()).fill_polygon(&[Vec2f::new(-8.0, -8.0), Vec2f::new(40.0, 0.0), Vec2f::new(0.0, 40.0)], white);
     renderer.render(frame_info(32, 32), &mut list).unwrap();
 
@@ -431,7 +441,7 @@ fn renderer_and_display_list_reuse_recording_and_clipping_storage_after_executio
     assert!(polygon_capacity >= 3);
     assert!(clipped_capacity >= 3);
 
-    painter(&mut list, viewport()).text(FontId::default(), "a", Vec2i::new(0, 0), white);
+    painter(&mut list, viewport()).text(font, "a", Vec2i::new(0, 0), white);
     painter(&mut list, viewport()).fill_polygon(&[Vec2f::new(1.0, 1.0), Vec2f::new(2.0, 1.0), Vec2f::new(1.0, 2.0)], white);
     renderer.render(frame_info(32, 32), &mut list).unwrap();
 
@@ -445,14 +455,18 @@ fn renderer_and_display_list_reuse_recording_and_clipping_storage_after_executio
 fn operation_clip_is_intersected_with_viewport_for_every_quad_kind() {
     let (backend, log) = recording_backend(make_atlas());
     let mut renderer = Renderer::new(backend);
+    // Text and icon operations intentionally share the renderer's atlas ownership domain.
+    let atlas = renderer.atlas();
+    let font = atlas.font_id("body").unwrap();
+    let close_icon = atlas.icon_id("close").expect("test atlas contains the close icon");
     let white = color(255, 255, 255, 255);
     let clip = Recti::new(2, 0, 20, 4);
     let mut list = DisplayList::new();
     {
         let mut painter = Painter::screen_space(&mut list, clip);
         painter.fill_rect(Recti::new(0, 0, 10, 4), white);
-        painter.text(FontId::default(), "a", Vec2i::new(0, 0), white);
-        painter.icon(CLOSE_ICON, Recti::new(0, 0, 4, 4), white);
+        painter.text(font, "a", Vec2i::new(0, 0), white);
+        painter.icon(close_icon, Recti::new(0, 0, 4, 4), white);
     }
 
     renderer.render(frame_info(8, 8), &mut list).unwrap();
@@ -630,6 +644,79 @@ fn texture_upload_validation_and_backend_failure_do_not_consume_ids() {
     assert_eq!(renderer.last_texture_slot, 0);
     assert!(renderer.textures.is_empty());
     assert_eq!(create_calls.get(), 1);
+}
+
+/// Verifies atlas provenance prevents equal local font and icon slots from aliasing across
+/// otherwise identical atlas allocations.
+#[test]
+fn foreign_same_slot_font_and_icon_fail_before_frame_acquisition_without_poisoning_local_ids() {
+    // Reconstructing identical source metadata deliberately creates distinct ownership domains.
+    // The conventional font and white icon occupy the same local slots and expose identical
+    // metrics, leaving atlas provenance as the only distinction between each capability pair.
+    let foreign_atlas = make_atlas();
+    let local_atlas = make_atlas();
+    let foreign_font = foreign_atlas.font_id("body").unwrap();
+    let local_font = local_atlas.font_id("body").unwrap();
+    let foreign_icon = foreign_atlas.white_icon();
+    let local_icon = local_atlas.white_icon();
+    assert_ne!(foreign_font, local_font);
+    assert_ne!(foreign_icon, local_icon);
+    assert_eq!(foreign_atlas.get_font_height(foreign_font), local_atlas.get_font_height(local_font));
+    let foreign_icon_rect = foreign_atlas.get_icon_rect(foreign_icon);
+    let local_icon_rect = local_atlas.get_icon_rect(local_icon);
+    assert_eq!(
+        (foreign_icon_rect.x, foreign_icon_rect.y, foreign_icon_rect.width, foreign_icon_rect.height,),
+        (local_icon_rect.x, local_icon_rect.y, local_icon_rect.width, local_icon_rect.height)
+    );
+
+    let (backend, log) = recording_backend(local_atlas.clone());
+    let mut renderer = Renderer::new(backend);
+    // Confirm the handles retained by the renderer mint the same local capabilities captured
+    // above; the regression must reject only IDs from the separate atlas allocation.
+    assert_eq!(renderer.atlas().font_id("body"), Some(local_font));
+    assert_eq!(renderer.atlas().white_icon(), local_icon);
+
+    // A foreign font is rejected while walking the opaque display list, before frame acquisition
+    // can append a Begin event or submit the preceding valid operation to the backend.
+    let mut foreign_font_list = DisplayList::new();
+    {
+        let mut painter = painter(&mut foreign_font_list, viewport());
+        painter.text(local_font, "a", Vec2i::new(0, 0), color(255, 255, 255, 255));
+        painter.text(foreign_font, "a", Vec2i::new(4, 0), color(255, 255, 255, 255));
+    }
+    assert_eq!(
+        renderer.render(frame_info(32, 32), &mut foreign_font_list),
+        Err(RenderError::UnknownFont { id: foreign_font, operation_index: 1 })
+    );
+    assert!(foreign_font_list.is_empty());
+    assert!(log.snapshot().is_empty(), "foreign font preflight must run before backend acquisition");
+
+    // Repeat the same check independently for icons. Placing a valid local icon first verifies
+    // that preflight is atomic for the complete operation stream, not just its first operation.
+    let mut foreign_icon_list = DisplayList::new();
+    {
+        let mut painter = painter(&mut foreign_icon_list, viewport());
+        painter.icon(local_icon, Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
+        painter.icon(foreign_icon, Recti::new(1, 0, 1, 1), color(255, 255, 255, 255));
+    }
+    assert_eq!(
+        renderer.render(frame_info(32, 32), &mut foreign_icon_list),
+        Err(RenderError::UnknownIcon { id: foreign_icon, operation_index: 1 })
+    );
+    assert!(foreign_icon_list.is_empty());
+    assert!(log.snapshot().is_empty(), "foreign icon preflight must run before backend acquisition");
+
+    // Rendering both matching local IDs proves that the failed submissions neither acquire the
+    // backend nor disturb the renderer's valid atlas resources.
+    let mut local_list = DisplayList::new();
+    {
+        let mut painter = painter(&mut local_list, viewport());
+        painter.text(local_font, "a", Vec2i::new(0, 0), color(255, 255, 255, 255));
+        painter.icon(local_icon, Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
+    }
+    renderer.render(frame_info(32, 32), &mut local_list).unwrap();
+    assert!(local_list.is_empty());
+    assert_eq!(log.snapshot().iter().filter(|event| matches!(event, RenderEvent::AtlasQuad(_))).count(), 2);
 }
 
 /// Verifies renderer provenance prevents equal local slots from aliasing across renderer instances.

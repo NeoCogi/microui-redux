@@ -453,7 +453,7 @@ impl WidgetBuilder for TextboxBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::test_atlas;
+    use crate::test_support::{test_atlas, test_style};
 
     #[derive(Debug, Eq, PartialEq)]
     enum RecordedEvent {
@@ -478,7 +478,7 @@ mod tests {
 
     fn update_textbox(textbox: &mut Textbox, focused: bool, input: Vec<UiInputEvent>) {
         let atlas = test_atlas();
-        let style = Style::default();
+        let style = test_style(&atlas);
         let bounds = rect(0, 0, 120, 20);
         let mut modifiers = Modifiers::NONE;
         for event in &input {

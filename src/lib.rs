@@ -260,10 +260,7 @@ pub mod retained {
 /// renderer integration. Low-level backend and Renderer types live under [`render`].
 pub mod prelude {
     pub use crate::event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventPortHandle};
-    pub use crate::atlas::{
-        AtlasHandle, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry, FontId,
-        IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON,
-    };
+    pub use crate::atlas::{AtlasHandle, CharEntry, FontEntry, FontId, IconId, SourceFormat};
     pub use crate::file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};
     pub use crate::menu::{Menu, MenuBar, MenuItem, MenuItemAccessError, MenuItemHandle, MenuItemMark, MenuItemParameters, MenuItemSubmitted};
     pub use crate::image::{ImageSource, load_image_bytes};
@@ -293,10 +290,7 @@ pub mod prelude {
     };
 }
 
-pub use atlas::{
-    AtlasHandle, AtlasSource, CHECK_ICON, CLOSE_ICON, CLOSED_FOLDER_16_ICON, CharEntry, COLLAPSE_ICON, EXPAND_DOWN_ICON, EXPAND_ICON, FILE_16_ICON, FontEntry,
-    FontId, IconId, OPEN_FOLDER_16_ICON, SourceFormat, WHITE_ICON,
-};
+pub use atlas::{AtlasHandle, AtlasSource, CharEntry, FontEntry, FontId, IconId, SourceFormat};
 pub use context::{Context, ContextFrame, Ui};
 pub use window_manager::{
     ChildWindowClip, DEFAULT_LAYER, LayerBinding, MAX_LAYER, MIN_LAYER, PopupEvent, PopupHandle, SurfaceMutationError, Window, WindowEvent, WindowHandle,

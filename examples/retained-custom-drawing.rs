@@ -139,7 +139,7 @@ fn make_atlas() -> AtlasHandle {
         ),
     ];
     let fonts = vec![(
-        "default",
+        "body",
         FontEntry {
             line_size: 10,
             baseline: 8,

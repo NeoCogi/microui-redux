@@ -174,12 +174,14 @@ mod tests {
     use super::*;
     use crate::color;
     use crate::render::DisplayList;
+    use crate::test_support::{test_atlas, test_style};
 
     #[test]
     fn frame_geometry_derives_inside_content() {
+        let atlas = test_atlas();
         let style = Style {
             frame_border_width: 2,
-            ..Style::default()
+            ..test_style(&atlas)
         };
         let geometry = frame_geometry(Recti::new(10, 20, 30, 40), true, &style);
         assert_eq!(rect_tuple(geometry.outer), (10, 20, 30, 40));
@@ -188,9 +190,10 @@ mod tests {
 
     #[test]
     fn zero_width_frame_keeps_the_complete_content_rect() {
+        let atlas = test_atlas();
         let style = Style {
             frame_border_width: 0,
-            ..Style::default()
+            ..test_style(&atlas)
         };
         let outer = Recti::new(10, 20, 30, 40);
         let geometry = frame_geometry(outer, true, &style);
@@ -199,9 +202,10 @@ mod tests {
 
     #[test]
     fn transparent_border_keeps_structural_inset() {
+        let atlas = test_atlas();
         let mut style = Style {
             frame_border_width: 1,
-            ..Style::default()
+            ..test_style(&atlas)
         };
         style.colors[crate::ControlColor::Border as usize] = color(0, 0, 0, 0);
         assert_eq!(frame_geometry(Recti::new(4, 5, 8, 7), true, &style).content.map(rect_tuple), Some((5, 6, 6, 5)));
@@ -209,7 +213,8 @@ mod tests {
 
     #[test]
     fn tiny_frame_has_no_content() {
-        let style = Style::default();
+        let atlas = test_atlas();
+        let style = test_style(&atlas);
         assert!(frame_geometry(Recti::new(7, 8, 2, 10), true, &style).content.is_none());
     }
 

@@ -51,7 +51,7 @@ pub enum FontRole {
 }
 
 impl FontRole {
-    /// Returns the conventional atlas font name used by [`Style::bind_named_fonts`].
+    /// Returns the conventional atlas font name resolved by [`Style::from_atlas`].
     pub fn atlas_name(self) -> &'static str {
         match self {
             Self::Body => "body",

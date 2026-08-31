@@ -705,14 +705,20 @@ mod tests {
     }
 
     /// Lays out one fixed content node and returns the parent layout's committed summary.
-    fn laid_out_geometry(child_size: Dimensioni, surface: Recti, style: Style, requested_offset: Vec2i) -> ScrollAreaGeometry {
+    ///
+    /// `style` must contain resource IDs resolved from `atlas`; accepting the handle explicitly
+    /// keeps this helper from creating a second, incompatible ownership domain behind the test's
+    /// back.
+    fn laid_out_geometry(child_size: Dimensioni, surface: Recti, style: Style, atlas: &crate::AtlasHandle, requested_offset: Vec2i) -> ScrollAreaGeometry {
         let child = fixed_content(child_size);
         let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child));
         scroll.try_update(|state| state.set_offset(requested_offset)).unwrap();
 
         let mut runtime = UiRuntime::new();
         runtime.begin_update();
-        runtime.layout_tree_root(&mut root, &style, test_atlas(), surface, UNCLIPPED_RECT);
+        // The runtime takes an owned handle for the pass, so clone the caller's exact atlas
+        // capability rather than reconstructing identical-but-foreign atlas contents.
+        runtime.layout_tree_root(&mut root, &style, atlas.clone(), surface, UNCLIPPED_RECT);
         scroll.try_read(|state| state.geometry).unwrap()
     }
 
@@ -744,10 +750,11 @@ mod tests {
         let child = fixed_content(Dimensioni::new(20, 20));
         let child_id = child.id();
         let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child));
+        let atlas = test_atlas();
         let style = Style {
             padding: 0,
             scrollbar_size: 10,
-            ..Style::default()
+            ..crate::test_support::test_style(&atlas)
         };
         let viewport = Recti::new(0, 0, 100, 80);
         let mut runtime = UiRuntime::new();
@@ -755,7 +762,7 @@ mod tests {
         // A child smaller than the viewport produces no overflow but receives the complete
         // interactive content allocation rather than a top-aligned intrinsic-height strip.
         runtime.begin_update();
-        runtime.layout_tree_root(&mut root, &style, test_atlas(), viewport, UNCLIPPED_RECT);
+        runtime.layout_tree_root(&mut root, &style, atlas.clone(), viewport, UNCLIPPED_RECT);
         let child_rect = runtime.node_rect(std::slice::from_ref(&root), child_id).unwrap();
         assert_eq!((child_rect.width, child_rect.height), (100, 80));
         assert_eq!(
@@ -774,26 +781,27 @@ mod tests {
         // Overflow on both axes reserves two ten-pixel bars and leaves a 90-by-90 content viewport.
         let child = fixed_content(Dimensioni::new(200, 300));
         let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child));
+        let atlas = test_atlas();
         let style = Style {
             padding: 0,
             scrollbar_size: 10,
-            ..Style::default()
+            ..crate::test_support::test_style(&atlas)
         };
         let viewport = Recti::new(0, 0, 100, 100);
         let mut runtime = UiRuntime::new();
         runtime.begin_update();
-        runtime.layout_tree_root(&mut root, &style, test_atlas(), viewport, UNCLIPPED_RECT);
+        runtime.layout_tree_root(&mut root, &style, atlas.clone(), viewport, UNCLIPPED_RECT);
 
         // Align the trailing edges of a lower-right target, then commit the requested offsets
         // through ordinary placement and range clamping.
         scroll.try_update(|state| state.scroll_rect_into_view(Recti::new(150, 250, 1, 10))).unwrap();
-        runtime.layout_tree_root(&mut root, &style, test_atlas(), viewport, UNCLIPPED_RECT);
+        runtime.layout_tree_root(&mut root, &style, atlas.clone(), viewport, UNCLIPPED_RECT);
         assert_eq!(scroll.try_read(|state| (state.offset().x, state.offset().y)), Some((61, 170)));
 
         // A target before the visible origin aligns its leading edges instead of overscrolling to
         // zero or retaining the previous lower-right position.
         scroll.try_update(|state| state.scroll_rect_into_view(Recti::new(10, 20, 5, 5))).unwrap();
-        runtime.layout_tree_root(&mut root, &style, test_atlas(), viewport, UNCLIPPED_RECT);
+        runtime.layout_tree_root(&mut root, &style, atlas.clone(), viewport, UNCLIPPED_RECT);
         assert_eq!(scroll.try_read(|state| (state.offset().x, state.offset().y)), Some((10, 20)));
     }
 
@@ -809,15 +817,15 @@ mod tests {
         let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, content));
         assert_eq!(root.debug_node_count(), 1_005, "all retained row nodes remain owned by their column");
 
+        let atlas = test_atlas();
         let style = Style {
             padding: 0,
             spacing: 2,
             scrollbar_size: 10,
-            ..Style::default()
+            ..crate::test_support::test_style(&atlas)
         };
         let viewport = Recti::new(0, 0, 200, 120);
         let mut runtime = UiRuntime::new();
-        let atlas = test_atlas();
         runtime.begin_update();
         runtime.layout_tree_root(&mut root, &style, atlas.clone(), viewport, UNCLIPPED_RECT);
         let first_id = first_id.unwrap();
@@ -844,16 +852,17 @@ mod tests {
     fn disabling_scrolling_revokes_scrollbar_capture_through_participation() {
         let child = fixed_content(Dimensioni::new(200, 200));
         let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child));
+        let atlas = test_atlas();
         let style = Style {
             padding: 0,
             scrollbar_size: 10,
-            ..Style::default()
+            ..crate::test_support::test_style(&atlas)
         };
         let outer = Recti::new(0, 0, 100, 100);
         let mut runtime = UiRuntime::new();
 
         runtime.begin_update();
-        runtime.layout_tree_root(&mut root, &style, test_atlas(), outer, UNCLIPPED_RECT);
+        runtime.layout_tree_root(&mut root, &style, atlas.clone(), outer, UNCLIPPED_RECT);
         let track = scroll
             .try_read(|state| state.geometry.vertical)
             .flatten()
@@ -868,11 +877,11 @@ mod tests {
             .route_input_event_to_node_ref(&mut root, &style, &event)
             .expect("the scrollbar must receive its pointer press");
         runtime.update_pointer_capture(owner, result, &event, snapshot.mouse_buttons);
-        runtime.update_tree_root(&mut root, &style, test_atlas(), snapshot);
+        runtime.update_tree_root(&mut root, &style, atlas.clone(), snapshot);
         assert_eq!(runtime.debug_capture_target(), Some(owner));
 
         scroll.try_update(|state| state.set_scrolling_enabled(false)).unwrap();
-        runtime.layout_tree_root(&mut root, &style, test_atlas(), outer, UNCLIPPED_RECT);
+        runtime.layout_tree_root(&mut root, &style, atlas.clone(), outer, UNCLIPPED_RECT);
         assert_eq!(runtime.debug_capture_target(), None);
     }
 
@@ -881,14 +890,13 @@ mod tests {
     fn padding_and_mutually_induced_bars_converge_from_logical_content_extent() {
         // Ten pixels of padding on both sides leaves an eighty-pixel viewport for the child.
         let surface = Recti::new(0, 0, 100, 100);
+        let atlas = test_atlas();
+        let style = crate::test_support::test_style(&atlas);
         let fits = laid_out_geometry(
             Dimensioni::new(80, 80),
             surface,
-            Style {
-                padding: 10,
-                scrollbar_size: 10,
-                ..Style::default()
-            },
+            Style { padding: 10, scrollbar_size: 10, ..style },
+            &atlas,
             Vec2i::default(),
         );
         assert_eq!((fits.surface.width, fits.surface.height), (100, 100));
@@ -900,11 +908,8 @@ mod tests {
         let induced = laid_out_geometry(
             Dimensioni::new(95, 101),
             surface,
-            Style {
-                padding: 0,
-                scrollbar_size: 10,
-                ..Style::default()
-            },
+            Style { padding: 0, scrollbar_size: 10, ..style },
+            &atlas,
             Vec2i::default(),
         );
         assert_eq!(induced.vertical.map(|track| track.x), Some(90));
@@ -923,15 +928,16 @@ mod tests {
             std::iter::empty::<Node>(),
         );
         let (_, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, Node::container(content)));
+        let atlas = test_atlas();
         let style = Style {
             padding: 0,
             scrollbar_size: 10,
-            ..Style::default()
+            ..crate::test_support::test_style(&atlas)
         };
 
         let mut runtime = UiRuntime::new();
         runtime.begin_update();
-        runtime.layout_tree_root(&mut root, &style, test_atlas(), Recti::new(0, 0, 100, 100), UNCLIPPED_RECT);
+        runtime.layout_tree_root(&mut root, &style, atlas.clone(), Recti::new(0, 0, 100, 100), UNCLIPPED_RECT);
 
         assert_eq!(placements.get(), 1, "candidate scrollbar states must never speculatively place content");
     }
@@ -950,33 +956,33 @@ mod tests {
             crate::LinearItem::flex(text_column, 1.0),
         ]));
         let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, row));
+        let atlas = test_atlas();
         let style = Style {
             padding: 0,
             spacing: 4,
             scrollbar_size: 10,
-            ..Style::default()
+            ..crate::test_support::test_style(&atlas)
         };
 
         let mut runtime = UiRuntime::new();
         runtime.begin_update();
-        runtime.layout_tree_root(&mut root, &style, test_atlas(), Recti::new(0, 0, 100, 300), UNCLIPPED_RECT);
+        runtime.layout_tree_root(&mut root, &style, atlas.clone(), Recti::new(0, 0, 100, 300), UNCLIPPED_RECT);
 
         assert_eq!(scroll.try_read(|state| state.geometry.horizontal.is_none()), Some(true));
         let text_rect = runtime.node_rect(std::slice::from_ref(&root), text_id).unwrap();
         assert_eq!(text_rect.width, 56);
-        assert!(text_rect.height > test_atlas().get_font_height(style.font) as i32);
+        assert!(text_rect.height > atlas.get_font_height(style.font) as i32);
     }
 
     #[test]
     fn placement_clamps_requested_offsets_after_content_or_viewport_changes() {
+        let atlas = test_atlas();
+        let style = crate::test_support::test_style(&atlas);
         let geometry = laid_out_geometry(
             Dimensioni::new(120, 130),
             Recti::new(0, 0, 100, 100),
-            Style {
-                padding: 0,
-                scrollbar_size: 10,
-                ..Style::default()
-            },
+            Style { padding: 0, scrollbar_size: 10, ..style },
+            &atlas,
             Vec2i::new(500, 500),
         );
         assert_eq!((geometry.offset.x, geometry.offset.y), (30, 40));
@@ -988,16 +994,17 @@ mod tests {
         let wide_line = "0123456789".repeat(12);
         let (text, child) = TextBlock::create(TextBlockParameters::new(&wide_line));
         let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child));
+        let atlas = test_atlas();
         let style = Style {
             padding: 0,
             scrollbar_size: 10,
-            ..Style::default()
+            ..crate::test_support::test_style(&atlas)
         };
         let surface = Recti::new(0, 0, 100, 80);
         let mut runtime = UiRuntime::new();
 
         runtime.begin_update();
-        runtime.layout_tree_root(&mut root, &style, test_atlas(), surface, UNCLIPPED_RECT);
+        runtime.layout_tree_root(&mut root, &style, atlas.clone(), surface, UNCLIPPED_RECT);
         text.set_text(std::iter::repeat_n(wide_line, 20).collect::<Vec<_>>().join("\n")).unwrap();
         scroll
             .try_update(|state| {
@@ -1007,7 +1014,7 @@ mod tests {
             .unwrap();
 
         runtime.begin_update();
-        runtime.layout_tree_root(&mut root, &style, test_atlas(), surface, UNCLIPPED_RECT);
+        runtime.layout_tree_root(&mut root, &style, atlas.clone(), surface, UNCLIPPED_RECT);
         let geometry = scroll.try_read(|state| state.geometry).unwrap();
         assert_eq!(geometry.offset.x, 7);
         assert!(geometry.max_offset.y > 0);
@@ -1021,16 +1028,17 @@ mod tests {
         let child_id = child.id();
         let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, child));
         let mut runtime = UiRuntime::new();
+        let atlas = test_atlas();
         let style = Style {
             frame_border_width: 3,
             padding: 5,
             scrollbar_size: 10,
-            ..Style::default()
+            ..crate::test_support::test_style(&atlas)
         };
         let outer = Recti::new(10, 20, 100, 80);
 
         runtime.begin_update();
-        runtime.layout_tree_root(&mut root, &style, test_atlas(), outer, UNCLIPPED_RECT);
+        runtime.layout_tree_root(&mut root, &style, atlas.clone(), outer, UNCLIPPED_RECT);
         let allocation_before = root.with_node(child_id, |node| node.state.layout.allocation).unwrap();
         let screen_before = runtime.node_rect(std::slice::from_ref(&root), child_id).unwrap();
         assert_eq!((allocation_before.x, allocation_before.y), (0, 0));
@@ -1043,7 +1051,7 @@ mod tests {
         );
 
         scroll.try_update(|state| state.set_offset(Vec2i::new(0, 12))).unwrap();
-        runtime.layout_tree_root(&mut root, &style, test_atlas(), outer, UNCLIPPED_RECT);
+        runtime.layout_tree_root(&mut root, &style, atlas.clone(), outer, UNCLIPPED_RECT);
         let allocation_after = root.with_node(child_id, |node| node.state.layout.allocation).unwrap();
         let screen_after = runtime.node_rect(std::slice::from_ref(&root), child_id).unwrap();
         assert_eq!(
@@ -1053,7 +1061,7 @@ mod tests {
         );
         assert_eq!((screen_after.x, screen_after.y), (screen_before.x, screen_before.y - 12));
 
-        runtime.layout_tree_root(&mut root, &style, test_atlas(), Recti::new(10, 20, 240, 260), UNCLIPPED_RECT);
+        runtime.layout_tree_root(&mut root, &style, atlas.clone(), Recti::new(10, 20, 240, 260), UNCLIPPED_RECT);
         assert_eq!(scroll.try_read(|state| (state.offset().x, state.offset().y)), Some((0, 0)));
     }
 }

@@ -121,8 +121,6 @@ pub fn atlas_config() -> builder::Config<'static> {
         texture_width: 512,
         white_icon: String::from("assets/WHITE.png"),
         icons: ICONS,
-        default_font: String::from("assets/NORMAL.ttf"),
-        default_font_size: 12,
         fonts: FONTS,
     }
 }

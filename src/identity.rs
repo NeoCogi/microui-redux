@@ -32,9 +32,9 @@
 //!
 //! Event ports describe observable behavior and lifetime; they are deliberately not object keys.
 //! This module supplies the orthogonal identity primitive wrapped by concrete window, popup,
-//! menu-item, and renderer identifier types. Each wrapper preserves its domain at compile time,
-//! while this shared source prevents equal owner identities from arising anywhere in one process.
-//! The raw value has no public accessor.
+//! menu-item, renderer, and atlas identifier types. Each wrapper preserves its domain at compile
+//! time, while this shared source prevents equal owner identities from arising anywhere in one
+//! process. The raw value has no public accessor.
 
 use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -56,8 +56,8 @@ const fn advance_process_unique_id(current: u64) -> Option<u64> {
 /// Opaque process-local identity assigned once to one concrete owner.
 ///
 /// Domain-specific wrappers preserve kind safety, while the shared namespace prevents equal
-/// identities from arising in separate Contexts or renderers. This value is intentionally not
-/// persistent: uniqueness lasts for the current process, matching every owner it identifies.
+/// identities from arising in separate Contexts, renderers, or atlases. This value is intentionally
+/// not persistent: uniqueness lasts for the current process, matching every owner it identifies.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[repr(transparent)]
 pub(crate) struct ProcessUniqueId(

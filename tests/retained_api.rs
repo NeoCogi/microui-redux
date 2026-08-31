@@ -34,11 +34,11 @@ use microui_redux::render::{FrameError, FrameInfo, RendererBackend, RendererFram
 use microui_redux::retained::*;
 use microui_redux::prelude::{
     Dimensioni, Ui, FileDialog, FileDialogRequest, FileDialogStatus, Menu, MenuBar, MenuItem, MenuItemHandle, MenuItemMark, MenuItemParameters,
-    MenuItemSubmitted, Recti, TextBlock, TextBlockParameters, TypedWidgetHandle, Window,
+    MenuItemSubmitted, Recti, TextBlock, TextBlockParameters, TypedWidgetHandle, Vec2i, Window,
 };
 use microui_redux::{
-    color, rect, AtlasHandle, AtlasSource, Constraints, Context, Disclosure, DisclosureParameters, FontEntry, Grid, GridParameters, Linear, LinearParameters,
-    ScrollArea, ScrollAreaOption, ScrollAreaParameters, SourceFormat, Style, SurfaceMutationError, TextureId,
+    color, rect, AtlasHandle, AtlasSource, CharEntry, Constraints, Context, Disclosure, DisclosureParameters, FontChoice, FontEntry, Grid, GridParameters,
+    Linear, LinearParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SourceFormat, Style, SurfaceMutationError, TextureId, ThemeIcons,
 };
 
 struct TestBackend {
@@ -75,14 +75,33 @@ impl RendererBackend for TestBackend {
 fn context_with_state<State: 'static>() -> Context<TestBackend, State> {
     // Build the smallest public atlas accepted by the downstream test renderer.
     let pixels = [255, 255, 255, 255];
-    let icons = [("white", Recti::new(0, 0, 1, 1))];
+    let icon_names = [
+        "white",
+        "close",
+        "expand",
+        "collapse",
+        "check",
+        "expand_down",
+        "open_folder",
+        "closed_folder",
+        "file",
+    ];
+    let icons: Vec<_> = icon_names.iter().map(|name| (*name, Recti::new(0, 0, 1, 1))).collect();
+    let entries = [(
+        '_',
+        CharEntry {
+            offset: Vec2i::new(0, 0),
+            advance: Vec2i::new(1, 0),
+            rect: Recti::new(0, 0, 1, 1),
+        },
+    )];
     let font = FontEntry {
         line_size: 10,
         baseline: 8,
         font_size: 10,
-        entries: &[],
+        entries: &entries,
     };
-    let fonts = [("default", font)];
+    let fonts = [("body", font)];
     let source = AtlasSource {
         width: 1,
         height: 1,
@@ -98,6 +117,33 @@ fn context_with_state<State: 'static>() -> Context<TestBackend, State> {
 fn context() -> Context<TestBackend> {
     // Most downstream tests use the polling-only unit application state.
     context_with_state()
+}
+
+/// Verifies downstream code constructs and installs only atlas-owned style capabilities.
+#[test]
+fn downstream_style_and_theme_are_constructed_from_atlas_capabilities() {
+    let mut context = context();
+    let atlas = context.renderer().atlas();
+    let icons = ThemeIcons::from_atlas(&atlas);
+    let mut style = Style::from_atlas(&atlas);
+
+    // Public lookups and semantic construction must agree on the exact opaque capabilities.
+    assert_eq!(style.font, atlas.font_id("body").unwrap());
+    assert_eq!(icons.close, atlas.icon_id("close").unwrap());
+    assert_eq!(FontChoice::id(style.font).resolve(&style), style.font);
+
+    // Scalar customization preserves those IDs; Context accepts the complete style by value.
+    style.padding = 9;
+    context.set_style(style);
+    assert_eq!(context.style().padding, 9);
+    assert_eq!(context.style().icons, icons);
+
+    // A style from separately reconstructed identical metadata carries a different AtlasId and is
+    // rejected at the Context mutation boundary rather than aliasing same-slot resources.
+    let foreign_context = context_with_state::<()>();
+    let foreign_style = *foreign_context.style();
+    let foreign_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| context.set_style(foreign_style)));
+    assert!(foreign_result.is_err());
 }
 
 struct FileDialogModel {

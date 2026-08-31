@@ -35,7 +35,7 @@ pub fn external_atlas_source(pixels: &[u8]) -> AtlasSource<'_> {
     AtlasSource {
 width: 512, height: 256,
 icons: &[
-("WHITE", Rect { x: 1, y: 1, width: 24, height: 24 }),("CLOSE", Rect { x: 26, y: 1, width: 24, height: 24 }),("PLUS", Rect { x: 51, y: 1, width: 24, height: 24 }),("MINUS", Rect { x: 76, y: 1, width: 24, height: 24 }),("CHECK", Rect { x: 101, y: 1, width: 24, height: 24 }),("EXPAND_DOWN", Rect { x: 126, y: 1, width: 24, height: 24 }),("OPEN_FOLDER_16", Rect { x: 151, y: 1, width: 16, height: 16 }),("CLOSED_FOLDER_16", Rect { x: 168, y: 1, width: 16, height: 16 }),("FILE_16", Rect { x: 185, y: 1, width: 16, height: 16 }),],
+("white", Rect { x: 1, y: 1, width: 24, height: 24 }),("close", Rect { x: 26, y: 1, width: 24, height: 24 }),("expand", Rect { x: 51, y: 1, width: 24, height: 24 }),("collapse", Rect { x: 76, y: 1, width: 24, height: 24 }),("check", Rect { x: 101, y: 1, width: 24, height: 24 }),("expand_down", Rect { x: 126, y: 1, width: 24, height: 24 }),("open_folder", Rect { x: 151, y: 1, width: 16, height: 16 }),("closed_folder", Rect { x: 168, y: 1, width: 16, height: 16 }),("file", Rect { x: 185, y: 1, width: 16, height: 16 }),],
 fonts: &[
 ("body", FontEntry { line_size: 16, baseline: 13, font_size: 12, entries: &[
 ('P', CharEntry { offset: Vec2i { x: 1, y:0 }, advance: Vec2i { x:7, y: 0 }, rect: Recti {x: 382, y: 9, width: 6, height: 9 }, }),

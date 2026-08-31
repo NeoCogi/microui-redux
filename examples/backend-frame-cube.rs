@@ -172,7 +172,7 @@ fn build_cube_vertices(area: Recti, white_uv: Vec2f, angle: f32) -> Vec<Vertex> 
 
 /// Returns the atlas coordinate sampled by solid colored triangles.
 fn white_uv(atlas: &AtlasHandle) -> Vec2f {
-    let white = atlas.get_icon_rect(WHITE_ICON);
+    let white = atlas.get_icon_rect(atlas.white_icon());
     let texture = atlas.get_texture_dimension();
     Vec2f::new(
         (white.x as f32 + white.width as f32 * 0.5) / texture.width.max(1) as f32,
