@@ -119,7 +119,7 @@ impl RendererBackend for SmokeRenderer {
         Ok(SmokeFrame { backend: self })
     }
 
-    fn create_texture(&mut self, id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) -> Result<(), String> {
+    fn create_texture(&mut self, id: TextureId, _pixels: &[u8]) -> Result<(), String> {
         self.textures.push(id);
         Ok(())
     }

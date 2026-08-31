@@ -79,7 +79,7 @@ impl crate::WidgetEvent for PopupEvent {}
 #[repr(transparent)]
 pub(super) struct PopupId(
     /// Shared non-reused value hidden behind the popup-specific type boundary.
-    crate::identity::RetainedObjectId,
+    crate::identity::ProcessUniqueId,
 );
 
 impl PopupId {
@@ -87,7 +87,7 @@ impl PopupId {
     fn allocate() -> Self {
         // Menu and application popups share this concrete wrapper because both occupy popup nodes;
         // only application popups expose a handle and event endpoint.
-        Self(crate::identity::RetainedObjectId::allocate())
+        Self(crate::identity::ProcessUniqueId::allocate())
     }
 }
 

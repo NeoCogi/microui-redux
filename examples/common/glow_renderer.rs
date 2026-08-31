@@ -107,7 +107,8 @@ trait GlFrameOps {
     fn push_triangle_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex);
     fn flush(&mut self);
     fn end(&mut self);
-    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<(), String>;
+    /// Uploads pixels using the immutable dimensions carried by the renderer-issued ID.
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), String>;
     fn destroy_texture(&mut self, id: TextureId);
     fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]);
 }
@@ -340,7 +341,9 @@ impl GlFrameOps for GLRenderer {
     }
 
     /// Creates a GL texture for a backend-owned external image.
-    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<(), String> {
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), String> {
+        // The opaque capability is the sole dimension source validated by the core renderer.
+        let dimensions = id.size();
         let gl = &self.gl;
         unsafe {
             // User textures share the same nearest-neighbor setup as the atlas.
@@ -354,8 +357,8 @@ impl GlFrameOps for GLRenderer {
                 glow::TEXTURE_2D,
                 0,
                 glow::RGBA as i32,
-                width,
-                height,
+                dimensions.width,
+                dimensions.height,
                 0,
                 glow::RGBA,
                 glow::UNSIGNED_BYTE,
@@ -501,8 +504,8 @@ impl RendererBackend for GLRenderer {
         Ok(GlFrame { backend: self })
     }
 
-    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<(), String> {
-        GlFrameOps::create_texture(self, id, width, height, pixels)
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), String> {
+        GlFrameOps::create_texture(self, id, pixels)
     }
 
     fn destroy_texture(&mut self, id: TextureId) {

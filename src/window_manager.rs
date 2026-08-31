@@ -168,7 +168,7 @@ impl Window {
 #[repr(transparent)]
 pub(crate) struct RootId(
     /// Shared non-reused value hidden behind the root-specific type boundary.
-    crate::identity::RetainedObjectId,
+    crate::identity::ProcessUniqueId,
 );
 
 impl RootId {
@@ -176,7 +176,7 @@ impl RootId {
     pub(crate) fn allocate() -> Self {
         // The concrete wrapper is retained in both the forest key and the private application
         // handle; neither exposes the shared numeric value.
-        Self(crate::identity::RetainedObjectId::allocate())
+        Self(crate::identity::ProcessUniqueId::allocate())
     }
 }
 

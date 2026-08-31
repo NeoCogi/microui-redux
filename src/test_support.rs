@@ -219,7 +219,7 @@ impl RendererBackend for NoopRenderer {
         Ok(NoopFrame)
     }
 
-    fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) -> Result<(), String> {
+    fn create_texture(&mut self, _id: TextureId, _pixels: &[u8]) -> Result<(), String> {
         Ok(())
     }
 
@@ -408,11 +408,13 @@ impl RendererBackend for RecordingRenderer {
         Ok(RecordingFrame { backend: self })
     }
 
-    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<(), String> {
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), String> {
+        // Record dimensions from the same opaque capability a real backend receives.
+        let dimensions = id.size();
         self.log.push(RenderEvent::CreateTexture {
             id,
-            width,
-            height,
+            width: dimensions.width,
+            height: dimensions.height,
             byte_len: pixels.len(),
         });
         if self.fail_texture_upload {

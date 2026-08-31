@@ -127,8 +127,8 @@ higher-ranked lifetime means the callback can use the active frame but cannot sa
 state. The returned `CustomRenderHandle<B>` is tagged with `B`, so registration and removal through
 a Context using another backend type fail at compile time. `Node::custom_render` erases the handle
 to its backend-neutral registry key after checking the backend type; a key originating from any
-other Context is rejected by its foreign registry namespace during renderer preflight before a
-backend frame is acquired.
+other Context retains a different concrete renderer identity and is rejected during renderer
+preflight before a backend frame is acquired.
 
 `CustomRenderArgs` carries the geometry needed at execution time:
 

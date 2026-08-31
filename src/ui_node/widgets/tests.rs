@@ -46,7 +46,7 @@ fn run_click<W: Widget>(widget: &mut W) {
 fn image_widgets_measure_external_texture_dimensions() {
     let atlas = make_test_atlas();
     let style = Style::default();
-    let texture = TextureId::new(7, 13, 5);
+    let texture = TextureId::new_test(7, 13, 5);
 
     let button = ButtonBuilder::create_widget(ButtonParameters::with_image("aa", Some(texture), WidgetOption::FRAME, WidgetFillOption::ALL));
     let button_size = button.measure(&style, &atlas, Constraints::unbounded());

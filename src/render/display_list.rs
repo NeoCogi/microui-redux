@@ -276,7 +276,7 @@ mod tests {
         list.push_fill_rect(clips[0], Recti::new(0, 0, 2, 2), color(1, 2, 3, 4));
         list.push_text(clips[1], FontId::default(), Vec2i::new(4, 5), color(5, 6, 7, 8), "text");
         list.push_icon(clips[2], IconId::default(), Recti::new(6, 7, 8, 9), color(9, 10, 11, 12));
-        list.push_image(clips[3], TextureId::new(1, 12, 13), Recti::new(10, 11, 12, 13), color(13, 14, 15, 16));
+        list.push_image(clips[3], TextureId::new_test(1, 12, 13), Recti::new(10, 11, 12, 13), color(13, 14, 15, 16));
 
         assert_eq!(list.ops.len(), clips.len());
         for (operation, expected) in list.ops.iter().zip(clips) {

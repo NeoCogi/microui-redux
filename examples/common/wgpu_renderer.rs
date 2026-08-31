@@ -133,7 +133,8 @@ trait WgpuFrameOps {
     fn push_triangle_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex);
     fn flush(&mut self);
     fn finish(&mut self, frame: wgpu::SurfaceTexture);
-    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<(), String>;
+    /// Uploads pixels using the immutable dimensions carried by the renderer-issued ID.
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), String>;
     fn destroy_texture(&mut self, id: TextureId);
     fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]);
 }
@@ -815,19 +816,17 @@ impl WgpuFrameOps for WgpuRenderer {
     }
 
     /// Creates a backend-owned sampled texture and its bind group.
-    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<(), String> {
-        if width <= 0 || height <= 0 {
-            return Err(String::from("texture dimensions must be positive"));
-        }
-
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), String> {
+        // The opaque capability is the sole dimension source validated by the core renderer.
+        let dimensions = id.size();
         let texture = Self::create_gpu_texture(
             &self.device,
             &self.queue,
             &self.bind_group_layout,
             &self.sampler,
             &self.uniform_buffer,
-            width as u32,
-            height as u32,
+            dimensions.width as u32,
+            dimensions.height as u32,
             Some(pixels),
         )?;
         self.textures.insert(id, texture);
@@ -918,8 +917,8 @@ impl RendererBackend for WgpuRenderer {
         })
     }
 
-    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<(), String> {
-        WgpuFrameOps::create_texture(self, id, width, height, pixels)
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), String> {
+        WgpuFrameOps::create_texture(self, id, pixels)
     }
 
     fn destroy_texture(&mut self, id: TextureId) {

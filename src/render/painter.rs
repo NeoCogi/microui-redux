@@ -403,7 +403,7 @@ mod tests {
             let mut painter = Painter::for_widget(&mut list, Recti::new(10, 20, 100, 100), Recti::new(10, 20, 20, 20));
             painter.text(FontId::default(), "label", Vec2i::new(1, 2), color(255, 255, 255, 255));
             painter.icon(IconId::default(), Recti::new(2, 3, 4, 5), color(255, 255, 255, 255));
-            painter.image(TextureId::new(1, 10, 10), Recti::new(100, 100, 10, 10), color(255, 255, 255, 255));
+            painter.image(TextureId::new_test(1, 10, 10), Recti::new(100, 100, 10, 10), color(255, 255, 255, 255));
         }
 
         assert_eq!(list.ops.len(), 2);

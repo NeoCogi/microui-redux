@@ -39,6 +39,7 @@ use crate::test_support::{RecordedVertex, RenderEvent, recording_backend};
 use crate::{AtlasSource, CharEntry, CLOSE_ICON, FontEntry, SourceFormat, color, color4b};
 use std::{
     cell::{Cell, RefCell},
+    collections::HashSet,
     rc::Rc,
 };
 
@@ -94,7 +95,7 @@ impl RendererBackend for CountingRenderer {
         Ok(CountingFrame { backend: self })
     }
 
-    fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) -> Result<(), String> {
+    fn create_texture(&mut self, _id: TextureId, _pixels: &[u8]) -> Result<(), String> {
         Ok(())
     }
 
@@ -129,7 +130,7 @@ impl RendererBackend for TextureUploadRenderer {
         Ok(EmptyFrame)
     }
 
-    fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) -> Result<(), String> {
+    fn create_texture(&mut self, _id: TextureId, _pixels: &[u8]) -> Result<(), String> {
         self.create_calls.set(self.create_calls.get() + 1);
         if self.fail_upload.get() {
             Err(String::from("backend rejected texture"))
@@ -604,6 +605,7 @@ fn custom_barrier_flushes_clips_and_preserves_order() {
     assert_eq!(events[6], RenderEvent::End);
 }
 
+/// Verifies invalid inputs and failed uploads leave both texture ownership and slot state unchanged.
 #[test]
 fn texture_upload_validation_and_backend_failure_do_not_consume_ids() {
     let create_calls = Rc::new(Cell::new(0));
@@ -618,16 +620,62 @@ fn texture_upload_validation_and_backend_failure_do_not_consume_ids() {
     let mut renderer = Renderer::new(backend);
     let error = renderer.try_load_texture_rgba(2, 2, &[0xFF; 4]).unwrap_err();
     assert_eq!(error, "Expected 16 RGBA bytes, received 4");
-    assert_eq!(renderer.next_texture_id, 1);
+    assert_eq!(renderer.last_texture_slot, 0);
     assert!(renderer.textures.is_empty());
     assert_eq!(create_calls.get(), 0);
 
     fail_upload.set(true);
     let error = renderer.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap_err();
     assert_eq!(error, "backend rejected texture");
-    assert_eq!(renderer.next_texture_id, 1);
+    assert_eq!(renderer.last_texture_slot, 0);
     assert!(renderer.textures.is_empty());
     assert_eq!(create_calls.get(), 1);
+}
+
+/// Verifies renderer provenance prevents equal local slots from aliasing across renderer instances.
+#[test]
+fn foreign_same_slot_texture_cannot_render_or_destroy_the_local_texture() {
+    let (left_backend, _left_log) = recording_backend(make_atlas());
+    let mut left = Renderer::new(left_backend);
+    let (right_backend, right_log) = recording_backend(make_atlas());
+    let mut right = Renderer::new(right_backend);
+
+    // Each renderer deliberately allocates its first local slot with the same dimensions. Only the
+    // process-unique renderer identity distinguishes these otherwise identical capabilities.
+    let foreign = left.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap();
+    let local = right.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap();
+    assert_eq!(left.last_texture_slot, right.last_texture_slot);
+    assert_eq!((foreign.width(), foreign.height()), (local.width(), local.height()));
+    assert_ne!(foreign, local);
+
+    right_log.clear();
+    let mut foreign_list = DisplayList::new();
+    painter(&mut foreign_list, viewport()).image(foreign, Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
+    let error = right.render(frame_info(32, 32), &mut foreign_list).unwrap_err();
+    assert!(matches!(error, RenderError::UnknownTexture { id, operation_index: 0 } if id == foreign));
+    assert!(right_log.snapshot().is_empty(), "foreign texture preflight must run before backend acquisition");
+
+    // The public lifecycle operation follows the established debug-assert/release-no-op contract.
+    // In either mode the foreign capability must leave the matching local slot alive.
+    let foreign_free = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| right.free_texture(foreign)));
+    if cfg!(debug_assertions) {
+        assert!(foreign_free.is_err());
+    } else {
+        assert!(foreign_free.is_ok());
+    }
+    assert!(right_log.snapshot().is_empty(), "foreign destruction must not reach the backend");
+
+    // Successful rendering with the local handle proves the rejected destruction did not remove
+    // the same-numbered resource from either Renderer tracking or the backend.
+    let mut local_list = DisplayList::new();
+    painter(&mut local_list, viewport()).image(local, Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
+    right.render(frame_info(32, 32), &mut local_list).unwrap();
+    assert!(
+        right_log
+            .snapshot()
+            .iter()
+            .any(|event| matches!(event, RenderEvent::ExternalTexture { id, .. } if *id == local))
+    );
 }
 
 #[cfg(debug_assertions)]
@@ -662,7 +710,7 @@ fn unknown_and_freed_textures_fail_preflight_and_drop_destroys_owned_textures_on
     renderer.free_texture(first);
     let mut list = DisplayList::new();
     painter(&mut list, viewport()).image(first, Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
-    painter(&mut list, viewport()).image(TextureId::new(999, 1, 1), Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
+    painter(&mut list, viewport()).image(TextureId::new_test(999, 1, 1), Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
     painter(&mut list, viewport()).fill_polygon(&[Vec2f::new(0.0, 0.0), Vec2f::new(8.0, 0.0), Vec2f::new(0.0, 8.0)], color(255, 255, 255, 255));
     let capacities = list_capacities(&list);
     let error = renderer.render(frame_info(32, 32), &mut list).unwrap_err();
@@ -674,15 +722,14 @@ fn unknown_and_freed_textures_fail_preflight_and_drop_destroys_owned_textures_on
 
     let events = log.snapshot();
     assert!(!events.iter().any(|event| matches!(event, RenderEvent::ExternalTexture { .. })));
-    let mut destroyed: Vec<_> = events
+    let destroyed: HashSet<_> = events
         .iter()
         .filter_map(|event| match event {
-            RenderEvent::DestroyTexture(id) => Some(id.raw()),
+            RenderEvent::DestroyTexture(id) => Some(*id),
             _ => None,
         })
         .collect();
-    destroyed.sort_unstable();
-    assert_eq!(destroyed, vec![first.raw(), second.raw(), third.raw()]);
+    assert_eq!(destroyed, HashSet::from([first, second, third]));
 }
 
 #[test]
@@ -726,7 +773,7 @@ fn frame_acquisition_failure_discards_the_list_without_finalization() {
             Err(FrameError::new("acquire failed"))
         }
 
-        fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) -> Result<(), String> {
+        fn create_texture(&mut self, _id: TextureId, _pixels: &[u8]) -> Result<(), String> {
             Ok(())
         }
 

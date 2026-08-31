@@ -28,51 +28,52 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-//! Non-reused process-local identity for retained surfaces and menu items.
+//! Non-reused process-local identity for concrete retained and resource capabilities.
 //!
 //! Event ports describe observable behavior and lifetime; they are deliberately not object keys.
-//! This module supplies the orthogonal identity primitive wrapped by concrete window, popup, and
-//! menu-item identifier types, including popup keys used only by private menu surfaces. The raw
-//! value never crosses the public API boundary.
+//! This module supplies the orthogonal identity primitive wrapped by concrete window, popup,
+//! menu-item, and renderer identifier types. Each wrapper preserves its domain at compile time,
+//! while this shared source prevents equal owner identities from arising anywhere in one process.
+//! The raw value has no public accessor.
 
 use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Process-wide source shared by every retained surface and menu-item identity kind.
+/// Process-wide source shared by every concrete process-local identity kind.
 ///
 /// Relaxed ordering is sufficient because allocation establishes uniqueness only. It neither
-/// publishes retained object memory nor synchronizes manager operations, which remain confined to
-/// their owning Context thread.
-static NEXT_RETAINED_OBJECT_ID: AtomicU64 = AtomicU64::new(1);
+/// publishes object memory nor synchronizes operations, which remain confined to their concrete
+/// owner after construction.
+static NEXT_PROCESS_UNIQUE_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Returns the following representable identity without wrapping to a previously issued value.
-const fn advance_retained_object_id(current: u64) -> Option<u64> {
+const fn advance_process_unique_id(current: u64) -> Option<u64> {
     // Checked addition makes exhaustion terminal instead of turning the process-wide source back
     // into zero or another value that could alias a destroyed object.
     current.checked_add(1)
 }
 
-/// Opaque process-local identity assigned once to one retained surface or menu item.
+/// Opaque process-local identity assigned once to one concrete owner.
 ///
-/// Concrete wrappers preserve kind safety, while the shared namespace prevents equal identities
-/// from arising in separate Contexts. This value is intentionally not a persistent identifier:
-/// uniqueness lasts for the current process, matching the lifetime of every retained handle.
+/// Domain-specific wrappers preserve kind safety, while the shared namespace prevents equal
+/// identities from arising in separate Contexts or renderers. This value is intentionally not
+/// persistent: uniqueness lasts for the current process, matching every owner it identifies.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[repr(transparent)]
-pub(crate) struct RetainedObjectId(
-    /// Non-zero raw value kept private so application code cannot forge retained capabilities.
+pub(crate) struct ProcessUniqueId(
+    /// Non-zero raw value kept private so application code cannot forge concrete capabilities.
     NonZeroU64,
 );
 
-impl RetainedObjectId {
+impl ProcessUniqueId {
     /// Allocates one process-unique identity or panics after exhausting the usable `u64` space.
     pub(crate) fn allocate() -> Self {
         // `fetch_update` modifies the global source only when checked advancement succeeds. Once
         // exhausted, every later attempt therefore fails consistently rather than reusing an ID.
-        let raw = NEXT_RETAINED_OBJECT_ID
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, advance_retained_object_id)
-            .expect("retained object identity space exhausted");
-        Self(NonZeroU64::new(raw).expect("retained object identity allocator returned zero"))
+        let raw = NEXT_PROCESS_UNIQUE_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, advance_process_unique_id)
+            .expect("process-unique identity space exhausted");
+        Self(NonZeroU64::new(raw).expect("process-unique identity allocator returned zero"))
     }
 }
 
@@ -82,20 +83,20 @@ mod tests {
 
     /// Verifies that allocator advancement cannot cross the wraparound boundary.
     #[test]
-    fn retained_object_identity_advancement_stops_before_reuse() {
+    fn process_unique_identity_advancement_stops_before_reuse() {
         // Ordinary values advance exactly once, while the terminal value remains unmodified by
         // `fetch_update` because this helper rejects its transition.
-        assert_eq!(advance_retained_object_id(1), Some(2));
-        assert_eq!(advance_retained_object_id(u64::MAX), None);
+        assert_eq!(advance_process_unique_id(1), Some(2));
+        assert_eq!(advance_process_unique_id(u64::MAX), None);
     }
 
     /// Verifies process-wide allocation produces distinct non-recycled values.
     #[test]
-    fn retained_object_identity_allocations_are_unique() {
+    fn process_unique_identity_allocations_are_unique() {
         // Equality is the only operation concrete object identifiers require; their numeric
         // representation intentionally remains inaccessible even to this behavioral assertion.
-        let first = RetainedObjectId::allocate();
-        let second = RetainedObjectId::allocate();
+        let first = ProcessUniqueId::allocate();
+        let second = ProcessUniqueId::allocate();
         assert_ne!(first, second);
     }
 }

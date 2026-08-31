@@ -52,17 +52,11 @@
 //
 //! Public renderer integration types.
 
+use super::texture::RendererId;
 use crate::atlas::AtlasHandle;
 use crate::render::{Color, TextureId};
 use rs_math3d::{Color4b, Dimensioni, Rect, Vec2f, color4b};
-use std::{
-    collections::HashMap,
-    error::Error,
-    fmt,
-    marker::PhantomData,
-    num::NonZeroU64,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::{collections::HashMap, error::Error, fmt, marker::PhantomData};
 
 #[derive(Default, Copy, Clone)]
 #[repr(C)]
@@ -291,8 +285,6 @@ pub trait RendererFrame {
 ///     fn create_texture(
 ///         &mut self,
 ///         _id: TextureId,
-///         _width: i32,
-///         _height: i32,
 ///         _pixels: &[u8],
 ///     ) -> Result<(), String> {
 ///         Ok(())
@@ -329,9 +321,11 @@ pub trait RendererBackend: 'static {
     fn frame(&mut self, info: FrameInfo) -> Result<Self::Frame<'_>, FrameError>;
     /// Creates a texture owned by the backend.
     ///
-    /// The caller validates RGBA dimensions and byte length before calling this method. Backends
-    /// should return an error without retaining `id` when GPU texture creation or upload fails.
-    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<(), String>;
+    /// The caller validates [`TextureId::size`] and RGBA byte length before calling this method.
+    /// Backends should return an error without retaining `id` when GPU creation or upload fails.
+    /// Dimensions are carried only by `id`, preventing a backend from observing contradictory
+    /// handle and argument sizes.
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), String>;
     /// Destroys a previously created texture.
     fn destroy_texture(&mut self, id: TextureId);
 }
@@ -360,7 +354,9 @@ where
 /// Backend-neutral key retained by UI nodes and display-list operations.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct CustomRenderKey {
-    namespace: NonZeroU64,
+    /// Identity of the renderer that owns this callback registry.
+    renderer: RendererId,
+    /// Monotonically allocated callback slot within `renderer`.
     slot: u64,
 }
 
@@ -387,8 +383,6 @@ impl<B: RendererBackend> fmt::Debug for CustomRenderHandle<B> {
 /// Custom-render registry mutation failure.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum CustomRenderRegistryError {
-    /// The process-wide registry namespace counter was exhausted.
-    NamespaceExhausted,
     /// This registry's monotonically increasing callback slot counter was exhausted.
     SlotExhausted,
     /// The supplied handle is foreign to this registry or has already been removed.
@@ -398,7 +392,6 @@ pub enum CustomRenderRegistryError {
 impl fmt::Display for CustomRenderRegistryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NamespaceExhausted => f.write_str("custom-render registry namespace exhausted"),
             Self::SlotExhausted => f.write_str("custom-render registry slot counter exhausted"),
             Self::UnknownRenderer => f.write_str("unknown custom renderer"),
         }
@@ -407,62 +400,60 @@ impl fmt::Display for CustomRenderRegistryError {
 
 impl Error for CustomRenderRegistryError {}
 
-static NEXT_CUSTOM_RENDER_NAMESPACE: AtomicU64 = AtomicU64::new(1);
-
 /// Renderer-owned callbacks specialized for one concrete backend.
 pub(crate) struct CustomRenderRegistry<B: RendererBackend> {
-    namespace: Option<NonZeroU64>,
+    /// Identity shared with the Renderer and every other renderer-owned capability.
+    renderer: RendererId,
+    /// Last callback slot allocated by this registry.
     next_slot: u64,
+    /// Live callbacks keyed by renderer provenance and local slot.
     callbacks: HashMap<CustomRenderKey, Box<dyn CustomRender<B>>>,
 }
 
 impl<B: RendererBackend> CustomRenderRegistry<B> {
-    pub(crate) fn new() -> Self {
+    /// Creates the sole custom-render registry owned by `renderer`.
+    pub(crate) fn new(renderer: RendererId) -> Self {
+        // Renderer constructs this registry exactly once and supplies the same identity copied into
+        // texture handles. No second namespace allocator or lazy initialization state is required.
         Self {
-            namespace: None,
+            renderer,
             next_slot: 0,
             callbacks: HashMap::new(),
         }
     }
 
+    /// Registers one concrete backend-specialized callback under a fresh local slot.
     pub(crate) fn register<F>(&mut self, callback: F) -> Result<CustomRenderHandle<B>, CustomRenderRegistryError>
     where
         F: for<'frame> FnMut(&mut B::Frame<'frame>, CustomRenderArgs) + 'static,
     {
-        let namespace = match self.namespace {
-            Some(namespace) => namespace,
-            None => {
-                // next_namespace = current_namespace + 1.
-                let raw = NEXT_CUSTOM_RENDER_NAMESPACE
-                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| value.checked_add(1))
-                    .map_err(|_| CustomRenderRegistryError::NamespaceExhausted)?;
-                let namespace = NonZeroU64::new(raw).ok_or(CustomRenderRegistryError::NamespaceExhausted)?;
-                self.namespace = Some(namespace);
-                namespace
-            }
-        };
         // next_slot = current_slot + 1.
         let slot = self.next_slot.checked_add(1).ok_or(CustomRenderRegistryError::SlotExhausted)?;
         self.next_slot = slot;
-        let key = CustomRenderKey { namespace, slot };
+        let key = CustomRenderKey { renderer: self.renderer, slot };
         let previous = self.callbacks.insert(key, Box::new(callback));
         debug_assert!(previous.is_none(), "fresh custom-render key was already occupied");
         Ok(CustomRenderHandle { key, _backend: PhantomData })
     }
 
+    /// Removes a live callback only when its handle belongs to this renderer.
     pub(crate) fn remove(&mut self, handle: CustomRenderHandle<B>) -> Result<(), CustomRenderRegistryError> {
-        if Some(handle.key.namespace) != self.namespace || self.callbacks.remove(&handle.key).is_none() {
+        // Check provenance before touching the map so a same-slot foreign handle can never remove
+        // this registry's callback.
+        if handle.key.renderer != self.renderer || self.callbacks.remove(&handle.key).is_none() {
             return Err(CustomRenderRegistryError::UnknownRenderer);
         }
         Ok(())
     }
 
+    /// Reports whether `key` identifies a live callback owned by this renderer.
     pub(crate) fn contains(&self, key: CustomRenderKey) -> bool {
-        Some(key.namespace) == self.namespace && self.callbacks.contains_key(&key)
+        key.renderer == self.renderer && self.callbacks.contains_key(&key)
     }
 
+    /// Borrows a live callback only when its key belongs to this renderer.
     pub(crate) fn get_mut(&mut self, key: CustomRenderKey) -> Option<&mut Box<dyn CustomRender<B>>> {
-        if Some(key.namespace) != self.namespace {
+        if key.renderer != self.renderer {
             return None;
         }
         self.callbacks.get_mut(&key)

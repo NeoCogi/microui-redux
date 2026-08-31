@@ -186,7 +186,8 @@ trait VulkanFrameOps {
     fn push_triangle_vertices(&mut self, v0: &Vertex, v1: &Vertex, v2: &Vertex);
     fn flush(&mut self);
     fn finish(&mut self, acquired: AcquiredVulkanFrame);
-    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<()>;
+    /// Uploads pixels using the immutable dimensions carried by the renderer-issued ID.
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<()>;
     fn destroy_texture(&mut self, id: TextureId);
     fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]);
 }
@@ -357,11 +358,13 @@ impl VulkanFrameOps for VulkanRenderer {
     }
 
     /// Creates a backend-owned sampled texture and tracks it by `TextureId`.
-    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<()> {
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<()> {
         if self.device_lost {
             return Err(String::from("Vulkan device is lost"));
         }
-        let texture = self.context.create_texture_resource(width, height, pixels)?;
+        // The opaque capability is the sole dimension source validated by the core renderer.
+        let dimensions = id.size();
+        let texture = self.context.create_texture_resource(dimensions.width, dimensions.height, pixels)?;
         self.textures.insert(id, texture);
         Ok(())
     }
@@ -474,8 +477,8 @@ impl RendererBackend for VulkanRenderer {
         Ok(VulkanFrame { backend: self, acquired: Some(acquired) })
     }
 
-    fn create_texture(&mut self, id: TextureId, width: i32, height: i32, pixels: &[u8]) -> Result<()> {
-        VulkanFrameOps::create_texture(self, id, width, height, pixels)
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<()> {
+        VulkanFrameOps::create_texture(self, id, pixels)
     }
 
     fn destroy_texture(&mut self, id: TextureId) {

@@ -30,17 +30,40 @@
 
 //! Renderer-owned external texture handles.
 
+use crate::identity::ProcessUniqueId;
 use rs_math3d::Dimensioni;
+
+/// Concrete identity assigned once to one [`crate::render::Renderer`].
+///
+/// Keeping this wrapper distinct from other process-unique owners prevents an atlas, retained
+/// surface, or unrelated registry identity from being used as texture provenance inside the crate.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub(crate) struct RendererId(
+    /// Shared non-reused process identity hidden behind the renderer-specific type boundary.
+    ProcessUniqueId,
+);
+
+impl RendererId {
+    /// Allocates the identity retained by one newly constructed renderer.
+    pub(crate) fn allocate() -> Self {
+        // Renderer construction is the sole allocation boundary. Every later texture copies this
+        // value, so provenance never depends on a backend address or renderer-local counter alone.
+        Self(ProcessUniqueId::allocate())
+    }
+}
 
 /// Handle referencing an external texture managed by the renderer.
 ///
-/// Equality and hashing include the renderer-issued numeric identifier and the immutable width and
-/// height carried by the handle. Renderer validation therefore accepts only the exact handle whose
-/// dimensions will be used for texture-coordinate projection.
+/// Equality and hashing include the owning renderer, its local allocation slot, and the immutable
+/// dimensions carried by the handle. Two renderers can therefore issue the same local slot without
+/// either accepting, drawing, or destroying the other's texture.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TextureId {
-    /// Backend-local texture identifier.
-    raw: u32,
+    /// Process-unique identity of the renderer that created this texture.
+    renderer: RendererId,
+    /// Monotonically allocated slot meaningful only within `renderer`.
+    slot: u32,
     /// Texture width in pixels.
     width: i32,
     /// Texture height in pixels.
@@ -48,14 +71,11 @@ pub struct TextureId {
 }
 
 impl TextureId {
-    /// Creates a texture id with known dimensions.
-    pub(crate) fn new(raw: u32, width: i32, height: i32) -> Self {
-        Self { raw, width, height }
-    }
-
-    /// Returns the raw numeric identifier stored inside the handle.
-    pub fn raw(self) -> u32 {
-        self.raw
+    /// Creates one renderer-owned texture capability with immutable dimensions.
+    pub(crate) fn new(renderer: RendererId, slot: u32, width: i32, height: i32) -> Self {
+        // Only Renderer calls this production constructor after validating dimensions and before
+        // transferring the complete capability to its backend.
+        Self { renderer, slot, width, height }
     }
 
     /// Returns the texture width in pixels.
@@ -72,6 +92,14 @@ impl TextureId {
     pub fn size(self) -> Dimensioni {
         Dimensioni::new(self.width, self.height)
     }
+
+    /// Creates an isolated opaque texture capability for unit tests that do not own a Renderer.
+    #[cfg(test)]
+    pub(crate) fn new_test(slot: u32, width: i32, height: i32) -> Self {
+        // A fresh owner prevents synthetic handles from accidentally comparing equal across tests;
+        // tests that exercise equality construct several IDs from one explicit RendererId instead.
+        Self::new(RendererId::allocate(), slot, width, height)
+    }
 }
 
 #[cfg(test)]
@@ -79,19 +107,28 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
+    /// Verifies every component of an opaque texture capability participates in identity.
     #[test]
-    fn identity_includes_immutable_dimensions() {
-        let texture = TextureId::new(7, 32, 16);
-        let same = TextureId::new(7, 32, 16);
-        let different_width = TextureId::new(7, 64, 16);
-        let different_height = TextureId::new(7, 32, 8);
+    fn identity_includes_renderer_slot_and_immutable_dimensions() {
+        let renderer = RendererId::allocate();
+        let other_renderer = RendererId::allocate();
+        let texture = TextureId::new(renderer, 7, 32, 16);
+        let same = TextureId::new(renderer, 7, 32, 16);
+        let foreign = TextureId::new(other_renderer, 7, 32, 16);
+        let different_slot = TextureId::new(renderer, 8, 32, 16);
+        let different_width = TextureId::new(renderer, 7, 64, 16);
+        let different_height = TextureId::new(renderer, 7, 32, 8);
 
         assert_eq!(texture, same);
+        assert_ne!(texture, foreign);
+        assert_ne!(texture, different_slot);
         assert_ne!(texture, different_width);
         assert_ne!(texture, different_height);
 
         let textures = HashSet::from([texture]);
         assert!(textures.contains(&same));
+        assert!(!textures.contains(&foreign));
+        assert!(!textures.contains(&different_slot));
         assert!(!textures.contains(&different_width));
         assert!(!textures.contains(&different_height));
     }

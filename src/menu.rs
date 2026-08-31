@@ -158,7 +158,7 @@ pub enum MenuItemAccessError {
 #[repr(transparent)]
 pub(crate) struct MenuItemId(
     /// Shared non-reused value hidden behind the menu-item-specific type boundary.
-    crate::identity::RetainedObjectId,
+    crate::identity::ProcessUniqueId,
 );
 
 impl MenuItemId {
@@ -166,7 +166,7 @@ impl MenuItemId {
     fn allocate() -> Self {
         // Allocate before constructing either the record or handle so both receive the exact same
         // immutable identity at their sole pairing boundary.
-        Self(crate::identity::RetainedObjectId::allocate())
+        Self(crate::identity::ProcessUniqueId::allocate())
     }
 }
 

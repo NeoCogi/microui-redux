@@ -41,6 +41,7 @@ use super::{
     },
     display_list::{DisplayList, DrawKind, DrawOp},
     geometry::{ClipRect, SolidTriangle, textured_quad_from_uv},
+    texture::RendererId,
 };
 use crate::{
     atlas::{AtlasHandle, FontId, IconId, WHITE_ICON},
@@ -106,6 +107,8 @@ impl From<FrameError> for RenderError {
 /// Applications paint through [`WidgetPaintCtx::painter`](crate::WidgetPaintCtx::painter); display
 /// list construction and submission remain crate-owned.
 pub struct Renderer<B: RendererBackend> {
+    /// Process-unique identity copied into every resource capability owned by this renderer.
+    id: RendererId,
     /// Uniquely owned backend.
     backend: B,
     /// Atlas cached once from the backend.
@@ -116,8 +119,8 @@ pub struct Renderer<B: RendererBackend> {
     white_icon_rect: Recti,
     /// UV at the center of the baked white icon used for solid triangles.
     white_uv: Vec2f,
-    /// Next external texture id allocated by this renderer.
-    next_texture_id: u32,
+    /// Last renderer-local external texture slot successfully allocated.
+    last_texture_slot: u32,
     /// Complete handles for backend-owned external textures.
     textures: HashSet<TextureId>,
     /// Backend-specialized persistent custom callbacks.
@@ -129,6 +132,9 @@ pub struct Renderer<B: RendererBackend> {
 impl<B: RendererBackend> Renderer<B> {
     /// Creates a renderer with unique ownership of the provided backend.
     pub fn new(backend: B) -> Self {
+        // Allocate provenance once at the concrete Renderer ownership boundary. Textures and custom
+        // callbacks copy this same identity rather than maintaining independent global namespaces.
+        let id = RendererId::allocate();
         let atlas = backend.get_atlas();
         let atlas_dim = atlas.get_texture_dimension();
         let white_icon_rect = atlas.get_icon_rect(WHITE_ICON);
@@ -139,14 +145,15 @@ impl<B: RendererBackend> Renderer<B> {
         // white_uv = (white_icon_origin + white_icon_extent / 2) / atlas_extent.
         let white_uv = (white_icon_min + white_icon_extent * 0.5) / atlas_extent;
         Self {
+            id,
             backend,
             atlas,
             atlas_dim,
             white_icon_rect,
             white_uv,
-            next_texture_id: 1,
+            last_texture_slot: 0,
             textures: HashSet::new(),
-            custom_renderers: CustomRenderRegistry::new(),
+            custom_renderers: CustomRenderRegistry::new(id),
             clipped_triangles: Vec::new(),
         }
     }
@@ -237,11 +244,18 @@ impl<B: RendererBackend> Renderer<B> {
     /// ```
     pub fn try_load_texture_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> Result<TextureId, String> {
         crate::image::validate_rgba_buffer(width, height, pixels.len())?;
-        // next_texture_id = current_texture_id + 1.
-        let next_texture_id = self.next_texture_id.checked_add(1).ok_or_else(|| String::from("Texture id space exhausted"))?;
-        let id = TextureId::new(self.next_texture_id, width, height);
-        self.backend.create_texture(id, width, height, pixels)?;
-        self.next_texture_id = next_texture_id;
+        // Compute the next slot without committing it, so exhaustion and failed backend uploads
+        // leave allocator state unchanged. The zero initial value keeps every usable u32 slot.
+        let slot = self
+            .last_texture_slot
+            .checked_add(1)
+            .ok_or_else(|| String::from("Texture slot space exhausted"))?;
+        let id = TextureId::new(self.id, slot, width, height);
+        // TextureId is the sole dimension source at the backend boundary; pixels were validated
+        // against those same immutable values immediately above.
+        self.backend.create_texture(id, pixels)?;
+        // Publish the slot only after the backend owns the corresponding texture.
+        self.last_texture_slot = slot;
         self.textures.insert(id);
         Ok(id)
     }

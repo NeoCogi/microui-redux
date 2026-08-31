@@ -362,13 +362,16 @@ fn upload_checkerboard<B: RendererBackend>(
 
 Texture dimensions and RGBA byte length are validated before a texture ID is
 consumed. Failed backend creation does not leave a tracked texture behind.
-`TextureId` carries its immutable dimensions, and equality and hashing cover
-both those dimensions and its renderer-issued numeric identifier. Renderer
-tracks the complete live handles without storing a second copy of their
-dimensions. Repeated `free_image`/`free_texture` calls for the same handle are
-debug-asserted as lifecycle mistakes and become idempotent no-ops in release
-builds; they notify the backend only once. Dropping `Renderer` destroys every
-external texture it still owns.
+`TextureId` carries its renderer identity, renderer-local allocation slot, and
+immutable dimensions. Equality and hashing cover all three, so matching local
+slots from separate renderers remain distinct capabilities. Renderer tracks
+the complete live handles without storing a second copy of their dimensions.
+`RendererBackend::create_texture` receives only the ID and pixel bytes; it uses
+`TextureId::size` rather than accepting contradictory dimension arguments.
+Repeated `free_image`/`free_texture` calls for the same handle are debug-asserted
+as lifecycle mistakes and become idempotent no-ops in release builds; they
+notify the backend only once. Dropping `Renderer` destroys every external
+texture it still owns.
 
 ## Custom-render callbacks
 
@@ -449,8 +452,6 @@ impl RendererBackend for Backend {
     fn create_texture(
         &mut self,
         _id: TextureId,
-        _width: i32,
-        _height: i32,
         _pixels: &[u8],
     ) -> Result<(), String> {
         Ok(())
@@ -474,8 +475,8 @@ Backend rules:
   must preserve painter order when switching textures.
 - concrete frame `Drop` performs best-effort, non-panicking final flush,
   submission, and presentation.
-- `create_texture` must return an error without retaining the ID when creation
-  fails.
+- `create_texture` obtains immutable dimensions from `TextureId::size` and must
+  return an error without retaining the ID when creation fails.
 - `destroy_texture` releases the matching backend resource.
 - the backend does not calculate UI clipping or inspect input.
 

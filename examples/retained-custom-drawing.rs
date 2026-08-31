@@ -60,7 +60,7 @@ impl RendererBackend for NoopRenderer {
         Ok(NoopFrame)
     }
 
-    fn create_texture(&mut self, _id: TextureId, _width: i32, _height: i32, _pixels: &[u8]) -> Result<(), String> {
+    fn create_texture(&mut self, _id: TextureId, _pixels: &[u8]) -> Result<(), String> {
         Ok(())
     }
 
