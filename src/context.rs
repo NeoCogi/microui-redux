@@ -818,9 +818,10 @@ impl<B: RendererBackend, State: 'static> ContextFrame<'_, B, State> {
     /// Consumes this logical frame, paints the last committed UI once, and submits it once.
     ///
     /// Returns [`RenderError::UiUpdateRequired`] before paint or backend acquisition when no commit
-    /// exists for these dimensions or when raw input is pending. This operation is paint-only: it
-    /// does not route input, update semantic state, run layout, synthesize timers, or produce a
-    /// generic frame-result/resource-state object. Widget paint is observational with respect to
+    /// exists for these dimensions, raw input is pending, or a measurement-affecting typed mutation
+    /// dirtied a visible widget tree. This operation is paint-only: it does not route input, update
+    /// semantic state, run layout, synthesize timers, or produce a generic
+    /// frame-result/resource-state object. Widget paint is observational with respect to
     /// application-authored semantic state, topology, interaction, and committed layout. Widgets
     /// may update private rendering caches; custom-render callbacks may update callback-private
     /// rendering caches only. Neither kind of cache can alter the current commit or publish

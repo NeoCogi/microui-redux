@@ -845,6 +845,55 @@ fn render_preflight_requires_a_matching_commit_and_never_acquires_backend_on_err
 }
 
 #[test]
+fn render_preflight_rejects_nested_typed_mutation_until_update_clears_it() {
+    let (backend, log) = recording_backend(test_atlas());
+    let mut ctx = Context::<_>::new(backend);
+    let (text, text_node) = TextBlock::create(TextBlockParameters::new("before"));
+    let (column, content) = Linear::create(LinearParameters::vertical([text_node]));
+    ctx.ui().create_window(Window::new("window", rect(10, 10, 120, 90), content));
+    let dimensions = Dimensioni::new(320, 240);
+    ctx.update_ui(dimensions);
+
+    text.try_update(|text| text.set_text("after")).unwrap();
+
+    assert_eq!(ctx.frame(frame_info(dimensions)).render_ui(), Err(RenderError::UiUpdateRequired));
+    assert!(log.snapshot().is_empty(), "a rejected dirty commit must not acquire the backend");
+
+    ctx.update_ui(dimensions);
+    ctx.frame(frame_info(dimensions)).render_ui().unwrap();
+    assert!(!log.snapshot().is_empty(), "the context walk must clear the measurement marker");
+
+    log.clear();
+    column.try_update(|_| {}).unwrap();
+    assert_eq!(ctx.frame(frame_info(dimensions)).render_ui(), Err(RenderError::UiUpdateRequired));
+    assert!(log.snapshot().is_empty(), "container storage must use the same render guard");
+    ctx.update_ui(dimensions);
+    ctx.frame(frame_info(dimensions)).render_ui().unwrap();
+}
+
+#[test]
+fn hidden_typed_mutation_does_not_block_the_visible_commit() {
+    let (backend, log) = recording_backend(test_atlas());
+    let mut ctx = Context::<_>::new(backend);
+    ctx.ui().create_window(Window::new("visible", rect(10, 10, 120, 90), empty_content()));
+    let (hidden_text, hidden_node) = TextBlock::create(TextBlockParameters::new("before"));
+    let hidden = ctx.ui().create_window(Window::new("hidden", rect(20, 20, 120, 90), hidden_node));
+    ctx.ui().set_window_visible(&hidden, false).unwrap();
+    let dimensions = Dimensioni::new(320, 240);
+    ctx.update_ui(dimensions);
+
+    hidden_text.try_update(|text| text.set_text("after")).unwrap();
+
+    ctx.frame(frame_info(dimensions)).render_ui().unwrap();
+    assert!(!log.snapshot().is_empty(), "hidden widget state cannot stale the visible frame");
+
+    ctx.ui().set_window_visible(&hidden, true).unwrap();
+    assert_eq!(ctx.frame(frame_info(dimensions)).render_ui(), Err(RenderError::UiUpdateRequired));
+    ctx.update_ui(dimensions);
+    ctx.frame(frame_info(dimensions)).render_ui().unwrap();
+}
+
+#[test]
 fn invalid_update_dimensions_panic_before_dequeue_and_preserve_pending_input() {
     let mut ctx = context();
     let root = ctx.ui().create_window(Window::new("window", rect(10, 10, 120, 90), empty_content()));
@@ -1162,13 +1211,16 @@ fn traversal_recovers_after_widget_access_closure_borrows_are_released() {
     }));
     assert!(update_result.is_err(), "layout must diagnose the active TextBlock borrow");
 
-    // Once the access closure has unwound and released its borrow, the same commit is valid.
+    // Once the access closure has unwound and released its borrow, synchronization can commit.
     ctx.update_ui(dimensions);
-    let paint_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let render_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         text.try_update(|_| ctx.frame(frame_info(dimensions)).render_ui().unwrap());
     }));
-    assert!(paint_result.is_err(), "paint must diagnose the active TextBlock borrow");
+    assert!(render_result.is_err(), "render preflight must diagnose the active TextBlock borrow");
 
+    // A typed update marks measurement dirty before invoking application code, so unwinding from
+    // the nested render attempt conservatively requires a fresh synchronization commit.
+    ctx.update_ui(dimensions);
     ctx.frame(frame_info(dimensions)).render_ui().unwrap();
 
     // A shared access closure is likewise incompatible when the routed update needs to mutate the
@@ -1203,9 +1255,9 @@ fn update_traversal_reports_an_active_typed_access_closure() {
 
 #[test]
 #[should_panic(expected = "retained widget invariant violated")]
-fn paint_traversal_reports_an_active_typed_access_closure() {
-    // Commit once before holding the concrete widget's mutable access guard across paint traversal,
-    // ensuring the panic comes from painting rather than update preflight.
+fn render_preflight_reports_an_active_typed_access_closure() {
+    // Commit once so render validation reaches the visible-tree measurement scan while the concrete
+    // widget's mutable access guard remains held.
     let (text, widget) = crate::TextBlock::create(crate::TextBlockParameters::new("borrowed"));
     let mut ctx = context();
     ctx.ui().create_window(Window::new("window", rect(0, 0, 140, 100), widget));

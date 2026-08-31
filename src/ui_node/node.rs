@@ -404,6 +404,11 @@ impl Node {
         measurement_dirty
     }
 
+    /// Reports whether this node or any descendant has uncommitted widget measurement state.
+    pub(crate) fn has_measurement_dirty(&self) -> bool {
+        self.data.is_measurement_dirty() || self.with_children(|children| children.iter().any(Self::has_measurement_dirty))
+    }
+
     /// Marks this node as the local source of a preferred-size invalidation.
     pub(crate) fn mark_measurement_dirty(&mut self) {
         self.data.mark_measurement_dirty();

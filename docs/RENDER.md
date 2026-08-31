@@ -76,7 +76,7 @@ Context::frame(validated FrameInfo)
     -> returns an exclusively borrowed ContextFrame
 
 ContextFrame::render_ui(self)
-    -> require a matching commit and no pending input
+    -> require a matching commit, no pending input, and no visible measurement mutation
     -> Widget::paint records one ordered DisplayList
     -> preflight resource keys
     -> RendererBackend::frame acquires native frame resources
@@ -85,9 +85,10 @@ ContextFrame::render_ui(self)
 ```
 
 `render_ui` never drains input, updates widgets, or computes layout. A missing or stale commit,
-pending input, or different frame dimensions returns `RenderError::UiUpdateRequired` before paint,
-display-list execution, or backend acquisition. Input belongs to `update_ui`; by the time painting
-starts, widgets record only committed visual state.
+pending input, a measurement-affecting typed mutation in a visible widget tree, or different frame
+dimensions returns `RenderError::UiUpdateRequired` before paint, display-list execution, or backend
+acquisition. Input and measurement invalidation belong to `update_ui`; by the time painting starts,
+widgets record only committed visual state.
 
 Widget paint is observational with respect to application-authored semantic state, topology,
 interaction, and committed layout. Widgets may maintain private rendering caches, but cannot alter

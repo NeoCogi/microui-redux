@@ -762,6 +762,17 @@ impl SurfaceForest {
         self.node_mut(key).map(|node| &mut node.surface)
     }
 
+    /// Reports uncommitted widget measurement state in the surfaces painted by this commit.
+    pub(super) fn has_visible_measurement_dirty(&self) -> bool {
+        self.visible_order.iter().copied().any(|key| {
+            let surface = self.surface(key).expect("visible surface must remain retained");
+            match &surface.body {
+                SurfaceBody::Widgets { root, .. } => root.has_measurement_dirty(),
+                SurfaceBody::Menu(_) => false,
+            }
+        })
+    }
+
     /// Inserts a root at the newest point in global activation chronology.
     fn insert_root(&mut self, node: SurfaceNode) {
         debug_assert!(matches!(node.key, SurfaceKey::Root(_)) && node.root().is_some());

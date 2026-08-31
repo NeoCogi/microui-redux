@@ -343,12 +343,14 @@ impl WindowManager {
         self.invalidate_ui_commit();
     }
 
-    /// Returns whether dimensions and pending-input state match the last complete update.
+    /// Returns whether dimensions, input, and visible widget state match the last complete update.
     pub(crate) fn can_render(&self, dimensions: Dimensioni) -> bool {
-        // Rendering is observational and therefore requires both exact dimensions and an empty FIFO.
+        // Rendering is observational and therefore requires exact dimensions, an empty FIFO, and
+        // no context-free measurement mutation in a tree that the committed frame would paint.
         self.ui_commit
             .is_some_and(|committed| (committed.width, committed.height) == (dimensions.width, dimensions.height))
             && !self.input.has_pending()
+            && !self.surfaces.has_visible_measurement_dirty()
     }
 
     /// Borrows the reusable display list after retained paint has recorded it.

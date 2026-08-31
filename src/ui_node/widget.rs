@@ -304,15 +304,20 @@ impl<W: Widget + 'static> TypedWidgetHandle<W> {
     }
 
     /// Runs a widget-specific mutation when the widget is alive and not otherwise borrowed.
+    ///
+    /// Successful access conservatively dirties retained measurement before `f` runs. A visible
+    /// tree therefore requires [`crate::Context::update_ui`] before its next render.
     pub fn try_update<R>(&self, f: impl FnOnce(&mut W) -> R) -> Option<R> {
         let widget = self.widget.upgrade()?;
         let mut widget = widget.try_borrow_mut().ok()?;
-        let result = f(&mut widget.widget);
         widget.mark_measurement_dirty();
+        let result = f(&mut widget.widget);
         Some(result)
     }
 
     /// Mutates a widget while preserving an owned input when access cannot begin.
+    ///
+    /// As with [`Self::try_update`], successful access dirties retained measurement before `f`.
     pub fn try_update_with<I, R>(&self, input: I, f: impl FnOnce(&mut W, I) -> R) -> Result<R, I> {
         let widget = match self.widget.upgrade() {
             Some(widget) => widget,
@@ -322,8 +327,8 @@ impl<W: Widget + 'static> TypedWidgetHandle<W> {
             Ok(widget) => widget,
             Err(_) => return Err(input),
         };
-        let result = f(&mut widget.widget, input);
         widget.mark_measurement_dirty();
+        let result = f(&mut widget.widget, input);
         Ok(result)
     }
 
@@ -576,6 +581,23 @@ mod widget_tests {
 
         assert_eq!(allocations.events, 0, "checked state access allocated {} bytes", allocations.bytes);
         assert_eq!(state.try_read(|state| state.value), Some(1_001));
+    }
+
+    #[test]
+    fn panicking_typed_update_preserves_measurement_invalidation() {
+        let widget = TestBuilder::create_widget(TestParameters { value: 0 });
+        let (state, mut node) = crate::Node::typed_widget(widget);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _: Result<(), usize> = state.try_update_with(1, |state, value| {
+                state.value = value;
+                panic!("partial mutation");
+            });
+        }));
+
+        assert!(result.is_err());
+        assert!(node.synchronize_measurement_invalidation());
+        assert!(!node.synchronize_measurement_invalidation());
     }
 
     #[test]
