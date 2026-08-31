@@ -127,7 +127,12 @@ pub fn atlas_config() -> builder::Config<'static> {
 
 #[cfg(all(not(feature = "prebuilt-atlas"), not(feature = "external-atlas"), feature = "builder"))]
 pub fn load_atlas() -> AtlasHandle {
-    builder::Builder::from_config(&atlas_config()).expect("valid atlas config").to_atlas()
+    // Asset decoding and completed-atlas validation are distinct fallible boundaries. Finalizing
+    // through build also preserves the atlas identity already stamped into builder-issued IDs.
+    builder::Builder::from_config(&atlas_config())
+        .expect("default atlas assets must load and pack")
+        .build()
+        .expect("default built atlas must satisfy the complete atlas contract")
 }
 
 #[cfg(feature = "prebuilt-atlas")]
@@ -136,7 +141,9 @@ mod prebuilt {
     include!(concat!(env!("OUT_DIR"), "/prebuilt_atlas.rs"));
 
     pub fn load() -> AtlasHandle {
-        AtlasHandle::from(&PREBUILT_ATLAS)
+        // Generated metadata is validated again at its runtime ownership boundary; generation is
+        // not treated as permission to bypass structural checks.
+        AtlasHandle::try_from(&PREBUILT_ATLAS).expect("generated prebuilt atlas must satisfy the complete atlas contract")
     }
 }
 
@@ -155,7 +162,9 @@ pub fn load_atlas() -> AtlasHandle {
     let atlas_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("atlas.png");
     let pixels = fs::read(&atlas_path).unwrap_or_else(|err| panic!("Failed to read {}: {err}", atlas_path.display()));
     let source = external::external_atlas_source(&pixels);
-    AtlasHandle::try_from(&source).unwrap_or_else(|err| panic!("Failed to decode {}: {err}", atlas_path.display()))
+    // Decoding and metadata validation form one fallible load operation, so the diagnostic must
+    // not imply that malformed rectangles or semantic rendering resources decoded successfully.
+    AtlasHandle::try_from(&source).unwrap_or_else(|err| panic!("Failed to load and validate {}: {err}", atlas_path.display()))
 }
 
 #[cfg(all(not(feature = "prebuilt-atlas"), not(feature = "external-atlas"), not(feature = "builder")))]

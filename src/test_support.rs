@@ -191,7 +191,9 @@ pub(crate) fn test_atlas_with_font_sizes(fonts: &[(&str, usize)]) -> AtlasHandle
         fonts: &fonts,
         format: SourceFormat::Raw,
     };
-    AtlasHandle::from(&source)
+    // Shared fixtures use the public fallible loader so malformed test metadata cannot bypass the
+    // same validation boundary required of downstream applications.
+    AtlasHandle::try_from(&source).expect("shared test atlas must satisfy the complete atlas contract")
 }
 
 /// Constructs a resolved style whose resource capabilities belong to `atlas`.

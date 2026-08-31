@@ -66,7 +66,7 @@ pub(crate) fn content_height(style: &Style, atlas: &AtlasHandle, font: FontChoic
     // Fit whichever visual is taller, then apply the theme's compact vertical breathing room.
     let font_height = atlas.get_font_height(style.resolve_font_choice(font)) as i32;
     let vertical_pad = (style.padding / 2).max(1);
-    (font_height.max(visual_height) + vertical_pad * 2).max(0)
+    font_height.max(visual_height).max(0).saturating_add(vertical_pad.saturating_mul(2))
 }
 
 /// Computes preferred size for a single-line label plus an optional icon or texture.
@@ -82,11 +82,11 @@ pub(super) fn inline_content_size(style: &Style, atlas: &AtlasHandle, font: Font
     let has_visual = visual_size.width > 0 && visual_size.height > 0;
 
     // Text gets horizontal padding on both sides; visuals add one extra text/visual gap.
-    let mut width = padding * 2 + text_size.width.max(0);
+    let mut width = padding.saturating_mul(2).saturating_add(text_size.width.max(0));
     if has_visual {
-        width += visual_size.width.max(0);
+        width = width.saturating_add(visual_size.width.max(0));
         if has_text {
-            width += padding;
+            width = width.saturating_add(padding);
         }
     }
 
@@ -102,7 +102,9 @@ pub(super) fn scaled_visual_content_size(constraints: Constraints, visual_size: 
     }
 
     let width = constraints.width.bound().unwrap_or(visual_size.width);
-    let height = ((width.max(0) as i64 * visual_size.height as i64) / visual_size.width as i64) as i32;
+    // Positive i32 factors fit one i64 product. Clamp only after the complete ratio so an extreme
+    // aspect ratio cannot wrap while deriving intrinsic height.
+    let height = ((i64::from(width.max(0)) * i64::from(visual_size.height)) / i64::from(visual_size.width)).min(i64::from(i32::MAX)) as i32;
     Dimensioni::new(width.max(0), height.max(0))
 }
 
@@ -127,13 +129,13 @@ pub(super) fn place_inline_content(bounds: Recti, style: &Style, label: &str, vi
         return InlineContentPlacement { visual: None, text: bounds };
     }
 
-    let visual_width = visual_size.width.min((bounds.width - padding * 2).max(0)).max(0);
+    let visual_width = visual_size.width.min(bounds.width.saturating_sub(padding.saturating_mul(2)).max(0)).max(0);
     let visual_height = visual_size.height.min(bounds.height.max(0)).max(0);
-    let visual_y = bounds.y + ((bounds.height - visual_height) / 2).max(0);
+    let visual_y = bounds.y.saturating_add((bounds.height.saturating_sub(visual_height) / 2).max(0));
 
     if !has_text {
         // Visual-only controls center the visual and do not reserve a text rect.
-        let visual_x = bounds.x + ((bounds.width - visual_width) / 2).max(0);
+        let visual_x = bounds.x.saturating_add((bounds.width.saturating_sub(visual_width) / 2).max(0));
         let visual = rect(visual_x, visual_y, visual_width, visual_height);
         return InlineContentPlacement {
             visual: Some(visual),
@@ -141,11 +143,11 @@ pub(super) fn place_inline_content(bounds: Recti, style: &Style, label: &str, vi
         };
     }
 
-    let visual_x = bounds.x + padding;
+    let visual_x = bounds.x.saturating_add(padding);
     let visual = rect(visual_x, visual_y, visual_width, visual_height);
-    let text_x = visual.x + visual.width;
-    let right = bounds.x + bounds.width;
-    let text = rect(text_x, bounds.y, (right - text_x).max(0), bounds.height);
+    let text_x = visual.x.saturating_add(visual.width);
+    let right = bounds.x.saturating_add(bounds.width);
+    let text = rect(text_x, bounds.y, right.saturating_sub(text_x).max(0), bounds.height);
     InlineContentPlacement { visual: Some(visual), text }
 }
 
@@ -156,16 +158,20 @@ pub(super) fn place_scaled_visual_content(bounds: Recti, visual_size: Option<Dim
         return InlineContentPlacement { visual: None, text: bounds };
     }
 
-    let mut width = bounds.width;
-    let mut height = ((width as i64 * visual_size.height as i64) / visual_size.width as i64) as i32;
-    if height > bounds.height {
-        height = bounds.height;
-        width = ((height as i64 * visual_size.width as i64) / visual_size.height as i64) as i32;
-    }
+    // Compare the first aspect-ratio result in i64 before narrowing it. If height is the limiting
+    // axis, the inverse ratio is necessarily no wider than the original positive bounds width.
+    let proposed_height = i64::from(bounds.width) * i64::from(visual_size.height) / i64::from(visual_size.width);
+    let (width, height) = if proposed_height > i64::from(bounds.height) {
+        let height = bounds.height;
+        let width = (i64::from(height) * i64::from(visual_size.width) / i64::from(visual_size.height)) as i32;
+        (width, height)
+    } else {
+        (bounds.width, proposed_height as i32)
+    };
 
     let visual = rect(
-        bounds.x + (bounds.width - width).max(0) / 2,
-        bounds.y + (bounds.height - height).max(0) / 2,
+        bounds.x.saturating_add(bounds.width.saturating_sub(width).max(0) / 2),
+        bounds.y.saturating_add(bounds.height.saturating_sub(height).max(0) / 2),
         width.max(0),
         height.max(0),
     );
@@ -186,5 +192,24 @@ pub(super) fn widget_fill_color(ctx: &WidgetPaintCtx<'_>, base: ControlColor, fi
         Some(ctx.style().colors[base as usize])
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Focused coverage for shared control geometry at the integer boundary.
+
+    use super::*;
+
+    /// Verifies extreme positive aspect ratios clamp or fit without narrowing through a wrapped
+    /// intermediate coordinate.
+    #[test]
+    fn scaled_visual_geometry_uses_wide_ratio_arithmetic() {
+        let intrinsic = scaled_visual_content_size(Constraints::bounded(Dimensioni::new(i32::MAX, i32::MAX)), Some(Dimensioni::new(1, i32::MAX)));
+        assert_eq!((intrinsic.width, intrinsic.height), (i32::MAX, i32::MAX));
+
+        let placement = place_scaled_visual_content(Recti::new(i32::MAX, i32::MAX, i32::MAX, i32::MAX), Some(Dimensioni::new(1, i32::MAX)));
+        let visual = placement.visual.expect("positive image and bounds must produce a fitted rectangle");
+        assert_eq!((visual.x, visual.y, visual.width, visual.height), (i32::MAX, i32::MAX, 1, i32::MAX));
     }
 }

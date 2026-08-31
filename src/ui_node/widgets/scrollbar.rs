@@ -56,6 +56,7 @@
 //! allocating the track. Shared geometry keeps paint, dragging, and track clicks consistent.
 use std::{cell::RefCell, rc::Rc};
 
+use crate::math::{clamp_i64_to_i32, RectExt};
 use crate::{
     ControlColor, Dimensioni, MouseButton, Node, Recti, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters,
     WidgetUpdateCtx,
@@ -71,6 +72,7 @@ pub enum ScrollbarAxis {
 }
 
 impl ScrollbarAxis {
+    /// Returns the rectangle extent along this scrollbar's movement axis.
     fn rect_len(self, rect: Recti) -> i32 {
         match self {
             Self::Vertical => rect.height,
@@ -78,6 +80,7 @@ impl ScrollbarAxis {
         }
     }
 
+    /// Returns one point component along this scrollbar's movement axis.
     fn point(self, point: Vec2i) -> i32 {
         match self {
             Self::Vertical => point.y,
@@ -85,6 +88,7 @@ impl ScrollbarAxis {
         }
     }
 
+    /// Returns the rectangle origin along this scrollbar's movement axis.
     fn origin(self, rect: Recti) -> i32 {
         match self {
             Self::Vertical => rect.y,
@@ -92,6 +96,7 @@ impl ScrollbarAxis {
         }
     }
 
+    /// Replaces the rectangle extent along this scrollbar's movement axis.
     fn with_len(self, mut rect: Recti, len: i32) -> Recti {
         match self {
             Self::Vertical => rect.height = len,
@@ -100,6 +105,7 @@ impl ScrollbarAxis {
         rect
     }
 
+    /// Translates the rectangle origin along this scrollbar's movement axis.
     fn translate(self, mut rect: Recti, amount: i32) -> Recti {
         // translated_axis_origin = rectangle_axis_origin + amount.
         match self {
@@ -117,11 +123,24 @@ impl ScrollbarAxis {
 /// larger than the proportional thumb.
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct ScrollbarGeometry {
+    /// Axis used to select rectangle and pointer components.
     axis: ScrollbarAxis,
+    /// Complete local track rectangle.
     track: Recti,
+    /// Proportional, minimum-bounded thumb rectangle inside `track`.
     thumb: Recti,
+    /// Largest valid content offset.
     max_offset: i32,
+    /// Number of pixels through which the thumb can move.
     thumb_travel: i32,
+}
+
+/// Multiplies before dividing in a wider domain and clamps the signed result to one coordinate.
+fn scaled_ratio(value: i32, numerator: i32, denominator: i32) -> i32 {
+    debug_assert!(numerator >= 0 && denominator > 0);
+    // Every i32 product fits i64. Dividing before narrowing preserves proportional mapping at
+    // large content ranges instead of saturating the intermediate product and destroying its ratio.
+    clamp_i64_to_i32(i64::from(value) * i64::from(numerator) / i64::from(denominator))
 }
 
 impl ScrollbarGeometry {
@@ -136,7 +155,7 @@ impl ScrollbarGeometry {
         // Proportional length represents the visible fraction; the style minimum preserves usability.
         let proportional = if content_len > 0 {
             // proportional_thumb_length = track_length * visible_length / content_length.
-            track_len.saturating_mul(view_len) / content_len
+            scaled_ratio(track_len, view_len, content_len)
         } else {
             track_len
         };
@@ -146,7 +165,7 @@ impl ScrollbarGeometry {
         // Map clamped content offset into thumb travel using the same integer ratio inverted by drag.
         let thumb_offset = if max_offset > 0 && thumb_travel > 0 {
             // thumb_offset = clamped_content_offset * thumb_travel / maximum_content_offset.
-            offset.clamp(0, max_offset).saturating_mul(thumb_travel) / max_offset
+            scaled_ratio(offset.clamp(0, max_offset), thumb_travel, max_offset)
         } else {
             0
         };
@@ -178,7 +197,7 @@ impl ScrollbarGeometry {
             return 0;
         }
         // content_delta = pointer_delta * maximum_content_offset / thumb_travel.
-        self.axis.point(delta).saturating_mul(self.max_offset) / self.thumb_travel
+        scaled_ratio(self.axis.point(delta), self.max_offset, self.thumb_travel)
     }
 
     /// Returns the offset that centers the thumb on `pointer`, clamped to the track.
@@ -193,7 +212,7 @@ impl ScrollbarGeometry {
         // centered_thumb = clamp(track_pointer - thumb_length / 2, 0, thumb_travel).
         let centered = track_pointer.saturating_sub(thumb_len / 2).clamp(0, self.thumb_travel);
         // content_offset = centered_thumb * maximum_content_offset / thumb_travel.
-        centered.saturating_mul(self.max_offset) / self.thumb_travel
+        scaled_ratio(centered, self.max_offset, self.thumb_travel)
     }
 }
 
@@ -408,10 +427,10 @@ impl Widget for Scrollbar {
         let geometry = self.geometry(ctx.local_rect(), ctx.style().thumb_size.max(0));
         let previous = self.offset;
         match input {
-            Some(UiInputEvent::MouseDown { pos, button }) if button.intersects(MouseButton::LEFT) && geometry.track().contains(pos) => {
+            Some(UiInputEvent::MouseDown { pos, button }) if button.intersects(MouseButton::LEFT) && geometry.track().contains_point(*pos) => {
                 // Clicking outside the thumb recenters it. Runtime capture established for this
                 // press supplies the complete drag lease through `ctx.active()` below.
-                if !geometry.thumb().contains(pos) {
+                if !geometry.thumb().contains_point(*pos) {
                     self.offset = geometry.centered_offset(*pos);
                 }
             }
@@ -478,5 +497,30 @@ mod tests {
 
         assert_eq!(geometry.centered_offset(Vec2i::new(-100, 8)), 0);
         assert_eq!(geometry.centered_offset(Vec2i::new(104, 8)), 75);
+    }
+
+    /// Verifies large content ranges retain their proportional thumb position and inverse drag
+    /// mapping instead of saturating the multiplication before division.
+    #[test]
+    fn extreme_content_range_preserves_scroll_ratios() {
+        let track = Recti::new(10, 20, 300, 8);
+        let view_len = 300;
+        let content_len = i32::MAX;
+        let max_offset = scrollbar_max_scroll(content_len, view_len);
+        let offset = max_offset / 2;
+        let geometry = ScrollbarGeometry::new(ScrollbarAxis::Horizontal, track, view_len, content_len, offset, 8);
+        let thumb = geometry.thumb();
+
+        assert_eq!(thumb.width, 8);
+        assert!(
+            (i64::from(thumb.x) - i64::from(10 + 146)).abs() <= 1,
+            "integer division may place the half-range thumb one pixel before the exact midpoint"
+        );
+        let inverse = geometry.drag_delta(Vec2i::new(146, 0));
+        assert!(
+            (i64::from(inverse) - i64::from(offset)).abs() <= 1,
+            "half-track drag must map back to half the content range"
+        );
+        assert!((i64::from(geometry.centered_offset(Vec2i::new(10 + 146 + 4, 20))) - i64::from(offset)).abs() <= 1);
     }
 }

@@ -124,8 +124,11 @@ impl ColorSwatch {
         } else {
             atlas.get_text_size(font, self.label.as_str()).width.max(0)
         };
-        let height = (atlas.get_font_height(font) as i32 + padding * 2).max(24);
-        Dimensioni::new((label_width + padding * 2).max(24), height)
+        // Saturating extents keep an otherwise valid extreme font from wrapping intrinsic widget
+        // geometry before layout has a chance to constrain it.
+        let padding_extent = padding.saturating_mul(2);
+        let height = (atlas.get_font_height(font) as i32).saturating_add(padding_extent).max(24);
+        Dimensioni::new(label_width.saturating_add(padding_extent).max(24), height)
     }
 
     /// Paints the swatch fill, border, and optional label.

@@ -45,7 +45,7 @@ use super::{
 };
 use crate::{
     atlas::{AtlasHandle, FontId, IconId},
-    math::RectExt,
+    math::{clamp_i64_to_i32, RectExt},
     render::{Color, TextureId},
 };
 use rs_math3d::{Dimensioni, Recti, Vec2f, Vec2i};
@@ -151,11 +151,6 @@ pub struct Renderer<B: RendererBackend> {
 
 impl<B: RendererBackend> Renderer<B> {
     /// Creates a renderer with unique ownership of the provided backend.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the backend atlas does not contain the exact icon name `white`, which is the
-    /// required opaque texel source for solid-color geometry.
     pub fn new(backend: B) -> Self {
         // Allocate provenance once at the concrete Renderer ownership boundary. Textures and custom
         // callbacks copy this same identity rather than maintaining independent global namespaces.
@@ -374,8 +369,9 @@ impl<B: RendererBackend> DisplayListExecutor<'_, '_, B> {
     fn draw_text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color, clip: Recti) {
         let frame = &mut self.frame;
         let atlas_dim = self.atlas_dim;
-        self.atlas.draw_string(font, text, |_, _, dst, src| {
-            let dst = Recti::new(pos.x + dst.x, pos.y + dst.y, dst.width, dst.height);
+        self.atlas.draw_string(font, text, pos, |_, _, dst, src| {
+            // Atlas text walking combines unbounded metric accumulation with this application
+            // origin before one coordinate clamp, retaining cancellation between the two terms.
             submit_atlas_rect(frame, atlas_dim, dst, src, color, clip);
         });
     }
@@ -383,12 +379,12 @@ impl<B: RendererBackend> DisplayListExecutor<'_, '_, B> {
     /// Centers an icon inside its semantic destination and submits it.
     fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color, clip: Recti) {
         let src = self.atlas.get_icon_rect(id);
-        let dst = Recti::new(
-            rect.x + (rect.width - src.width) / 2,
-            rect.y + (rect.height - src.height) / 2,
-            src.width,
-            src.height,
-        );
+        // Destination geometry is application-controlled and may use the complete i32 domain.
+        // Evaluate centering in i64 so subtracting the icon extent and adding an extreme origin
+        // cannot overflow before the renderer-facing coordinate is clamped.
+        let x = i64::from(rect.x) + (i64::from(rect.width) - i64::from(src.width)) / 2;
+        let y = i64::from(rect.y) + (i64::from(rect.height) - i64::from(src.height)) / 2;
+        let dst = Recti::new(clamp_i64_to_i32(x), clamp_i64_to_i32(y), src.width, src.height);
         submit_atlas_rect(&mut self.frame, self.atlas_dim, dst, src, color, clip);
     }
 
@@ -412,7 +408,9 @@ impl<B: RendererBackend> DisplayListExecutor<'_, '_, B> {
             let vertices = (*triangle.vertices()).map(|vertex| Vertex::new(vertex.position, self.white_uv, vertex.color));
             self.clipped_triangles.clear();
             clip.clip_triangle(vertices, self.clipped_triangles);
-            for triangle in self.clipped_triangles.chunks_exact(3) {
+            // Triangle clipping appends complete triples; fixed-size partitioning makes that
+            // renderer invariant explicit at the backend call boundary.
+            for triangle in self.clipped_triangles.as_chunks::<3>().0 {
                 self.frame.push_triangle([triangle[0], triangle[1], triangle[2]]);
             }
         }

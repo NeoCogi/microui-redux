@@ -38,6 +38,7 @@
 use std::{cell::RefCell, fmt, rc::Rc};
 
 use crate::ui_node::widgets::content_height;
+use crate::math::RectExt;
 use crate::{
     AtlasHandle, Color, ControlColor, Dimensioni, FontChoice, FontRole, MouseButton, Recti, Style, UiInputEvent, Vec2i, WidgetEventPortHandle, WidgetOption,
     WidgetPaintCtx,
@@ -445,7 +446,7 @@ impl MenuSurface {
 
     /// Returns whether one screen point lies in this surface's allocated and clipped region.
     pub(crate) fn contains(&self, point: Vec2i) -> bool {
-        self.rect.contains(&point) && self.clip.contains(&point)
+        self.rect.contains_point(point) && self.clip.contains_point(point)
     }
 
     /// Clears hover and capture without changing the forest-derived open highlight.
@@ -557,7 +558,7 @@ impl MenuSurface {
         let Some(position) = input.position() else {
             return MenuRoute::unhandled();
         };
-        let inside = self.rect.contains(&position) && self.clip.contains(&position);
+        let inside = self.rect.contains_point(position) && self.clip.contains_point(position);
         if !inside && !self.captured {
             self.hovered_slot = None;
             return MenuRoute::unhandled();
@@ -566,7 +567,9 @@ impl MenuSurface {
         // Slot geometry is local while normalized input is screen-space. Translate once and use the
         // same rectangles later painted by `paint`, including full-row separator occlusion.
         let local = Vec2i::new(position.x.saturating_sub(self.rect.x), position.y.saturating_sub(self.rect.y));
-        let slot = inside.then(|| self.geometry.slots.iter().position(|bounds| bounds.contains(&local))).flatten();
+        let slot = inside
+            .then(|| self.geometry.slots.iter().position(|bounds| bounds.contains_point(local)))
+            .flatten();
         self.hovered_slot = slot;
         if self.keyboard_slot.is_some()
             && let Some(slot) = slot

@@ -55,6 +55,7 @@
 //! The helpers in this file keep cursor indices on valid byte boundaries, apply keyboard/text
 //! input, and translate pointer positions into cursor locations. Cursor movement and deletion use
 //! Unicode scalar-value boundaries, not grapheme-cluster boundaries.
+use crate::math::clamp_i64_to_i32;
 use crate::ui_node::text_layout::TextLine;
 use crate::{rect, AtlasHandle, FontId, Key, KeyEvent, Modifiers, Recti};
 
@@ -96,28 +97,28 @@ pub(crate) struct FontLineMetrics {
 pub(crate) fn font_line_metrics(font: FontId, atlas: &AtlasHandle) -> FontLineMetrics {
     let line_height = atlas.get_font_height(font) as i32;
     let baseline = atlas.get_font_baseline(font);
-    let descent = (line_height - baseline).max(0);
+    let descent = line_height.saturating_sub(baseline).max(0);
     FontLineMetrics { line_height, baseline, descent }
 }
 
 /// Centers a single text line inside bounds while keeping it fully clipped to the bounds.
 pub(crate) fn centered_line_top(bounds: Recti, line_height: i32) -> i32 {
-    let mut text_y = bounds.y + bounds.height / 2 - line_height / 2;
-    if text_y < bounds.y {
-        text_y = bounds.y;
-    }
-    let max_text_y = (bounds.y + bounds.height - line_height).max(bounds.y);
-    if text_y > max_text_y {
-        text_y = max_text_y;
-    }
-    text_y
+    let bounds_y = i64::from(bounds.y);
+    let candidate = bounds_y + i64::from(bounds.height) / 2 - i64::from(line_height) / 2;
+    let max_text_y = (bounds_y + i64::from(bounds.height) - i64::from(line_height)).max(bounds_y);
+    // Clamp the complete alignment expression in i64 so a large font and extreme rectangle origin
+    // cannot overflow before the final retained coordinate is produced.
+    clamp_i64_to_i32(candidate.clamp(bounds_y, max_text_y))
 }
 
 /// Builds a one-pixel caret rectangle clipped to the visible text area.
 pub(crate) fn caret_rect(x: i32, baseline_y: i32, metrics: FontLineMetrics, clip: Recti) -> Recti {
-    let caret_top = (baseline_y - metrics.baseline + 2).max(clip.y).min(clip.y + clip.height);
-    let caret_bottom = (baseline_y + metrics.descent - 2).max(clip.y).min(clip.y + clip.height);
-    rect(x, caret_top, 1, (caret_bottom - caret_top).max(1))
+    let clip_top = i64::from(clip.y);
+    let clip_bottom = clip_top + i64::from(clip.height.max(0));
+    let caret_top = (i64::from(baseline_y) - i64::from(metrics.baseline) + 2).clamp(clip_top, clip_bottom);
+    let caret_bottom = (i64::from(baseline_y) + i64::from(metrics.descent) - 2).clamp(clip_top, clip_bottom);
+    let height = (caret_bottom - caret_top).clamp(1, i64::from(i32::MAX)) as i32;
+    rect(x, clamp_i64_to_i32(caret_top), 1, height)
 }
 
 /// Clamps a byte cursor to the nearest previous Unicode scalar-value boundary.
@@ -302,7 +303,8 @@ pub(crate) fn cursor_from_x(line: &TextLine, buf: &str, target_x: i32, font: Fon
         let width = atlas.get_text_size(font, &slice[..next]).width;
         if target_x < width {
             // Snap to whichever side of the glyph midpoint the target falls on.
-            if target_x < (last_width + width) / 2 {
+            let midpoint = (i64::from(last_width) + i64::from(width)) / 2;
+            if i64::from(target_x) < midpoint {
                 return line.start + idx;
             }
             return line.start + next;
@@ -323,7 +325,8 @@ pub(crate) fn cursor_from_text_x(buf: &str, target_x: i32, font: FontId, atlas: 
         let next = idx + ch.len_utf8();
         let width = atlas.get_text_size(font, &buf[..next]).width;
         if target_x < width {
-            if target_x < (last_width + width) / 2 {
+            let midpoint = (i64::from(last_width) + i64::from(width)) / 2;
+            if i64::from(target_x) < midpoint {
                 return idx;
             }
             return next;

@@ -31,7 +31,7 @@
 //!
 //! This standalone example validates that external texture drawing respects UI clipping.
 
-use microui_redux::{prelude::*, render::Vertex, AtlasSource, Constraints};
+use microui_redux::{prelude::*, render::Vertex};
 use std::{cell::RefCell, rc::Rc};
 
 const THEME_ICON_NAMES: [&str; 9] = [
@@ -169,7 +169,9 @@ fn make_smoke_atlas() -> AtlasHandle {
         fonts: &fonts,
         format: SourceFormat::Raw,
     };
-    AtlasHandle::from(&source)
+    // The smoke test keeps its compact embedded source while still accepting only a completely
+    // validated runtime atlas.
+    AtlasHandle::try_from(&source).expect("texture-clipping smoke atlas must satisfy the complete atlas contract")
 }
 
 fn assert_vec2f_eq(actual: Vec2f, expected: Vec2f) {

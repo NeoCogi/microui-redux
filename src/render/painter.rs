@@ -135,8 +135,7 @@ impl<'a> Painter<'a> {
     /// Returns the current effective clip translated into local coordinates.
     pub fn current_clip_rect(&self) -> Recti {
         // local_clip_origin = screen_clip_origin - painter_origin.
-        self.clip
-            .saturating_translated(Vec2i::new(self.origin.x.saturating_neg(), self.origin.y.saturating_neg()))
+        self.clip.relative_to(self.origin)
     }
 
     /// Records a semantic filled rectangle.
@@ -254,7 +253,7 @@ impl<'a> Painter<'a> {
 
     /// Converts a local rectangle into screen space.
     fn screen_rect(&self, rect: Recti) -> Recti {
-        rect.saturating_translated(self.origin)
+        rect.translated(self.origin)
     }
 
     /// Applies the common rectangle visibility policy and records one semantic rectangle operation.

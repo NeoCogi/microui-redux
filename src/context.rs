@@ -341,8 +341,9 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     ///
     /// # Panics
     ///
-    /// Panics when the backend atlas lacks the `white` rendering tile, `body` font, or any semantic
-    /// icon required by [`crate::ThemeIcons::from_atlas`].
+    /// Panics when the backend atlas lacks the `body` font or any semantic icon required by
+    /// [`crate::ThemeIcons::from_atlas`]. Every constructible atlas already has a validated white
+    /// rendering tile.
     pub fn new(backend: B) -> Self {
         // The backend supplies the sole atlas; style construction mints every retained font and
         // icon capability from that exact allocation before WindowManager can retain them.

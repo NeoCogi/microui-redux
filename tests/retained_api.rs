@@ -110,8 +110,11 @@ fn context_with_state<State: 'static>() -> Context<TestBackend, State> {
         fonts: &fonts,
         format: SourceFormat::Raw,
     };
-    // Context infers the application state type from this helper's return value.
-    Context::new(TestBackend { atlas: AtlasHandle::from(&source) })
+    // Context infers the application state type from this helper's return value. Loading remains
+    // explicit and fallible so this downstream fixture exercises the same validated public API an
+    // application uses for embedded atlas metadata.
+    let atlas = AtlasHandle::try_from(&source).expect("downstream retained-API atlas must satisfy the complete atlas contract");
+    Context::new(TestBackend { atlas })
 }
 
 fn context() -> Context<TestBackend> {

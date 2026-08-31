@@ -145,9 +145,10 @@
 //! deletion operate on scalar values rather than grapheme clusters.
 //!
 //! Rendering coverage belongs to the selected atlas font. The built-in atlas builder bakes
-//! printable ASCII (`U+0020` through `U+007E`). A missing character uses the font's underscore
-//! glyph; custom [`AtlasSource`] tables may provide arbitrary Unicode scalar values and should
-//! include `_`. The renderer does not perform script shaping, bidirectional reordering, grapheme
+//! printable ASCII (`U+0020` through `U+007E`). A missing character uses the font's required
+//! underscore glyph; validated custom [`AtlasSource`] tables may provide arbitrary Unicode scalar
+//! values but must include exactly one `_` per font. The renderer does not perform script shaping,
+//! bidirectional reordering, grapheme
 //! segmentation, kerning, or fallback-font selection.
 //!
 //! Update and paint traverse parent before children and siblings in forward order. Later work sees
@@ -260,10 +261,10 @@ pub mod retained {
 /// renderer integration. Low-level backend and Renderer types live under [`render`].
 pub mod prelude {
     pub use crate::event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventPortHandle};
-    pub use crate::atlas::{AtlasHandle, CharEntry, FontEntry, FontId, IconId, SourceFormat};
+    pub use crate::atlas::{AtlasError, AtlasHandle, AtlasSource, CharEntry, FontEntry, FontId, IconId, SourceFormat};
     pub use crate::file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};
     pub use crate::menu::{Menu, MenuBar, MenuItem, MenuItemAccessError, MenuItemHandle, MenuItemMark, MenuItemParameters, MenuItemSubmitted};
-    pub use crate::image::{ImageSource, load_image_bytes};
+    pub use crate::image::{ImageSource, MAX_DECODED_RGBA_BYTES, load_image_bytes};
     pub use crate::input::{Key, KeyEvent, KeyState, Modifiers, MouseButton};
     pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame, TextureId};
     pub use crate::retained::{
@@ -290,7 +291,7 @@ pub mod prelude {
     };
 }
 
-pub use atlas::{AtlasHandle, AtlasSource, CharEntry, FontEntry, FontId, IconId, SourceFormat};
+pub use atlas::{AtlasError, AtlasHandle, AtlasSource, CharEntry, FontEntry, FontId, IconId, SourceFormat};
 pub use context::{Context, ContextFrame, Ui};
 pub use window_manager::{
     ChildWindowClip, DEFAULT_LAYER, LayerBinding, MAX_LAYER, MIN_LAYER, PopupEvent, PopupHandle, SurfaceMutationError, Window, WindowEvent, WindowHandle,
@@ -299,7 +300,7 @@ pub use window_manager::{
 pub use event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventPortHandle};
 pub use file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};
 pub use menu::{Menu, MenuBar, MenuItem, MenuItemAccessError, MenuItemHandle, MenuItemMark, MenuItemParameters, MenuItemSubmitted};
-pub use image::{ImageSource, load_image_bytes};
+pub use image::{ImageSource, MAX_DECODED_RGBA_BYTES, load_image_bytes};
 pub use input::{Key, KeyEvent, KeyState, Modifiers, MouseButton};
 pub use math::{expand_rect, rect, vec2};
 pub use render::TextureId;

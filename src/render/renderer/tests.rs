@@ -174,7 +174,9 @@ fn make_atlas() -> AtlasHandle {
             entries: &entries,
         },
     )];
-    AtlasHandle::from(&AtlasSource {
+    // Renderer tests construct resources through the public checked boundary so their assumptions
+    // about atlas ownership are exercised only with structurally valid metadata.
+    AtlasHandle::try_from(&AtlasSource {
         width: 8,
         height: 8,
         pixels: &pixels,
@@ -182,6 +184,42 @@ fn make_atlas() -> AtlasHandle {
         fonts: &fonts,
         format: SourceFormat::Raw,
     })
+    .expect("renderer fixture atlas must satisfy the complete atlas contract")
+}
+
+/// Builds a valid atlas whose fallback glyph reaches the largest runtime x coordinate.
+fn make_extreme_metric_atlas() -> AtlasHandle {
+    let pixels = [0xFF; 4];
+    let icons = [("white", Recti::new(0, 0, 1, 1))];
+    let entries = [(
+        '_',
+        CharEntry {
+            offset: Vec2i::new(i32::MAX, 0),
+            advance: Vec2i::new(i32::MAX, 0),
+            rect: Recti::new(0, 0, 1, 1),
+        },
+    )];
+    let fonts = [(
+        "body",
+        FontEntry {
+            line_size: 1,
+            baseline: 1,
+            font_size: 1,
+            entries: &entries,
+        },
+    )];
+
+    // Extreme placement metrics are legal metadata: clipping must handle the resulting exclusive
+    // destination edge in wider arithmetic instead of constraining otherwise useful coordinates.
+    AtlasHandle::try_from(&AtlasSource {
+        width: 1,
+        height: 1,
+        pixels: &pixels,
+        icons: &icons,
+        fonts: &fonts,
+        format: SourceFormat::Raw,
+    })
+    .expect("extreme but representable metrics must remain structurally valid")
 }
 
 fn viewport() -> Recti {
@@ -368,6 +406,63 @@ fn streamed_glyphs_preserve_order_fallback_and_newline_positioning() {
     assert_position(quads[2][2], [14.0, 18.0]);
     assert_uv(quads[2][0], [0.0, 0.5]);
     assert_uv(quads[2][2], [0.5, 1.0]);
+}
+
+/// Verifies an extreme glyph destination clips before its exclusive edge is narrowed to i32.
+#[test]
+fn extreme_glyph_destination_is_clipped_without_integer_overflow() {
+    let (backend, log) = recording_backend(make_extreme_metric_atlas());
+    let mut renderer = Renderer::new(backend);
+    let font = renderer.atlas().font_id("body").expect("fixture font must exist");
+    let mut list = DisplayList::new();
+    painter(&mut list, viewport()).text(font, "_", Vec2i::new(0, 0), color(255, 255, 255, 255));
+
+    renderer
+        .render(frame_info(32, 32), &mut list)
+        .expect("extreme off-screen glyphs must clip cleanly");
+
+    // The one-pixel glyph begins at i32::MAX and therefore cannot overlap the ordinary viewport.
+    // Reaching the empty submission also proves its mathematical right edge was not formed in i32.
+    assert!(!log.snapshot().iter().any(|event| matches!(event, RenderEvent::AtlasQuad(_))));
+}
+
+/// Verifies the text-run origin participates before glyph placement is narrowed to i32.
+#[test]
+fn extreme_text_origin_preserves_metric_cancellation() {
+    let (backend, log) = recording_backend(make_extreme_metric_atlas());
+    let mut renderer = Renderer::new(backend);
+    let font = renderer.atlas().font_id("body").expect("fixture font must exist");
+    let mut list = DisplayList::new();
+    let viewport = Recti::new(0, 0, i32::MAX, 1);
+    painter(&mut list, viewport).text(font, "__", Vec2i::new(i32::MIN, 0), color(255, 255, 255, 255));
+
+    renderer
+        .render(frame_info(i32::MAX, 1), &mut list)
+        .expect("wide glyph and run coordinates must combine before clipping");
+
+    // The first glyph ends at x=0 and is invisible. The second begins at i32::MAX - 1 after the
+    // negative run origin cancels one of its two positive metric terms, so exactly one quad lands
+    // on the viewport's final pixel.
+    assert_eq!(log.snapshot().iter().filter(|event| matches!(event, RenderEvent::AtlasQuad(_))).count(), 1);
+}
+
+/// Verifies centering an icon in application-provided extreme geometry uses wider arithmetic.
+#[test]
+fn extreme_icon_destination_is_centered_without_integer_overflow() {
+    let (backend, log) = recording_backend(make_atlas());
+    let mut renderer = Renderer::new(backend);
+    let icon = renderer.atlas().icon_id("close").expect("fixture icon must exist");
+    let mut list = DisplayList::new();
+
+    // Push directly so the test reaches execution even though this deliberately off-screen
+    // destination would normally be culled by Painter. Its old x-centering expression overflowed
+    // before renderer clipping could reject the resulting four-pixel icon.
+    list.push_icon(viewport(), icon, Recti::new(i32::MAX, 0, i32::MAX, 4), color(255, 255, 255, 255));
+    renderer
+        .render(frame_info(32, 32), &mut list)
+        .expect("extreme off-screen icons must center and clip cleanly");
+
+    assert!(!log.snapshot().iter().any(|event| matches!(event, RenderEvent::AtlasQuad(_))));
 }
 
 #[test]

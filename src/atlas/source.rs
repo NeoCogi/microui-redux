@@ -31,8 +31,7 @@
 //! Serializable atlas source metadata and decoding.
 
 use super::*;
-use crate::image::{ImageSource, load_image_bytes};
-use std::io::Error;
+use crate::image::{CheckedImageLoadError, ImageSource, load_image_bytes_checked};
 
 /// Describes a font baked into an [`AtlasSource`].
 pub struct FontEntry<'a> {
@@ -44,121 +43,124 @@ pub struct FontEntry<'a> {
     pub font_size: usize,
     /// Glyph metadata table keyed by Unicode scalar value.
     ///
-    /// Runtime drawing substitutes the `_` entry for a missing character. Include underscore when
-    /// the table does not cover every character an application may display.
+    /// Runtime drawing substitutes the `_` entry for a missing character. Every font must contain
+    /// exactly one underscore entry; atlas validation rejects a missing or duplicate fallback.
     pub entries: &'a [(char, CharEntry)],
 }
 
 /// Encodes how atlas pixel data is stored.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum SourceFormat {
     /// Raw RGBA byte array.
     Raw,
     #[cfg(feature = "png_source")]
-    /// PNG-formatted byte array.
+    /// Static PNG-formatted byte array; animated PNG data is rejected.
     Png,
 }
 
 /// Serializable representation of an atlas that can be shipped with the binary.
 pub struct AtlasSource<'a> {
-    /// Width of the atlas texture.
+    /// Positive width of the atlas texture, representable by an `i32` rectangle coordinate.
+    ///
+    /// Together with [`AtlasSource::height`], this must require no more than
+    /// [`crate::image::MAX_DECODED_RGBA_BYTES`] of normalized pixel storage.
     pub width: usize,
-    /// Height of the atlas texture.
+    /// Positive height of the atlas texture, representable by an `i32` rectangle coordinate.
+    ///
+    /// The combined allocation limit is documented on [`AtlasSource::width`].
     pub height: usize,
     /// Pixel data matching [`AtlasSource::format`].
     pub pixels: &'a [u8],
     /// Icon lookup table.
     ///
-    /// An entry named `white` must be an opaque white rendering tile.
+    /// Names must be unique and every rectangle must be positive and in bounds. An entry named
+    /// `white` must exist and every pixel in its rectangle must be opaque white.
     /// [`crate::render::Renderer`] resolves that atlas-owned capability by name when drawing solid
     /// geometry; table position has no public meaning.
     pub icons: &'a [(&'a str, Recti)],
     /// Fonts baked into the atlas.
     ///
-    /// Unlike the built-in builder's printable-ASCII output, these tables may contain arbitrary
-    /// Unicode scalar values.
+    /// Font names and per-font characters must be unique. Metrics must fit runtime coordinates,
+    /// rectangles must be nonnegative and in bounds, and every font must contain `_`. Unlike the
+    /// built-in builder's printable-ASCII output, these tables may contain arbitrary Unicode scalar
+    /// values.
     pub fonts: &'a [(&'a str, FontEntry<'a>)],
     /// Encoding of [`AtlasSource::pixels`].
     pub format: SourceFormat,
 }
 
-impl AtlasHandle {
-    /// Rehydrates atlas tables from serialized metadata and already-decoded pixels.
-    fn from_parts<'a>(source: &AtlasSource<'a>, pixels: Vec<Color4b>) -> Self {
-        // Loading serialized metadata creates a new runtime ownership domain even when another
-        // AtlasHandle was reconstructed from byte-for-byte identical source data.
-        let id = AtlasId::allocate();
-        let icons: Vec<(String, Icon)> = source.icons.iter().map(|(name, rect)| (name.to_string(), Icon { rect: *rect })).collect();
-        let fonts: Vec<(String, Font)> = source
+impl<'source> TryFrom<&AtlasSource<'source>> for AtlasHandle {
+    type Error = AtlasError;
+
+    /// Decodes and validates one serialized atlas without a panic or lossy fallback path.
+    ///
+    /// # Errors
+    ///
+    /// Returns the precise [`AtlasError`] for invalid dimensions or pixels, image decode and
+    /// dimension failures, duplicate resource keys, invalid metrics or rectangles, a missing glyph
+    /// fallback, or an absent/non-white rendering tile.
+    fn try_from(source: &AtlasSource<'source>) -> Result<Self, Self::Error> {
+        // Validate all dimension arithmetic before converting to i32, decoding compressed pixels,
+        // or allocating runtime tables. This is also the bound supplied to checked PNG loading.
+        let dimensions = super::validation::checked_atlas_dimensions(source.width, source.height)?;
+
+        let image = match source.format {
+            SourceFormat::Raw => ImageSource::Raw {
+                // CheckedImageDimensions proved both values fit i32 exactly.
+                width: source.width as i32,
+                height: source.height as i32,
+                pixels: source.pixels,
+            },
+            #[cfg(feature = "png_source")]
+            SourceFormat::Png => ImageSource::Png { bytes: source.pixels },
+        };
+        let (_, _, pixels) = load_image_bytes_checked(image, dimensions).map_err(map_image_error)?;
+
+        // Copy borrowed metadata into the duplicate-preserving candidate representation. Runtime
+        // hash maps are deliberately built only after the common finalizer accepts every key.
+        let icons = source
+            .icons
+            .iter()
+            .map(|(name, rectangle)| (name.to_string(), Icon { rect: *rectangle }))
+            .collect();
+        let fonts = source
             .fonts
             .iter()
-            .map(|(name, f)| {
-                let font = Font {
-                    line_size: f.line_size,
-                    baseline: f.baseline,
-                    font_size: f.font_size,
-                    entries: f.entries.iter().map(|(ch, e)| (*ch, e.clone())).collect(),
+            .map(|(name, font)| {
+                let candidate = FontCandidate {
+                    line_size: font.line_size,
+                    baseline: font.baseline,
+                    font_size: font.font_size,
+                    entries: font.entries.to_vec(),
                 };
-                (name.to_string(), font)
+                (name.to_string(), candidate)
             })
             .collect();
-        Self(Rc::new(Atlas {
-            id,
-            width: source.width,
-            height: source.height,
-            icons,
-            fonts,
-            pixels,
-        }))
+        let candidate = AtlasCandidate::from_decoded(dimensions, pixels, fonts, icons);
+        AtlasHandle::finish(candidate)
     }
+}
 
-    /// Reconstructs an atlas from a serialized [`AtlasSource`].
-    ///
-    /// This method panics when decoding fails. Use [`AtlasHandle::try_from`] to handle
-    /// failures explicitly, or [`AtlasHandle::from_lossy`] to preserve the previous
-    /// "blank atlas on error" fallback behavior.
-    pub fn from<'a>(source: &AtlasSource<'a>) -> Self {
-        Self::try_from(source).unwrap_or_else(|err| panic!("Atlas decode failed: {}", err))
-    }
-
-    /// Reconstructs an atlas from a serialized [`AtlasSource`], falling back to a blank atlas
-    /// if decoding fails.
-    pub fn from_lossy<'a>(source: &AtlasSource<'a>) -> Self {
-        match Self::try_from(source) {
-            Ok(atlas) => atlas,
-            Err(err) => {
-                debug_assert!(false, "Atlas decode failed: {}", err);
-                let pixel_count = source.width.saturating_mul(source.height);
-                Self::from_parts(source, vec![Color4b::default(); pixel_count])
-            }
-        }
-    }
-
-    /// Attempts to reconstruct an atlas from a serialized [`AtlasSource`].
-    ///
-    /// This validates pixel decoding and the declared image dimensions. It does not currently
-    /// validate icon/glyph rectangles, semantic asset names, font metrics, or the required opaque
-    /// icon named `white`. Treat metadata as trusted and satisfy the [`AtlasSource`]
-    /// field contracts before constructing the handle.
-    pub fn try_from<'a>(source: &AtlasSource<'a>) -> std::io::Result<Self> {
-        let width = i32::try_from(source.width).map_err(|_| Error::other("Atlas width exceeds i32::MAX"))?;
-        let height = i32::try_from(source.height).map_err(|_| Error::other("Atlas height exceeds i32::MAX"))?;
-        let pixels = match source.format {
-            SourceFormat::Raw => {
-                let (raw_width, raw_height, pixels) = load_image_bytes(ImageSource::Raw { width, height, pixels: source.pixels })?;
-                if raw_width != source.width || raw_height != source.height {
-                    return Err(Error::other("Atlas dimensions do not match raw data"));
-                }
-                pixels
-            }
-            #[cfg(feature = "png_source")]
-            SourceFormat::Png => {
-                let (png_width, png_height, pixels) = load_image_bytes(ImageSource::Png { bytes: source.pixels })?;
-                if png_width != source.width || png_height != source.height {
-                    return Err(Error::other("Atlas dimensions do not match PNG data"));
-                }
-                pixels
-            }
-        };
-        Ok(Self::from_parts(source, pixels))
+/// Maps the concrete checked-image failure into its equally concrete atlas-layer variant.
+fn map_image_error(error: CheckedImageLoadError) -> AtlasError {
+    // Preserve decoded dimensions as integers and retain decoder errors as the standard error
+    // source. No caller needs to parse an image-layer diagnostic to classify the failure.
+    match error {
+        CheckedImageLoadError::Decode { source } => AtlasError::PixelDecode { source },
+        CheckedImageLoadError::Storage { source } => super::validation::map_image_storage_error(source),
+        CheckedImageLoadError::RawPixelLengthMismatch { expected, actual } => AtlasError::RawPixelLengthMismatch { expected, actual },
+        #[cfg(any(feature = "builder", feature = "png_source"))]
+        CheckedImageLoadError::AnimatedPngUnsupported => AtlasError::AnimatedPngUnsupported,
+        CheckedImageLoadError::DimensionMismatch {
+            expected_width,
+            expected_height,
+            actual_width,
+            actual_height,
+        } => AtlasError::DecodedDimensionsMismatch {
+            declared_width: expected_width,
+            declared_height: expected_height,
+            decoded_width: actual_width,
+            decoded_height: actual_height,
+        },
     }
 }

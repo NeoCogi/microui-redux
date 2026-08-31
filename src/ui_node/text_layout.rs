@@ -55,6 +55,7 @@
 //! Text widgets and simple display widgets use these routines to keep UTF-8 line slicing,
 //! baseline alignment, and control text placement consistent. Measurement follows
 //! [`AtlasHandle::get_text_size`], including its missing-character fallback.
+use crate::math::clamp_i64_to_i32;
 use crate::{vec2, AtlasHandle, Dimensioni, FontId, Recti, Style, Vec2i, WidgetOption};
 
 /// Controls how text should wrap when rendered inside a container.
@@ -109,11 +110,13 @@ fn push_wrapped_line(
 
     let mut offset = 0;
     let mut seg_start = 0;
-    let mut seg_width = 0;
+    let mut seg_width = 0_i32;
     for word in line.split_inclusive(' ') {
         let word_len = word.len();
         let word_width = atlas.get_text_size(font, word).width;
-        if seg_width > 0 && seg_width + word_width > max_width {
+        // Compare the mathematical sum before reducing it to the coordinate domain. Comparing two
+        // already-saturated i32 values would treat MAX + MAX as equal to MAX and fail to wrap.
+        if seg_width > 0 && i64::from(seg_width) + i64::from(word_width) > i64::from(max_width) {
             // Split before the word that would overflow the current segment.
             let seg_end = offset;
             lines.push(TextLine {
@@ -124,7 +127,7 @@ fn push_wrapped_line(
             seg_start = offset;
             seg_width = 0;
         }
-        seg_width += word_width;
+        seg_width = seg_width.saturating_add(word_width);
         offset += word_len;
     }
 
@@ -173,22 +176,26 @@ pub(crate) fn build_display_text_lines(buf: &str, wrap: TextWrap, max_width: i32
 
 /// Returns the y coordinate that aligns a font baseline inside a control rectangle.
 pub(crate) fn baseline_aligned_top(rect: Recti, line_height: i32, baseline: i32) -> i32 {
-    if rect.height >= line_height {
-        return rect.y + (rect.height - line_height) / 2;
+    let rect_y = i64::from(rect.y);
+    let rect_height = i64::from(rect.height);
+    let line_height = i64::from(line_height);
+    if rect_height >= line_height {
+        return clamp_i64_to_i32(rect_y + (rect_height - line_height) / 2);
     }
 
-    let baseline_center = rect.y + rect.height / 2;
-    let min_top = rect.y + rect.height - line_height;
-    let max_top = rect.y;
+    let baseline_center = rect_y + rect_height / 2;
+    let min_top = rect_y + rect_height - line_height;
+    let max_top = rect_y;
     // text_top = clamp(centered_baseline - font_baseline, minimum_top, maximum_top).
-    (baseline_center - baseline).clamp(min_top, max_top)
+    clamp_i64_to_i32((baseline_center - i64::from(baseline)).clamp(min_top, max_top))
 }
 
 /// Computes the bounding size for a block of measured lines.
 pub(crate) fn text_block_size(lines: &[TextLine], line_height: i32) -> Dimensioni {
     let width = lines.iter().map(|line| line.width).max().unwrap_or(0).max(0);
     // block_height = line_height * max(line_count, 1).
-    let height = line_height.saturating_mul((lines.len() as i32).max(1)).max(0);
+    let line_count = i32::try_from(lines.len()).unwrap_or(i32::MAX).max(1);
+    let height = line_height.saturating_mul(line_count).max(0);
     Dimensioni::new(width, height)
 }
 
@@ -200,11 +207,66 @@ pub(crate) fn control_text_position_with_font(style: &Style, atlas: &AtlasHandle
     let baseline = atlas.get_font_baseline(font);
     let y = baseline_aligned_top(rect, line_height, baseline);
     let x = if opt.intersects(WidgetOption::ALIGN_CENTER) {
-        rect.x + (rect.width - tsize.width) / 2
+        i64::from(rect.x) + (i64::from(rect.width) - i64::from(tsize.width)) / 2
     } else if opt.intersects(WidgetOption::ALIGN_RIGHT) {
-        rect.x + rect.width - tsize.width - padding
+        i64::from(rect.x) + i64::from(rect.width) - i64::from(tsize.width) - i64::from(padding)
     } else {
-        rect.x + padding
+        i64::from(rect.x) + i64::from(padding)
     };
-    vec2(x, y)
+    vec2(clamp_i64_to_i32(x), y)
+}
+
+#[cfg(test)]
+mod tests {
+    //! Boundary tests for shared text measurement and wrapping arithmetic.
+
+    use super::*;
+    use crate::{AtlasSource, CharEntry, FontEntry, SourceFormat};
+
+    /// Constructs a valid atlas whose fallback advance occupies the complete positive i32 range.
+    fn extreme_advance_atlas() -> AtlasHandle {
+        let pixels = [0xFF; 4];
+        let icons = [("white", Recti::new(0, 0, 1, 1))];
+        let entries = [(
+            '_',
+            CharEntry {
+                offset: Vec2i::new(0, 0),
+                advance: Vec2i::new(i32::MAX, 0),
+                rect: Recti::new(0, 0, 1, 1),
+            },
+        )];
+        let fonts = [(
+            "body",
+            FontEntry {
+                line_size: 1,
+                baseline: 1,
+                font_size: 1,
+                entries: &entries,
+            },
+        )];
+
+        // Atlas validation deliberately permits extreme but representable advances; wrapping owns
+        // the responsibility for combining those values without narrowing intermediate sums.
+        AtlasHandle::try_from(&AtlasSource {
+            width: 1,
+            height: 1,
+            pixels: &pixels,
+            icons: &icons,
+            fonts: &fonts,
+            format: SourceFormat::Raw,
+        })
+        .expect("the extreme-advance fixture must satisfy the complete atlas contract")
+    }
+
+    /// Verifies two individually representable words wrap when their mathematical sum is wider.
+    #[test]
+    fn word_wrap_compares_widths_before_coordinate_saturation() {
+        let atlas = extreme_advance_atlas();
+        let font = atlas.font_id("body").expect("the fixture font must exist");
+        let lines = build_text_lines("_ _", TextWrap::Word, i32::MAX, font, &atlas);
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!((lines[0].start, lines[0].end, lines[0].width), (0, 2, i32::MAX));
+        assert_eq!((lines[1].start, lines[1].end, lines[1].width), (2, 3, i32::MAX));
+    }
 }

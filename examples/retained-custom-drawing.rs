@@ -32,8 +32,19 @@
 //! This example demonstrates implementing a custom widget that records widget-local geometry
 //! through `WidgetPaintCtx::painter`.
 
-use microui_redux::{prelude::*, render::Vertex, AtlasSource, Constraints};
-const ICON_NAMES: [&str; 6] = ["white", "close", "expand", "collapse", "check", "expand_down"];
+use microui_redux::{prelude::*, render::Vertex};
+/// Complete semantic icon set required by the standard Context theme.
+const ICON_NAMES: [&str; 9] = [
+    "white",
+    "close",
+    "expand",
+    "collapse",
+    "check",
+    "expand_down",
+    "open_folder",
+    "closed_folder",
+    "file",
+];
 
 struct NoopRenderer {
     atlas: AtlasHandle,
@@ -155,7 +166,9 @@ fn make_atlas() -> AtlasHandle {
         fonts: &fonts,
         format: SourceFormat::Raw,
     };
-    AtlasHandle::from(&source)
+    // Embedded example metadata uses the same checked construction boundary as a file-backed
+    // application atlas rather than relying on a panicking convenience constructor.
+    AtlasHandle::try_from(&source).expect("retained custom-drawing atlas must satisfy the complete atlas contract")
 }
 
 fn main() -> Result<(), String> {

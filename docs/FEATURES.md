@@ -1,8 +1,8 @@
 # Cargo features
 
 - `builder` *(default)* – enables the runtime atlas builder and PNG decoding helpers used by the examples.
-- `png_source` – accepts PNG-compressed serialized atlases and `ImageSource::Png { .. }`; pixels are decoded to RGBA when loaded.
-- `save-to-rust` – enables `AtlasHandle::to_rust_files` to emit the current atlas as Rust code for embedding.
+- `png_source` – accepts static PNG-compressed serialized atlases and `ImageSource::Png { .. }`; pixels are decoded to RGBA and pass the same strict atlas validation as raw sources before a handle is returned. Animated PNGs are rejected.
+- `save-to-rust` *(default)* – enables `AtlasHandle::to_rust_files` to emit the current atlas as Rust code for embedding.
 - `prebuilt-atlas` – opt-in example atlas embedding; without it, examples build their atlas at runtime.
 - `external-atlas` – example-only loader for a repository-root `atlas.png` paired with the checked-in `examples/common/external_atlas_metadata.rs` metadata.
 - `example-backend` – shared internal gate used by examples; pair it with at least one concrete backend.
@@ -10,6 +10,13 @@
 
 Disabling default features leaves only the raw RGBA upload path (`ImageSource::Raw { .. }`):
 `cargo build --no-default-features`
+
+Serialized atlases are loaded with `AtlasHandle::try_from(&source)`. Construction returns a
+concrete `AtlasError` for malformed pixels or metadata; there is no lossy or infallible atlas-load
+path. Every font must include an underscore fallback, and all atlas rectangles must fit inside the
+declared texture. Public image decoding, serialized atlas construction, builder atlas allocation,
+and builder icon decoding share a 64-MiB limit for each decoded RGBA or normalized color buffer
+(`MAX_DECODED_RGBA_BYTES`, exactly 4,096 × 4,096 four-byte pixels).
 
 The demos build their atlas at runtime unless you opt into `prebuilt-atlas`, so `--no-default-features` example builds should include `builder`:
 `cargo run --example demo-full --no-default-features --features "example-vulkan builder"`

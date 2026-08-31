@@ -55,6 +55,7 @@
 use rs_math3d::{Recti, Vec2i};
 
 use crate::atlas::{AtlasHandle, FontId, IconId};
+use crate::math::RectExt;
 use crate::render::{DisplayList, Painter, TextureId};
 use crate::input::{Modifiers, MouseButton};
 use crate::{KeyboardAction, KeyboardBehavior, WidgetOption};
@@ -63,14 +64,31 @@ use crate::ui_node::text_layout::control_text_position_with_font;
 
 use super::UiInputEvent;
 
+/// Converts one screen point into a saturated coordinate relative to `origin`.
+fn local_point(origin: Vec2i, point: Vec2i) -> Vec2i {
+    // Event positions and root origins are independently application-controlled. Saturating each
+    // subtraction keeps localization total when their mathematical distance exceeds i32.
+    Vec2i::new(point.x.saturating_sub(origin.x), point.y.saturating_sub(origin.y))
+}
+
+/// Converts one screen-space clip into coordinates relative to a content rectangle.
+fn localize_clip(content_rect: Recti, screen_clip: Recti) -> Recti {
+    // RectExt owns the saturated subtraction policy shared by clipping and hit testing.
+    screen_clip.relative_to(Vec2i::new(content_rect.x, content_rect.y))
+}
+
 /// Converts one routed event into coordinates relative to `origin`.
 pub(crate) fn localize_event(origin: Vec2i, event: UiInputEvent) -> UiInputEvent {
     match event {
-        UiInputEvent::MouseMove { pos, delta } => UiInputEvent::MouseMove { pos: pos - origin, delta },
-        UiInputEvent::MouseDrag { pos, delta, buttons } => UiInputEvent::MouseDrag { pos: pos - origin, delta, buttons },
-        UiInputEvent::MouseDown { pos, button } => UiInputEvent::MouseDown { pos: pos - origin, button },
-        UiInputEvent::MouseUp { pos, button } => UiInputEvent::MouseUp { pos: pos - origin, button },
-        UiInputEvent::Scroll { pos, delta } => UiInputEvent::Scroll { pos: pos - origin, delta },
+        UiInputEvent::MouseMove { pos, delta } => UiInputEvent::MouseMove { pos: local_point(origin, pos), delta },
+        UiInputEvent::MouseDrag { pos, delta, buttons } => UiInputEvent::MouseDrag {
+            pos: local_point(origin, pos),
+            delta,
+            buttons,
+        },
+        UiInputEvent::MouseDown { pos, button } => UiInputEvent::MouseDown { pos: local_point(origin, pos), button },
+        UiInputEvent::MouseUp { pos, button } => UiInputEvent::MouseUp { pos: local_point(origin, pos), button },
+        UiInputEvent::Scroll { pos, delta } => UiInputEvent::Scroll { pos: local_point(origin, pos), delta },
         event => event,
     }
 }
@@ -128,12 +146,9 @@ impl<'a> WidgetContextData<'a> {
     }
 
     fn local_clip(&self) -> Recti {
-        Recti::new(
-            self.screen_clip.x - self.content_rect.x,
-            self.screen_clip.y - self.content_rect.y,
-            self.screen_clip.width,
-            self.screen_clip.height,
-        )
+        // Reuse the crate-wide saturated rectangle translation so update hit tests and paint clips
+        // agree even when screen and content origins span the complete coordinate domain.
+        localize_clip(self.content_rect, self.screen_clip)
     }
 }
 
@@ -290,7 +305,7 @@ impl<'a> WidgetUpdateCtx<'a> {
         if !self.in_hover_root {
             return false;
         }
-        local_rect.contains(&mouse_pos) && self.common.local_clip().contains(&mouse_pos)
+        local_rect.contains_point(mouse_pos) && self.common.local_clip().contains_point(mouse_pos)
     }
 }
 
@@ -455,5 +470,32 @@ impl<'a> WidgetPaintCtx<'a> {
         let pos = control_text_position_with_font(self.common.style, self.common.atlas, font, text, rect, opt);
         let mut painter = self.painter();
         painter.with_clip(rect, |painter| painter.text(font, text, pos, color));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Boundary tests for traversal-to-widget coordinate conversion.
+
+    use super::*;
+
+    /// Verifies pointer localization saturates both directions instead of overflowing Vec2i
+    /// subtraction before a widget receives the routed event.
+    #[test]
+    fn event_localization_handles_extreme_screen_and_widget_origins() {
+        let event = localize_event(
+            Vec2i::new(i32::MAX, i32::MIN),
+            UiInputEvent::MouseDown {
+                pos: Vec2i::new(i32::MIN, i32::MAX),
+                button: MouseButton::LEFT,
+            },
+        );
+        let UiInputEvent::MouseDown { pos, .. } = event else {
+            panic!("localization must preserve the concrete event variant");
+        };
+        assert_eq!((pos.x, pos.y), (i32::MIN, i32::MAX));
+
+        let clip = localize_clip(Recti::new(i32::MAX, i32::MIN, 1, 1), Recti::new(i32::MIN, i32::MAX, 1, 1));
+        assert_eq!((clip.x, clip.y, clip.width, clip.height), (i32::MIN, i32::MAX, 1, 1));
     }
 }

@@ -212,9 +212,10 @@ impl DisclosureHeader {
         } else {
             atlas.get_text_size(style.font, &self.label).width
         };
-        let content_height = (font_height.max(icon.height) + vertical_pad * 2).max(0);
-        let icon_width = (content_height - padding).max(icon.width);
-        let content = Dimensioni::new((padding * 2 + icon_width + text_width).max(0), content_height);
+        let content_height = font_height.max(icon.height).max(0).saturating_add(vertical_pad.saturating_mul(2));
+        let icon_width = content_height.saturating_sub(padding).max(icon.width).max(0);
+        let content_width = padding.saturating_mul(2).saturating_add(icon_width).saturating_add(text_width.max(0));
+        let content = Dimensioni::new(content_width, content_height);
         // A header frame is internal to this child, so preferred size must include its inset here.
         let border = if self.opt.intersects(WidgetOption::FRAME) {
             style.frame_border().width

@@ -32,22 +32,29 @@
 
 use rs_math3d::{Recti, Vec2f, Vec2i};
 
+/// Clamps one wider geometry calculation into the crate's signed coordinate domain.
+pub(crate) fn clamp_i64_to_i32(value: i64) -> i32 {
+    // Multi-term expressions should retain cancellation in i64 and narrow exactly once at the
+    // Recti/Vec2i boundary. A cast would wrap values outside the destination range.
+    value.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+}
+
 /// Internal rectangle operations not yet supplied by `rs-math3d`.
 pub(crate) trait RectExt: Sized {
-    /// Expands the rectangle uniformly on all sides using ordinary integer arithmetic.
+    /// Expands the rectangle uniformly on all sides with saturated coordinates and extents.
     fn expanded(self, amount: i32) -> Self;
 
-    /// Translates the rectangle using ordinary integer arithmetic.
+    /// Translates the rectangle while saturating its origin at the integer bounds.
     fn translated(self, offset: Vec2i) -> Self;
 
-    /// Translates the rectangle while saturating its origin at the integer bounds.
-    fn saturating_translated(self, offset: Vec2i) -> Self;
-
-    /// Converts the rectangle into coordinates relative to an origin.
+    /// Converts the rectangle into coordinates relative to an origin with saturated subtraction.
     fn relative_to(self, origin: Vec2i) -> Self;
 
     /// Returns whether both rectangle extents are positive.
     fn has_positive_area(self) -> bool;
+
+    /// Returns whether a point lies inside the positive rectangle using overflow-safe edges.
+    fn contains_point(self, point: Vec2i) -> bool;
 
     /// Returns the positive-area portion shared with another rectangle.
     fn positive_intersection(self, other: Self) -> Option<Self>;
@@ -67,30 +74,57 @@ pub(crate) trait RectExt: Sized {
 
 impl RectExt for Recti {
     fn expanded(self, amount: i32) -> Self {
-        Self::new(self.x - amount, self.y - amount, self.width + amount * 2, self.height + amount * 2)
+        let extent = amount.saturating_mul(2);
+        Self::new(
+            self.x.saturating_sub(amount),
+            self.y.saturating_sub(amount),
+            self.width.saturating_add(extent),
+            self.height.saturating_add(extent),
+        )
     }
 
     fn translated(self, offset: Vec2i) -> Self {
-        Self::new(self.x + offset.x, self.y + offset.y, self.width, self.height)
-    }
-
-    fn saturating_translated(self, offset: Vec2i) -> Self {
         Self::new(self.x.saturating_add(offset.x), self.y.saturating_add(offset.y), self.width, self.height)
     }
 
     fn relative_to(self, origin: Vec2i) -> Self {
-        Self::new(self.x - origin.x, self.y - origin.y, self.width, self.height)
+        Self::new(self.x.saturating_sub(origin.x), self.y.saturating_sub(origin.y), self.width, self.height)
     }
 
     fn has_positive_area(self) -> bool {
         self.width > 0 && self.height > 0
     }
 
+    fn contains_point(self, point: Vec2i) -> bool {
+        if !self.has_positive_area() {
+            return false;
+        }
+        let x = i64::from(point.x);
+        let y = i64::from(point.y);
+        let left = i64::from(self.x);
+        let top = i64::from(self.y);
+        // Exclusive edges live in i64 so a positive extent at i32::MAX remains queryable.
+        x >= left && x < left + i64::from(self.width) && y >= top && y < top + i64::from(self.height)
+    }
+
     fn positive_intersection(self, other: Self) -> Option<Self> {
         if !self.has_positive_area() || !other.has_positive_area() {
             return None;
         }
-        self.intersect(&other).filter(|intersection| intersection.has_positive_area())
+
+        // Recti permits an origin at i32::MAX together with a positive extent, so computing an
+        // exclusive edge in i32 can overflow even though both rectangles are individually valid.
+        // Wider intermediates make clipping total for renderer geometry derived from untrusted
+        // atlas metrics; the resulting origin and extent are bounded by the input i32 values.
+        let left = i64::from(self.x).max(i64::from(other.x));
+        let top = i64::from(self.y).max(i64::from(other.y));
+        let right = (i64::from(self.x) + i64::from(self.width)).min(i64::from(other.x) + i64::from(other.width));
+        let bottom = (i64::from(self.y) + i64::from(self.height)).min(i64::from(other.y) + i64::from(other.height));
+        if right <= left || bottom <= top {
+            return None;
+        }
+
+        Some(Self::new(left as i32, top as i32, (right - left) as i32, (bottom - top) as i32))
     }
 
     fn overlaps(self, other: Self) -> bool {
@@ -98,11 +132,15 @@ impl RectExt for Recti {
     }
 
     fn union(self, other: Self) -> Self {
-        let min_x = self.x.min(other.x);
-        let min_y = self.y.min(other.y);
-        let max_x = (self.x + self.width).max(other.x + other.width);
-        let max_y = (self.y + self.height).max(other.y + other.height);
-        Self::new(min_x, min_y, max_x - min_x, max_y - min_y)
+        let min_x = i64::from(self.x.min(other.x));
+        let min_y = i64::from(self.y.min(other.y));
+        let max_x = (i64::from(self.x) + i64::from(self.width)).max(i64::from(other.x) + i64::from(other.width));
+        let max_y = (i64::from(self.y) + i64::from(self.height)).max(i64::from(other.y) + i64::from(other.height));
+        // Recti cannot represent a union wider than i32::MAX. Preserve the leading origin and
+        // saturate the extent instead of wrapping to a negative layout rectangle.
+        let width = (max_x - min_x).clamp(0, i64::from(i32::MAX)) as i32;
+        let height = (max_y - min_y).clamp(0, i64::from(i32::MAX)) as i32;
+        Self::new(min_x as i32, min_y as i32, width, height)
     }
 
     fn from_points(points: &[Vec2f]) -> Option<Self> {
@@ -178,7 +216,7 @@ mod tests {
         assert_rect(source.translated(Vec2i::new(-3, 5)), (7, 25, 30, 40));
         assert_rect(source.relative_to(Vec2i::new(3, 5)), (7, 15, 30, 40));
         assert_rect(
-            Recti::new(i32::MAX - 1, i32::MIN + 1, 30, 40).saturating_translated(Vec2i::new(10, -10)),
+            Recti::new(i32::MAX - 1, i32::MIN + 1, 30, 40).translated(Vec2i::new(10, -10)),
             (i32::MAX, i32::MIN, 30, 40),
         );
     }
@@ -196,6 +234,24 @@ mod tests {
         assert!(!left.overlaps(touching));
         assert!(left.positive_intersection(touching).is_none());
         assert_rect(left.union(overlapping), (0, 0, 15, 10));
+        assert!(left.contains_point(Vec2i::new(9, 9)));
+        assert!(!left.contains_point(Vec2i::new(10, 10)));
+    }
+
+    /// Verifies rectangle queries form exclusive edges in wider arithmetic at coordinate limits.
+    #[test]
+    fn rectangle_intersection_handles_exclusive_edges_beyond_i32() {
+        let extreme = Recti::new(i32::MAX, i32::MIN, 1, 2);
+
+        // An identical rectangle still intersects even though its mathematical right edge is one
+        // greater than i32::MAX. A normal viewport remains disjoint without evaluating x + width
+        // in the narrower coordinate type.
+        assert_rect(
+            extreme.positive_intersection(extreme).expect("identical extreme rectangles overlap"),
+            (i32::MAX, i32::MIN, 1, 2),
+        );
+        assert!(extreme.positive_intersection(Recti::new(0, 0, 32, 32)).is_none());
+        assert!(extreme.contains_point(Vec2i::new(i32::MAX, i32::MIN)));
     }
 
     #[test]

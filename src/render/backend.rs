@@ -314,10 +314,10 @@ pub trait RendererBackend: 'static {
 
     /// Returns the atlas backing the UI renderer.
     ///
-    /// The atlas must contain an opaque white rendering tile named `white`, which the renderer
-    /// resolves into an atlas-owned capability and samples for solid geometry. Backends used with
-    /// [`crate::Context`] must additionally provide the `body` font and every lowercase semantic
-    /// icon required by [`crate::ThemeIcons::from_atlas`].
+    /// Every constructible [`AtlasHandle`] already contains a validated opaque white rendering tile
+    /// named `white`, which the renderer samples for solid geometry. Backends used with
+    /// [`crate::Context`] must additionally return a handle containing the `body` font and every
+    /// lowercase semantic icon required by [`crate::ThemeIcons::from_atlas`].
     fn get_atlas(&self) -> AtlasHandle;
     /// Acquires and initializes one backend frame.
     fn frame(&mut self, info: FrameInfo) -> Result<Self::Frame<'_>, FrameError>;

@@ -312,7 +312,7 @@ impl InputRouter {
 
         // Capture lets drag/release escape the original rectangle; all other pointer events still
         // need to hit both the node allocation and its effective clip.
-        let event_hits_rect = event.position().is_some_and(|pos| rect.contains(&pos) && clip.contains(&pos));
+        let event_hits_rect = event.position().is_some_and(|pos| rect.contains_point(pos) && clip.contains_point(pos));
         match event {
             UiInputEvent::MouseDown { button, .. } if event_hits_rect => {
                 // Focusability controls persistent keyboard ownership; the Captured result below
@@ -538,7 +538,7 @@ impl InputRouter {
 
         // Allocations are parent-local while the inherited clip is already in screen space.
         let screen_rect = parent_transform.resolve(node.state.layout.allocation);
-        parent_transform.clip.contains(&pos) && screen_rect.contains(&pos)
+        parent_transform.clip.contains_point(pos) && screen_rect.contains_point(pos)
     }
 
     /// Routes to one selected target, then bubbles an ignored result through ancestors only.
@@ -637,10 +637,10 @@ impl InputRouter {
         let screen_origin = Vec2i::new(screen_rect.x, screen_rect.y);
         let local_rect = Recti::new(0, 0, screen_rect.width, screen_rect.height);
         let content_rect = crate::ui_node::frame::frame_geometry(local_rect, framed, style).content_or_empty();
-        let screen_clip = parent_transform.clip.intersect(&screen_rect).unwrap_or_default();
+        let screen_clip = parent_transform.clip.positive_intersection(screen_rect).unwrap_or_default();
         let local_clip = screen_clip.relative_to(screen_origin);
         let content_clip = local_clip
-            .intersect(&content_rect)
+            .positive_intersection(content_rect)
             .unwrap_or_else(|| Recti::new(content_rect.x, content_rect.y, 0, 0));
         let local_event = super::widget_context::localize_event(screen_origin, event.clone());
         let captured = self.capture == Some(node.id());

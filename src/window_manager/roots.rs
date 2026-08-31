@@ -34,6 +34,7 @@ use std::{cell::RefCell, fmt, rc::Rc};
 
 use super::*;
 use crate::menu::{MenuAction, MenuEntry, MenuSlot, MenuSurface};
+use crate::math::RectExt;
 use crate::{MouseButton, Node, UiInputEvent, Vec2i, rect};
 
 use super::root_chrome::{RootChromeGeometry, RootChromePart, RootInteraction, record_root_background, record_root_overlay, root_chrome_geometry};
@@ -267,7 +268,7 @@ impl Surface {
     fn contains(&self, point: Vec2i) -> bool {
         // A structural child can overlap its parent chrome geometrically while remaining clipped
         // out of that area. Require both committed boundaries so input matches recorded pixels.
-        self.rect.contains(&point) && self.clip.contains(&point)
+        self.rect.contains_point(point) && self.clip.contains_point(point)
     }
 }
 
@@ -623,7 +624,7 @@ impl SurfaceNode {
     fn chrome_part_at(&self, point: Vec2i) -> Option<RootChromePart> {
         self.root()?;
         // Chrome outside an ancestor-provided child clip is neither visible nor interactive.
-        self.surface.clip.contains(&point).then(|| self.surface.geometry.hit_test(point)).flatten()
+        self.surface.clip.contains_point(point).then(|| self.surface.geometry.hit_test(point)).flatten()
     }
 
     /// Returns whether a parent-owned overlay precedes structural children at `point`.
@@ -632,9 +633,9 @@ impl SurfaceNode {
         // parent there acts as a hit shield, matching the border that is repainted after children.
         let frame = self.root().is_some()
             && self.surface.options.intersects(WindowOption::FRAME)
-            && self.surface.clip.contains(&point)
-            && self.surface.rect.contains(&point)
-            && !self.surface.geometry.client.contains(&point);
+            && self.surface.clip.contains_point(point)
+            && self.surface.rect.contains_point(point)
+            && !self.surface.geometry.client.contains_point(point);
 
         // Actionable title/close/resize geometry and the intrinsic menu bar use their committed
         // rectangles. Together with `frame`, these are precisely the parent-owned regions recorded
@@ -2282,7 +2283,7 @@ impl WindowManager {
                 let inherited = parent.surface.clip;
                 match parent.root().expect("child parent must retain root policy").child_window_clip {
                     ChildWindowClip::None => inherited,
-                    ChildWindowClip::Content => inherited.intersect(&parent.surface.geometry.body).unwrap_or_else(|| {
+                    ChildWindowClip::Content => inherited.positive_intersection(parent.surface.geometry.body).unwrap_or_else(|| {
                         Recti::new(
                             inherited.x.max(parent.surface.geometry.body.x),
                             inherited.y.max(parent.surface.geometry.body.y),

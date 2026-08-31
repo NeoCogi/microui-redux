@@ -260,14 +260,17 @@ impl Slider {
         let base = ctx.local_rect();
         let range = self.high - self.low;
         ctx.draw_widget_fill(base, ControlColor::Base);
-        let width = ctx.style().thumb_size;
-        let available = (base.width - width).max(0);
+        // Measurement already treats negative theme thumb sizes as zero. Paint applies the same
+        // normalization and uses saturated extent arithmetic so either public style or layout
+        // input may span the i32 domain without panicking.
+        let width = ctx.style().thumb_size.max(0);
+        let available = base.width.max(0).saturating_sub(width);
         let x = if range != 0.0 && available > 0 {
             ((self.value - self.low) * available as Real / range) as i32
         } else {
             0
         };
-        let thumb = rect(base.x + x, base.y, width, base.height);
+        let thumb = rect(base.x.saturating_add(x), base.y, width, base.height.max(0));
         ctx.draw_widget_internal_frame(thumb, ControlColor::Button);
         let label = number_label(self.value, self.precision);
         ctx.draw_control_text_with_font(font, label.as_str(), base, ControlColor::Text, self.opt);
@@ -527,5 +530,22 @@ mod tests {
         slider.set_value(4.0);
         assert_eq!(slider.value(), 4.0);
         assert!(!dispatcher.dispatch(&mut Vec::new()));
+    }
+
+    /// Verifies paint shares measurement's negative-thumb normalization without subtract overflow.
+    #[test]
+    fn negative_extreme_thumb_size_keeps_slider_paint_total() {
+        let atlas = make_test_atlas();
+        let mut style = test_style(&atlas);
+        style.thumb_size = i32::MIN;
+        let mut slider = SliderBuilder::create_widget(SliderParameters::new(0.5, 0.0, 1.0));
+        let bounds = rect(0, 0, 100, 20);
+        let mut display_list = crate::render::DisplayList::new();
+        let mut ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut display_list, bounds, &style, &atlas, false, false, false, false);
+
+        slider.paint(&mut ctx);
+
+        // The base fill and numeric label remain valid even though the zero-width thumb is omitted.
+        assert!(display_list.debug_operation_count() >= 1);
     }
 }

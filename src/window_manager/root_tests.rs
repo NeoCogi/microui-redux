@@ -36,7 +36,8 @@ use crate::{
     CustomParameters, Constraints, Context, Dimensioni, Disclosure, DisclosureParameters, Ui, Grid, GridParameters, Key, KeyEvent, KeyboardBehavior, Linear,
     LinearItem, LinearParameters, Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted, MouseButton, Node, ScrollArea,
     ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Slider, SliderParameters, Style, Textbox, TextboxChanged, TextBlock,
-    TextBlockParameters, TextboxParameters, TrackSize, TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx, Modifiers,
+    TextBlockParameters, TextboxParameters, TrackSize, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
+    Modifiers,
 };
 use crate::render::{FrameInfo, RenderError};
 use std::{
@@ -46,6 +47,79 @@ use std::{
 
 fn context() -> Context<NoopRenderer> {
     Context::new_test(NoopRenderer { atlas: test_atlas() }, Dimensioni::new(320, 240))
+}
+
+/// Constructs the smallest complete theme atlas with deliberately maximal text metrics.
+fn extreme_metric_atlas() -> AtlasHandle {
+    // Every semantic icon may share the one opaque-white texel: identity is name based, while this
+    // fixture is concerned only with the propagation of valid font metrics through Context.
+    let pixels = [0xFF, 0xFF, 0xFF, 0xFF];
+    let icons = [
+        ("white", Recti::new(0, 0, 1, 1)),
+        ("close", Recti::new(0, 0, 1, 1)),
+        ("expand", Recti::new(0, 0, 1, 1)),
+        ("collapse", Recti::new(0, 0, 1, 1)),
+        ("check", Recti::new(0, 0, 1, 1)),
+        ("expand_down", Recti::new(0, 0, 1, 1)),
+        ("open_folder", Recti::new(0, 0, 1, 1)),
+        ("closed_folder", Recti::new(0, 0, 1, 1)),
+        ("file", Recti::new(0, 0, 1, 1)),
+    ];
+    let glyphs = [(
+        '_',
+        crate::CharEntry {
+            offset: Vec2i::new(0, 0),
+            advance: Vec2i::new(i32::MAX, 0),
+            rect: Recti::new(0, 0, 1, 1),
+        },
+    )];
+    let fonts = [(
+        "body",
+        crate::FontEntry {
+            line_size: i32::MAX as usize,
+            baseline: i32::MAX,
+            font_size: 1,
+            entries: &glyphs,
+        },
+    )];
+    let source = crate::AtlasSource {
+        width: 1,
+        height: 1,
+        pixels: &pixels,
+        icons: &icons,
+        fonts: &fonts,
+        format: crate::SourceFormat::Raw,
+    };
+
+    AtlasHandle::try_from(&source).expect("maximal representable font metrics must form a valid atlas")
+}
+
+/// Verifies valid maximal font metrics remain total through layout, input routing, and rendering.
+#[test]
+fn context_handles_extreme_font_metrics_across_a_complete_commit() {
+    let (_, button) = Button::create(ButtonParameters::new("_"));
+    let button_id = button.id();
+    let (_, content) = Linear::create(LinearParameters::horizontal([button]));
+    let mut context = Context::new_test(NoopRenderer { atlas: extreme_metric_atlas() }, Dimensioni::new(320, 240));
+    let root = context.ui().create_window(Window::new("extreme metrics", rect(20, 20, 140, 100), content));
+    context
+        .ui()
+        .set_window_options(&root, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+
+    // A Content track preserves intrinsic overflow, so the child's positive screen origin plus
+    // i32::MAX extent crosses the integer boundary that the dependency's Recti methods cannot
+    // evaluate. The complete empty-input commit must still update, clip, and render successfully.
+    context.update_and_render_ui();
+    let child = context.debug_root_node_rect(root.id(), button_id).expect("the extreme child must be laid out");
+    assert!(child.x > 0 && child.y > 0);
+    assert_eq!((child.width, child.height), (i32::MAX, i32::MAX));
+
+    // Route a real pointer event through both window and retained-node hit tests, then repeat layout
+    // and rendering so every production geometry consumer observes the same extreme rectangle.
+    let body = context.debug_root_body(root.id()).expect("the fixed window must expose its body");
+    context.mousemove(body.x.saturating_add(1), body.y.saturating_add(1));
+    context.update_and_render_ui();
 }
 
 /// Delivers one complete left-button click to the center of a committed test rectangle.

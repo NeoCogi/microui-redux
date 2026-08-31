@@ -292,7 +292,10 @@ impl Input {
         let event = self.pending.pop_front()?;
         Some(match event {
             RawInputEvent::MouseMove { pos } => {
-                let delta = pos - self.mouse_pos;
+                // Raw coordinates come from the application and may jump across the complete i32
+                // domain. Preserve the direction and clamp only the unrepresentable magnitude so
+                // one hostile or synthetic input event cannot panic before retained routing.
+                let delta = Vec2i::new(pos.x.saturating_sub(self.mouse_pos.x), pos.y.saturating_sub(self.mouse_pos.y));
                 self.mouse_pos = pos;
                 if self.mouse_down.is_empty() {
                     UiInputEvent::MouseMove { pos, delta }
@@ -375,5 +378,26 @@ mod tests {
         assert!(matches!(input.pop_event(), Some(UiInputEvent::Scroll { .. })));
         assert!(matches!(input.pop_event(), Some(UiInputEvent::Text { text }) if text.is_empty()));
         assert!(input.pop_event().is_none());
+    }
+
+    /// Verifies public mouse input remains total when successive coordinates span the i32 domain.
+    #[test]
+    fn extreme_mouse_jump_saturates_each_delta_axis() {
+        let mut input = Input::default();
+        input.mousemove(i32::MIN, i32::MAX);
+        input.mousemove(i32::MAX, i32::MIN);
+
+        assert!(matches!(
+            input.pop_event(),
+            Some(UiInputEvent::MouseMove { pos, delta })
+                if (pos.x, pos.y, delta.x, delta.y)
+                    == (i32::MIN, i32::MAX, i32::MIN, i32::MAX)
+        ));
+        assert!(matches!(
+            input.pop_event(),
+            Some(UiInputEvent::MouseMove { pos, delta })
+                if (pos.x, pos.y, delta.x, delta.y)
+                    == (i32::MAX, i32::MIN, i32::MAX, i32::MIN)
+        ));
     }
 }

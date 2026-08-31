@@ -30,6 +30,7 @@
 
 use std::{cell::RefCell, rc::Rc};
 
+use crate::math::RectExt;
 use crate::{Constraints, Dimensioni, Recti, Style, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption};
 
 use super::{ChildParticipation, Children, NodeLayout, NodeRuntime, UiRuntime, WidgetStorage};
@@ -350,7 +351,7 @@ impl ContainerLayoutCtx<'_> {
         // content rectangle. Disjoint input is represented by a stable empty rectangle at content
         // origin rather than by an invalid rectangle.
         let viewport = viewport
-            .intersect(&self.content)
+            .positive_intersection(self.content)
             .unwrap_or_else(|| Recti::new(self.content.x, self.content.y, 0, 0));
         // Rebuild the child transform while retaining the current logical content size.
         let outer = self.current.layout.allocation;

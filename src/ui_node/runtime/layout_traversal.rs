@@ -107,7 +107,7 @@ impl UiRuntime {
             .layout
             .children
             .clip
-            .intersect(&content)
+            .positive_intersection(content)
             .unwrap_or_else(|| Recti::new(content.x, content.y, 0, 0));
 
         // Only visible branches that opt into propagation contribute descendant overflow to their
@@ -116,8 +116,8 @@ impl UiRuntime {
         if is_branch && node_children_visible(node) && propagate_child_overflow {
             let content_rect = node.with_children(child_content_bounds_from_children).unwrap_or(content);
             let content_size = Dimensioni::new(
-                (content_rect.x + content_rect.width).max(outer.width).max(0),
-                (content_rect.y + content_rect.height).max(outer.height).max(0),
+                content_rect.x.saturating_add(content_rect.width).max(outer.width).max(0),
+                content_rect.y.saturating_add(content_rect.height).max(outer.height).max(0),
             );
             node.set_layout(node.state.layout.with_content_size(content_size));
         }

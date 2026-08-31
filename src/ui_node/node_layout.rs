@@ -186,11 +186,17 @@ impl Transform {
         // Allocation locates the node in its parent's content space. The child offset is applied
         // only after computing the node-local viewport, so scrolling translates descendants but
         // never translates the viewport that clips them.
-        let node_origin = self.offset + Vec2i::new(layout.allocation.x, layout.allocation.y);
+        let node_origin = Vec2i::new(
+            self.offset.x.saturating_add(layout.allocation.x),
+            self.offset.y.saturating_add(layout.allocation.y),
+        );
         let screen_clip = layout.children.clip.translated(node_origin);
         Self {
-            offset: node_origin + layout.children.offset,
-            clip: self.clip.intersect(&screen_clip).unwrap_or_default(),
+            offset: Vec2i::new(
+                node_origin.x.saturating_add(layout.children.offset.x),
+                node_origin.y.saturating_add(layout.children.offset.y),
+            ),
+            clip: self.clip.positive_intersection(screen_clip).unwrap_or_default(),
         }
     }
 
@@ -198,5 +204,28 @@ impl Transform {
     pub(crate) fn resolve(self, allocation: Recti) -> Recti {
         // Allocations are parent-local; the inherited offset is the complete accumulated transform.
         allocation.translated(self.offset)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Regression coverage for transform arithmetic at the retained coordinate boundary.
+
+    use super::*;
+
+    /// Verifies translation and clipping remain total when a child rectangle extends past i32.
+    #[test]
+    fn transform_push_handles_a_child_far_edge_beyond_i32() {
+        let parent = Transform {
+            offset: Vec2i::new(1, 0),
+            clip: Recti::new(0, 0, 32, 32),
+        };
+        let layout = NodeLayout::from_parts(Recti::new(i32::MAX, 0, 1, 1), Recti::new(0, 0, 1, 1), Dimensioni::new(1, 1));
+
+        // The translated origin saturates, while the mathematically valid far edge MAX + 1 is
+        // evaluated in i64 by positive_intersection and found disjoint from the ordinary viewport.
+        let child = parent.push(layout);
+        assert_eq!((child.offset.x, child.offset.y), (i32::MAX, 0));
+        assert_eq!((child.clip.x, child.clip.y, child.clip.width, child.clip.height), (0, 0, 0, 0));
     }
 }

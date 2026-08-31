@@ -202,14 +202,27 @@ struct ScenarioResult {
 fn make_atlas() -> crate::AtlasHandle {
     let pixels = [0xFF; 4];
     let icons = [("white", Recti::new(0, 0, 1, 1))];
-    let entries = [(
-        'a',
-        CharEntry {
-            offset: Vec2i::new(0, 0),
-            advance: Vec2i::new(1, 0),
-            rect: Recti::new(0, 0, 1, 1),
-        },
-    )];
+    let entries = [
+        (
+            // Every validated font owns an explicit fallback glyph. Keeping it in this minimal
+            // benchmark fixture prevents timing code from depending on a synthetic atlas-origin
+            // fallback that ordinary atlas loading no longer permits.
+            '_',
+            CharEntry {
+                offset: Vec2i::new(0, 0),
+                advance: Vec2i::new(1, 0),
+                rect: Recti::new(0, 0, 1, 1),
+            },
+        ),
+        (
+            'a',
+            CharEntry {
+                offset: Vec2i::new(0, 0),
+                advance: Vec2i::new(1, 0),
+                rect: Recti::new(0, 0, 1, 1),
+            },
+        ),
+    ];
     let fonts = [(
         "default",
         FontEntry {
@@ -219,7 +232,9 @@ fn make_atlas() -> crate::AtlasHandle {
             entries: &entries,
         },
     )];
-    crate::AtlasHandle::from(&AtlasSource {
+    // Performance fixtures deliberately cross the public validation boundary before measurement;
+    // validation itself remains outside every timed frame.
+    crate::AtlasHandle::try_from(&AtlasSource {
         width: 1,
         height: 1,
         pixels: &pixels,
@@ -227,6 +242,7 @@ fn make_atlas() -> crate::AtlasHandle {
         fonts: &fonts,
         format: SourceFormat::Raw,
     })
+    .expect("renderer performance atlas must satisfy the complete atlas contract")
 }
 
 /// Returns the shared recording bounds and viewport.

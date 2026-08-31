@@ -299,7 +299,7 @@ impl Combo {
             text_size(style, atlas, self.font, self.label.as_str()).width
         };
         let indicator = atlas.get_icon_size(style.icons.expand_down);
-        let width = (padding * 3 + text_w + indicator.width).max(0);
+        let width = padding.saturating_mul(3).saturating_add(text_w.max(0)).saturating_add(indicator.width.max(0));
         let height = content_height(style, atlas, self.font, indicator.height);
         Dimensioni::new(width, height)
     }
@@ -312,7 +312,7 @@ impl Combo {
         let submitted = if let Some(action) = action {
             let previous_open = self.open;
             let screen_header = ctx.screen_content_rect();
-            let anchor = rect(screen_header.x, screen_header.y + screen_header.height, screen_header.width, 1);
+            let anchor = rect(screen_header.x, screen_header.y.saturating_add(screen_header.height), screen_header.width, 1);
             self.open = match action {
                 KeyboardAction::Activate => !self.open,
                 KeyboardAction::Expand => true,

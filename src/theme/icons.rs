@@ -139,14 +139,18 @@ mod tests {
                 entries: &glyphs,
             },
         )];
-        let atlas = AtlasHandle::from(&AtlasSource {
+        // Even test metadata crosses the same strict construction boundary as application atlases;
+        // this prevents a fixture from accidentally relying on malformed names, metrics, or
+        // rectangles that production loading rejects.
+        let atlas = AtlasHandle::try_from(&AtlasSource {
             width: 1,
             height: 1,
             pixels: &pixels,
             icons: &icons,
             fonts: &fonts,
             format: SourceFormat::Raw,
-        });
+        })
+        .expect("semantic-icon fixture atlas must satisfy the complete atlas contract");
 
         let bindings = ThemeIcons::from_atlas(&atlas);
 

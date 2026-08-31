@@ -166,15 +166,15 @@ impl ListItem {
     /// Measures the row label and optional icon.
     fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         let padding = style.padding.max(0);
-        let mut width = padding * 2;
+        let mut width = padding.saturating_mul(2);
         let mut visual_h = 0;
         if let Some(icon) = self.icon {
             let size = atlas.get_icon_size(icon);
-            width += size.width + padding;
+            width = width.saturating_add(size.width.max(0)).saturating_add(padding);
             visual_h = size.height;
         }
         if !self.label.is_empty() {
-            width += text_size(style, atlas, self.font, &self.label).width;
+            width = width.saturating_add(text_size(style, atlas, self.font, &self.label).width.max(0));
         }
         let height = content_height(style, atlas, self.font, visual_h);
         Dimensioni::new(width.max(0), height)
@@ -200,12 +200,17 @@ impl ListItem {
             // Icons consume the left padding + icon width before the text region starts.
             let padding = ctx.style().padding.max(0);
             let icon_size = ctx.atlas().get_icon_size(icon);
-            let icon_x = bounds.x + padding;
-            let icon_y = bounds.y + ((bounds.height - icon_size.height) / 2).max(0);
-            let icon_rect = rect(icon_x, icon_y, icon_size.width, icon_size.height);
-            let consumed = icon_size.width + padding * 2;
-            text_rect.x += consumed;
-            text_rect.width = (text_rect.width - consumed).max(0);
+            // Style values and retained allocations can independently reach coordinate limits.
+            // Saturating the nonnegative extents keeps paint total while preserving ordinary
+            // geometry exactly.
+            let icon_width = icon_size.width.max(0);
+            let icon_height = icon_size.height.max(0);
+            let icon_x = bounds.x.saturating_add(padding);
+            let icon_y = bounds.y.saturating_add(bounds.height.saturating_sub(icon_height).max(0) / 2);
+            let icon_rect = rect(icon_x, icon_y, icon_width, icon_height);
+            let consumed = icon_width.saturating_add(padding.saturating_mul(2));
+            text_rect.x = text_rect.x.saturating_add(consumed);
+            text_rect.width = text_rect.width.saturating_sub(consumed).max(0);
             let color = ctx.style().colors[ControlColor::Text as usize];
             ctx.draw_icon(icon, icon_rect, color);
         }
@@ -278,5 +283,32 @@ impl WidgetBuilder for ListItemBuilder {
             label: parameters.label,
             submitted_event: Rc::new(RefCell::new(crate::event::WidgetEventPort::new())),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Boundary tests for retained list-item paint geometry.
+
+    use super::*;
+    use crate::render::DisplayList;
+    use crate::test_support::{test_atlas, test_style};
+
+    /// Verifies application-provided maximum padding cannot overflow icon or label placement.
+    #[test]
+    fn extreme_padding_keeps_icon_paint_total() {
+        let atlas = test_atlas();
+        let mut style = test_style(&atlas);
+        style.padding = i32::MAX;
+        let icon = atlas.icon_id("check").expect("the shared fixture icon must exist");
+        let mut item = ListItemBuilder::create_widget(ListItemParameters::with_icon("item", icon));
+        let bounds = rect(0, 0, 20, 20);
+        let mut display_list = DisplayList::new();
+        let mut ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut display_list, bounds, &style, &atlas, true, false, false, false);
+
+        item.paint(&mut ctx);
+
+        // Hover fill remains visible; extreme icon/text geometry may be clipped completely.
+        assert!(display_list.debug_operation_count() >= 1);
     }
 }

@@ -47,11 +47,11 @@ impl UiRuntime {
         let local_rect = Recti::new(0, 0, screen_rect.width, screen_rect.height);
         let frame_geometry = crate::ui_node::frame::frame_geometry(local_rect, framed, style);
         let content_rect = frame_geometry.content_or_empty();
-        let screen_clip = parent_transform.clip.intersect(&screen_rect).unwrap_or_default();
+        let screen_clip = parent_transform.clip.positive_intersection(screen_rect).unwrap_or_default();
         let child_transform = parent_transform.push(node.state.layout);
         let local_clip = screen_clip.relative_to(screen_origin);
         let content_clip = local_clip
-            .intersect(&content_rect)
+            .positive_intersection(content_rect)
             .unwrap_or_else(|| Recti::new(content_rect.x, content_rect.y, 0, 0));
 
         // Snapshot interaction before invoking user code so all reads during this update are stable.

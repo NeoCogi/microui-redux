@@ -59,8 +59,10 @@ pub(super) fn number_preferred_size(
     let padding = style.padding.max(0);
     let vertical_pad = (padding / 2).max(1);
     let font_height = atlas.get_font_height(resolved_font) as i32;
-    let width = (text_w + padding * 2 + visual_width.max(0)).max(0);
-    let height = (font_height.max(visual_height.max(0)) + vertical_pad * 2).max(0);
+    // Preferred sizes saturate because text metrics, visual hints, and style padding are independent
+    // application inputs even though each value is individually representable.
+    let width = text_w.max(0).saturating_add(padding.saturating_mul(2)).saturating_add(visual_width.max(0));
+    let height = font_height.max(visual_height.max(0)).max(0).saturating_add(vertical_pad.saturating_mul(2));
     Dimensioni::new(width, height)
 }
 

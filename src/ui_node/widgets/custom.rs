@@ -115,9 +115,9 @@ impl Custom {
         } else {
             text_size(style, atlas, self.font, self.name.as_str()).width
         };
-        let width = padding * 2 + text_w;
+        let width = padding.saturating_mul(2).saturating_add(text_w.max(0));
         let height = content_height(style, atlas, self.font, 0);
-        Dimensioni::new(width.max(0), height)
+        Dimensioni::new(width, height)
     }
 }
 

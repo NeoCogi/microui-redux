@@ -37,6 +37,7 @@
 
 use std::fmt;
 
+use crate::math::RectExt;
 use crate::render::Painter;
 use crate::{AtlasHandle, ControlColor, Dimensioni, Recti, Style, WidgetEventPortHandle, WindowOption};
 
@@ -154,11 +155,11 @@ impl RootChromeGeometry {
     /// Classifies a screen-space point in interaction-priority order.
     pub(super) fn hit_test(self, point: crate::Vec2i) -> Option<RootChromePart> {
         // Specialized controls overlap title/body geometry and therefore take priority.
-        if self.close.is_some_and(|rect| rect.contains(&point)) {
+        if self.close.is_some_and(|rect| rect.contains_point(point)) {
             Some(RootChromePart::Close)
-        } else if self.resize.is_some_and(|rect| rect.contains(&point)) {
+        } else if self.resize.is_some_and(|rect| rect.contains_point(point)) {
             Some(RootChromePart::Resize)
-        } else if self.title.is_some_and(|rect| rect.contains(&point)) {
+        } else if self.title.is_some_and(|rect| rect.contains_point(point)) {
             Some(RootChromePart::Title)
         } else {
             None
@@ -188,7 +189,7 @@ pub(super) fn root_chrome_geometry(
         0
     };
     // Both leading and trailing edges contribute to the outer extent.
-    let border_extent = border.checked_mul(2).expect("root chrome frame extent overflowed i32");
+    let border_extent = border.saturating_mul(2);
     let padding_extent = padding.saturating_mul(2);
     let auto_width = options.intersects(WindowOption::AUTO_WIDTH);
     let auto_height = options.intersects(WindowOption::AUTO_HEIGHT);
@@ -210,25 +211,20 @@ pub(super) fn root_chrome_geometry(
         });
     }
     // The frame contributes one border on every outer edge.
-    let minimum_outer = Dimensioni::new(
-        minimum_width.checked_add(border_extent).expect("root chrome minimum width overflowed i32"),
-        minimum_height.checked_add(border_extent).expect("root chrome minimum height overflowed i32"),
-    );
+    let minimum_outer = Dimensioni::new(minimum_width.saturating_add(border_extent), minimum_height.saturating_add(border_extent));
     let title_extent = if options.intersects(WindowOption::NO_TITLE) { 0 } else { title_height };
     // Intrinsic geometry adds the surface-owned frame, title, and padding to child measurement.
     let intrinsic_outer = Dimensioni::new(
         child_intrinsic
             .width
             .saturating_add(padding_extent)
-            .checked_add(border_extent)
-            .expect("root chrome intrinsic width overflowed i32")
+            .saturating_add(border_extent)
             .max(minimum_outer.width),
         child_intrinsic
             .height
             .saturating_add(padding_extent)
             .saturating_add(title_extent)
-            .checked_add(border_extent)
-            .expect("root chrome intrinsic height overflowed i32")
+            .saturating_add(border_extent)
             .max(minimum_outer.height),
     );
 
@@ -343,7 +339,7 @@ pub(super) fn record_root_overlay(
     if let Some(visual) = geometry
         .resize
         .filter(|resize| resize.width > 0 && resize.height > 0)
-        .and_then(|resize| resize.intersect(&geometry.client))
+        .and_then(|resize| resize.positive_intersection(geometry.client))
     {
         // The raised frame treatment keeps the grip visible over application content.
         crate::ui_node::frame::paint_internal_frame(&mut painter, visual, Some(style.colors[ControlColor::WindowBG as usize]), style.frame_border());

@@ -158,9 +158,10 @@ fn expand_positive_axis(value: i32, border_width: i32) -> i32 {
         value
     } else {
         // border_outset = leading_border_width + trailing_border_width.
-        let outset = i64::from(border_width.max(0)) * 2;
-        // outer_extent = content_extent + border_outset.
-        i32::try_from(i64::from(value) + outset).expect("framed preferred size overflowed i32")
+        let outset = border_width.max(0).saturating_mul(2);
+        // Preferred geometry is allowed to saturate; exact placement will still be bounded by its
+        // parent constraint, and an extreme font or style must not turn measurement into a panic.
+        value.saturating_add(outset)
     }
 }
 

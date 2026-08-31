@@ -23,24 +23,26 @@ Rendering coverage is a separate atlas concern. Text measurement and drawing ite
 scalar values and use the same lookup rules:
 
 - a character present in the selected atlas font uses its own glyph metrics and rectangle;
-- a missing character uses the selected font's underscore (`_`) entry;
-- if underscore is also absent, the runtime uses a synthetic 8-by-8 fallback rectangle at the
-  atlas origin.
+- a missing character uses the selected font's mandatory underscore (`_`) entry.
 
 The built-in atlas builder bakes only printable ASCII (`U+0020` through `U+007E`), which includes
 underscore. `AtlasSource` can describe arbitrary Unicode scalar values, so applications needing
-broader coverage must provide their own glyph table and should always include `_`. There is not
-yet a configurable glyph-range option in `builder::Config`.
+broader coverage must provide their own glyph table and must include `_` in every font. Atlas
+construction rejects a font without that explicit fallback. There is not yet a configurable
+glyph-range option in `builder::Config`.
 
 The text pipeline does not perform grapheme segmentation, script shaping, bidirectional
 reordering, kerning, or fallback-font selection. `TextWrap::Word` wraps only at ASCII space
 boundaries; an individual word is not split when it exceeds the available width.
 
-An application-provided atlas must have a `body` font and an opaque white tile named `white` for
-solid geometry; neither resource depends on a numeric table position. The standard style also expects the semantic icon names
+An atlas used with `Context` must have a `body` font and the standard semantic icon names
 `close`, `expand`, `collapse`, `check`, `expand_down`, `open_folder`, `closed_folder`, and `file`.
-The current loader does not validate the complete contract, so treat atlas metadata as trusted
-input and keep every glyph/icon rectangle within the declared texture dimensions.
+Every atlas, including a fontless atlas used only by a low-level `Renderer`, has a validated opaque
+white tile named `white` for solid geometry; no resource depends on a numeric table position.
+`AtlasHandle::try_from` validates dimensions, decoded pixels, unique names and glyphs, font
+metrics, the mandatory underscore entries, every glyph/icon rectangle, and the opaque white tile
+before returning a handle. `Style::from_atlas` and `ThemeIcons::from_atlas` separately enforce the
+standard UI's `body` and semantic-icon naming policy.
 
 `FontId` and `IconId` are opaque capabilities scoped to one runtime atlas allocation. Cloning an
 `AtlasHandle` preserves their owner, while loading identical source metadata again creates a
@@ -106,5 +108,6 @@ let (_title, title_node) = TextBlock::create(
 );
 ```
 
-`builder::Config::fonts` must be non-empty. Standard Context atlases name one entry `body`; optional
-roles that are absent fall back to that same atlas-owned body font.
+`builder::Config::fonts` may be empty for an atlas used directly by `Renderer`. A `Context` atlas
+must name one entry `body`; optional roles that are absent fall back to that same atlas-owned body
+font.

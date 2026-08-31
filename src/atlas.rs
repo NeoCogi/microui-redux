@@ -35,10 +35,9 @@
 //! and drawing substitute the selected font's underscore entry for a missing character.
 
 use std::collections::HashMap;
-use std::fmt::{Debug, Formatter};
 
 use super::*;
-use crate::identity::ProcessUniqueId;
+use crate::{identity::ProcessUniqueId, image::CheckedImageDimensions};
 
 #[derive(Debug, Clone)]
 /// Metrics and atlas coordinates for a glyph.
@@ -51,7 +50,6 @@ pub struct CharEntry {
     pub rect: Recti, // coordinates in the atlas
 }
 
-#[derive(Clone)]
 /// Internal font record stored in the atlas.
 struct Font {
     /// Distance between text baselines in pixels.
@@ -67,18 +65,19 @@ struct Font {
     entries: HashMap<char, CharEntry>,
 }
 
-impl Debug for Font {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        use std::fmt::Write;
-        let mut entries = String::new();
-        for e in &self.entries {
-            entries.write_fmt(format_args!("{:?}, ", e))?;
-        }
-        f.write_fmt(format_args!(
-            "Font {{ line_size: {}, baseline: {}, font_size: {}, entries: [{}] }}",
-            self.line_size, self.baseline, self.font_size, entries
-        ))
-    }
+/// Unvalidated owned font metadata retained until atlas finalization succeeds.
+///
+/// A vector deliberately preserves duplicate characters from serialized input. Converting to the
+/// runtime [`HashMap`] before validation would silently replace one duplicate with another.
+struct FontCandidate {
+    /// Distance between text baselines in pixels.
+    line_size: usize,
+    /// Distance from the top of a line to its baseline.
+    baseline: i32,
+    /// Requested font size in pixels.
+    font_size: usize,
+    /// Ordered glyph metadata, including any duplicate keys that validation must reject.
+    entries: Vec<(char, CharEntry)>,
 }
 
 /// Concrete identity assigned once to one immutable runtime atlas.
@@ -158,14 +157,13 @@ impl IconId {
     }
 }
 
-#[derive(Debug, Clone)]
 /// Internal bitmap icon record stored in the atlas.
 struct Icon {
     /// Rectangle occupied by the icon in atlas pixel coordinates.
     rect: Recti,
 }
 
-/// Immutable atlas storage shared through [`AtlasHandle`].
+/// Structurally validated immutable atlas storage shared through [`AtlasHandle`].
 struct Atlas {
     /// Process-unique provenance copied into every font and icon capability.
     id: AtlasId,
@@ -181,9 +179,33 @@ struct Atlas {
     icons: Vec<(String, Icon)>,
 }
 
+/// Owned atlas data that has not yet crossed the single validation boundary.
+///
+/// Serialized sources and the build-time atlas builder both produce this concrete representation.
+/// Only atlas validation may convert it into the immutable runtime [`Atlas`].
+struct AtlasCandidate {
+    /// Process-unique provenance retained if finalization succeeds.
+    id: AtlasId,
+    /// Prevalidated dimensions and allocation counts for the texture.
+    dimensions: CheckedImageDimensions,
+    /// Decoded RGBA pixels in row-major order.
+    pixels: Vec<Color4b>,
+    /// Named fonts whose glyph vectors still preserve duplicate keys.
+    fonts: Vec<(String, FontCandidate)>,
+    /// Named icons and their proposed atlas rectangles.
+    icons: Vec<(String, Icon)>,
+}
+
 #[derive(Clone)]
-/// Shared read-only handle to a fully constructed atlas.
+/// Shared read-only handle to a fully validated atlas.
+///
+/// Construct a handle with [`AtlasHandle::try_from`] and handle the concrete [`AtlasError`]. The
+/// crate provides no infallible or lossy source conversion because malformed metadata must never
+/// become a renderer-visible resource table.
 pub struct AtlasHandle(Rc<Atlas>);
+
+mod validation;
+pub use validation::AtlasError;
 
 #[cfg(feature = "builder")]
 /// Helpers for constructing atlas textures at build time.

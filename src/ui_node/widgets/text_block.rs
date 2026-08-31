@@ -170,7 +170,11 @@ impl TextBlock {
         let mut painter = ctx.painter();
         painter.with_clip(bounds, |painter| {
             for (idx, line) in lines.iter().enumerate() {
-                let line_rect = rect(bounds.x, bounds.y + idx as i32 * line_height, bounds.width, line_height);
+                // A large validated line height or long block must clamp at the geometry boundary
+                // instead of overflowing while deriving a later row's origin.
+                let line_index = i32::try_from(idx).unwrap_or(i32::MAX);
+                let line_y = bounds.y.saturating_add(line_index.saturating_mul(line_height));
+                let line_rect = rect(bounds.x, line_y, bounds.width, line_height);
                 let line_top = baseline_aligned_top(line_rect, line_height, baseline);
                 let slice = &self.text[line.start..line.end];
                 if !slice.is_empty() {

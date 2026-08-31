@@ -426,6 +426,13 @@ impl crate::TypedWidget<TextAreaSubmitted> for TextArea {
     }
 }
 
+/// Converts a text-line index into a saturated content-local y coordinate.
+fn text_line_y(index: usize, line_height: i32) -> i32 {
+    // Retained documents can contain more rows than i32 and valid fonts can use the complete
+    // positive metric range. Clamp both conversion and multiplication at the geometry boundary.
+    i32::try_from(index).unwrap_or(i32::MAX).saturating_mul(line_height)
+}
+
 /// Complete derived text layout in stable content-local coordinates.
 struct TextAreaLayout {
     /// Complete allocation supplied by the containing scroll surface.
@@ -541,7 +548,8 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>, 
     {
         // Pointer positions already include the parent's scroll translation. Convert directly from
         // content-local pixels into a visual line and nearest scalar boundary.
-        let line_idx = (pos.y / layout.metrics.line_height.max(1)).clamp(0, layout.lines.len().saturating_sub(1) as i32) as usize;
+        let last_line = i32::try_from(layout.lines.len().saturating_sub(1)).unwrap_or(i32::MAX);
+        let line_idx = (pos.y / layout.metrics.line_height.max(1)).clamp(0, last_line) as usize;
         cursor_pos = cursor_from_x(&layout.lines[line_idx], state.buf.as_str(), pos.x, font, ctx.atlas());
         ensure_visible = true;
         reset_preferred = true;
@@ -568,7 +576,7 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>, 
         // baseline and descent inside the parent viewport.
         state.reveal_rect(Recti::new(
             caret_x,
-            cursor_line as i32 * layout.metrics.line_height,
+            text_line_y(cursor_line, layout.metrics.line_height),
             1,
             layout.metrics.line_height,
         ));
@@ -605,8 +613,13 @@ fn textarea_paint(ctx: &mut WidgetPaintCtx<'_>, state: &TextArea, font: FontId) 
     let caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
     let caret = if ctx.focused() {
         // Align the caret with the same baseline metrics as the corresponding text line.
-        let line_top = cursor_line as i32 * line_height;
-        Some(caret_rect(caret_x, line_top + layout.metrics.baseline, layout.metrics, layout.bounds))
+        let line_top = text_line_y(cursor_line, line_height);
+        Some(caret_rect(
+            caret_x,
+            line_top.saturating_add(layout.metrics.baseline),
+            layout.metrics,
+            layout.bounds,
+        ))
     } else {
         None
     };
@@ -617,7 +630,7 @@ fn textarea_paint(ctx: &mut WidgetPaintCtx<'_>, state: &TextArea, font: FontId) 
         for (idx, line) in layout.lines.iter().enumerate().take(last_line).skip(first_line) {
             let text = &state.buf[line.start..line.end];
             if !text.is_empty() {
-                painter.text(font, text, Vec2i::new(0, idx as i32 * line_height), color);
+                painter.text(font, text, Vec2i::new(0, text_line_y(idx, line_height)), color);
             }
         }
 

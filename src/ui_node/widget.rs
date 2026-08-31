@@ -456,9 +456,11 @@ impl LeafWidget for WidgetOption {
         let vertical_pad = max(1, padding / 2);
         let font_height = atlas.get_font_height(style.font) as i32;
         let icon_height = atlas.get_icon_size(style.icons.expand_down).height;
-        let content = max(font_height, icon_height);
-        let height = (content + vertical_pad * 2).max(0);
-        let width = (padding * 2 + content).max(0);
+        let content = max(font_height, icon_height).max(0);
+        // Valid font metrics and application style values may independently reach i32 limits;
+        // preferred geometry clamps rather than wrapping before the parent applies constraints.
+        let height = content.saturating_add(vertical_pad.saturating_mul(2));
+        let width = padding.saturating_mul(2).saturating_add(content);
         Dimensioni::new(width, height)
     }
 }

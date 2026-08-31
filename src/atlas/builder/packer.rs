@@ -53,109 +53,34 @@
 
 //! Packs small rectangles into a larger texture atlas.
 
-#![allow(dead_code)]
-
 use crate::{Rect, Recti};
 
-/// Describes size and padding requirements of rectangle packing.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub struct Config {
-    /// Width of the encompassing rectangle.
-    pub width: i32,
-    /// Height of the encompassing rectangle.
-    pub height: i32,
-
-    /// Minimum spacing between border and rectangles.
-    pub border_padding: i32,
-    /// Minimum spacing between rectangles.
-    pub rectangle_padding: i32,
-}
-
-/// Simplified rectangle interface required by the packer implementations.
-pub trait RectTrait {
-    /// Returns the top edge (minimum y).
-    fn top(&self) -> i32;
-    /// Returns the bottom edge (exclusive).
-    fn bottom(&self) -> i32;
-    /// Returns the left edge (minimum x).
-    fn left(&self) -> i32;
-    /// Returns the right edge (exclusive).
-    fn right(&self) -> i32;
-
-    /// Returns the area of the rectangle.
-    fn area(&self) -> i32 {
-        (self.bottom() - self.top()) * (self.right() - self.left())
-    }
-
-    /// Check if intersection of two rectangles is non empty.
-    fn intersects(&self, other: &Self) -> bool {
-        self.contains_point(other.left(), other.top())
-            || self.contains_point(other.left(), other.bottom() - 1)
-            || self.contains_point(other.right() - 1, other.bottom() - 1)
-            || self.contains_point(other.right() - 1, other.top())
-            || other.contains_point(self.left(), self.top())
-            || other.contains_point(self.left(), self.bottom() - 1)
-            || other.contains_point(self.right() - 1, self.bottom() - 1)
-            || other.contains_point(self.right() - 1, self.top())
-    }
-
-    /// Check if `other` rectangle is completely inside `self`.
-    fn contains_rect(&self, other: &Self) -> bool {
-        self.left() <= other.left() && self.right() >= other.right() && self.top() <= other.top() && self.bottom() >= other.bottom()
-    }
-
-    /// Check if given pixel is inside this rectangle.
-    fn contains_point(&self, x: i32, y: i32) -> bool {
-        self.left() <= x && x < self.right() && self.top() <= y && y < self.bottom()
-    }
-}
-
-impl RectTrait for Recti {
-    #[inline(always)]
-    fn top(&self) -> i32 {
-        self.y
-    }
-
-    #[inline(always)]
-    fn bottom(&self) -> i32 {
-        self.y + self.height
-    }
-
-    #[inline(always)]
-    fn left(&self) -> i32 {
-        self.x
-    }
-
-    #[inline(always)]
-    fn right(&self) -> i32 {
-        self.x + self.width
-    }
-}
-
-/// `Packer` is the main structure in this crate. It holds packing context.
+/// Private rectangle-packing state used by the parent atlas builder.
 #[derive(Clone)]
-pub struct Packer {
-    /// Padding and size configuration supplied by the caller.
-    config: Config,
+pub(super) struct Packer {
     /// Inner skyline packer operating on the padding-adjusted region.
     packer: DensePacker,
 }
 
 impl Packer {
-    /// Create new empty `Packer` with the provided parameters.
-    pub fn new(config: Config) -> Packer {
-        let width = std::cmp::max(0, config.width + config.rectangle_padding - 2 * config.border_padding);
-        let height = std::cmp::max(0, config.height + config.rectangle_padding - 2 * config.border_padding);
+    /// Fixed spacing retained between the atlas border and packed rectangles.
+    const BORDER_PADDING: i32 = 1;
+    /// Fixed spacing retained between independently packed rectangles.
+    const RECTANGLE_PADDING: i32 = 1;
 
-        Packer {
-            config,
-            packer: DensePacker::new(width, height),
+    /// Creates the atlas builder's empty packer with its fixed one-pixel separations.
+    pub(super) fn new(width: i32, height: i32) -> Self {
+        // The builder has one packing policy. Keeping it here prevents the parent module from
+        // constructing or mutating the packer's internal representation. Calculate the usable
+        // extent in i64 so extreme dimensions cannot overflow before the coordinate-domain clamp.
+        let usable =
+            |extent: i32| (i64::from(extent) + i64::from(Self::RECTANGLE_PADDING) - i64::from(Self::BORDER_PADDING) * 2).clamp(0, i64::from(i32::MAX)) as i32;
+        let usable_width = usable(width);
+        let usable_height = usable(height);
+
+        Self {
+            packer: DensePacker::new(usable_width, usable_height),
         }
-    }
-
-    /// Get config that this packer was created with.
-    pub fn config(&self) -> Config {
-        self.config
     }
 
     /// Pack new rectangle. Returns position of the newly added rectangle. If there is not enough space returns `None`.
@@ -163,30 +88,25 @@ impl Packer {
     ///
     /// `allow_rotation` - allow 90° rotation of the input rectangle. You can detect whether rectangle was rotated by comparing
     /// returned `width` and `height` with the supplied ones.
-    pub fn pack(&mut self, width: i32, height: i32, allow_rotation: bool) -> Option<Recti> {
+    pub(super) fn pack(&mut self, width: i32, height: i32, allow_rotation: bool) -> Option<Recti> {
         if width <= 0 || height <= 0 {
             return None;
         }
 
-        if let Some(mut rect) = self
-            .packer
-            .pack(width + self.config.rectangle_padding, height + self.config.rectangle_padding, allow_rotation)
-        {
-            rect.width -= self.config.rectangle_padding;
-            rect.height -= self.config.rectangle_padding;
-            rect.x += self.config.border_padding;
-            rect.y += self.config.border_padding;
+        // Padding can push an otherwise representable rectangle past i32::MAX. Such a rectangle
+        // cannot fit this coordinate-based packer, so report ordinary packing failure.
+        let padded_width = width.checked_add(Self::RECTANGLE_PADDING)?;
+        let padded_height = height.checked_add(Self::RECTANGLE_PADDING)?;
+        if let Some(mut rect) = self.packer.pack(padded_width, padded_height, allow_rotation) {
+            rect.width = rect.width.checked_sub(Self::RECTANGLE_PADDING)?;
+            rect.height = rect.height.checked_sub(Self::RECTANGLE_PADDING)?;
+            rect.x = rect.x.checked_add(Self::BORDER_PADDING)?;
+            rect.y = rect.y.checked_add(Self::BORDER_PADDING)?;
 
             Some(rect)
         } else {
             None
         }
-    }
-
-    /// Check if rectangle with the specified size can be added.
-    pub fn can_pack(&self, width: i32, height: i32, allow_rotation: bool) -> bool {
-        self.packer
-            .can_pack(width + self.config.rectangle_padding, height + self.config.rectangle_padding, allow_rotation)
     }
 }
 
@@ -194,24 +114,24 @@ impl Packer {
 /// One horizontal skyline segment in the dense packer.
 struct Skyline {
     /// Left x coordinate of the skyline segment.
-    pub left: i32,
+    left: i32,
     /// Current y height at this skyline segment.
-    pub y: i32,
+    y: i32,
     /// Width of this skyline segment.
-    pub width: i32,
+    width: i32,
 }
 
 impl Skyline {
     #[inline(always)]
     /// Returns the exclusive right edge of the segment.
-    pub fn right(&self) -> i32 {
+    fn right(&self) -> i32 {
         self.left + self.width
     }
 }
 
 /// Similar to `Packer` but does not add any padding between rectangles.
 #[derive(Clone)]
-pub struct DensePacker {
+struct DensePacker {
     /// Packer width in pixels.
     width: i32,
     /// Packer height in pixels.
@@ -223,7 +143,7 @@ pub struct DensePacker {
 
 impl DensePacker {
     /// Create new empty `DensePacker` with the provided parameters.
-    pub fn new(width: i32, height: i32) -> DensePacker {
+    fn new(width: i32, height: i32) -> DensePacker {
         let width = std::cmp::max(0, width);
         let height = std::cmp::max(0, height);
 
@@ -232,32 +152,12 @@ impl DensePacker {
         DensePacker { width, height, skylines }
     }
 
-    /// Get size that this packer was created with.
-    pub fn size(&self) -> (i32, i32) {
-        (self.width, self.height)
-    }
-
-    /// Set new size for this packer.
-    ///
-    /// New size should be not less than the current size.
-    pub fn resize(&mut self, width: i32, height: i32) {
-        assert!(width >= self.width && height >= self.height);
-
-        self.width = width;
-        self.height = height;
-
-        // Add a new skyline to fill the gap
-        // The new skyline starts where the furthest one ends
-        let left = self.skylines.last().unwrap().right();
-        self.skylines.push(Skyline { left, y: 0, width: width - left });
-    }
-
     /// Pack new rectangle. Returns position of the newly added rectangle. If there is not enough space returns `None`.
     /// If it returns `None` you can still try to add smaller rectangles.
     ///
     /// `allow_rotation` - allow 90° rotation of the input rectangle. You can detect whether rectangle was rotated by comparing
     /// returned `width` and `height` with the supplied ones.
-    pub fn pack(&mut self, width: i32, height: i32, allow_rotation: bool) -> Option<Recti> {
+    fn pack(&mut self, width: i32, height: i32, allow_rotation: bool) -> Option<Recti> {
         if width <= 0 || height <= 0 {
             return None;
         }
@@ -272,19 +172,18 @@ impl DensePacker {
         }
     }
 
-    /// Check if rectangle with the specified size can be added.
-    pub fn can_pack(&self, width: i32, height: i32, allow_rotation: bool) -> bool {
-        self.find_skyline(width, height, allow_rotation).is_some()
-    }
-
     /// Returns a placement if the rectangle can fit starting at skyline `i`.
     fn can_put(&self, mut i: usize, w: i32, h: i32) -> Option<Recti> {
+        if w <= 0 || h <= 0 {
+            return None;
+        }
         let mut rect = Rect::new(self.skylines[i].left, 0, w, h);
         let mut width_left = rect.width;
         loop {
             rect.y = std::cmp::max(rect.y, self.skylines[i].y);
-            // the source rect is too large
-            if !Rect::new(0, 0, self.width, self.height).contains_rect(&rect) {
+            // Test exclusive edges in i64 before later skyline code forms them in i32. Once this
+            // placement passes, all later right/bottom additions are bounded by the packer extent.
+            if i64::from(rect.x) + i64::from(rect.width) > i64::from(self.width) || i64::from(rect.y) + i64::from(rect.height) > i64::from(self.height) {
                 return None;
             }
             if self.skylines[i].width >= width_left {
@@ -292,7 +191,11 @@ impl DensePacker {
             }
             width_left -= self.skylines[i].width;
             i += 1;
-            assert!(i < self.skylines.len());
+            if i >= self.skylines.len() {
+                // A malformed or exhausted skyline is a failed placement, not a reason to panic
+                // while processing builder-controlled rectangle dimensions.
+                return None;
+            }
         }
     }
 
@@ -306,9 +209,9 @@ impl DensePacker {
         // keep the `bottom` and `width` as small as possible
         for i in 0..self.skylines.len() {
             if let Some(r) = self.can_put(i, w, h)
-                && (r.bottom() < bottom || (r.bottom() == bottom && self.skylines[i].width < width))
+                && (r.y + r.height < bottom || (r.y + r.height == bottom && self.skylines[i].width < width))
             {
-                bottom = r.bottom();
+                bottom = r.y + r.height;
                 width = self.skylines[i].width;
                 index = Some(i);
                 rect = r;
@@ -316,9 +219,9 @@ impl DensePacker {
 
             if allow_rotation
                 && let Some(r) = self.can_put(i, h, w)
-                && (r.bottom() < bottom || (r.bottom() == bottom && self.skylines[i].width < width))
+                && (r.y + r.height < bottom || (r.y + r.height == bottom && self.skylines[i].width < width))
             {
-                bottom = r.bottom();
+                bottom = r.y + r.height;
                 width = self.skylines[i].width;
                 index = Some(i);
                 rect = r;
@@ -331,8 +234,8 @@ impl DensePacker {
     /// Splits skyline segments after placing `rect` at segment `i`.
     fn split(&mut self, i: usize, rect: &Recti) {
         let skyline = Skyline {
-            left: rect.left(),
-            y: rect.bottom(),
+            left: rect.x,
+            y: rect.y + rect.height,
             width: rect.width,
         };
 
@@ -370,5 +273,22 @@ impl DensePacker {
                 i += 1;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verifies padding arithmetic remains total at the coordinate limit and ordinary packing is
+    /// unchanged by the wider intermediate calculations.
+    #[test]
+    fn padded_packer_rejects_overflowing_extents_and_places_normal_rectangles() {
+        let mut extreme = Packer::new(i32::MAX, i32::MAX);
+        assert!(extreme.pack(i32::MAX, 1, false).is_none());
+
+        let mut ordinary = Packer::new(8, 8);
+        let placed = ordinary.pack(2, 2, false).expect("ordinary padded rectangle must fit");
+        assert_eq!((placed.x, placed.y, placed.width, placed.height), (1, 1, 2, 2));
     }
 }

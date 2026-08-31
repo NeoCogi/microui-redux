@@ -193,9 +193,9 @@ focus, input, or the active `Style`.
 `Painter::text` records a UTF-8 string and its selected `FontId`; glyph lookup and final clipping
 happen during renderer execution. Text storage is UTF-8-safe, while glyph coverage is
 atlas-dependent. Rendering and measurement iterate Unicode scalar values. A missing character
-uses the selected font's underscore entry; if underscore is also absent, the runtime uses a
-synthetic 8-by-8 entry at the atlas origin. Applications supplying a serialized `AtlasSource`
-should therefore include `_` in every font.
+uses the selected font's underscore entry. Every serialized font must therefore contain `_`;
+strict atlas construction rejects a font without that explicit fallback rather than sampling a
+synthetic rectangle at the atlas origin.
 
 The built-in builder bakes printable ASCII (`U+0020` through `U+007E`) only. Serialized atlas
 sources can describe arbitrary Unicode scalar values, but the renderer does not perform grapheme
@@ -469,10 +469,11 @@ impl RendererBackend for Backend {
 
 Backend rules:
 
-- `get_atlas` must return a non-empty atlas with an opaque white rendering tile
-  named `white`; the renderer resolves its atlas-owned `IconId` by name.
-  `Context` backends additionally provide the `body` font and all lowercase
-  semantic names consumed by `ThemeIcons::from_atlas`.
+- Every constructible `AtlasHandle` already contains a validated opaque white
+  rendering tile named `white`; the renderer resolves its atlas-owned `IconId`
+  by name. A backend used by `Context` additionally returns an atlas with the
+  `body` font and all lowercase semantic names consumed by
+  `ThemeIcons::from_atlas`.
 - `frame` acquires all fallible native frame resources and returns a value
   that exclusively borrows the backend.
 - `push_quad` and `push_triangle` receive final atlas-backed

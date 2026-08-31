@@ -144,9 +144,11 @@ impl Checkbox {
         let padding = style.padding.max(0);
         let check_icon = atlas.get_icon_size(style.icons.check);
         let height = content_height(style, atlas, self.font, check_icon.height);
-        let mut width = padding * 2 + height;
+        let mut width = padding.saturating_mul(2).saturating_add(height.max(0));
         if !self.label.is_empty() {
-            width += text_size(style, atlas, self.font, &self.label).width + padding;
+            width = width
+                .saturating_add(text_size(style, atlas, self.font, &self.label).width.max(0))
+                .saturating_add(padding);
         }
         Dimensioni::new(width.max(0), height)
     }

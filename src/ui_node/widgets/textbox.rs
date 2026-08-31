@@ -56,6 +56,7 @@
 //! and deletion on valid Unicode scalar-value boundaries. It retains characters that are absent
 //! from the selected atlas; measurement and painting render those through the atlas fallback.
 use crate::*;
+use crate::math::clamp_i64_to_i32;
 use std::{cell::RefCell, rc::Rc};
 
 use super::text_edit::{apply_text_input, caret_rect, centered_line_top, clamp_cursor_boundary, cursor_from_text_x, font_line_metrics, ReturnBehavior};
@@ -244,11 +245,13 @@ impl Textbox {
         } else {
             atlas.get_text_size(font, self.buf.as_str()).width
         };
-        let mut width = (text_w + padding * 2 + 1).max(0);
+        // Text width and style padding are independent; clamp their preferred sum before applying
+        // an optional finite parent constraint.
+        let mut width = text_w.max(0).saturating_add(padding.saturating_mul(2)).saturating_add(1);
         if let Some(max_width) = constraints.width.bound() {
             width = width.min(max_width);
         }
-        let height = (font_height + vertical_pad * 2).max(0);
+        let height = font_height.max(0).saturating_add(vertical_pad.saturating_mul(2));
         Dimensioni::new(width, height)
     }
 
@@ -356,12 +359,11 @@ pub(crate) fn textbox_update(
 
     let text_metrics = ctx.atlas().get_text_size(font, buf.as_str());
     let padding = ctx.style().padding;
-    let ofx = r.width - padding - text_metrics.width - 1;
-    let textx = r.x + if ofx < padding { ofx } else { padding };
+    let textx = textbox_text_x(r, padding, text_metrics.width);
 
     if ctx.focused() && mouse_pressed.intersects(MouseButton::LEFT) && ctx.mouse_over(r, mouse_pos) {
         // Convert local click x into a UTF-8 boundary cursor position.
-        let click_x = mouse_pos.x - (textx - r.x);
+        let click_x = clamp_i64_to_i32(i64::from(mouse_pos.x) - (i64::from(textx) - i64::from(r.x)));
         cursor_pos = cursor_from_text_x(buf, click_x, font, ctx.atlas());
     }
 
@@ -373,8 +375,18 @@ pub(crate) fn textbox_update(
 /// Semantic editing events produced by the shared single-line editor.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct TextboxUpdateOutcome {
+    /// Whether user input changed the retained text buffer.
     pub(crate) changed: bool,
+    /// Whether user input requested submission without changing focus.
     pub(crate) submitted: bool,
+}
+
+/// Chooses the shared single-line text origin, scrolling overflowing text toward its trailing edge.
+fn textbox_text_x(bounds: Recti, padding: i32, text_width: i32) -> i32 {
+    // Evaluate the complete signed expression in i64. Negative application padding and saturated
+    // measured text can then cancel correctly before the retained coordinate is clamped once.
+    let trailing_origin = clamp_i64_to_i32(i64::from(bounds.width) - i64::from(padding) - i64::from(text_width) - 1);
+    clamp_i64_to_i32(i64::from(bounds.x) + i64::from(trailing_origin.min(padding)))
 }
 
 /// Shared single-line textbox painting used by textbox and numeric inline editors.
@@ -385,12 +397,11 @@ pub(crate) fn textbox_paint(ctx: &mut WidgetPaintCtx<'_>, buf: &str, cursor: usi
 
     let metrics = font_line_metrics(font, ctx.atlas());
     let texty = centered_line_top(r, metrics.line_height);
-    let baseline_y = texty + metrics.baseline;
+    let baseline_y = clamp_i64_to_i32(i64::from(texty) + i64::from(metrics.baseline));
 
     let text_metrics = ctx.atlas().get_text_size(font, buf);
     let padding = ctx.style().padding;
-    let ofx = r.width - padding - text_metrics.width - 1;
-    let textx = r.x + if ofx < padding { ofx } else { padding };
+    let textx = textbox_text_x(r, padding, text_metrics.width);
     let cursor_pos = clamp_cursor_boundary(buf, cursor);
     let caret_offset = if cursor_pos == 0 {
         0
@@ -401,7 +412,7 @@ pub(crate) fn textbox_paint(ctx: &mut WidgetPaintCtx<'_>, buf: &str, cursor: usi
     if ctx.focused() {
         // Focused editing path clips text/caret to the textbox bounds.
         let color = ctx.style().colors[ControlColor::Text as usize];
-        let caret = caret_rect(textx + caret_offset, baseline_y, metrics, r);
+        let caret = caret_rect(clamp_i64_to_i32(i64::from(textx) + i64::from(caret_offset)), baseline_y, metrics, r);
         let mut painter = ctx.painter();
         painter.with_clip(r, |painter| {
             painter.text(font, buf, vec2(textx, texty), color);
