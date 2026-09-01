@@ -1202,8 +1202,8 @@ struct DemoThemes {
 impl DemoThemes {
     /// Loads the bundled JSON themes while preserving the Context's original flat style.
     fn load(context: &mut Context<SelectedBackend, State>) -> Self {
-        // Theme loading uploads each unique PNG once and leaves the installed Context style alone.
-        // Retaining every concrete style therefore permits switching without file I/O later.
+        // Theme loading bakes each unique PNG into its candidate atlas and leaves the installed
+        // Context style alone. Retaining every bundle permits switching without later file I/O.
         let default = LoadedTheme::from_style("Default Style", context.atlas(), context.style().clone());
         let windows_311_path = demo_asset_path("themes/windows-3.11/theme.json");
         let windows_311 = context
@@ -1462,6 +1462,11 @@ struct State {
     window_info_value_states: [TypedWidgetHandle<ListItem>; 3],
     /// Editable copy of the currently selected base theme.
     style: Style,
+    /// Whether the editable style differs from the last value published to the Context.
+    ///
+    /// Publishing invalidates every retained measurement cache, so animation frames must not call
+    /// `Context::set_style` unless a theme selector or Style Editor input actually changed it.
+    style_dirty: bool,
     /// Pristine Context-bound atlas/style bundles used by the demo theme selector.
     themes: DemoThemes,
     /// Concrete radio items updated whenever the selected base theme changes.
@@ -1993,6 +1998,7 @@ impl State {
             style_color_swatch_states,
             window_info_value_states,
             style,
+            style_dirty: false,
             themes,
             theme_menu_items: menu_items.themes,
             demo_root,
@@ -2120,6 +2126,7 @@ impl State {
             ] {
                 self.style.foregrounds.set_state(role, VisualState::Normal, color);
             }
+            self.style_dirty = true;
             return;
         }
         let color = match color_index {
@@ -2136,6 +2143,7 @@ impl State {
             2 => color.b = value,
             _ => color.a = value,
         }
+        self.style_dirty = true;
     }
 
     fn style_value_changed(&mut self, index: &usize, event: &SliderChanged) {
@@ -2147,6 +2155,7 @@ impl State {
             4 => self.style.scrollbar_size = event.value as i32,
             _ => unreachable!("style value slider index is bounded by construction"),
         }
+        self.style_dirty = true;
     }
 
     fn text_submitted(&mut self, event: &TextboxSubmitted) {
@@ -2356,6 +2365,7 @@ impl State {
             .expect("compact-spacing menu item unavailable")
             .mark = MenuItemMark::Radio(!comfortable);
         self.style.spacing = spacing;
+        self.style_dirty = true;
         set_slider_value(&self.style_value_slider_states[1], spacing as Real);
         self.write_log(if comfortable {
             "Selected comfortable control spacing"
@@ -2372,6 +2382,7 @@ impl State {
             context.menu_item_mut(item).expect("theme menu item unavailable").mark = MenuItemMark::Radio(candidate == selection);
         }
         self.style = self.themes.select(selection);
+        self.style_dirty = true;
         // The Style Editor edits this new copy rather than stale values from the preceding theme.
         self.sync_style_controls_from_style();
         self.write_log(format!("Selected theme: {}", selection.label()).as_str());
@@ -2873,6 +2884,11 @@ impl State {
     }
 
     fn style_window(&mut self, ctx: &mut Context<SelectedBackend, Self>) {
+        if !self.style_dirty {
+            // Animated demo frames still repaint, but an unchanged style must preserve retained
+            // measurement caches and the layout commit produced by the preceding update.
+            return;
+        }
         let colors = self.style.colors.into_iter().chain([
             self.style.focus_color,
             self.style.window_focus_color,
@@ -2886,6 +2902,7 @@ impl State {
         // clone whose font and icon capabilities are guaranteed to belong to that active atlas.
         self.themes.install_selected(ctx);
         ctx.set_style(self.style.clone());
+        self.style_dirty = false;
     }
 
     fn typography_window(&mut self, _ctx: &mut Context<SelectedBackend, Self>) {}
