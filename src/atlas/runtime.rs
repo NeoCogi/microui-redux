@@ -246,8 +246,15 @@ impl AtlasHandle {
         let mut baseline_y = baseline;
         let mut pen_x = 0_i128;
 
-        for chr in text.chars() {
+        let mut chars = text.chars().peekable();
+        while let Some(chr) = chars.next() {
             if chr == '\n' || chr == '\r' {
+                // Treat CRLF as one platform line ending. Built-in multiline widgets canonicalize
+                // storage to LF at ingress, while this low-level public API remains deterministic
+                // for application-owned strings passed directly to atlas measurement or drawing.
+                if chr == '\r' && chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
                 pen_x = 0;
                 // Accumulate in a wider domain and clamp only values exposed to rendering. This
                 // keeps long inputs deterministic without losing later metric cancellation.
@@ -277,7 +284,7 @@ impl AtlasHandle {
 
     /// Walks each Unicode scalar value in the string and invokes the closure with draw information.
     ///
-    /// Newline and carriage return advance to another line without invoking the closure. A missing
+    /// LF, lone CR, and CRLF advance exactly one line without invoking the closure. A missing
     /// character uses the selected font's validated `_` entry. `origin` participates in the wide
     /// placement expression before coordinate saturation, and the callback still receives the
     /// original character rather than the fallback key.
@@ -403,6 +410,26 @@ mod tests {
         let icon_result = std::panic::catch_unwind(|| second.get_icon_rect(foreign_icon));
         assert!(font_result.is_err());
         assert!(icon_result.is_err());
+    }
+
+    /// Verifies a platform CRLF sequence advances exactly one visual row.
+    #[test]
+    fn text_runtime_treats_crlf_as_one_line_ending() {
+        let atlas = make_atlas();
+        let font = atlas.font_id("body").unwrap();
+
+        let crlf_size = atlas.get_text_size(font, "_\r\n_");
+        let lf_size = atlas.get_text_size(font, "_\n_");
+        assert_eq!((crlf_size.width, crlf_size.height), (lf_size.width, lf_size.height));
+        let mut crlf_destinations = Vec::new();
+        atlas.draw_string(font, "_\r\n_", Vec2i::default(), |_, _, destination, _| {
+            crlf_destinations.push((destination.x, destination.y, destination.width, destination.height))
+        });
+        let mut lf_destinations = Vec::new();
+        atlas.draw_string(font, "_\n_", Vec2i::default(), |_, _, destination, _| {
+            lf_destinations.push((destination.x, destination.y, destination.width, destination.height))
+        });
+        assert_eq!(crlf_destinations, lf_destinations);
     }
 
     /// Verifies valid per-glyph metrics cannot overflow when accumulated across arbitrary text.

@@ -202,7 +202,9 @@ sources can describe arbitrary Unicode scalar values, but the renderer does not 
 segmentation, script shaping, bidirectional reordering, kerning, or fallback-font selection.
 Textbox and text-area cursor operations also work on scalar-value boundaries rather than
 user-perceived grapheme clusters. `TextWrap::Word` uses ASCII spaces as wrap opportunities and does
-not split an overlong individual word.
+not split an overlong individual word. Textbox removes CR and LF at construction, replacement, and
+input boundaries. TextArea and TextBlock instead canonicalize CRLF and lone CR to LF. Low-level
+atlas measurement and drawing likewise treat CRLF as one line ending.
 
 `FontId` is an opaque capability containing one runtime atlas owner and one local font slot.
 Cloned handles to the same atlas mint equal IDs; separately loading identical metadata does not.

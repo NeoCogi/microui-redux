@@ -55,8 +55,9 @@
 //! [`TextArea`] owns only text, cursor, editing, and caret behavior. [`TextArea::create`] mounts
 //! that leaf inside [`ScrollArea`], which exclusively owns clipping, translation, wheel input,
 //! scroll offsets, and its two reusable scrollbar children. Editing operates on Unicode scalar
-//! values rather than grapheme clusters; rendering uses the selected atlas's glyph coverage and
-//! missing-character fallback.
+//! values rather than grapheme clusters. Stored text uses LF line endings: construction,
+//! programmatic replacement, and text input convert CRLF and lone CR at ingress. Rendering uses the
+//! selected atlas's glyph coverage and missing-character fallback.
 
 use std::{cell::RefCell, rc::Rc};
 
@@ -64,13 +65,13 @@ use crate::ui_node::text_layout::{TextLine, build_text_lines, text_block_size};
 use crate::*;
 
 use super::text_edit::{
-    FontLineMetrics, ReturnBehavior, apply_text_input, caret_rect, clamp_cursor_boundary, cursor_from_x, cursor_x_in_line, font_line_metrics,
-    line_index_for_cursor,
+    CaretAffinity, FontLineMetrics, ReturnBehavior, affinity_for_line, apply_text_input, caret_rect, clamp_cursor_boundary, cursor_from_x, cursor_x_in_line,
+    font_line_metrics, line_index_for_cursor, normalize_multiline_text,
 };
 
 /// One-shot construction input for a composed [`TextArea`].
 pub struct TextAreaParameters {
-    /// Initial buffer edited by the text area.
+    /// Initial buffer edited by the text area; line endings are normalized when mounted.
     buf: String,
     /// Wrapping mode used for measurement, editing, and paint.
     pub wrap: TextWrap,
@@ -167,6 +168,8 @@ impl crate::WidgetEvent for TextAreaSubmitted {}
 struct TextAreaInteraction {
     /// Desired caret x position preserved while moving vertically.
     preferred_x: Option<i32>,
+    /// Visual side retained when a wrapped line end and continuation start share one byte offset.
+    caret_affinity: CaretAffinity,
 }
 
 impl TextArea {
@@ -191,9 +194,10 @@ impl TextArea {
     fn new_editor(parameters: TextAreaParameters) -> Self {
         // Initialize semantic and event state together so direct unit tests and composed creation
         // observe the same editing behavior.
-        let cursor = parameters.buf.len();
+        let buf = normalize_multiline_text(parameters.buf);
+        let cursor = buf.len();
         Self {
-            buf: parameters.buf,
+            buf,
             cursor,
             reset_preferred_x: false,
             reveal_caret: false,
@@ -212,12 +216,14 @@ impl TextArea {
         self.buf.as_str()
     }
 
-    /// Replaces the current text, moves the cursor to the end, and schedules caret reveal.
+    /// Replaces text, normalizes line endings to LF, moves the cursor to the end, and reveals it.
     pub fn set_text(&mut self, text: impl Into<String>) {
         // Replace buffer and cursor atomically so no phase can observe a cursor outside the new
-        // scalar-aligned byte range.
-        self.buf = text.into();
+        // scalar-aligned byte range. Canonical LF storage also keeps layout and atlas rendering on
+        // one line-break convention for programmatic replacements.
+        self.buf = normalize_multiline_text(text);
         self.cursor = self.buf.len();
+        self.interaction.caret_affinity = CaretAffinity::Upstream;
         self.reset_preferred_x = true;
         self.reveal_caret = true;
     }
@@ -228,6 +234,7 @@ impl TextArea {
         // document even if the weak scroll capability has already expired during teardown.
         self.buf.clear();
         self.cursor = 0;
+        self.interaction.caret_affinity = CaretAffinity::Upstream;
         self.reset_preferred_x = true;
         self.reveal_caret = false;
         self.set_scroll(Vec2i::default());
@@ -243,6 +250,9 @@ impl TextArea {
     pub fn set_cursor(&mut self, cursor: usize) {
         // Clamp external byte offsets before scheduling navigation-state reset and caret reveal.
         self.cursor = clamp_cursor_boundary(&self.buf, cursor);
+        // A bare byte offset has no visual-side information, so public positioning deterministically
+        // selects the preceding wrapped segment when the offset is shared.
+        self.interaction.caret_affinity = CaretAffinity::Upstream;
         self.reset_preferred_x = true;
         self.reveal_caret = true;
     }
@@ -251,6 +261,7 @@ impl TextArea {
     pub fn move_cursor_to_end(&mut self) {
         // String length is always a valid terminal UTF-8 boundary.
         self.cursor = self.buf.len();
+        self.interaction.caret_affinity = CaretAffinity::Upstream;
         self.reset_preferred_x = true;
         self.reveal_caret = true;
     }
@@ -354,7 +365,7 @@ impl TypedWidgetHandle<TextArea> {
         self.try_read(|widget| widget.text().to_owned())
     }
 
-    /// Replaces retained text, moves its cursor to the end, and schedules caret reveal.
+    /// Replaces retained text with canonical LF endings, moves its cursor to the end, and reveals it.
     pub fn set_text(&self, text: impl Into<String>) -> Option<()> {
         // Preserve ownership of the replacement string when access cannot begin.
         self.try_update_with(text.into(), |widget, text| widget.set_text(text)).ok()
@@ -464,6 +475,7 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>, 
     let mut reset_preferred = false;
     let mut vertical_moved = false;
     let mut preferred_x = state.interaction.preferred_x;
+    let mut caret_affinity = state.interaction.caret_affinity;
     let mut cursor_pos = clamp_cursor_boundary(&state.buf, state.cursor);
 
     // Normalize the one routed input into the scalar and navigation components used by the shared
@@ -480,12 +492,12 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>, 
     if ctx.focused() {
         // Apply scalar editing and horizontal cursor movement before building layout because inserted
         // text can immediately change wrapping, line indices, and intrinsic content height.
+        let cursor_before_edit = cursor_pos;
         let edit = apply_text_input(
             &mut state.buf,
             cursor_pos,
             text_input,
             key_event,
-            true,
             ReturnBehavior::Newline { submit_on_ctrl: true },
         );
         cursor_pos = edit.cursor;
@@ -493,10 +505,17 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>, 
             outcome.changed = true;
             ensure_visible = true;
             reset_preferred = true;
+            if edit.cursor != cursor_before_edit {
+                // Insertion and backspace produce a new byte position with no retained visual-side
+                // meaning. Forward Delete leaves the cursor fixed and therefore preserves its
+                // selected continuation side when the wrap boundary survives reflow.
+                caret_affinity = CaretAffinity::Upstream;
+            }
         }
         if edit.moved {
             ensure_visible = true;
             reset_preferred = true;
+            caret_affinity = CaretAffinity::Upstream;
         }
         outcome.submitted = edit.submit;
     }
@@ -504,13 +523,14 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>, 
     // Resolve line geometry from the updated buffer in content-local coordinates. ScrollArea's
     // translation already localizes pointer positions into this same coordinate system.
     let layout = textarea_layout(ctx.local_rect(), ctx.atlas(), state, font);
-    let mut cursor_line = line_index_for_cursor(&layout.lines, cursor_pos);
+    let mut cursor_line = line_index_for_cursor(&layout.lines, cursor_pos, caret_affinity);
     let mut caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
 
     if ctx.focused() {
         if key_event.is_some_and(|event| event.is_pressed() && event.key == Key::End) {
             // End targets the current visual line, including wrapped segments.
             cursor_pos = layout.lines[cursor_line].end;
+            caret_affinity = affinity_for_line(&layout.lines, cursor_line, cursor_pos);
             caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
             ensure_visible = true;
             reset_preferred = true;
@@ -522,6 +542,7 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>, 
             if cursor_line > 0 {
                 cursor_line -= 1;
                 cursor_pos = cursor_from_x(&layout.lines[cursor_line], state.buf.as_str(), target_x, font, ctx.atlas());
+                caret_affinity = affinity_for_line(&layout.lines, cursor_line, cursor_pos);
             }
             preferred_x = Some(target_x);
             ensure_visible = true;
@@ -534,6 +555,7 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>, 
             if cursor_line + 1 < layout.lines.len() {
                 cursor_line += 1;
                 cursor_pos = cursor_from_x(&layout.lines[cursor_line], state.buf.as_str(), target_x, font, ctx.atlas());
+                caret_affinity = affinity_for_line(&layout.lines, cursor_line, cursor_pos);
             }
             preferred_x = Some(target_x);
             ensure_visible = true;
@@ -551,13 +573,14 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>, 
         let last_line = i32::try_from(layout.lines.len().saturating_sub(1)).unwrap_or(i32::MAX);
         let line_idx = (pos.y / layout.metrics.line_height.max(1)).clamp(0, last_line) as usize;
         cursor_pos = cursor_from_x(&layout.lines[line_idx], state.buf.as_str(), pos.x, font, ctx.atlas());
+        caret_affinity = affinity_for_line(&layout.lines, line_idx, cursor_pos);
         ensure_visible = true;
         reset_preferred = true;
     }
 
     // Re-resolve final caret geometry after keyboard and pointer navigation have both completed.
     cursor_pos = clamp_cursor_boundary(&state.buf, cursor_pos);
-    cursor_line = line_index_for_cursor(&layout.lines, cursor_pos);
+    cursor_line = line_index_for_cursor(&layout.lines, cursor_pos, caret_affinity);
     caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
 
     if reset_preferred && !vertical_moved {
@@ -571,6 +594,7 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>, 
 
     state.cursor = cursor_pos;
     state.interaction.preferred_x = preferred_x;
+    state.interaction.caret_affinity = caret_affinity;
     if ensure_visible {
         // Reveal the complete caret line rather than a single pixel so vertical navigation keeps its
         // baseline and descent inside the parent viewport.
@@ -609,7 +633,7 @@ fn textarea_paint(ctx: &mut WidgetPaintCtx<'_>, state: &TextArea, font: FontId) 
     ctx.draw_widget_fill(layout.bounds, ControlColor::Base);
     let color = ctx.style().colors[ControlColor::Text as usize];
     let cursor_pos = clamp_cursor_boundary(&state.buf, state.cursor);
-    let cursor_line = line_index_for_cursor(&layout.lines, cursor_pos);
+    let cursor_line = line_index_for_cursor(&layout.lines, cursor_pos, state.interaction.caret_affinity);
     let caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
     let caret = if ctx.focused() {
         // Align the caret with the same baseline metrics as the corresponding text line.
@@ -752,6 +776,118 @@ mod tests {
             events,
             [RecordedEvent::Changed("line".to_owned(), 4), RecordedEvent::Submitted("line".to_owned())]
         );
+    }
+
+    /// Verifies construction, replacement, and pasted text share canonical LF storage.
+    #[test]
+    fn every_multiline_text_ingress_normalizes_line_endings() {
+        let mut text_area = TextArea::new_editor(TextAreaParameters::new("a\r\nb\rc\n"));
+        assert_eq!(text_area.text(), "a\nb\nc\n");
+        assert_eq!(text_area.cursor(), text_area.text().len());
+
+        text_area.set_text("d\r\ne\rf\n");
+        assert_eq!(text_area.text(), "d\ne\nf\n");
+
+        update_text_area(&mut text_area, vec![UiInputEvent::Text { text: "g\r\nh\ri\n".into() }]);
+        assert_eq!(text_area.text(), "d\ne\nf\ng\nh\ni\n");
+        assert_eq!(text_area.cursor(), text_area.text().len());
+    }
+
+    /// Verifies vertical navigation retains the continuation side of a wrapped byte boundary.
+    #[test]
+    fn wrapped_vertical_navigation_retains_visual_caret_affinity() {
+        // With the test font's eight-pixel advances, this width produces ranges 0..2 and 2..4.
+        // Byte 2 is therefore both the first line's end and the continuation line's start.
+        let mut text_area = TextArea::new_editor(TextAreaParameters::new("_ __").wrap(TextWrap::Word));
+        text_area.set_cursor(0);
+        let atlas = test_atlas();
+        let style = test_style(&atlas);
+        let bounds = Recti::new(0, 0, 16, 30);
+        let down = UiInputEvent::Key {
+            event: KeyEvent::pressed(Key::ArrowDown, Modifiers::NONE),
+        };
+        let mut ctx = WidgetUpdateCtx::new_with_interaction(
+            bounds,
+            bounds,
+            &style,
+            &atlas,
+            true,
+            true,
+            true,
+            false,
+            false,
+            MouseButton::NONE,
+            Modifiers::NONE,
+        );
+        text_area.update(&mut ctx, Some(&down));
+
+        let font = style.resolve_font_choice(text_area.font);
+        let layout = textarea_layout(bounds, &atlas, &text_area, font);
+        assert_eq!(text_area.cursor(), 2);
+        assert_eq!(text_area.interaction.caret_affinity, CaretAffinity::Downstream);
+        assert_eq!(
+            line_index_for_cursor(&layout.lines, text_area.cursor(), text_area.interaction.caret_affinity),
+            1
+        );
+
+        // Forward Delete does not move the byte cursor. The shorter replacement still wraps at the
+        // same boundary, so the caret must remain on the continuation side after reflow.
+        let delete = UiInputEvent::Key {
+            event: KeyEvent::pressed(Key::Delete, Modifiers::NONE),
+        };
+        let mut ctx = WidgetUpdateCtx::new_with_interaction(
+            bounds,
+            bounds,
+            &style,
+            &atlas,
+            true,
+            true,
+            true,
+            false,
+            false,
+            MouseButton::NONE,
+            Modifiers::NONE,
+        );
+        text_area.update(&mut ctx, Some(&delete));
+        assert_eq!(text_area.text(), "_ _");
+        assert_eq!(text_area.cursor(), 2);
+        assert_eq!(text_area.interaction.caret_affinity, CaretAffinity::Downstream);
+
+        // End must now operate on the selected continuation rather than jumping back to line zero.
+        let end = UiInputEvent::Key {
+            event: KeyEvent::pressed(Key::End, Modifiers::NONE),
+        };
+        let mut ctx = WidgetUpdateCtx::new_with_interaction(
+            bounds,
+            bounds,
+            &style,
+            &atlas,
+            true,
+            true,
+            true,
+            false,
+            false,
+            MouseButton::NONE,
+            Modifiers::NONE,
+        );
+        text_area.update(&mut ctx, Some(&end));
+        assert_eq!(text_area.cursor(), 3);
+    }
+
+    /// Verifies multiline backspace at byte zero cannot delete the following newline.
+    #[test]
+    fn backspace_at_start_preserves_leading_newline() {
+        let mut text_area = TextArea::new_editor(TextAreaParameters::new("\ntext"));
+        text_area.set_cursor(0);
+        update_text_area(
+            &mut text_area,
+            vec![UiInputEvent::Key {
+                event: KeyEvent::pressed(Key::Backspace, Modifiers::NONE),
+            }],
+        );
+
+        assert_eq!(text_area.text(), "\ntext");
+        assert_eq!(text_area.cursor(), 0);
     }
 
     /// Verifies the five-node composition and nested typed-handle lifetime.

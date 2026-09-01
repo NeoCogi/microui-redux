@@ -53,17 +53,20 @@
 //! Single-line textbox widget and shared textbox update/paint helpers.
 //!
 //! The textbox stores a UTF-8 byte cursor and uses shared text-edit helpers to keep cursor movement
-//! and deletion on valid Unicode scalar-value boundaries. It retains characters that are absent
-//! from the selected atlas; measurement and painting render those through the atlas fallback.
+//! and deletion on valid Unicode scalar-value boundaries. Construction, programmatic replacement,
+//! and text input remove CR and LF so the stored value always matches the one-line measurement
+//! contract. Other characters absent from the selected atlas render through its fallback.
 use crate::*;
 use crate::math::clamp_i64_to_i32;
 use std::{cell::RefCell, rc::Rc};
 
-use super::text_edit::{apply_text_input, caret_rect, centered_line_top, clamp_cursor_boundary, cursor_from_text_x, font_line_metrics, ReturnBehavior};
+use super::text_edit::{
+    ReturnBehavior, apply_text_input, caret_rect, centered_line_top, clamp_cursor_boundary, cursor_from_text_x, font_line_metrics, normalize_single_line_text,
+};
 
 /// One-shot construction input for a [`Textbox`].
 pub struct TextboxParameters {
-    /// Initial buffer edited by the textbox.
+    /// Initial buffer edited by the textbox; CR and LF are removed when the widget is mounted.
     buf: String,
     /// Font used for measurement, editing, and paint.
     pub font: FontChoice,
@@ -127,9 +130,11 @@ impl Textbox {
         self.buf.as_str()
     }
 
-    /// Replaces the current text and moves the cursor to the end.
+    /// Replaces the current text, removes CR and LF, and moves the cursor to the end.
     pub fn set_text(&mut self, text: impl Into<String>) {
-        self.buf = text.into();
+        // Apply the same single-line policy as construction and pasted input. Keeping the stored
+        // invariant here prevents measurement, hit testing, and paint from disagreeing about rows.
+        self.buf = normalize_single_line_text(text);
         self.cursor = self.buf.len();
     }
 
@@ -161,7 +166,7 @@ impl TypedWidgetHandle<Textbox> {
         self.try_read(|widget| widget.text().to_owned())
     }
 
-    /// Replaces the retained text and moves its cursor to the end.
+    /// Replaces retained text, removes CR and LF, and moves its cursor to the end.
     pub fn set_text(&self, text: impl Into<String>) -> Option<()> {
         self.try_update_with(text.into(), |widget, text| widget.set_text(text)).ok()
     }
@@ -332,7 +337,7 @@ pub(crate) fn textbox_update(
     };
     let end_pressed = key_event.is_some_and(|event| event.is_pressed() && event.key == Key::End);
     let edit = if ctx.focused() {
-        apply_text_input(buf, cursor_pos, text_input, key_event, false, ReturnBehavior::Submit)
+        apply_text_input(buf, cursor_pos, text_input, key_event, ReturnBehavior::Submit)
     } else {
         // Without focus, the textbox ignores key/text input but keeps a consistent outcome.
         super::text_edit::TextEditOutcome {
@@ -449,9 +454,12 @@ impl WidgetBuilder for TextboxBuilder {
     type W = Textbox;
 
     fn create_widget(parameters: Self::Parameters) -> Self::W {
-        let cursor = parameters.buf.len();
+        // Parameters retain their original input until the concrete storage boundary. Normalize
+        // here so even a future alternate constructor cannot mount a multiline textbox buffer.
+        let buf = normalize_single_line_text(parameters.buf);
+        let cursor = buf.len();
         Textbox {
-            buf: parameters.buf,
+            buf,
             cursor,
             font: parameters.font,
             opt: parameters.opt,
@@ -543,5 +551,21 @@ mod tests {
         textbox.move_cursor_to_end();
         textbox.clear();
         assert!(!dispatcher.dispatch(&mut Vec::new()));
+    }
+
+    /// Verifies construction, programmatic replacement, and pasted input all remain single-line.
+    #[test]
+    fn every_text_ingress_removes_line_endings() {
+        let mut textbox = TextboxBuilder::create_widget(TextboxParameters::new("a\r\nb\rc\n"));
+        assert_eq!(textbox.text(), "abc");
+        assert_eq!(textbox.cursor(), 3);
+
+        textbox.set_text("d\r\ne\rf\n");
+        assert_eq!(textbox.text(), "def");
+        assert_eq!(textbox.cursor(), 3);
+
+        update_textbox(&mut textbox, true, vec![UiInputEvent::Text { text: "g\r\nh\ri\n".into() }]);
+        assert_eq!(textbox.text(), "defghi");
+        assert_eq!(textbox.cursor(), 6);
     }
 }

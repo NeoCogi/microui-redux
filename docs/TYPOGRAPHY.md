@@ -9,10 +9,11 @@
 ## Text encoding and glyph coverage
 
 All public text enters the library as Rust `str` or `String` values and is therefore valid UTF-8.
-Textboxes and text areas retain arbitrary UTF-8 and keep their byte cursor on Unicode scalar-value
-boundaries. Left/right movement and deletion operate on one scalar value at a time, not on a
-user-perceived grapheme cluster. Combining sequences and multi-scalar emoji can therefore require
-more than one cursor or deletion operation.
+Textbox removes CR and LF so its stored value always remains single-line. TextArea and TextBlock
+canonicalize CRLF and lone CR to LF when text is constructed, replaced, or pasted. Textbox and text
+area keep their byte cursor on Unicode scalar-value boundaries. Left/right movement and deletion
+operate on one scalar value at a time, not on a user-perceived grapheme cluster. Combining
+sequences and multi-scalar emoji can therefore require more than one cursor or deletion operation.
 
 File-dialog paths also cross the public API as UTF-8 `String` values. On platforms that permit
 non-UTF-8 paths, the default current directory and enumerated directory entries are converted

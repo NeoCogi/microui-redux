@@ -53,15 +53,18 @@
 //! Retained text-block widget.
 //!
 //! Text blocks render static or application-mutated text while participating in the same
-//! measurement and paint pipeline as interactive controls. They retain arbitrary UTF-8; visible
-//! glyph coverage and missing-character fallback come from the selected atlas font.
+//! measurement and paint pipeline as interactive controls. CRLF and lone CR are normalized to LF
+//! when text enters concrete widget storage. Visible glyph coverage and missing-character fallback
+//! come from the selected atlas font.
 
 use crate::ui_node::text_layout::{baseline_aligned_top, build_display_text_lines, text_block_size};
 use crate::*;
 
+use super::text_edit::normalize_multiline_text;
+
 /// One-shot construction input for a [`TextBlock`].
 pub struct TextBlockParameters {
-    /// Initial text rendered by the widget.
+    /// Initial text rendered by the widget; line endings are normalized when mounted.
     pub text: String,
     /// Wrapping mode used for layout and rendering.
     pub wrap: TextWrap,
@@ -126,9 +129,11 @@ impl TextBlock {
         &self.text
     }
 
-    /// Replaces the display text.
+    /// Replaces display text after normalizing line endings to LF.
     pub fn set_text(&mut self, text: impl Into<String>) {
-        self.text = text.into();
+        // Static multiline text shares the same canonical LF representation as editable content,
+        // keeping measured line ranges identical to the slices submitted during paint.
+        self.text = normalize_multiline_text(text);
     }
 
     /// Clears the display text.
@@ -191,7 +196,7 @@ impl TypedWidgetHandle<TextBlock> {
         self.try_read(|widget| widget.text().to_owned())
     }
 
-    /// Replaces the retained display text.
+    /// Replaces retained display text after normalizing line endings to LF.
     pub fn set_text(&self, text: impl Into<String>) -> Option<()> {
         self.try_update_with(text.into(), |widget, text| widget.set_text(text)).ok()
     }
@@ -226,7 +231,31 @@ impl WidgetBuilder for TextBlockBuilder {
             wrap: parameters.wrap,
             font: parameters.font,
             opt: parameters.opt,
-            text: parameters.text,
+            // `text` is public construction data and may be supplied through a struct literal, so
+            // enforce canonical storage at the concrete widget boundary rather than only in `new`.
+            text: normalize_multiline_text(parameters.text),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Storage-boundary regressions for static multiline text.
+
+    use super::*;
+
+    /// Verifies both public parameter forms and later replacements canonicalize line endings.
+    #[test]
+    fn text_block_stores_only_lf_line_endings() {
+        let mut block = TextBlockBuilder::create_widget(TextBlockParameters {
+            text: "a\r\nb\rc\n".to_owned(),
+            wrap: TextWrap::None,
+            font: FontChoice::Role(FontRole::Body),
+            opt: WidgetOption::NO_INTERACT,
+        });
+        assert_eq!(block.text(), "a\nb\nc\n");
+
+        block.set_text("d\r\ne\rf\n");
+        assert_eq!(block.text(), "d\ne\nf\n");
     }
 }

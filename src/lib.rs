@@ -140,9 +140,10 @@
 //!
 //! # Text encoding and glyph coverage
 //!
-//! Public text uses Rust [`str`] and [`String`] values and is therefore valid UTF-8. Textbox and
-//! text-area cursors are byte indices kept on Unicode scalar-value boundaries; movement and
-//! deletion operate on scalar values rather than grapheme clusters.
+//! Public text uses Rust [`str`] and [`String`] values and is therefore valid UTF-8. Textbox removes
+//! CR and LF at every ingress; text-area and text-block storage converts CRLF and lone CR to LF.
+//! Textbox and text-area cursors are byte indices kept on Unicode scalar-value boundaries;
+//! movement and deletion operate on scalar values rather than grapheme clusters.
 //!
 //! Rendering coverage belongs to the selected atlas font. The built-in atlas builder bakes
 //! printable ASCII (`U+0020` through `U+007E`). A missing character uses the font's required

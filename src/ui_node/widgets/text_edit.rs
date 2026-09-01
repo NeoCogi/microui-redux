@@ -55,11 +55,14 @@
 //! The helpers in this file keep cursor indices on valid byte boundaries, apply keyboard/text
 //! input, and translate pointer positions into cursor locations. Cursor movement and deletion use
 //! Unicode scalar-value boundaries, not grapheme-cluster boundaries.
+use std::borrow::Cow;
+
 use crate::math::clamp_i64_to_i32;
 use crate::ui_node::text_layout::TextLine;
 use crate::{rect, AtlasHandle, FontId, Key, KeyEvent, Modifiers, Recti};
 
 /// Determines what pressing return means for the active editor.
+#[derive(Copy, Clone)]
 pub(crate) enum ReturnBehavior {
     /// Return submits the edit.
     Submit,
@@ -68,6 +71,21 @@ pub(crate) enum ReturnBehavior {
         /// Whether Ctrl+Return should submit instead of inserting a newline.
         submit_on_ctrl: bool,
     },
+}
+
+/// Selects one visual side of a byte position shared by two wrapped lines.
+///
+/// Word wrapping does not insert a byte between adjacent visual lines: the previous line's `end`
+/// is exactly the continuation line's `start`. Retaining this concrete affinity lets vertical and
+/// pointer navigation keep the caret on the selected visual line without changing the public byte
+/// cursor representation.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) enum CaretAffinity {
+    /// Prefer the visual line ending at the shared byte position.
+    #[default]
+    Upstream,
+    /// Prefer the continuation line starting at the shared byte position.
+    Downstream,
 }
 
 /// Result of applying one input snapshot to a text buffer.
@@ -91,6 +109,52 @@ pub(crate) struct FontLineMetrics {
     pub baseline: i32,
     /// Descent below the baseline.
     pub descent: i32,
+}
+
+/// Converts multiline text to the editor's sole stored newline representation.
+///
+/// CRLF becomes one LF and a lone CR becomes one LF. The original allocation is returned unchanged
+/// when it already contains only LF line endings, keeping the common path allocation-free beyond
+/// the caller-owned `String` itself.
+pub(crate) fn normalize_multiline_text(text: impl Into<String>) -> String {
+    let text = text.into();
+    if !text.contains('\r') {
+        return text;
+    }
+
+    let mut normalized = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\r' {
+            // Consume the LF half of CRLF so one logical line ending occupies one stored byte.
+            if chars.peek() == Some(&'\n') {
+                chars.next();
+            }
+            normalized.push('\n');
+        } else {
+            normalized.push(ch);
+        }
+    }
+    normalized
+}
+
+/// Removes line endings from text entering a single-line editor.
+///
+/// Both halves of CRLF are discarded rather than replaced with presentation-only whitespace. The
+/// resulting stored value therefore always satisfies the textbox's one-line measurement contract.
+pub(crate) fn normalize_single_line_text(text: impl Into<String>) -> String {
+    let mut text = text.into();
+    text.retain(|ch| ch != '\r' && ch != '\n');
+    text
+}
+
+/// Borrows ordinary text input directly and allocates only when its line endings need rewriting.
+fn normalize_input(text: &str, behavior: ReturnBehavior) -> Cow<'_, str> {
+    match behavior {
+        ReturnBehavior::Submit if text.contains('\r') || text.contains('\n') => Cow::Owned(normalize_single_line_text(text)),
+        ReturnBehavior::Newline { .. } if text.contains('\r') => Cow::Owned(normalize_multiline_text(text)),
+        ReturnBehavior::Submit | ReturnBehavior::Newline { .. } => Cow::Borrowed(text),
+    }
 }
 
 /// Reads line-height, baseline, and descent from the atlas.
@@ -141,17 +205,14 @@ fn insert_text(buf: &mut String, cursor: &mut usize, text: &str) -> bool {
     true
 }
 
-/// Deletes the previous UTF-8 scalar value, with optional leading-newline cleanup for text areas.
-fn delete_prev(buf: &mut String, cursor: &mut usize, allow_leading_newline: bool) -> bool {
+/// Deletes the UTF-8 scalar value immediately before the cursor.
+fn delete_prev(buf: &mut String, cursor: &mut usize) -> bool {
     if buf.is_empty() {
         return false;
     }
     *cursor = clamp_cursor_boundary(buf, *cursor);
     if *cursor == 0 {
-        if allow_leading_newline && buf.as_bytes().first() == Some(&b'\n') {
-            buf.replace_range(0..1, "");
-            return true;
-        }
+        // Backspace never deletes text at or after the cursor. Delete owns the forward direction.
         return false;
     }
     let mut start = *cursor;
@@ -212,7 +273,6 @@ pub(crate) fn apply_text_input(
     cursor: usize,
     text_input: &str,
     key_event: Option<KeyEvent>,
-    allow_leading_newline: bool,
     return_behavior: ReturnBehavior,
 ) -> TextEditOutcome {
     let mut cursor_pos = clamp_cursor_boundary(buf, cursor);
@@ -220,7 +280,10 @@ pub(crate) fn apply_text_input(
     let mut moved = false;
     let mut submit = false;
 
-    if insert_text(buf, &mut cursor_pos, text_input) {
+    // Normalize pasted/platform text at the same boundary as typed input. Constructors and public
+    // setters apply the corresponding storage policy, so no mutation path can bypass it.
+    let text_input = normalize_input(text_input, return_behavior);
+    if insert_text(buf, &mut cursor_pos, text_input.as_ref()) {
         changed = true;
     }
 
@@ -228,7 +291,7 @@ pub(crate) fn apply_text_input(
     // therefore naturally repeats editing without a retained set of held navigation keys.
     let pressed = key_event.filter(|event| event.is_pressed());
 
-    if pressed.is_some_and(|event| event.key == Key::Backspace) && delete_prev(buf, &mut cursor_pos, allow_leading_newline) {
+    if pressed.is_some_and(|event| event.key == Key::Backspace) && delete_prev(buf, &mut cursor_pos) {
         changed = true;
     }
 
@@ -270,15 +333,35 @@ pub(crate) fn apply_text_input(
     }
 }
 
-/// Finds the display line containing `cursor`.
-pub(crate) fn line_index_for_cursor(lines: &[TextLine], cursor: usize) -> usize {
+/// Finds the display line containing `cursor`, preserving a wrapped-boundary preference.
+pub(crate) fn line_index_for_cursor(lines: &[TextLine], cursor: usize, affinity: CaretAffinity) -> usize {
     for (idx, line) in lines.iter().enumerate() {
-        if cursor <= line.end {
+        if cursor < line.end {
+            return idx;
+        }
+        if cursor == line.end {
+            // Only wrapped neighbors share a boundary. Logical newline-separated lines leave the
+            // delimiter byte between their ranges and therefore remain unambiguous.
+            if affinity == CaretAffinity::Downstream && lines.get(idx + 1).is_some_and(|next| next.start == cursor) {
+                return idx + 1;
+            }
             return idx;
         }
     }
     // last_line_index = line_count - 1, remaining at zero for an empty list.
     lines.len().saturating_sub(1)
+}
+
+/// Chooses the affinity that resolves `cursor` back to `selected_line`.
+pub(crate) fn affinity_for_line(lines: &[TextLine], selected_line: usize, cursor: usize) -> CaretAffinity {
+    if selected_line > 0
+        && lines.get(selected_line).is_some_and(|line| line.start == cursor)
+        && lines.get(selected_line - 1).is_some_and(|line| line.end == cursor)
+    {
+        CaretAffinity::Downstream
+    } else {
+        CaretAffinity::Upstream
+    }
 }
 
 /// Returns the x offset of `cursor` measured from the start of `line`.
@@ -346,7 +429,7 @@ mod tests {
     #[test]
     fn text_input_clamps_external_cursor_to_utf8_boundary() {
         let mut buf = String::from("éa");
-        let outcome = apply_text_input(&mut buf, 1, "x", None, false, ReturnBehavior::Submit);
+        let outcome = apply_text_input(&mut buf, 1, "x", None, ReturnBehavior::Submit);
 
         assert_eq!(buf, "xéa");
         assert_eq!(outcome.cursor, 1);
@@ -356,17 +439,64 @@ mod tests {
     #[test]
     fn delete_next_clamps_external_cursor_to_utf8_boundary() {
         let mut buf = String::from("éa");
-        let outcome = apply_text_input(
-            &mut buf,
-            1,
-            "",
-            Some(KeyEvent::pressed(Key::Delete, Modifiers::NONE)),
-            false,
-            ReturnBehavior::Submit,
-        );
+        let outcome = apply_text_input(&mut buf, 1, "", Some(KeyEvent::pressed(Key::Delete, Modifiers::NONE)), ReturnBehavior::Submit);
 
         assert_eq!(buf, "a");
         assert_eq!(outcome.cursor, 0);
         assert!(outcome.changed);
+    }
+
+    /// Verifies platform and legacy line endings collapse to the one multiline representation.
+    #[test]
+    fn multiline_normalization_collapses_crlf_and_lone_cr() {
+        assert_eq!(normalize_multiline_text("a\r\nb\rc\n"), "a\nb\nc\n");
+    }
+
+    /// Verifies single-line storage cannot retain either newline scalar.
+    #[test]
+    fn single_line_normalization_removes_all_line_endings() {
+        assert_eq!(normalize_single_line_text("a\r\nb\rc\n"), "abc");
+    }
+
+    /// Verifies pasted text follows the same newline policy as constructors and setters.
+    #[test]
+    fn text_input_normalizes_for_each_editor_kind() {
+        let mut single = String::new();
+        let single_outcome = apply_text_input(&mut single, 0, "a\r\nb\rc\n", None, ReturnBehavior::Submit);
+        assert_eq!(single, "abc");
+        assert_eq!(single_outcome.cursor, 3);
+
+        let mut multiline = String::new();
+        let multiline_outcome = apply_text_input(&mut multiline, 0, "a\r\nb\rc\n", None, ReturnBehavior::Newline { submit_on_ctrl: true });
+        assert_eq!(multiline, "a\nb\nc\n");
+        assert_eq!(multiline_outcome.cursor, multiline.len());
+    }
+
+    /// Verifies backspace at the beginning never removes content after the cursor.
+    #[test]
+    fn backspace_at_zero_does_not_delete_a_leading_newline() {
+        let mut buf = String::from("\ntext");
+        let outcome = apply_text_input(
+            &mut buf,
+            0,
+            "",
+            Some(KeyEvent::pressed(Key::Backspace, Modifiers::NONE)),
+            ReturnBehavior::Newline { submit_on_ctrl: true },
+        );
+
+        assert_eq!(buf, "\ntext");
+        assert_eq!(outcome.cursor, 0);
+        assert!(!outcome.changed);
+    }
+
+    /// Verifies one shared byte position can resolve to either wrapped visual line.
+    #[test]
+    fn wrapped_boundary_resolution_respects_caret_affinity() {
+        let lines = [TextLine { start: 0, end: 2, width: 16 }, TextLine { start: 2, end: 3, width: 8 }];
+
+        assert_eq!(line_index_for_cursor(&lines, 2, CaretAffinity::Upstream), 0);
+        assert_eq!(line_index_for_cursor(&lines, 2, CaretAffinity::Downstream), 1);
+        assert_eq!(affinity_for_line(&lines, 0, 2), CaretAffinity::Upstream);
+        assert_eq!(affinity_for_line(&lines, 1, 2), CaretAffinity::Downstream);
     }
 }
