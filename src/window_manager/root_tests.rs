@@ -35,9 +35,9 @@ use crate::{
     color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Combo, ComboParameters, ComboSubmitted, Custom, Color,
     CustomParameters, Constraints, Context, DecimalPrecision, Dimensioni, Disclosure, DisclosureParameters, Ui, Grid, GridParameters, Key, KeyEvent,
     KeyboardBehavior, Linear, LinearItem, LinearParameters, Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted, MouseButton, Node,
-    ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Slider, SliderParameters, Style, Textbox, TextboxChanged, TextBlock,
-    TextBlockParameters, TextboxParameters, TrackSize, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
-    Modifiers,
+    ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Slider, SliderParameters, Style, TextArea, TextAreaParameters, Textbox,
+    TextboxChanged, TextBlock, TextBlockParameters, TextboxParameters, TrackSize, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx,
+    WidgetUpdateCtx, Modifiers,
 };
 use crate::render::{FrameInfo, RenderError};
 use std::{
@@ -910,6 +910,37 @@ fn tab_focused_disclosure_uses_focus_fill_in_addition_to_the_shared_outline() {
 }
 
 #[test]
+fn empty_public_update_consumes_programmatic_text_area_caret_reveal() {
+    // Use enough unwrapped lines to guarantee vertical overflow inside the fixed window body.
+    let document = (0..20).map(|index| format!("line {index}")).collect::<Vec<_>>().join("\n");
+    let (text_area, content) = TextArea::create(TextAreaParameters::new(document));
+    let mut ctx = context();
+    let style = Style {
+        padding: 0,
+        scrollbar_size: 10,
+        ..*ctx.style()
+    };
+    ctx.set_style(style);
+    let root = ctx.ui().create_window(Window::new("text area", rect(10, 10, 100, 60), content));
+    ctx.ui()
+        .set_window_options(&root, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
+        .unwrap();
+    let dimensions = Dimensioni::new(320, 240);
+
+    // Both cursor mutations are programmatic and queue no UiInputEvent. The synchronization update
+    // must still let TextArea hand its caret rectangle to the parent-owned ScrollArea.
+    text_area.set_cursor(0).unwrap();
+    ctx.update_ui(dimensions);
+    assert_eq!(text_area.scroll().map(|scroll| (scroll.x, scroll.y)), Some((0, 0)));
+
+    text_area.move_cursor_to_end().unwrap();
+    ctx.update_ui(dimensions);
+    let scroll = text_area.scroll().expect("the composed TextArea must retain its ScrollArea");
+    assert_eq!(scroll.x, 0);
+    assert!(scroll.y > 0, "an empty-input Context update must reveal the final caret");
+}
+
+#[test]
 fn global_style_replacement_invalidates_measurements_in_hidden_surfaces() {
     let measures = Rc::new(Cell::new(0));
     let probe = Node::widget(CompleteStyleMeasureProbe {
@@ -1312,7 +1343,7 @@ fn topology_mutation_is_blocked_for_the_active_container_and_visible_in_a_later_
 
 #[test]
 #[allow(clippy::result_large_err)] // The assertion exercises the ownership-preserving mutation result.
-fn programmatic_topology_mutation_needs_only_an_empty_queue_layout_commit() {
+fn programmatic_topology_mutation_commits_during_an_empty_queue_synchronization() {
     let (_, first, _) = CommitProbe::new(10, None);
     let (column, content) = Linear::create(LinearParameters::vertical([first]));
     let mut ctx = context();
@@ -1333,8 +1364,8 @@ fn programmatic_topology_mutation_needs_only_an_empty_queue_layout_commit() {
 
     let metrics = ctx.debug_root_runtime_metrics(root.id()).unwrap();
     let appended_rect = ctx.debug_root_node_rect(root.id(), appended_id).unwrap();
-    assert_eq!(metrics.tree_layouts, 1);
-    assert_eq!(metrics.updates, 0);
+    assert_eq!(metrics.tree_layouts, 2, "eventless synchronization lays out before and after widget work");
+    assert_eq!(metrics.updates, 3, "the container and both children receive the one eventless traversal");
     assert_eq!(appended_rect.height, 18);
 }
 
@@ -1992,14 +2023,14 @@ fn outside_popup_press_dismisses_then_routes_once_to_the_revealed_root() {
 }
 
 #[test]
-fn layout_only_update_and_paint_have_separate_phase_counts() {
+fn eventless_update_and_paint_have_separate_phase_counts() {
     let mut ctx = context();
     let root = ctx.ui().create_window(Window::new("window", rect(10, 10, 120, 90), empty_content()));
 
     ctx.update_and_render_ui();
     let metrics = ctx.debug_root_runtime_metrics(root.id()).unwrap();
-    assert_eq!(metrics.tree_layouts, 1);
-    assert_eq!(metrics.updates, 0);
+    assert_eq!(metrics.tree_layouts, 2);
+    assert_eq!(metrics.updates, 1);
     assert_eq!(metrics.paints, 1);
 }
 

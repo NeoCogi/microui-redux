@@ -144,8 +144,13 @@ fn measure_scenario(name: &'static str, application_nodes: usize, build: impl Fn
 
     let synchronization = measure_repeated(|| ctx.update_ui(dimensions()));
     let synchronized_metrics = ctx.debug_root_runtime_metrics(root.id()).expect("measured root must expose test metrics");
-    assert_eq!(synchronized_metrics.tree_layouts, 1);
-    assert_eq!(synchronized_metrics.updates, 0);
+    assert_eq!(synchronized_metrics.tree_layouts, 2);
+    let updated_nodes = synchronized_metrics.updates;
+    assert!(updated_nodes > 0, "an empty-input synchronization must update visible programmatic work");
+    assert!(
+        updated_nodes <= total_nodes as u64,
+        "one eventless traversal cannot update more nodes than the retained tree owns"
+    );
     assert_eq!(synchronized_metrics.paints, 0);
 
     // Characterize the number of nodes eligible for paint in this viewport. Retained traversal
@@ -169,8 +174,8 @@ fn measure_scenario(name: &'static str, application_nodes: usize, build: impl Fn
         ctx.frame(frame_info()).render_ui().expect("baseline render must succeed");
     });
     let rendered_metrics = ctx.debug_root_runtime_metrics(root.id()).expect("measured root must expose test metrics");
-    assert_eq!(rendered_metrics.tree_layouts, 1, "rendering must not add layout work");
-    assert_eq!(rendered_metrics.updates, 0, "rendering must not add update work");
+    assert_eq!(rendered_metrics.tree_layouts, 2, "rendering must not add layout work");
+    assert_eq!(rendered_metrics.updates, updated_nodes, "rendering must not add update work");
     assert_eq!(
         rendered_metrics.paints,
         painted_nodes * ITERATIONS,
@@ -314,8 +319,8 @@ fn retained_runtime_baseline() {
     for result in [&one, &hundred, &scroll] {
         print_scenario(result);
         assert!(result.construction.events > 0);
-        assert_eq!(result.synchronized_metrics.tree_layouts, 1);
-        assert_eq!(result.rendered_metrics.tree_layouts, 1);
+        assert_eq!(result.synchronized_metrics.tree_layouts, 2);
+        assert_eq!(result.rendered_metrics.tree_layouts, 2);
     }
 
     // Manager chrome and menu presentation are concrete surface state rather than retained widget

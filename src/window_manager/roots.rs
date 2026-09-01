@@ -2238,7 +2238,7 @@ impl WindowManager {
         }
     }
 
-    /// Performs one synchronization layout, then one update/layout pair per queued event.
+    /// Performs one update per queued event or one eventless update when the queue is empty.
     pub(crate) fn update(&mut self, dimensions: Dimensioni, atlas: &crate::AtlasHandle) {
         // Polling contexts have no application dispatcher, so the safe boundary performs no work.
         self.update_with(dimensions, atlas, &mut (), |_, _| false);
@@ -2250,7 +2250,7 @@ impl WindowManager {
         dimensions: Dimensioni,
         atlas: &crate::AtlasHandle,
         dispatch_state: &mut DispatchState,
-        mut after_event: impl FnMut(&mut Self, &mut DispatchState) -> bool,
+        mut after_update: impl FnMut(&mut Self, &mut DispatchState) -> bool,
     ) {
         self.ui_commit = None;
         let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
@@ -2258,8 +2258,25 @@ impl WindowManager {
             // Every concrete surface begins the cycle so hidden trees retain coherent staged state.
             node.surface.body.begin_update();
         }
+
+        // Commit geometry before any update so widgets receive authoritative content rectangles.
+        // Preserve the pre-input subscriber boundary: a handler may change surface geometry that
+        // must be laid out before either eventless traversal or routing the first queued event.
         self.layout(viewport, atlas);
-        if after_event(self, dispatch_state) {
+        if after_update(self, dispatch_state) {
+            self.layout(viewport, atlas);
+        }
+
+        // A routed event already gives every eligible widget one ordinary update, so add an
+        // eventless traversal only when no raw event can consume pending programmatic work. This
+        // keeps eventful FIFO behavior at exactly one traversal per event while making an empty
+        // Context update a real synchronization boundary for caret reveal and similar requests.
+        if !self.input.has_pending() {
+            let input = self.input.snapshot();
+            self.update_eligible_widget_trees(atlas, input);
+            // Eventless widget work can emit typed events. Dispatch only after all widget borrows
+            // end, then commit widget and subscriber mutations in the same mandatory layout.
+            after_update(self, dispatch_state);
             self.layout(viewport, atlas);
         }
 
@@ -2267,10 +2284,29 @@ impl WindowManager {
             let input = self.input.snapshot();
             self.update_for_event(atlas, &event, input);
             // Subscribers run after all retained borrows are released and before the next layout.
-            after_event(self, dispatch_state);
+            after_update(self, dispatch_state);
             self.layout(viewport, atlas);
         }
         self.ui_commit = Some(dimensions);
+    }
+
+    /// Runs one ordinary update with no routed event across every currently eligible widget tree.
+    fn update_eligible_widget_trees(&mut self, atlas: &crate::AtlasHandle, input: crate::input::InputSnapshot) {
+        // Copy the resolved style once, matching event-driven traversal, then use the forest's
+        // shared visible order so modal scope and popup ownership have one eligibility policy.
+        let style = self.style;
+        let modal = self.surfaces.active_modal_root();
+        for index in 0..self.surfaces.visible_order.len() {
+            let key = self.surfaces.visible_order[index];
+            if self.surface_is_eligible(key, modal) {
+                self.surfaces
+                    .surface_mut(key)
+                    .expect("visible update surface must remain retained")
+                    .body
+                    .update(&style, atlas.clone(), input);
+            }
+        }
+        self.reconcile_active_surface();
     }
 
     /// Resolves the effective screen-space clip for one visible surface during parent-first layout.
@@ -2520,17 +2556,7 @@ impl WindowManager {
                 self.surfaces.nodes[index].clear_pointer_targets();
             }
         }
-        for index in 0..self.surfaces.visible_order.len() {
-            let key = self.surfaces.visible_order[index];
-            if self.surface_is_eligible(key, modal) {
-                self.surfaces
-                    .surface_mut(key)
-                    .expect("visible update surface must remain retained")
-                    .body
-                    .update(&style, atlas.clone(), input);
-            }
-        }
-        self.reconcile_active_surface();
+        self.update_eligible_widget_trees(atlas, input);
         if let Some((surface, action)) = staged_menu_action {
             // Direct routing has ended its concrete surface borrow before forest visibility changes.
             self.apply_menu_action(surface, action, previous_top);

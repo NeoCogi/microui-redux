@@ -396,7 +396,7 @@ impl<B: RendererBackend> Context<B> {
 // Retained update and application-event dispatch.
 
 impl<B: RendererBackend> Context<B> {
-    /// Drains input and commits layout for a polling-only context.
+    /// Runs eventless widget work, drains input, and commits layout for a polling-only context.
     #[track_caller]
     pub fn update_ui(&mut self, dimensions: Dimensioni) {
         assert!(dimensions.width > 0 && dimensions.height > 0, "update_ui dimensions must be positive");
@@ -409,10 +409,11 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// Drains ordered input, dispatches typed retained UI events, and commits layout for `dimensions`.
     ///
     /// One synchronization layout always runs first. Each queued input event then causes exactly
-    /// one route followed by one full eligible-tree update and another layout commit. Geometry
-    /// produced for one event is therefore authoritative when routing the next. With an empty
-    /// queue, the initial layout is the complete synchronization commit. This method performs no
-    /// timer synthesis, painting, or backend submission.
+    /// one route, one full eligible-tree update, and another layout commit. When the queue is empty,
+    /// one eventless eligible-tree update and a follow-up layout consume pending programmatic work
+    /// such as caret reveal. Geometry produced for one update is therefore authoritative when
+    /// routing the next event. This method performs no timer synthesis, painting, or backend
+    /// submission.
     ///
     /// Events retain FIFO order within each retained source port. When multiple ports are ready at one
     /// dispatch boundary, they are drained in subscription order. Dispatch repeats until all
