@@ -52,6 +52,14 @@ pub(crate) fn frame_geometry(outer: Recti, role: Option<AppearanceRole>, style: 
     let insets = role
         .map(|role| style.appearance(role, VisualState::Normal).insets.normalized())
         .unwrap_or(SliceInsets::ZERO);
+    frame_geometry_with_insets(outer, insets)
+}
+
+/// Resolves a border box using structural insets supplied independently from appearance artwork.
+pub(crate) fn frame_geometry_with_insets(outer: Recti, insets: SliceInsets) -> FrameGeometry {
+    // Window chrome uses this path because its fixed corner artwork may extend much farther along
+    // an edge than the narrow client inset represented by that edge's real border thickness.
+    let insets = insets.normalized();
     let content = if outer.width <= 0 || outer.height <= 0 {
         None
     } else if insets.horizontal_extent() == 0 && insets.vertical_extent() == 0 {

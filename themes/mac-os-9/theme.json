@@ -7,6 +7,7 @@
     "spacing": 5,
     "indent": 16,
     "title_height": 20,
+    "window_border": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
     "scrollbar_size": 16,
     "thumb_size": 16,
     "frame_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },

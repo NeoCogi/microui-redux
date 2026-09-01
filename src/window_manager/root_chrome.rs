@@ -319,7 +319,7 @@ pub(super) fn root_chrome_geometry(
     };
     let title_height = root_titlebar_height(style, atlas);
     let frame = if options.intersects(WindowOption::FRAME) {
-        style.appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets.normalized()
+        style.window_border.normalized()
     } else {
         crate::SliceInsets::ZERO
     };
@@ -371,8 +371,7 @@ pub(super) fn root_chrome_geometry(
     );
 
     // Shared frame geometry supplies the client rectangle used by both paint and layout.
-    let frame_role = options.intersects(WindowOption::FRAME).then_some(crate::AppearanceRole::WindowFrame);
-    let client = crate::ui_node::frame::frame_geometry(outer, frame_role, style).content_or_empty();
+    let client = crate::ui_node::frame::frame_geometry_with_insets(outer, frame).content_or_empty();
     let title =
         (!options.intersects(WindowOption::NO_TITLE)).then(|| Recti::new(client.x, client.y, client.width.max(0), title_height.min(client.height.max(0))));
     let (close, maximize, minimize) = if let Some(title) = title {
@@ -459,16 +458,17 @@ fn root_titlebar_height(style: &Style, atlas: &AtlasHandle) -> i32 {
 
 /// Resolves frame artwork while preserving the inactive frame's structural border thickness.
 fn root_frame_patch(style: &Style, active: bool, state: VisualState) -> crate::NinePatch {
-    // WindowFrame is the single layout authority consumed by client geometry and resize hit tests.
-    // Active artwork may replace every visual cell, but forcing its destination insets to this
-    // authority prevents focus changes from moving application content or resize boundaries.
-    let structural_insets = style.appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
+    // Passive frame artwork is the visual corner-span authority for both activation variants.
+    // Structural client and resize thickness lives in Style::window_border, so long transparent L
+    // corners do not enlarge the client inset. Matching active visual insets still prevents focus
+    // changes from moving or scaling the corner art itself.
+    let visual_insets = style.appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
     let role = if active {
         AppearanceRole::WindowFrameActive
     } else {
         AppearanceRole::WindowFrame
     };
-    style.appearance(role, state).with_insets(structural_insets)
+    style.appearance(role, state).with_insets(visual_insets)
 }
 
 /// Records the frame or plain background that must appear behind application content.
@@ -570,6 +570,12 @@ fn paint_caption_button(painter: &mut Painter<'_>, rect: Recti, button: RootCapt
         RootCaptionButton::Maximize => AppearanceRole::WindowMaximizeButton,
         RootCaptionButton::Close => AppearanceRole::WindowCloseButton,
     };
+    let glyph_role = match button {
+        RootCaptionButton::Minimize => AppearanceRole::WindowMinimizeGlyph,
+        RootCaptionButton::Maximize if visual.maximized => AppearanceRole::WindowRestoreGlyph,
+        RootCaptionButton::Maximize => AppearanceRole::WindowMaximizeGlyph,
+        RootCaptionButton::Close => AppearanceRole::WindowCloseGlyph,
+    };
     let state = if window_active {
         visual.part_state(RootChromePart::Caption(button))
     } else {
@@ -578,6 +584,26 @@ fn paint_caption_button(painter: &mut Painter<'_>, rect: Recti, button: RootCapt
     let Some(content) = crate::ui_node::frame::paint_internal_frame(painter, rect, style.appearance(role, state)) else {
         return;
     };
+    let glyph = style.appearance(glyph_role, state);
+    if glyph.is_visible() {
+        // Image glyphs retain their authored pixel dimensions and are centered in the button's
+        // usable content instead of stretching to fill it. A visible flat glyph still receives the
+        // complete content rectangle, keeping programmatic styles concrete and deterministic.
+        let glyph_rect = if let Some(image) = glyph.image_content() {
+            let width = image.source.width.max(0).min(content.width.max(0));
+            let height = image.source.height.max(0).min(content.height.max(0));
+            Recti::new(
+                content.x.saturating_add(content.width.saturating_sub(width) / 2),
+                content.y.saturating_add(content.height.saturating_sub(height) / 2),
+                width,
+                height,
+            )
+        } else {
+            content
+        };
+        let _ = crate::ui_node::frame::paint_internal_frame(painter, glyph_rect, glyph.with_insets(crate::SliceInsets::ZERO));
+        return;
+    }
     let color = style.foreground(role, state);
     match button {
         RootCaptionButton::Close => {

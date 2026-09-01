@@ -81,6 +81,12 @@ pub struct Style {
     pub indent: i32,
     /// Height of window title bars.
     pub title_height: i32,
+    /// Structural thickness reserved for each top-level window border edge.
+    ///
+    /// This is deliberately independent from the fixed corner span in the window-frame
+    /// nine-patch. A classic theme can therefore paint long L-shaped corner pieces while keeping
+    /// the client inset and one-axis resize hit regions at their actual narrow edge thickness.
+    pub window_border: SliceInsets,
     /// Width of scrollbars.
     pub scrollbar_size: i32,
     /// Minimum length of scrollbar thumbs and width of slider thumbs.
@@ -173,6 +179,7 @@ impl Style {
             spacing: 4,
             indent: 24,
             title_height: 24,
+            window_border: SliceInsets::uniform(1),
             scrollbar_size: 12,
             thumb_size: 8,
             appearances,

@@ -3066,6 +3066,8 @@ fn right_bottom_and_corner_resize_only_their_declared_axes_with_thick_borders() 
     let frame = StatefulAppearance::all(NinePatch::framed(insets, color(10, 20, 30, 255), Some(color(40, 50, 60, 255))));
     style.appearances.set(AppearanceRole::WindowFrame, frame);
     style.appearances.set(AppearanceRole::WindowFrameActive, frame);
+    // Structural resize thickness is independent from the frame artwork's fixed corner span.
+    style.window_border = insets;
     let grip_size = style.scrollbar_size;
     let mut ctx = Context::new_test(NoopRenderer { atlas }, Dimensioni::new(360, 260));
     ctx.set_style(style);
@@ -3260,12 +3262,10 @@ fn declarative_menu_popups_follow_heading_and_submenu_edges_when_the_window_move
     assert_eq!(open_popups[1].x, recent_row.x + recent_row.width);
     assert_eq!(open_popups[1].y, recent_row.y);
 
-    // Both popup levels use the shared frame and place their compact rows directly inside it. Root
-    // padding must not create a second inset around either a top-level menu or a recursive submenu.
+    // Both popup levels use MenuPopup as their sole shell and place compact rows directly inside
+    // it. Root padding and WindowFrame must not create a second inset at either menu depth.
     let popup_rows = ctx.debug_active_menu_row_rects();
-    // Context already owns an atlas-bound Style; use its actual frame metric rather than creating
-    // a disconnected resource-bearing value solely to read one scalar.
-    let border = ctx.style().frame_insets().left;
+    let border = ctx.style().appearance(AppearanceRole::MenuPopup, VisualState::Normal).insets.left;
     for (popup, rows) in open_popups.iter().zip(&popup_rows) {
         let first = rows.first().expect("each declared test menu must contain a row");
         let last = rows.last().unwrap();

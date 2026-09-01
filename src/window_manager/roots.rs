@@ -277,11 +277,11 @@ impl Surface {
 
     /// Creates an auto-sized popup around one concrete menu surface.
     fn menu(surface: MenuSurface) -> Self {
-        // Compact menu rows paint edge-to-edge inside their frame. Keep generic root padding out of
-        // both top-level menus and recursive submenus while retaining the shared frame treatment.
+        // MenuPopup owns its own semantic border and interior. Avoid wrapping it in WindowFrame:
+        // classic popup menus use a narrow menu outline, not top-level window corner artwork.
         Self {
             name: String::new(),
-            options: WindowOption::FRAME | WindowOption::NO_PADDING | WindowOption::NO_TITLE | WindowOption::NO_RESIZE | WindowOption::AUTO_SIZE,
+            options: WindowOption::NO_PADDING | WindowOption::NO_TITLE | WindowOption::NO_RESIZE | WindowOption::AUTO_SIZE,
             rect: Recti::default(),
             geometry: RootChromeGeometry::default(),
             clip: Recti::default(),

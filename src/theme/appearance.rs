@@ -99,11 +99,19 @@ pub enum AppearanceRole {
     WindowRestoreButton,
     /// Visible bottom-right resize grip.
     WindowResizeGrip,
+    /// Optional themed glyph painted inside the window close button.
+    WindowCloseGlyph,
+    /// Optional themed glyph painted inside the window minimize button.
+    WindowMinimizeGlyph,
+    /// Optional themed glyph painted inside the window maximize button.
+    WindowMaximizeGlyph,
+    /// Optional themed glyph painted inside the window restore button.
+    WindowRestoreGlyph,
 }
 
 impl AppearanceRole {
     /// Number of role slots retained by [`AppearanceCatalog`].
-    pub const COUNT: usize = Self::WindowResizeGrip as usize + 1;
+    pub const COUNT: usize = Self::WindowRestoreGlyph as usize + 1;
 
     /// Returns the stable snake-case JSON key for this role.
     pub const fn json_name(self) -> &'static str {
@@ -139,6 +147,10 @@ impl AppearanceRole {
             Self::WindowMaximizeButton => "window_maximize_button",
             Self::WindowRestoreButton => "window_restore_button",
             Self::WindowResizeGrip => "window_resize_grip",
+            Self::WindowCloseGlyph => "window_close_glyph",
+            Self::WindowMinimizeGlyph => "window_minimize_glyph",
+            Self::WindowMaximizeGlyph => "window_maximize_glyph",
+            Self::WindowRestoreGlyph => "window_restore_glyph",
         }
     }
 
@@ -181,6 +193,10 @@ impl AppearanceRole {
         Self::WindowMaximizeButton,
         Self::WindowRestoreButton,
         Self::WindowResizeGrip,
+        Self::WindowCloseGlyph,
+        Self::WindowMinimizeGlyph,
+        Self::WindowMaximizeGlyph,
+        Self::WindowRestoreGlyph,
     ];
 }
 
@@ -372,6 +388,10 @@ impl ForegroundCatalog {
             AppearanceRole::WindowMinimizeButton,
             AppearanceRole::WindowMaximizeButton,
             AppearanceRole::WindowRestoreButton,
+            AppearanceRole::WindowCloseGlyph,
+            AppearanceRole::WindowMinimizeGlyph,
+            AppearanceRole::WindowMaximizeGlyph,
+            AppearanceRole::WindowRestoreGlyph,
         ] {
             catalog.set(role, title);
         }

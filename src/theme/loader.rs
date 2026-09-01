@@ -238,6 +238,7 @@ impl ThemeDefinition {
         self.style.apply(&mut style);
         let frame_insets = self.style.frame_insets.map(InsetsDocument::into_insets).unwrap_or_else(|| style.frame_insets());
         validate_non_negative("generic_frame", "style.frame_insets", frame_insets)?;
+        validate_non_negative("window_frame", "style.window_border", style.window_border)?;
         style.appearances = AppearanceCatalog::from_flat_palette(
             frame_insets,
             style.colors,
@@ -329,6 +330,8 @@ struct StyleDocument {
     indent: Option<i32>,
     /// Window title height override.
     title_height: Option<i32>,
+    /// Structural window-edge thickness independent from frame-art corner spans.
+    window_border: Option<InsetsDocument>,
     /// Scrollbar cross-axis thickness override.
     scrollbar_size: Option<i32>,
     /// Minimum slider and scrollbar thumb size override.
@@ -349,6 +352,11 @@ impl StyleDocument {
         assign_if_some(&mut style.spacing, self.spacing);
         assign_if_some(&mut style.indent, self.indent);
         assign_if_some(&mut style.title_height, self.title_height);
+        if let Some(window_border) = self.window_border {
+            // Keep the schema-to-runtime conversion explicit because negative components are
+            // rejected by installation before they can affect layout or hit testing.
+            style.window_border = window_border.into_insets();
+        }
         assign_if_some(&mut style.scrollbar_size, self.scrollbar_size);
         assign_if_some(&mut style.thumb_size, self.thumb_size);
         self.colors.apply(style);
@@ -723,9 +731,11 @@ mod tests {
     fn bundled_windows_311_theme_uses_white_and_blue_title_images() {
         let (loaded, uploads) = install_bundled_theme("themes/windows-3.11/theme.json");
         assert_eq!(loaded.name(), "Windows 3.11 for Workgroups");
-        assert_eq!(uploads, 13, "each shared PNG path must be uploaded exactly once");
+        assert_eq!(uploads, 21, "each shared PNG path must be uploaded exactly once");
         let insets = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
-        assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (4, 4, 4, 4));
+        assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (23, 23, 23, 23));
+        let border = loaded.style().window_border;
+        assert_eq!((border.left, border.top, border.right, border.bottom), (4, 4, 4, 4));
         assert!(matches!(
             loaded.style().appearance(AppearanceRole::WindowTitle, VisualState::Pressed).content,
             crate::NinePatchContent::Image { .. }
@@ -738,6 +748,12 @@ mod tests {
             loaded.style().appearance(AppearanceRole::WindowTitle, VisualState::Inactive).content,
             crate::NinePatchContent::Image { .. }
         ));
+        assert!(matches!(
+            loaded.style().appearance(AppearanceRole::WindowMinimizeGlyph, VisualState::Normal).content,
+            crate::NinePatchContent::Image { image } if image.source.width == 9 && image.source.height == 9
+        ));
+        let selected_text = loaded.style().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
+        assert_eq!((selected_text.r, selected_text.g, selected_text.b, selected_text.a), (255, 255, 255, 255));
     }
 
     /// Verifies the bundled Mac theme installs its controls, title strips, frame, and grip artwork.

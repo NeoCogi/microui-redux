@@ -15,7 +15,13 @@ reference only: no source image, CSS, XPM, SVG, or other file was copied or tran
 PNG in this directory is original, deterministic pixel artwork authored for this repository and is
 distributed under the repository's BSD-3-Clause terms.
 
-The four-pixel window frame follows the period's black-gray-gray-black outline, while title
-backgrounds are independent flat image patches. Control source slices preserve the outer black
-line, inner highlight, and double lower/right shadow without tying destination layout to bitmap
-dimensions.
+The four-pixel window edge follows the period's black-gray-gray-black outline. Its four fixed
+23-pixel corner cells form the long mirrored L pieces visible in the reference while remaining
+independent from the four-pixel client inset and resize hit thickness. The bottom-right L is the
+visible two-axis affordance; the larger semantic grip image is intentionally transparent, so no
+filled rectangle appears over the client.
+
+Menu bars and popup interiors are white, popup shells use a single black line instead of window
+bevels, and highlighted rows pair the `#0000AA` selection with white state-specific foregrounds.
+Caption controls use original deterministic down-triangle, up-triangle, paired restore-triangle,
+and close glyphs with separately shifted pressed PNGs. No reference asset was copied or transformed.

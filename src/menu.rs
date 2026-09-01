@@ -847,14 +847,16 @@ fn layout_bar(headings: &[MenuSlot], style: &Style, atlas: &AtlasHandle, mut slo
 
 /// Computes vertical popup rows and one shared marker/text split.
 fn layout_popup(rows: &[MenuSlot], style: &Style, atlas: &AtlasHandle, mut slots: Vec<Recti>) -> MenuSurfaceLayout {
-    // Measure raw glyph maxima because common control text supplies its own inner padding.
+    // MenuPopup is the sole popup shell, so its structural insets surround every row without a
+    // second WindowFrame. Measure raw glyph maxima because control text supplies its own padding.
     slots.clear();
     slots.reserve(rows.len());
+    let panel_insets = style.appearance(AppearanceRole::MenuPopup, VisualState::Normal).insets.normalized();
     let padding = style.padding.max(1);
     let mut label_width = 0_i32;
     let mut trailing_width = 0_i32;
     let mut marker = false;
-    let mut y = 0_i32;
+    let mut y = panel_insets.top;
     for entry in rows {
         let height = match entry {
             MenuSlot::Item(item) => {
@@ -883,7 +885,7 @@ fn layout_popup(rows: &[MenuSlot], style: &Style, atlas: &AtlasHandle, mut slots
                 content_height(style, atlas, font_choice, visual_height)
             }
         };
-        slots.push(Recti::new(0, y, 0, height));
+        slots.push(Recti::new(panel_insets.left, y, 0, height));
         y = y.saturating_add(height);
     }
 
@@ -904,13 +906,14 @@ fn layout_popup(rows: &[MenuSlot], style: &Style, atlas: &AtlasHandle, mut slots
     } else {
         label_width.saturating_add(padding.saturating_mul(2))
     };
-    let preferred_width = marker_width.saturating_add(text_width);
+    let row_width = marker_width.saturating_add(text_width);
+    let preferred_width = row_width.saturating_add(panel_insets.horizontal_extent());
     // Complete widths in place after the shared intrinsic maximum is known; no second vector is needed.
     for slot in &mut slots {
-        slot.width = preferred_width;
+        slot.width = row_width;
     }
     MenuSurfaceLayout {
-        size: Dimensioni::new(preferred_width, y),
+        size: Dimensioni::new(preferred_width, y.saturating_add(panel_insets.bottom)),
         slots,
         marker_width,
     }

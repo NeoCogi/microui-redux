@@ -83,6 +83,7 @@ The optional `style` object accepts these integer metrics:
 - `spacing`
 - `indent`
 - `title_height`
+- `window_border` (`left`, `top`, `right`, and `bottom` structural edge thicknesses)
 - `scrollbar_size`
 - `thumb_size`
 - `frame_insets`
@@ -112,6 +113,8 @@ The `appearances` object accepts the following exact keys:
 - `window_frame`, `window_frame_active`, `window_title`, `window_title_active`
 - `window_close_button`, `window_minimize_button`, `window_maximize_button`,
   `window_restore_button`, `window_resize_grip`
+- `window_close_glyph`, `window_minimize_glyph`, `window_maximize_glyph`,
+  `window_restore_glyph`
 
 Unknown fields and role names are errors. This prevents a misspelled state or control name from
 silently falling back to a flat appearance.
@@ -128,18 +131,24 @@ remain free to resolve their own hover and pressed states.
 
 ## Window borders and caption controls
 
-`window_frame.insets` is the window's sole structural border thickness. Its left, top, right, and
-bottom values drive client layout, inactive and active frame paint, and hit testing together;
-`window_frame_active.insets` is normalized to that authority during painting. A resizable window
-uses the configured right and bottom thicknesses as its width-only and height-only hit regions; the
-existing bottom-right grip remains a two-axis resize region whose visible art comes from
-`window_resize_grip`.
+`style.window_border` is the window's structural border thickness. Its four values drive client
+layout and the right/bottom one-axis resize hit regions. `window_frame.insets` instead controls the
+fixed visual corner span of the three-by-three artwork; active frame art is normalized to that
+visual authority. Keeping the values separate permits a four-pixel Windows 3.11 edge to carry a
+23-pixel L-shaped corner without reserving 23 pixels around the client. The bottom-right two-axis
+region remains larger for easy input, but themes may leave `window_resize_grip` transparent when
+the frame corner itself is the complete visible affordance.
 
 Window caption controls are enabled explicitly through `WindowOption::MINIMIZE_BUTTON` and
 `WindowOption::MAXIMIZE_BUTTON`. The close button remains enabled unless `WindowOption::NO_CLOSE`
 is present. Caption and resize roles receive `hovered` and `pressed` states from manager-owned
 pointer capture just like widgets. A press dragged away from its originating caption button is no
 longer painted pressed and does not activate on release.
+
+The optional caption-glyph roles paint centered image artwork inside their corresponding button
+face. If a glyph role is transparent or omitted, the renderer uses its deterministic procedural
+fallback. This lets classic themes provide period-specific triangle controls and pressed offsets
+without forcing every flat application style to ship additional images.
 
 Minimize hides the retained window and emits `WindowEvent::Minimized`; the same `WindowHandle` can
 be shown again. Maximize saves the exact normal outer rectangle, tracks the complete inherited
