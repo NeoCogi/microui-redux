@@ -1,0 +1,5 @@
+error[E0599]: no method named `painter` found for mutable reference `&mut WidgetUpdateCtx<'_>` in the current scope
+ --> tests/ui/widget_update_cannot_paint.rs:6:28
+  |
+6 |     let _painter = context.painter();
+  |                            ^^^^^^^ method not found in `&mut WidgetUpdateCtx<'_>`

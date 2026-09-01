@@ -106,12 +106,9 @@ impl AtlasId {
 /// and panics; renderer submission reports the same mistake as a typed render error during
 /// preflight.
 ///
-/// IDs cannot be fabricated without an atlas owner:
-///
-/// ```compile_fail
-/// use microui_redux::FontId;
-/// let _font = FontId::default();
-/// ```
+/// IDs cannot be fabricated without an atlas owner. The diagnostic-matched
+/// `tests/ui/font_id_default.rs` contract test verifies the absence of a default constructor beside
+/// a passing fixture that obtains IDs from an [`AtlasHandle`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FontId {
     /// Identity of the atlas that minted this capability.
@@ -135,12 +132,9 @@ impl FontId {
 /// and panics; renderer submission reports the same mistake as a typed render error during
 /// preflight.
 ///
-/// IDs cannot be fabricated without an atlas owner:
-///
-/// ```compile_fail
-/// use microui_redux::IconId;
-/// let _icon = IconId::default();
-/// ```
+/// IDs cannot be fabricated without an atlas owner. The diagnostic-matched
+/// `tests/ui/icon_id_default.rs` contract test verifies the absence of a default constructor beside
+/// a passing fixture that obtains IDs from an [`AtlasHandle`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IconId {
     /// Identity of the atlas that minted this capability.

@@ -1,0 +1,9 @@
+error[E0499]: cannot borrow `*backend` as mutable more than once at a time
+ --> tests/ui/backend_frame_acquire_twice.rs:7:18
+  |
+6 |     let first = backend.frame(info).unwrap();
+  |                 ------- first mutable borrow occurs here
+7 |     let second = backend.frame(info).unwrap();
+  |                  ^^^^^^^ second mutable borrow occurs here
+8 |     drop((first, second));
+  |           ----- first borrow later used here

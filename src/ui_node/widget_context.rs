@@ -159,13 +159,9 @@ impl<'a> WidgetContextData<'a> {
 /// carry rendering state through the update pass. Interaction and focus are dispatcher-produced
 /// snapshots; widgets can inspect them but cannot cooperatively assign or clear focus.
 ///
-/// ```compile_fail
-/// use microui_redux::prelude::WidgetUpdateCtx;
-///
-/// fn painting_is_not_an_update_capability(ctx: &mut WidgetUpdateCtx<'_>) {
-///     let _ = ctx.painter();
-/// }
-/// ```
+/// The diagnostic-matched `tests/ui/widget_update_cannot_paint.rs` contract test verifies that an
+/// update context has no painter. Its adjacent passing fixture exercises the distinct public
+/// capabilities exposed by update and paint contexts.
 pub struct WidgetUpdateCtx<'a> {
     /// Common read-only data, intentionally separated from phase capabilities.
     common: WidgetContextData<'a>,

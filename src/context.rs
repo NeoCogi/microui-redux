@@ -298,18 +298,9 @@ impl<'a> Ui<'a> {
 /// applications should deliver any cross-thread results before starting a [`ContextFrame`].
 ///
 /// A live [`ContextFrame`] exclusively owns the Context borrow, preventing input/resource
-/// mutation or another logical frame until it is rendered or cancelled:
-///
-/// ```compile_fail
-/// use microui_redux::Context;
-/// use microui_redux::render::{FrameInfo, RendererBackend};
-///
-/// fn mutate_during_frame<B: RendererBackend>(context: &mut Context<B>, info: FrameInfo) {
-///     let frame = context.frame(info);
-///     context.mousemove(10, 20);
-///     drop(frame);
-/// }
-/// ```
+/// mutation or another logical frame until it is rendered or cancelled. The diagnostic-matched
+/// `tests/ui/context_mutate_during_frame.rs` contract test verifies that rejection beside a passing
+/// complete frame lifecycle.
 pub struct Context<B: RendererBackend, State: 'static = ()> {
     /// High-level renderer that replays root display lists.
     renderer: Renderer<B>,
@@ -330,18 +321,9 @@ pub struct Context<B: RendererBackend, State: 'static = ()> {
 /// [`Context::update_ui`] or [`Context::update_ui_state`] again before painting. No separate
 /// Context token exists.
 ///
-/// Submission consumes the frame, making a second submission unrepresentable:
-///
-/// ```compile_fail
-/// use microui_redux::Context;
-/// use microui_redux::render::{FrameInfo, RendererBackend};
-///
-/// fn submit_twice<B: RendererBackend>(context: &mut Context<B>, info: FrameInfo) {
-///     let frame = context.frame(info);
-///     frame.render_ui().unwrap();
-///     frame.render_ui().unwrap();
-/// }
-/// ```
+/// Submission consumes the frame, making a second submission unrepresentable. The
+/// diagnostic-matched `tests/ui/context_frame_submit_twice.rs` contract test verifies the move
+/// error rather than treating any unrelated compilation failure as success.
 #[must_use = "call render_ui() to submit this UI frame; dropping it cancels"]
 pub struct ContextFrame<'a, B: RendererBackend, State: 'static = ()> {
     context: &'a mut Context<B, State>,

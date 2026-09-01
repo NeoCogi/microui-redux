@@ -56,9 +56,9 @@ docs/
 display list or submit one directly; retained traversal owns recording and submission so every
 public `Painter` comes from a traversal-derived `WidgetPaintCtx`.
 
-```compile_fail
-use microui_redux::render::DisplayList;
-```
+The diagnostic-matched `tests/ui/display_list_private.rs` contract test verifies that application
+code cannot import `DisplayList`. Its adjacent passing fixture exercises `Painter`, the supported
+public recording capability, so an unrelated import failure cannot satisfy the privacy check.
 
 ## Frame execution
 

@@ -1,0 +1,5 @@
+error[E0599]: no associated function or constant named `default` found for struct `IconId` in the current scope
+ --> tests/ui/icon_id_default.rs:6:25
+  |
+6 |     let _icon = IconId::default();
+  |                         ^^^^^^^ associated function or constant not found in `IconId`

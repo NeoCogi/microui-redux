@@ -1,0 +1,15 @@
+error[E0382]: use of moved value: `frame`
+ --> tests/ui/context_frame_submit_twice.rs:9:5
+  |
+7 |     let frame = context.frame(info);
+  |         ----- move occurs because `frame` has type `ContextFrame<'_, B>`, which does not implement the `Copy` trait
+8 |     frame.render_ui().unwrap();
+  |           ----------- `frame` moved due to this method call
+9 |     frame.render_ui().unwrap();
+  |     ^^^^^ value used here after move
+  |
+note: `ContextFrame::<'_, B, State>::render_ui` takes ownership of the receiver `self`, which moves `frame`
+ --> src/context.rs
+  |
+  |     pub fn render_ui(mut self) -> Result<(), RenderError> {
+  |                          ^^^^

@@ -1,0 +1,11 @@
+error[E0603]: struct `DisplayList` is private
+ --> tests/ui/display_list_private.rs:3:28
+  |
+3 | use microui_redux::render::DisplayList;
+  |                            ^^^^^^^^^^^ private struct
+  |
+note: the struct `DisplayList` is defined here
+ --> src/render.rs
+  |
+  | pub(crate) use display_list::DisplayList;
+  |                ^^^^^^^^^^^^^^^^^^^^^^^^^

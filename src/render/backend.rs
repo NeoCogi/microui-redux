@@ -295,17 +295,9 @@ pub trait RendererFrame {
 /// ```
 ///
 /// An active frame owns the backend's exclusive mutable borrow, so safe Rust cannot acquire a
-/// second frame until the first is dropped:
-///
-/// ```compile_fail
-/// use microui_redux::render::{FrameInfo, RendererBackend};
-///
-/// fn acquire_twice<B: RendererBackend>(backend: &mut B, info: FrameInfo) {
-///     let first = backend.frame(info).unwrap();
-///     let second = backend.frame(info).unwrap();
-///     drop((first, second));
-/// }
-/// ```
+/// second frame until the first is dropped. The diagnostic-matched
+/// `tests/ui/backend_frame_acquire_twice.rs` contract test verifies that rejection beside a passing
+/// single-acquisition fixture.
 pub trait RendererBackend: 'static {
     /// Exclusively borrowed active frame produced by this backend.
     type Frame<'a>: RendererFrame

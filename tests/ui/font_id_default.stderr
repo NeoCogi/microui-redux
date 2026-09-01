@@ -1,0 +1,5 @@
+error[E0599]: no associated function or constant named `default` found for struct `FontId` in the current scope
+ --> tests/ui/font_id_default.rs:6:25
+  |
+6 |     let _font = FontId::default();
+  |                         ^^^^^^^ associated function or constant not found in `FontId`
