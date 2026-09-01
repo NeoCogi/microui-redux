@@ -2,9 +2,6 @@
 
 ## Roadmap to Version 0.9
 - [ ] Async/Multi-Threading?
-- [x] Theming/Skinning
-    - [x] Typed flat/image nine-patches, strict JSON definitions, and per-state PNG fallbacks
-    - [x] Original Windows 3.11, Windows 95, and Mac OS 9 example themes with `demo-full` selection
 
 ## Version 0.8
 
@@ -12,6 +9,9 @@ Version `0.8` is a deliberate retained-API redesign relative to `0.7`. It unifie
 authoring, input, events, windows, menus, and rendering around uniquely owned retained values; the
 superseded alpha APIs and their compatibility layers are not retained.
 
+- [x] Theming/Skinning
+    - [x] Typed flat/image nine-patches, strict JSON definitions, and per-state PNG fallbacks
+    - [x] Original Windows 3.11, Windows 95, and Mac OS 9 example themes with `demo-full` selection
 - [x] Rebuilt retained authoring around unique `Node` ownership and typed weak handles.
     - [x] Built-in leaf and container constructors return their `TypedWidgetHandle<W>` with the sole mountable `Node`; moving or mounting transfers ownership without invalidating handles.
     - [x] Concrete widgets own their semantic state, typed event ports, measurement, update, and paint behavior. `LeafWidget` and `ContainerWidget` define the two retained layout roles.
