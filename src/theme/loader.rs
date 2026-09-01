@@ -1069,6 +1069,14 @@ mod tests {
             (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: focused })
                 if normal.icon == focused.icon
         ));
+        let combo_normal = loaded.style().appearance(AppearanceRole::Combo, VisualState::Normal);
+        let combo_hovered = loaded.style().appearance(AppearanceRole::Combo, VisualState::Hovered);
+        assert!(matches!(
+            (combo_normal.content, combo_hovered.content),
+            (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: hovered })
+                if normal.icon != hovered.icon
+                    && (hovered.tint.r, hovered.tint.g, hovered.tint.b, hovered.tint.a) == (224, 232, 255, 255)
+        ));
     }
 
     /// Verifies the bundled Mac theme installs its controls, title strips, frame, and grip artwork.

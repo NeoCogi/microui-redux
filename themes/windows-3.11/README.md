@@ -5,7 +5,8 @@ Windows 95. It uses bright `#0000AA` active captions, white inactive captions an
 black outlines, tight white/dark-gray bevels, square controls, and the original gray application
 background. Keyboard focus keeps the black period control frame instead of borrowing the blue
 selection color reserved for active titles and selected rows. Pointer hover remains deliberately
-subtle rather than using a modern glow, while pressed and keyboard-focused artwork stay separate.
+subtle rather than using a modern glow: the combo header gains a light blue-gray raised tint while
+retaining its black outer frame, and pressed and keyboard-focused artwork stay separate.
 Activation selects the blue or white title and the corresponding frame role without recoloring the
 client hierarchy. Disabled foreground, background, button, and glyph artwork remains a separate
 explicit state rather than an inference from which window currently owns activation.

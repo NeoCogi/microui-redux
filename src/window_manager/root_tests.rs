@@ -2118,6 +2118,42 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     assert_eq!(context.debug_active_popup_names(), ["combo choices"]);
 }
 
+/// Verifies ordinary pointer hover reaches a combo's semantic frame state.
+#[test]
+fn combo_hover_routes_to_its_distinct_hovered_appearance() {
+    let atlas = test_atlas();
+    let mut style = test_style(&atlas);
+    let normal_color = color(17, 29, 43, 255);
+    let hovered_color = color(71, 83, 97, 255);
+    let mut combo_appearance = StatefulAppearance::all(NinePatch::solid(normal_color));
+    combo_appearance.set(VisualState::Hovered, NinePatch::solid(hovered_color));
+    style.appearances.set(AppearanceRole::Combo, combo_appearance);
+    let (combo, combo_node) = Combo::create(ComboParameters::new());
+    let combo_id = combo_node.id();
+    combo.update_items(&["Apple", "Pear"]);
+    let (backend, log) = recording_backend(atlas);
+    let mut ctx = Context::<_>::new(backend);
+    ctx.set_style(style);
+    let root = ctx.ui().create_window(Window::new("combo hover", rect(20, 20, 140, 60), combo_node));
+    ctx.ui()
+        .set_window_options(&root, WindowOption::NO_TITLE | WindowOption::NO_RESIZE | WindowOption::NO_PADDING)
+        .unwrap();
+    let dimensions = Dimensioni::new(320, 240);
+    ctx.update_ui(dimensions);
+    let combo_rect = ctx.debug_root_node_rect(root.id(), combo_id).expect("combo must receive committed geometry");
+
+    // A plain move is sufficient to refresh retained hover; no click or keyboard focus should be
+    // required before the semantic Combo role selects its Hovered state.
+    ctx.mousemove(combo_rect.x + combo_rect.width / 2, combo_rect.y + combo_rect.height / 2);
+    ctx.update_ui(dimensions);
+    log.clear();
+    ctx.frame(frame_info(dimensions)).render_ui().unwrap();
+
+    let events = log.snapshot();
+    assert!(!atlas_quads_with_color(&events, hovered_color).is_empty());
+    assert!(atlas_quads_with_color(&events, normal_color).is_empty());
+}
+
 #[test]
 fn textbox_handle_event_dispatches_a_complete_snapshot_to_state() {
     #[derive(Default)]

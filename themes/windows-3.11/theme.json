@@ -107,10 +107,10 @@
     "combo": {
       "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
       "normal": { "png": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-      "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+      "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "tint": [224, 232, 255, 255] },
       "pressed": { "png": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
       "focused": { "png": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-      "hovered_focused": { "png": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
+      "hovered_focused": { "png": "raised-hovered.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "tint": [224, 232, 255, 255] },
       "pressed_focused": { "png": "pressed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
       "disabled": { "png": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
     },
