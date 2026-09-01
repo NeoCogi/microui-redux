@@ -10,13 +10,17 @@
 /// callback beside the resource also makes this useful for both aggregate resources (a bound
 /// buffer) and individual opaque handles (a shader module or semaphore).
 pub(super) struct ResourceGuard<T, F: FnOnce(T)> {
+    /// Resource retained until either commit transfers it or Drop passes it to `cleanup`.
     resource: Option<T>,
+    /// Exact one-shot destruction operation paired with the acquired resource.
     cleanup: Option<F>,
 }
 
 impl<T, F: FnOnce(T)> ResourceGuard<T, F> {
     /// Arms cleanup immediately after a successful native allocation.
     pub(super) fn new(resource: T, cleanup: F) -> Self {
+        // Store both values as Options so commit and Drop can move them exactly once without
+        // requiring either an artificial Default value or a copyable native handle.
         Self {
             resource: Some(resource),
             cleanup: Some(cleanup),
@@ -25,17 +29,23 @@ impl<T, F: FnOnce(T)> ResourceGuard<T, F> {
 
     /// Borrows the resource while construction is still transactional.
     pub(super) fn get(&self) -> &T {
+        // A missing value means this consuming guard was already committed, which safe borrowing
+        // cannot observe unless the implementation's ownership invariant is broken.
         self.resource.as_ref().expect("resource guard is always armed before commit")
     }
 
     /// Mutably borrows the resource while construction is still transactional.
     #[cfg(any(feature = "example-vulkan", test))]
     pub(super) fn get_mut(&mut self) -> &mut T {
+        // Vulkan aggregate construction updates layout and other bookkeeping before committing the
+        // complete resource; the guard remains responsible for cleanup throughout that mutation.
         self.resource.as_mut().expect("resource guard is always armed before commit")
     }
 
     /// Transfers ownership to the completed object and permanently disarms cleanup.
     pub(super) fn into_inner(mut self) -> T {
+        // Taking the resource leaves Drop with no `(resource, cleanup)` pair, so the longer-lived
+        // recipient becomes the sole owner without invoking the destruction callback.
         self.resource.take().expect("resource guard cannot be committed twice")
     }
 }
@@ -43,6 +53,8 @@ impl<T, F: FnOnce(T)> ResourceGuard<T, F> {
 impl<T, F: FnOnce(T)> Drop for ResourceGuard<T, F> {
     /// Cleans an acquired-but-uncommitted resource during ordinary errors and unwinding.
     fn drop(&mut self) {
+        // Move both halves out before invoking arbitrary cleanup code, making re-entry or unwinding
+        // unable to execute the callback a second time.
         if let (Some(resource), Some(cleanup)) = (self.resource.take(), self.cleanup.take()) {
             cleanup(resource);
         }

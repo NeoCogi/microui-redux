@@ -195,9 +195,81 @@ fn create_single_graphics_pipeline(device: &ash::Device, info: vk::GraphicsPipel
 
 /// Native swapchain image and synchronization slot acquired before display-list execution.
 struct AcquiredVulkanFrame {
+    /// Frame-in-flight slot whose acquire semaphore was signaled for this image.
     frame: usize,
+    /// Swapchain image that must either be submitted and presented or make the context fatal.
     image_index: u32,
+    /// Whether acquisition reported that the swapchain should be rebuilt after presentation.
     suboptimal: bool,
+}
+
+/// Lifecycle of the single swapchain image currently owned by the high-level frame boundary.
+///
+/// A successful acquire signals a binary semaphore and removes one image from the presentation
+/// engine. If any later record, submit, or present step fails, neither that semaphore nor that image
+/// can be blindly reused. The fatal state deliberately disables later frames instead of attempting
+/// a partial synchronization repair whose correctness would depend on how far the driver progressed.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+enum AcquiredFrameState {
+    /// No acquired image or signaled acquire semaphore is outstanding.
+    #[default]
+    Ready,
+    /// One [`AcquiredVulkanFrame`] must complete through graphics submission and presentation.
+    Acquired,
+    /// A post-acquire failure abandoned synchronization state; this context cannot render again.
+    Fatal,
+}
+
+impl AcquiredFrameState {
+    /// Rejects acquisition unless every earlier image and semaphore completed normally.
+    fn ensure_ready(self) -> Result<()> {
+        match self {
+            Self::Ready => Ok(()),
+            Self::Acquired => Err(String::from("cannot acquire a second Vulkan frame while one is outstanding")),
+            Self::Fatal => Err(String::from("cannot acquire a Vulkan frame after an earlier acquired frame failed")),
+        }
+    }
+
+    /// Records that swapchain acquisition succeeded and its synchronization objects are now live.
+    fn acquire_succeeded(&mut self) -> Result<()> {
+        match self {
+            Self::Ready => {
+                // Only a ready context can publish a new acquired-frame token.
+                *self = Self::Acquired;
+                Ok(())
+            }
+            Self::Acquired => Err(String::from("cannot acquire a second Vulkan frame while one is outstanding")),
+            Self::Fatal => Err(String::from("cannot acquire a Vulkan frame after an earlier acquired frame failed")),
+        }
+    }
+
+    /// Commits a successful acquired frame or permanently latches any post-acquire failure.
+    fn finish<T>(&mut self, result: Result<T>) -> Result<T> {
+        debug_assert_eq!(*self, Self::Acquired, "only an acquired frame may be finalized");
+        if result.is_ok() {
+            // Submission and presentation consumed both the image and its acquire semaphore.
+            *self = Self::Ready;
+        } else {
+            // The exact driver progress is intentionally irrelevant after failure: no later frame
+            // may wait on, reset, or reuse synchronization objects from this abandoned transaction.
+            *self = Self::Fatal;
+        }
+        result
+    }
+
+    /// Latches a panic or other non-Result escape from acquired-frame finalization.
+    fn abandon(&mut self) {
+        // A panic can occur after native commands have been recorded. Treat it exactly like an
+        // explicit error so unwinding cannot make the same slot available again.
+        if *self == Self::Acquired {
+            *self = Self::Fatal;
+        }
+    }
+
+    /// Returns whether later rendering must remain disabled.
+    fn is_fatal(self) -> bool {
+        self == Self::Fatal
+    }
 }
 
 pub struct VulkanRenderer {
@@ -215,7 +287,8 @@ pub struct VulkanRenderer {
     width: u32,
     height: u32,
     frame_index: u64,
-    device_lost: bool,
+    /// Permanent high-level latch set after device loss or an abandoned acquired frame.
+    disabled: bool,
 }
 
 trait VulkanFrameOps {
@@ -260,7 +333,7 @@ impl VulkanRenderer {
             width,
             height,
             frame_index: 0,
-            device_lost: false,
+            disabled: false,
         })
     }
 
@@ -348,8 +421,8 @@ impl VulkanFrameOps for VulkanRenderer {
         self.vertices.clear();
         self.commands.clear();
         self.current_batch_end = 0;
-        if self.device_lost {
-            return Err(String::from("Vulkan device is lost"));
+        if self.disabled {
+            return Err(String::from("Vulkan renderer is disabled after an unrecoverable frame failure"));
         }
 
         self.ensure_swapchain_extent(self.width, self.height)?;
@@ -377,7 +450,7 @@ impl VulkanFrameOps for VulkanRenderer {
     /// Finalizes the frame by submitting the queued UI and custom commands to Vulkan.
     fn finish(&mut self, acquired: AcquiredVulkanFrame) {
         self.flush_ui_batch();
-        if self.device_lost {
+        if self.disabled {
             self.commands.clear();
             self.vertices.clear();
             self.current_batch_end = 0;
@@ -396,9 +469,9 @@ impl VulkanFrameOps for VulkanRenderer {
             &mut commands,
         ) {
             eprintln!("[microui-redux][vulkan] draw_frame failed: {err}");
-            if self.context.is_device_lost() {
-                self.device_lost = true;
-                eprintln!("[microui-redux][vulkan] device lost; disabling Vulkan rendering for the rest of this run");
+            if self.context.is_unusable() {
+                self.disabled = true;
+                eprintln!("[microui-redux][vulkan] acquired frame became unrecoverable; disabling Vulkan rendering for the rest of this run");
             }
         }
         commands.clear();
@@ -412,8 +485,8 @@ impl VulkanFrameOps for VulkanRenderer {
         // Texture creation is the public backend boundary, so convert Vulkan's string-based
         // operational failures into the renderer's typed texture error without changing the
         // file-wide `Result<T>` used by unrelated swapchain and resource internals.
-        if self.device_lost {
-            return Err(TextureError::backend("Vulkan device is lost"));
+        if self.disabled {
+            return Err(TextureError::backend("Vulkan renderer is disabled after an unrecoverable frame failure"));
         }
         self.textures
             .try_reserve(1)
@@ -446,7 +519,7 @@ impl VulkanFrameOps for VulkanRenderer {
 
     /// Queues a pre-clipped textured custom draw that samples from a backend-owned texture.
     fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]) {
-        if self.device_lost {
+        if self.disabled {
             return;
         }
         let descriptor = match self.textures.get(&id).map(|tex| tex.descriptor.set) {
@@ -537,6 +610,10 @@ impl Drop for VulkanFrame<'_> {
         }))
         .is_err()
         {
+            // A panic can occur after acquire or native recording. Latch both layers before
+            // unwinding is swallowed so no later frame reuses the outstanding image or sync slot.
+            self.backend.context.abandon_acquired_frame();
+            self.backend.disabled = true;
             eprintln!("[microui-redux][vulkan] frame finalization panicked");
         }
     }
@@ -571,7 +648,7 @@ impl RendererBackend for VulkanRenderer {
 
 impl VulkanRenderer {
     pub fn enqueue_colored_vertices(&mut self, area: CustomRenderArea, vertices: Vec<Vertex>) {
-        if self.device_lost {
+        if self.disabled {
             return;
         }
         if vertices.is_empty() {
@@ -596,7 +673,7 @@ impl VulkanRenderer {
     }
 
     pub fn enqueue_mesh_draw(&mut self, area: CustomRenderArea, submission: MeshSubmission) {
-        if self.device_lost {
+        if self.disabled {
             return;
         }
         if submission.mesh.is_empty() {
@@ -634,8 +711,11 @@ impl VulkanTexture {
 /// Identifies both a descriptor set and the exact pool generation that owns its allocation.
 #[derive(Clone, Copy)]
 struct TextureDescriptor {
+    /// Individually allocated descriptor-set handle used for one external image.
     set: vk::DescriptorSet,
+    /// Descriptor pool that must receive `set` when its texture is destroyed.
     pool: vk::DescriptorPool,
+    /// Swapchain/UI generation in which `pool` and `set` were allocated.
     generation: u64,
 }
 
@@ -957,6 +1037,29 @@ impl ImageResource {
 const MAX_DESCRIPTOR_SETS: u32 = 128;
 /// Individual external textures must return descriptor capacity when their capabilities die.
 const DESCRIPTOR_POOL_FLAGS: vk::DescriptorPoolCreateFlags = vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET;
+
+/// Publishes a completely built resource aggregate and returns its previous owner for destruction.
+///
+/// `replacement` is evaluated by the caller before this function receives the authoritative slot.
+/// An error therefore leaves `current` byte-for-byte untouched. On success, `transfer` may move
+/// swapchain-independent ownership from the old aggregate to the new one before publication; no
+/// fallible work remains after that ownership movement begins.
+fn commit_resource_replacement<T, E>(
+    current: &mut Option<T>,
+    replacement: std::result::Result<T, E>,
+    transfer: impl FnOnce(&mut T, &mut T),
+) -> std::result::Result<Option<T>, E> {
+    // Resolve construction first. `?` returns while `current` still owns every installed resource.
+    let mut replacement = replacement?;
+    let mut previous = current.take();
+    if let Some(previous) = previous.as_mut() {
+        // Ownership transfer is deliberately infallible, making publication the only remaining
+        // mutation after the previous aggregate leaves its slot.
+        transfer(previous, &mut replacement);
+    }
+    *current = Some(replacement);
+    Ok(previous)
+}
 
 struct UiResources {
     descriptor_set_layout: vk::DescriptorSetLayout,
@@ -1983,14 +2086,20 @@ impl MeshResources {
 /// complete. This bootstrap owner mirrors their dependency order and is disarmed only after the
 /// last fallible discovery step succeeds.
 struct VulkanBootstrap {
+    /// Root Vulkan instance retained until the completed context takes ownership.
     instance: Option<ash::Instance>,
+    /// Instance-level surface dispatch table required to destroy `surface`.
     surface_loader: Option<Surface>,
+    /// Window surface owned after creation and nulled when committed or destroyed.
     surface: vk::SurfaceKHR,
+    /// Logical device retained only after device creation succeeds.
     device: Option<ash::Device>,
 }
 
 impl VulkanBootstrap {
+    /// Starts a partial native ownership chain with the already-created instance.
     fn new(instance: ash::Instance) -> Self {
+        // Later stages remain absent/null so Drop can distinguish exactly which prefix exists.
         Self {
             instance: Some(instance),
             surface_loader: None,
@@ -1999,20 +2108,28 @@ impl VulkanBootstrap {
         }
     }
 
+    /// Borrows the instance required by surface and physical-device discovery.
     fn instance(&self) -> &ash::Instance {
+        // Bootstrap construction installs the instance before any helper can borrow it.
         self.instance.as_ref().expect("bootstrap instance is present before commit")
     }
 
+    /// Borrows the surface loader after it has been paired with the created surface.
     fn surface_loader(&self) -> &Surface {
+        // Callers reach this helper only after installing both loader and surface during startup.
         self.surface_loader.as_ref().expect("bootstrap surface loader is installed with the surface")
     }
 
+    /// Borrows the logical device during the final queue/bootstrap stages.
     fn device(&self) -> &ash::Device {
+        // Device-dependent discovery runs only after logical-device creation stored this owner.
         self.device.as_ref().expect("bootstrap device is present after logical-device creation")
     }
 
     /// Transfers the completed native ownership chain into `VulkanContext`.
     fn commit(mut self) -> (ash::Instance, Surface, vk::SurfaceKHR, ash::Device) {
+        // Null/take every field before Drop runs, preserving dependency order while disarming all
+        // bootstrap cleanup paths in one infallible ownership transfer.
         let surface = std::mem::replace(&mut self.surface, vk::SurfaceKHR::null());
         (
             self.instance.take().expect("bootstrap instance cannot be committed twice"),
@@ -2077,6 +2194,8 @@ pub(crate) struct VulkanContext {
     transfer_has_work: Vec<bool>,
     current_frame: usize,
     max_frames_in_flight: usize,
+    /// Ownership state for the acquire semaphore and swapchain image handed to the active frame.
+    acquired_frame_state: AcquiredFrameState,
     ui: Option<UiResources>,
     depth_images: Vec<ImageResource>,
     mesh: Option<MeshResources>,
@@ -2166,6 +2285,7 @@ impl VulkanContext {
             transfer_has_work: Vec::new(),
             current_frame: 0,
             max_frames_in_flight: 2,
+            acquired_frame_state: AcquiredFrameState::Ready,
             ui: None,
             depth_images: Vec::new(),
             mesh: None,
@@ -2286,22 +2406,24 @@ impl VulkanContext {
         self.render_pass = self.create_render_pass()?;
         self.framebuffers = self.create_framebuffers()?;
         self.allocate_command_buffers()?;
-        let preserved_atlas = if let Some(mut ui) = self.ui.take() {
-            // The UI pipeline references the old render pass / descriptor pool, so it must be
-            // recreated after any swapchain rebuild as well. The atlas image itself is independent
-            // of the swapchain, so preserve it across the rebuild.
-            let atlas = ui.atlas.take().map(|atlas| atlas.guarded(&self.device));
-            ui.destroy(&self.device);
-            atlas
-        } else {
-            None
-        };
-        let mut ui = UiResources::new(self)?;
-        if let Some(atlas) = preserved_atlas {
-            ui.update_descriptor(&self.device, ui.descriptor_set, atlas.get());
-            ui.atlas = Some(atlas.into_inner());
+        // Construct the complete replacement while the installed UI aggregate still owns the
+        // immutable atlas. If pipeline, sampler, pool, or descriptor creation fails, `self.ui`
+        // remains the exact owner needed by a later rebuild retry instead of dropping the atlas.
+        let replacement = UiResources::new(self);
+        let device = &self.device;
+        let previous = commit_resource_replacement(&mut self.ui, replacement, |previous, replacement| {
+            if let Some(atlas) = previous.atlas.take() {
+                // Descriptor writes are infallible Vulkan commands. Rebind before moving the image
+                // into its new aggregate, leaving no fallible step after ownership transfer starts.
+                replacement.update_descriptor(device, replacement.descriptor_set, &atlas);
+                replacement.atlas = Some(atlas);
+            }
+        })?;
+        if let Some(mut previous) = previous {
+            // The transferred atlas is no longer present in `previous`; destroy only resources
+            // tied to the obsolete render pass and descriptor pool after publication succeeds.
+            previous.destroy(&self.device);
         }
-        self.ui = Some(ui);
         self.swapchain_generation = self.swapchain_generation.wrapping_add(1);
 
         Ok(())
@@ -2634,6 +2756,10 @@ impl VulkanContext {
         if self.device_lost {
             return Err("device is lost; VulkanContext is disabled".into());
         }
+        // Never reuse a binary acquire semaphore or swapchain image left outstanding by an earlier
+        // post-acquire failure. The fatal policy makes this check finite instead of waiting on an
+        // unsignaled fence that was reset but never submitted.
+        self.acquired_frame_state.ensure_ready()?;
         self.logical_width = width;
         self.logical_height = height;
         let frame = self.current_frame;
@@ -2648,7 +2774,12 @@ impl VulkanContext {
             self.swapchain_loader
                 .acquire_next_image(self.swapchain, u64::MAX, self.image_available_semaphores[frame], vk::Fence::null())
         } {
-            Ok((image_index, suboptimal)) => Ok(AcquiredVulkanFrame { frame, image_index, suboptimal }),
+            Ok((image_index, suboptimal)) => {
+                // Publish the ownership transition only after Vulkan has returned a real image and
+                // signaled this frame slot's acquire semaphore.
+                self.acquired_frame_state.acquire_succeeded()?;
+                Ok(AcquiredVulkanFrame { frame, image_index, suboptimal })
+            }
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) | Err(vk::Result::SUBOPTIMAL_KHR) => {
                 self.recreate_swapchain(width, height)?;
                 Err(String::from("Vulkan swapchain changed during frame acquisition"))
@@ -2660,6 +2791,29 @@ impl VulkanContext {
     /// Executes one complete Vulkan frame from an acquired image through submit and present.
     #[allow(clippy::too_many_arguments)] // Frame recording keeps Vulkan state explicit at the call boundary.
     fn draw_frame(
+        &mut self,
+        acquired: AcquiredVulkanFrame,
+        clear_value: vk::ClearValue,
+        vertices: &[Vertex],
+        width: u32,
+        height: u32,
+        _frame_index: u64,
+        commands: &mut Vec<FrameCommand>,
+    ) -> Result<()> {
+        // Every exit after successful acquisition passes through the lifecycle commit below. Any
+        // error permanently latches the context before the caller can attempt another frame with a
+        // signaled acquire semaphore, an unpresented image, or an unsignaled unsubmitted fence.
+        let result = self.draw_acquired_frame(acquired, clear_value, vertices, width, height, _frame_index, commands);
+
+        // Success proves graphics submission and presentation consumed the acquired resources.
+        // Every error latches Fatal, including record, transfer, fence-reset, submit, present, and
+        // swapchain-rebuild failures.
+        self.acquired_frame_state.finish(result)
+    }
+
+    /// Performs the fallible native work for one already-acquired swapchain image.
+    #[allow(clippy::too_many_arguments)] // Frame recording keeps Vulkan state explicit at the call boundary.
+    fn draw_acquired_frame(
         &mut self,
         acquired: AcquiredVulkanFrame,
         clear_value: vk::ClearValue,
@@ -2689,10 +2843,6 @@ impl VulkanContext {
 
         let mut swapchain_needs_recreate = suboptimal;
 
-        unsafe {
-            self.device.reset_fences(&[fence]).map_err(|err| self.handle_vk_error("reset_fences", err))?;
-        }
-
         // UI drawing and custom rendering share one graphics command buffer per acquired image.
         let command_buffer = self.command_buffers[image_index as usize];
         self.record_command_buffer(command_buffer, image_index, clear_value, vertices, width, height, _frame_index, commands)?;
@@ -2714,6 +2864,11 @@ impl VulkanContext {
         let submit_infos = [submit_info.build()];
 
         unsafe {
+            // Keep the fence signaled throughout every fallible CPU recording and transfer-submit
+            // step. Reset it only when the graphics submission is fully assembled. If reset or
+            // queue submission fails, the outer acquired-frame transaction becomes fatal and no
+            // later frame can wait on or reuse this slot.
+            self.device.reset_fences(&[fence]).map_err(|err| self.handle_vk_error("reset_fences", err))?;
             self.device
                 .queue_submit(self.graphics_queue, &submit_infos, fence)
                 .map_err(|err| self.handle_vk_error("queue_submit", err))?;
@@ -2958,9 +3113,17 @@ impl VulkanContext {
         }
     }
 
-    /// Returns whether the device has entered a permanent device-lost state.
-    fn is_device_lost(&self) -> bool {
-        self.device_lost
+    /// Latches an acquired frame that escaped normal Result-based finalization.
+    fn abandon_acquired_frame(&mut self) {
+        // VulkanFrame's panic guard calls this before allowing another backend operation.
+        self.acquired_frame_state.abandon();
+    }
+
+    /// Returns whether native rendering must remain disabled for the rest of this context's life.
+    fn is_unusable(&self) -> bool {
+        // Actual device loss and an abandoned acquired-frame transaction are both permanent here;
+        // this example deliberately chooses a simple fatal policy instead of partial sync repair.
+        self.device_lost || self.acquired_frame_state.is_fatal()
     }
 
     /// Returns the current swapchain extent.
@@ -3635,8 +3798,68 @@ impl VulkanContext {
 #[cfg(test)]
 mod tests {
     use ash::vk::Handle;
+    use std::cell::Cell;
 
     use super::*;
+
+    /// Minimal aggregate used to fault-inject rebuild construction without a Vulkan device.
+    #[derive(Debug, Eq, PartialEq)]
+    struct TestResources {
+        /// Distinguishes the installed and replacement generations.
+        generation: u8,
+        /// Stand-in for the uniquely owned immutable atlas image.
+        atlas: Option<u8>,
+    }
+
+    /// Verifies failed construction retains the installed owner and successful commit moves it.
+    #[test]
+    fn resource_replacement_preserves_owner_on_failure_then_transfers_it_on_commit() {
+        let mut current = Some(TestResources { generation: 1, atlas: Some(42) });
+        let transfer_called = Cell::new(false);
+
+        // Inject a constructor failure. The transfer callback must not run and the authoritative
+        // aggregate must retain the exact atlas owner for a later rebuild attempt.
+        let failed = commit_resource_replacement(&mut current, Err::<TestResources, _>("injected construction failure"), |_, _| {
+            transfer_called.set(true)
+        });
+        assert_eq!(failed.unwrap_err(), "injected construction failure");
+        assert!(!transfer_called.get());
+        assert_eq!(current, Some(TestResources { generation: 1, atlas: Some(42) }));
+
+        let previous = commit_resource_replacement(
+            &mut current,
+            Ok::<_, &str>(TestResources { generation: 2, atlas: None }),
+            |previous, replacement| replacement.atlas = previous.atlas.take(),
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(previous.atlas, None, "the obsolete aggregate must no longer own the atlas");
+        assert_eq!(current.unwrap().atlas, Some(42), "the published replacement must own the same atlas");
+    }
+
+    /// Verifies every post-acquire failure and panic permanently closes the frame lifecycle.
+    #[test]
+    fn acquired_frame_failure_is_fatal_while_success_returns_to_ready() {
+        let mut state = AcquiredFrameState::Ready;
+        state.ensure_ready().unwrap();
+        state.acquire_succeeded().unwrap();
+        assert_eq!(state, AcquiredFrameState::Acquired);
+
+        let error = state.finish::<()>(Err(String::from("injected record failure"))).unwrap_err();
+        assert_eq!(error, "injected record failure");
+        assert!(state.is_fatal());
+        assert!(state.ensure_ready().is_err(), "a failed acquired frame must reject all later acquisition");
+
+        let mut successful = AcquiredFrameState::Ready;
+        successful.acquire_succeeded().unwrap();
+        successful.finish(Ok(())).unwrap();
+        assert_eq!(successful, AcquiredFrameState::Ready);
+
+        successful.acquire_succeeded().unwrap();
+        successful.abandon();
+        assert!(successful.is_fatal(), "panic-style abandonment must use the same fatal latch");
+    }
 
     #[test]
     fn external_texture_pool_supports_individual_descriptor_reclamation() {
