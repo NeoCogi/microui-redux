@@ -150,6 +150,57 @@ pub enum MenuItemAccessError {
     UnknownItem,
 }
 
+impl fmt::Display for MenuItemAccessError {
+    /// Describes why the requested menu-item capability could not be resolved.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Keep the message independent of private item identities: those values are intentionally
+        // process-local implementation details and would not help an application recover.
+        match self {
+            Self::UnknownItem => f.write_str("the menu item is unmounted, destroyed, or belongs to another Context"),
+        }
+    }
+}
+
+/// Marks menu-item lookup failures as leaf errors with no lower-level cause.
+///
+/// Resolution is a direct identity lookup, so every failure is completely represented by this
+/// enum rather than wrapping a backend, allocation, or transport error.
+impl std::error::Error for MenuItemAccessError {}
+
+/// Verifies the complete public formatting and error-chain contract for menu-item lookup errors.
+#[cfg(test)]
+mod menu_item_access_error_tests {
+    use super::MenuItemAccessError;
+
+    /// Confirms that the error remains usable through the standard error trait.
+    fn assert_standard_error<T: std::error::Error>() {}
+
+    /// Covers the stable diagnostic text for every concrete lookup failure.
+    #[test]
+    fn display_describes_every_variant() {
+        // Keep the expected text next to the sole variant so adding another failure requires an
+        // explicit message instead of inheriting an opaque debug representation.
+        let cases = [(
+            MenuItemAccessError::UnknownItem,
+            "the menu item is unmounted, destroyed, or belongs to another Context",
+        )];
+
+        for (error, expected) in cases {
+            assert_eq!(error.to_string(), expected);
+        }
+    }
+
+    /// Covers the standard error implementation and this leaf error's empty source chain.
+    #[test]
+    fn error_contract_has_no_hidden_source() {
+        // Menu-item lookup performs no fallible lower-level operation, so exposing a fabricated
+        // source would make callers infer a causal error that does not exist.
+        assert_standard_error::<MenuItemAccessError>();
+        let error = MenuItemAccessError::UnknownItem;
+        assert!(std::error::Error::source(&error).is_none());
+    }
+}
+
 /// Process-unique identity for one concrete actionable menu item.
 ///
 /// The value is allocated with the declaration and moves unchanged into its eventual menu surface.
