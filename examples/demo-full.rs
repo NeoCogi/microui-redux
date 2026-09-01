@@ -1159,15 +1159,15 @@ fn centered_button(label: impl Into<String>) -> (WidgetEventPortHandle<ButtonSub
 enum DemoTheme {
     /// Atlas-derived flat style installed by a new Context.
     Default,
-    /// Image-backed early-Windows bevel theme.
-    Windows311,
+    /// Image-backed Windows 95 bevel theme.
+    Windows95,
     /// Image-backed classic Macintosh Platinum theme.
     MacOs9,
 }
 
 impl DemoTheme {
     /// Complete choice list in the same order as style and menu-handle arrays.
-    const ALL: [Self; 3] = [Self::Default, Self::Windows311, Self::MacOs9];
+    const ALL: [Self; 3] = [Self::Default, Self::Windows95, Self::MacOs9];
 
     /// Returns the stable array slot owned by this typed choice.
     const fn index(self) -> usize {
@@ -1180,7 +1180,7 @@ impl DemoTheme {
         // Keep labels exhaustive so a new theme cannot appear without user-visible identification.
         match self {
             Self::Default => "Default Style",
-            Self::Windows311 => "Windows 3.11",
+            Self::Windows95 => "Windows 95",
             Self::MacOs9 => "Mac OS 9",
         }
     }
@@ -1200,10 +1200,10 @@ impl DemoThemes {
         // Theme loading uploads each unique PNG once and leaves the installed Context style alone.
         // Retaining all three concrete styles therefore permits switching without file I/O later.
         let default = context.style().clone();
-        let windows_path = demo_asset_path("themes/windows-3.11/theme.json");
+        let windows_path = demo_asset_path("themes/windows-95/theme.json");
         let windows = context
             .load_theme_file(windows_path.as_path())
-            .unwrap_or_else(|error| panic!("failed to load bundled Windows 3.11 theme {}: {error}", windows_path.display()));
+            .unwrap_or_else(|error| panic!("failed to load bundled Windows 95 theme {}: {error}", windows_path.display()));
         let mac_path = demo_asset_path("themes/mac-os-9/theme.json");
         let mac = context
             .load_theme_file(mac_path.as_path())
@@ -1238,7 +1238,7 @@ struct DemoMenuItems {
     comfortable_spacing: MenuItemHandle,
     /// Compact is the other half of the spacing radio pair.
     compact_spacing: MenuItemHandle,
-    /// Radio-marked Default, Windows 3.11, and Mac OS 9 selectors in enum order.
+    /// Radio-marked Default, Windows 95, and Mac OS 9 selectors in enum order.
     themes: [MenuItemHandle; DemoTheme::ALL.len()],
 }
 
@@ -1291,8 +1291,8 @@ fn demo_menu_bar(context: &mut Context<SelectedBackend, State>) -> (MenuBar, Dem
     );
     let (theme_windows, theme_windows_item) = registered_menu_item(
         context,
-        MenuItemParameters::new(DemoTheme::Windows311.label()).radio(false),
-        State::menu_theme_windows_311,
+        MenuItemParameters::new(DemoTheme::Windows95.label()).radio(false),
+        State::menu_theme_windows_95,
     );
     let (theme_mac, theme_mac_item) = registered_menu_item(
         context,
@@ -2223,10 +2223,10 @@ impl State {
         self.select_demo_theme(context, DemoTheme::Default);
     }
 
-    /// Selects the bundled Windows 3.11 bitmap style through its registered radio item.
-    fn menu_theme_windows_311(&mut self, context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
+    /// Selects the bundled Windows 95 bitmap style through its registered radio item.
+    fn menu_theme_windows_95(&mut self, context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
         // The already-loaded style makes this event a pure retained-state mutation without I/O.
-        self.select_demo_theme(context, DemoTheme::Windows311);
+        self.select_demo_theme(context, DemoTheme::Windows95);
     }
 
     /// Selects the bundled Mac OS 9 bitmap style through its registered radio item.

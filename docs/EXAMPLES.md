@@ -13,7 +13,7 @@
 - [`demo-full`](../examples/demo-full.rs) combines retained widgets, per-window File/View/Help
   menus, dialogs, custom drawing, external textures, and custom backend rendering. Its menu shows
   grouped and disabled commands, shortcut hints, a live checked item, radio choices in a cascading
-  View > Log Spacing submenu, a View > Theme radio submenu for Default Style, Windows 3.11, and
+  View > Log Spacing submenu, a View > Theme radio submenu for Default Style, Windows 95, and
   Mac OS 9, and typed
   item submission events into the file dialog, log, and style state. A titleless fullscreen family
   root at layer 0 renders a perspective X-Y grid beneath its content-clipped floating child windows.

@@ -620,9 +620,9 @@ mod tests {
 
     /// Verifies the bundled Windows theme and every original PNG install through the public schema.
     #[test]
-    fn bundled_windows_311_theme_reuses_shared_png_uploads() {
-        let (loaded, uploads) = install_bundled_theme("themes/windows-3.11/theme.json");
-        assert_eq!(loaded.name(), "Windows 3.11");
+    fn bundled_windows_95_theme_reuses_shared_png_uploads() {
+        let (loaded, uploads) = install_bundled_theme("themes/windows-95/theme.json");
+        assert_eq!(loaded.name(), "Windows 95");
         assert_eq!(uploads, 11, "each shared PNG path must be uploaded exactly once");
         let insets = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (4, 4, 4, 4));

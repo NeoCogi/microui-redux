@@ -13,7 +13,7 @@ their source insets, destination insets, and tints remain independent typed patc
 
 ## Bundled example themes
 
-The repository includes [`themes/windows-3.11/theme.json`](../themes/windows-3.11/theme.json) and
+The repository includes [`themes/windows-95/theme.json`](../themes/windows-95/theme.json) and
 [`themes/mac-os-9/theme.json`](../themes/mac-os-9/theme.json). Both use original BSD-licensed pixel
 artwork authored for this project; their directory READMEs identify the GTK and gallery references
 used for visual research and explicitly document that no third-party theme files were copied.
