@@ -18,7 +18,7 @@ name = "microui_redux"
 default = ["builder", "save-to-rust"]
 builder = ["dep:fontdue", "dep:png"]
 png_source = ["dep:png"]
-save-to-rust = []
+save-to-rust = ["dep:tempfile"]
 prebuilt-atlas = ["png_source"]
 external-atlas = ["png_source"]
 example-backend = []
@@ -54,6 +54,7 @@ ash-window-handle = { package = "ash-window", version = "0.13", optional = true 
 raw-window-handle = { version = "0.6", optional = true }
 wgpu = { version = "28", optional = true }
 pollster = { version = "0.4", optional = true }
+tempfile = { version = "3.27", optional = true }
 
 [dev-dependencies]
 rand = "0.10"

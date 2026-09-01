@@ -32,9 +32,10 @@
 
 use super::*;
 use std::{
-    fs::File,
     io::{self, BufWriter, Write},
+    path::Path,
 };
+use tempfile::NamedTempFile;
 
 /// Checks the deliberately small grammar accepted for a generated Rust constant name.
 fn validate_atlas_name(atlas_name: &str) -> io::Result<()> {
@@ -64,15 +65,25 @@ impl AtlasHandle {
     ///
     /// Returns [`io::ErrorKind::InvalidInput`] for an invalid constant name. Pixel encoding, file
     /// creation, and source writes preserve their underlying I/O errors.
-    pub fn to_rust_files(&self, atlas_name: &str, format: SourceFormat, path: &str) -> io::Result<()> {
-        // Validate and encode before creating the destination so caller mistakes or PNG failures do
-        // not truncate an existing generated source file.
+    pub fn to_rust_files(&self, atlas_name: &str, format: SourceFormat, path: impl AsRef<Path>) -> io::Result<()> {
+        // Validate and encode before creating even a temporary file so caller mistakes or PNG
+        // failures leave no filesystem debris. Source emission then targets a sibling and becomes
+        // visible only after its complete contents have reached the filesystem.
         validate_atlas_name(atlas_name)?;
         let (source_pixels, source_format) = self.source_pixels(format)?;
-        let file = File::create(path)?;
-        let mut writer = BufWriter::new(file);
+        let path = path.as_ref();
+        let parent = path.parent().filter(|parent| !parent.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+        let temporary = NamedTempFile::new_in(parent)?;
+        let mut writer = BufWriter::new(temporary);
+
+        // The destination remains untouched while every source fragment is written and flushed to
+        // a sibling file. `persist` then performs the platform-specific atomic replacement and the
+        // temporary-file owner removes its file automatically on every earlier error path.
         self.write_rust_source(&mut writer, atlas_name, source_format, &source_pixels)?;
-        writer.flush()
+        writer.flush()?;
+        writer.get_ref().as_file().sync_all()?;
+        let temporary = writer.into_inner().map_err(|error| error.into_error())?;
+        temporary.persist(path).map(|_| ()).map_err(|error| error.error)
     }
 
     /// Produces the encoded byte payload and matching source enum expression before file creation.
@@ -156,6 +167,7 @@ impl AtlasHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{fs, process::Command};
 
     /// Returns one visible glyph entry reused for every literal-escaping case.
     fn glyph() -> CharEntry {
@@ -231,6 +243,109 @@ mod tests {
         assert!(generated.starts_with(
             "use microui_redux::prelude::{AtlasSource, CharEntry, FontEntry, Recti, SourceFormat, Vec2i};\n\npub const TEST_ATLAS: AtlasSource<'static>"
         ));
+    }
+
+    /// Verifies publication replaces a destination only after a complete source file exists.
+    #[test]
+    fn file_export_atomically_replaces_existing_contents() {
+        let scratch = tempfile::tempdir().expect("the exporter test needs a scratch directory");
+        let destination = scratch.path().join("atlas.rs");
+        fs::write(&destination, b"old complete contents").expect("fixture destination must be writable");
+
+        escaping_atlas()
+            .to_rust_files("TEST_ATLAS", SourceFormat::Raw, &destination)
+            .expect("valid generated source must replace the destination");
+
+        let generated = fs::read_to_string(&destination).expect("published source must be UTF-8");
+        assert!(generated.contains("pub const TEST_ATLAS"));
+        assert!(!generated.contains("old complete contents"));
+        let siblings = fs::read_dir(scratch.path())
+            .expect("scratch directory must remain readable")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("scratch directory entries must remain readable");
+        assert_eq!(siblings.len(), 1, "successful publication must remove its temporary sibling");
+    }
+
+    /// Compiles and executes generated source to prove literal escaping round-trips actual values.
+    #[test]
+    fn generated_source_compiles_and_round_trips() {
+        let scratch = tempfile::tempdir().expect("the compiler test needs a scratch directory");
+        let generated_path = scratch.path().join("generated_atlas.rs");
+        let wrapper_path = scratch.path().join("round_trip.rs");
+        let executable_path = scratch.path().join("round_trip");
+        escaping_atlas()
+            .to_rust_files("TEST_ATLAS", SourceFormat::Raw, &generated_path)
+            .expect("fixture atlas must export");
+
+        // The wrapper intentionally supplies only the public data shape consumed by generated
+        // source. Successful compilation catches invalid tokens; the executable assertions catch
+        // escaped literals that compile but decode to the wrong string, character, or byte value.
+        let wrapper = format!(
+            r#"
+extern crate self as microui_redux;
+
+pub mod prelude {{
+    pub use crate::{{AtlasSource, CharEntry, FontEntry, Recti, SourceFormat, Vec2i}};
+}}
+
+#[derive(Clone, Copy)]
+pub struct Vec2i {{ pub x: i32, pub y: i32 }}
+#[derive(Clone, Copy)]
+pub struct Recti {{ pub x: i32, pub y: i32, pub width: i32, pub height: i32 }}
+#[derive(Clone, Copy)]
+pub struct CharEntry {{ pub offset: Vec2i, pub advance: Vec2i, pub rect: Recti }}
+pub struct FontEntry<'a> {{
+    pub line_size: usize,
+    pub baseline: usize,
+    pub font_size: usize,
+    pub entries: &'a [(char, CharEntry)],
+}}
+#[derive(Clone, Copy, PartialEq)]
+pub enum SourceFormat {{ Raw, Png }}
+pub struct AtlasSource<'a> {{
+    pub width: usize,
+    pub height: usize,
+    pub icons: &'a [(&'a str, Recti)],
+    pub fonts: &'a [(&'a str, FontEntry<'a>)],
+    pub format: SourceFormat,
+    pub pixels: &'a [u8],
+}}
+
+mod generated {{
+    include!({generated_path:?});
+}}
+
+fn main() {{
+    let atlas = &generated::TEST_ATLAS;
+    assert_eq!(atlas.icons[1].0, "icon\"\\\n");
+    assert_eq!(atlas.fonts[0].0, "font\"\\\n");
+    let characters: Vec<char> = atlas.fonts[0].1.entries.iter().map(|entry| entry.0).collect();
+    assert_eq!(characters, vec!['\n', '\'', '\\', '_', 'z']);
+    assert_eq!(atlas.pixels, &[0xff; 8]);
+}}
+"#,
+            generated_path = generated_path
+        );
+        fs::write(&wrapper_path, wrapper).expect("compiler wrapper must be writable");
+
+        let compilation = Command::new("rustc")
+            .arg("--edition=2024")
+            .arg(&wrapper_path)
+            .arg("-o")
+            .arg(&executable_path)
+            .output()
+            .expect("the Rust compiler used by Cargo must be executable");
+        assert!(
+            compilation.status.success(),
+            "generated source did not compile:\n{}",
+            String::from_utf8_lossy(&compilation.stderr)
+        );
+        let execution = Command::new(&executable_path).output().expect("compiled round-trip fixture must run");
+        assert!(
+            execution.status.success(),
+            "generated values did not round-trip:\n{}",
+            String::from_utf8_lossy(&execution.stderr)
+        );
     }
 
     /// Verifies the optional PNG path emits its matching format and compressed signature bytes.
