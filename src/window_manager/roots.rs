@@ -478,12 +478,20 @@ impl SurfaceBody {
     }
 
     /// Paints one concrete body into the shared manager display list.
-    fn paint(&mut self, display_list: &mut crate::render::DisplayList, style: &Style, atlas: &crate::AtlasHandle, focus_visible: bool, window_active: bool) {
-        // Widget and compact-menu bodies share the same activation input so neither can infer it
-        // from keyboard focus, hover, or the concrete body variant.
+    fn paint(
+        &mut self,
+        display_list: &mut crate::render::DisplayList,
+        style: &Style,
+        atlas: &crate::AtlasHandle,
+        focus_visible: bool,
+        window_active: bool,
+        enabled: bool,
+    ) {
+        // Widget and compact-menu bodies share explicit activation and enabled facts so neither
+        // infers disabled presentation from focus, hover, or the concrete body variant.
         match self {
-            Self::Widgets { root, runtime } => runtime.paint_tree_root(root, display_list, style, atlas.clone(), focus_visible, window_active),
-            Self::Menu(menu) => menu.paint(display_list, style, atlas, window_active),
+            Self::Widgets { root, runtime } => runtime.paint_tree_root(root, display_list, style, atlas.clone(), focus_visible, window_active, enabled),
+            Self::Menu(menu) => menu.paint(display_list, style, atlas, window_active, enabled),
         }
     }
 
@@ -735,12 +743,17 @@ impl SurfaceNode {
             // normal rectangle rather than leaving an un-restorable maximized window.
             self.surface.rect = rect;
         }
-        let disabled = (options.intersects(WindowOption::NO_TITLE) && interaction == RootInteraction::Moving)
+        let disabled = options.intersects(WindowOption::DISABLED);
+        let revokes_interaction = (options.intersects(WindowOption::NO_TITLE) && interaction == RootInteraction::Moving)
             || (options.intersects(WindowOption::NO_RESIZE | WindowOption::AUTO_SIZE) && matches!(interaction, RootInteraction::Resizing(_)))
             || (matches!(interaction, RootInteraction::Caption(RootCaptionButton::Minimize)) && !options.intersects(WindowOption::MINIMIZE_BUTTON))
             || (matches!(interaction, RootInteraction::Caption(RootCaptionButton::Maximize)) && !options.intersects(WindowOption::MAXIMIZE_BUTTON))
             || (matches!(interaction, RootInteraction::Caption(RootCaptionButton::Close)) && options.intersects(WindowOption::NO_CLOSE));
         if disabled {
+            // Whole-window disabling suspends focus for later reactivation while revoking every
+            // pointer-derived gesture immediately, matching modal exclusion semantics.
+            self.clear_pointer_targets();
+        } else if revokes_interaction {
             self.clear_transient_targets();
         }
     }
@@ -1003,6 +1016,27 @@ impl SurfaceForest {
         }
     }
 
+    /// Returns whether one root and its structural window ancestry accept interaction.
+    fn root_is_effectively_enabled(&self, root: RootId) -> bool {
+        let Some(node) = self.root_node(root) else {
+            return false;
+        };
+        let Some(state) = node.root() else {
+            return false;
+        };
+        if node.surface.options.intersects(WindowOption::DISABLED) {
+            return false;
+        }
+        match state.mode {
+            // Independent windows and modal dialogs own their enabled state. In particular, a
+            // dialog remains usable when its ordinary owner is intentionally disabled beneath it.
+            RootMode::Normal { .. } | RootMode::Modal => true,
+            // Structural child windows are part of their parent's interactive family and cannot
+            // escape an explicitly disabled ancestor.
+            RootMode::Child => self.root_parent(root).is_some_and(|parent| self.root_is_effectively_enabled(parent)),
+        }
+    }
+
     /// Selects the adjacent visible ordinary root in activation chronology, with wrapping.
     fn window_cycle_target(&self, current: Option<RootId>, reverse: bool) -> Option<RootId> {
         // A keyboard window switch is rare, so materializing only the compact root identities keeps
@@ -1013,7 +1047,9 @@ impl SurfaceForest {
             .iter()
             .filter_map(|node| match (node.key, node.root()) {
                 (SurfaceKey::Root(root), Some(state))
-                    if matches!(state.mode, RootMode::Normal { .. } | RootMode::Child) && self.root_is_effectively_visible(root) =>
+                    if matches!(state.mode, RootMode::Normal { .. } | RootMode::Child)
+                        && self.root_is_effectively_visible(root)
+                        && self.root_is_effectively_enabled(root) =>
                 {
                     Some(root)
                 }
@@ -1423,19 +1459,54 @@ impl WindowManager {
         Ok(())
     }
 
-    /// Replaces window chrome options and reconciles capture immediately.
+    /// Replaces window presentation and interaction options and reconciles capture immediately.
     pub fn set_window_options(&mut self, window: &WindowHandle, options: WindowOption) -> Result<(), SurfaceMutationError> {
         let root = self.window_id(window)?;
+        // Snapshot transient ownership before applying DISABLED because disabled menu surfaces are
+        // intentionally no longer discoverable through the ordinary active-menu query.
+        let active_menu_root = self.active_menu_root();
+        let active_popup_owner = self.active_popup_owner();
         self.root_node_mut(root)?.set_root_options(options);
+
+        // A disabled structural root disables every child window in that family. Revoke their
+        // pointer targets immediately rather than waiting for another input event to discover that
+        // a former capture or hover can no longer participate; retained keyboard focus survives.
+        for index in 0..self.surfaces.nodes.len() {
+            let key = self.surfaces.nodes[index].key;
+            if !self.surface_accepts_input(key) {
+                self.surfaces.nodes[index].clear_pointer_targets();
+            }
+        }
+        // Transient branches cannot remain open above an owner that no longer accepts input.
+        if active_menu_root.is_some_and(|owner| !self.surfaces.root_is_effectively_enabled(owner)) {
+            self.finish_keyboard_menu(true);
+        }
+        if active_popup_owner.is_some_and(|owner| !self.surfaces.root_is_effectively_enabled(owner)) {
+            self.dismiss_active_popups();
+        }
+        self.reconcile_active_surface();
         self.invalidate_ui_commit();
         Ok(())
     }
 
     /// Replaces popup frame, padding, and automatic-size policy through its typed handle.
     pub fn set_popup_options(&mut self, popup: &PopupHandle, options: WindowOption) -> Result<(), SurfaceMutationError> {
-        let node = self.popup_node_mut(popup)?;
-        // Popups never acquire manager chrome; enforce that invariant regardless of caller flags.
-        node.surface.options = options | WindowOption::NO_TITLE | WindowOption::NO_RESIZE;
+        let popup = self.popup_id(popup)?;
+        let disabled = options.intersects(WindowOption::DISABLED);
+        {
+            let node = self.surfaces.popup_node_mut(popup).expect("authenticated popup must remain retained");
+            // Popups never acquire manager chrome; enforce that invariant regardless of caller
+            // flags. Disabling additionally clears any local widget capture immediately.
+            node.surface.options = options | WindowOption::NO_TITLE | WindowOption::NO_RESIZE;
+            if disabled {
+                node.clear_transient_targets();
+            }
+        }
+        if disabled && self.surfaces.popup_is_active(popup) {
+            let depth = self.surfaces.popup_depth(popup).expect("active popup must retain rooted ancestry");
+            self.truncate_active_popup_path(depth);
+        }
+        self.reconcile_active_surface();
         self.invalidate_ui_commit();
         Ok(())
     }
@@ -1580,6 +1651,9 @@ impl WindowManager {
     fn open_popup_id(&mut self, popup: PopupId) -> Result<(), SurfaceMutationError> {
         let node = self.surfaces.popup_node(popup).ok_or(SurfaceMutationError::UnknownPopup)?;
         let parent = node.parent.expect("every popup must retain one parent edge");
+        if node.surface.options.intersects(WindowOption::DISABLED) {
+            return Err(SurfaceMutationError::InvalidPopupParent);
+        }
         let owner = self.surfaces.owning_root(SurfaceKey::Popup(popup)).ok_or(SurfaceMutationError::UnknownPopup)?;
         if !self.popup_owner_is_eligible(owner) {
             return Err(SurfaceMutationError::InvalidPopupParent);
@@ -1725,12 +1799,6 @@ impl WindowManager {
         Ok(self.surfaces.popup_node(id).expect("authenticated popup must remain retained"))
     }
 
-    /// Mutably resolves a typed popup capability to its authenticated concrete forest node.
-    fn popup_node_mut(&mut self, popup: &PopupHandle) -> Result<&mut SurfaceNode, SurfaceMutationError> {
-        let id = self.popup_id(popup)?;
-        Ok(self.surfaces.popup_node_mut(id).expect("authenticated popup must remain retained"))
-    }
-
     /// Collects one root and every structurally owned child window or modal dialog below it.
     fn owned_root_ids(&self, root: RootId) -> Vec<RootId> {
         let mut ids = vec![root];
@@ -1755,7 +1823,7 @@ impl WindowManager {
         let Some(state) = self.surfaces.root_node(owner).and_then(SurfaceNode::root) else {
             return false;
         };
-        if !self.surfaces.root_is_effectively_visible(owner) {
+        if !self.surfaces.root_is_effectively_visible(owner) || !self.surfaces.root_is_effectively_enabled(owner) {
             return false;
         }
         match self.surfaces.active_modal_root() {
@@ -1846,6 +1914,9 @@ impl WindowManager {
     /// Returns the exact active surface when it denotes a concrete menu container.
     fn active_menu_surface(&self) -> Option<SurfaceKey> {
         let surface = self.active_surface?;
+        if !self.surface_accepts_input(surface) {
+            return None;
+        }
         match surface {
             SurfaceKey::Root(_) => {
                 // The root key is shared with its intrinsic bar, so a selected direct child marks
@@ -1881,16 +1952,31 @@ impl WindowManager {
         }
     }
 
+    /// Returns whether one retained surface and its structural enabled ancestry accept input.
+    fn surface_accepts_input(&self, key: SurfaceKey) -> bool {
+        let Some(owner) = self.surfaces.owning_root(key) else {
+            return false;
+        };
+        // A popup may be disabled independently, while every surface also inherits the effective
+        // enabled state of its owning root. Root options are therefore checked exactly once by the
+        // forest helper and popup options only at their own concrete node.
+        self.surfaces.root_is_effectively_enabled(owner)
+            && self
+                .surfaces
+                .node(key)
+                .is_some_and(|node| !node.surface.options.intersects(WindowOption::DISABLED))
+    }
+
     /// Repairs active-surface identity after visibility or ownership changes.
     fn reconcile_active_surface(&mut self) {
         let modal = self.surfaces.active_modal_root();
-        let retained = self
-            .active_surface
-            .is_some_and(|surface| self.surfaces.visible_order.contains(&surface) && self.surface_is_eligible(surface, modal));
+        let retained = self.active_surface.is_some_and(|surface| {
+            self.surfaces.visible_order.contains(&surface) && self.surface_is_eligible(surface, modal) && self.surface_accepts_input(surface)
+        });
         if !retained {
             // A modal root is the only mandatory fallback. Ordinary roots continue using the front
             // visible surface lazily until a pointer or window-cycle command selects one exactly.
-            self.active_surface = modal.map(SurfaceKey::Root);
+            self.active_surface = modal.map(SurfaceKey::Root).filter(|surface| self.surface_accepts_input(*surface));
         }
     }
 
@@ -2241,7 +2327,8 @@ impl WindowManager {
         let Some(SurfaceKey::Popup(popup)) = self.active_surface else {
             return false;
         };
-        if !self.surfaces.popup_is_active(popup)
+        if !self.surface_accepts_input(SurfaceKey::Popup(popup))
+            || !self.surfaces.popup_is_active(popup)
             || !matches!(
                 self.surfaces.popup_node(popup).and_then(SurfaceNode::popup),
                 Some(PopupState::Application { .. })
@@ -2332,7 +2419,7 @@ impl WindowManager {
 
     /// Routes one event to window chrome and reports whether the overlay consumed it.
     fn route_chrome_event(&mut self, root: RootId, event: &UiInputEvent) -> bool {
-        if self.root_node(root).is_err() {
+        if self.root_node(root).is_err() || !self.surface_accepts_input(SurfaceKey::Root(root)) {
             return false;
         }
         match event {
@@ -2628,10 +2715,14 @@ impl WindowManager {
         let hover = (event.is_pointer() && !discard_pointer)
             .then(|| self.input_surface_at(input.mouse_pos))
             .flatten();
+        // Disabled surfaces remain in hit testing so they occlude lower windows, but they are not
+        // routable targets. Keeping both facts prevents click-through without a second stacking
+        // model or a special disabled-window event path.
+        let interactive_hover = hover.filter(|surface| self.surface_accepts_input(*surface));
         if event.is_pointer() {
             // Hover is paint state even when no button is pressed or the selected chrome region
             // ultimately lets the event fall through to application content.
-            self.update_chrome_hover(hover, input.mouse_pos);
+            self.update_chrome_hover(interactive_hover, input.mouse_pos);
         }
         if matches!(event, UiInputEvent::MouseDown { .. })
             && self.active_menu_surface().is_some()
@@ -2642,7 +2733,7 @@ impl WindowManager {
             self.finish_keyboard_menu(false);
         }
         if matches!(event, UiInputEvent::MouseDown { .. })
-            && let Some(surface) = hover
+            && let Some(surface) = interactive_hover
         {
             self.activate_pointer_surface(surface);
             let owner = self.surfaces.owning_root(surface).expect("visible surface must retain a root ancestor");
@@ -2656,7 +2747,7 @@ impl WindowManager {
         let drag = (!discard_pointer).then(|| self.drag_input_surface()).flatten();
         let pointer = match event {
             UiInputEvent::MouseDrag { .. } => drag,
-            _ => hover,
+            _ => interactive_hover,
         };
         let keyboard = self.keyboard_input_surface();
         let tab_navigation = matches!(
@@ -2679,7 +2770,7 @@ impl WindowManager {
         for index in 0..self.surfaces.visible_order.len() {
             let key = self.surfaces.visible_order[index];
             if self.surface_is_eligible(key, modal) {
-                let widget_pointer = pointer == Some(key) && !self.menu_contains(key, input.mouse_pos);
+                let widget_pointer = self.surface_accepts_input(key) && pointer == Some(key) && !self.menu_contains(key, input.mouse_pos);
                 self.surfaces
                     .surface_mut(key)
                     .expect("visible input surface must remain retained")
@@ -2778,9 +2869,10 @@ impl WindowManager {
             let visible = self.surfaces.visible_order.contains(&key);
             if !visible {
                 self.surfaces.nodes[index].clear_transient_targets();
-            } else if !self.surface_is_eligible(key, modal) {
-                // A modal scope suspends underlying keyboard focus rather than destroying it.
-                // Pointer state cannot survive the exclusion and is revoked independently.
+            } else if !self.surface_is_eligible(key, modal) || !self.surface_accepts_input(key) {
+                // A modal scope suspends underlying keyboard focus rather than destroying it. A
+                // disabled surface follows the same retained-focus policy. Pointer state cannot
+                // survive either exclusion and is revoked independently.
                 self.surfaces.nodes[index].clear_pointer_targets();
             }
         }
@@ -2796,17 +2888,27 @@ impl WindowManager {
         {
             // A short node borrow records the base before recursion. Releasing it here lets direct
             // child calls borrow arbitrary later forest entries without unsafe aliasing or mirrors.
+            let window_enabled = self.surfaces.root_is_effectively_enabled(root);
             let node_index = self.surfaces.node_index(SurfaceKey::Root(root)).expect("visible root must remain retained");
             let node = &mut self.surfaces.nodes[node_index];
-            let window_active = active_window == Some(root);
+            let window_active = window_enabled && active_window == Some(root);
             let dialog = node.root().is_some_and(|state| state.mode == RootMode::Modal);
-            record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, style, dialog, window_active);
+            record_root_background(
+                &mut self.display_list,
+                node.surface.clip,
+                node.surface.rect,
+                style,
+                dialog,
+                window_active,
+                window_enabled,
+            );
             node.surface.body.paint(
                 &mut self.display_list,
                 style,
                 atlas,
-                focus_surface == Some(SurfaceKey::Root(root)),
+                window_enabled && focus_surface == Some(SurfaceKey::Root(root)),
                 window_active,
+                window_enabled,
             );
         }
 
@@ -2833,12 +2935,19 @@ impl WindowManager {
         {
             // Parent-owned presentation is deliberately delayed until every child body and child
             // overlay has recorded. The inverse input recursion below uses the same relationship.
+            let window_enabled = self.surfaces.root_is_effectively_enabled(root);
             let node_index = self.surfaces.node_index(SurfaceKey::Root(root)).expect("visible root must remain retained");
             let node = &mut self.surfaces.nodes[node_index];
             if let Some(root_state) = node.root_mut()
                 && let Some(bar) = root_state.menu_bar.as_mut()
             {
-                bar.paint(&mut self.display_list, style, atlas, active_window == Some(root));
+                bar.paint(
+                    &mut self.display_list,
+                    style,
+                    atlas,
+                    window_enabled && active_window == Some(root),
+                    window_enabled,
+                );
             }
             let root_state = node.root().expect("root overlay must retain root policy");
             let dialog = root_state.mode == RootMode::Modal;
@@ -2853,7 +2962,8 @@ impl WindowManager {
                 style,
                 atlas,
                 dialog,
-                active_window == Some(root),
+                window_enabled && active_window == Some(root),
+                window_enabled,
                 visual,
             );
         }
@@ -2868,12 +2978,20 @@ impl WindowManager {
             if !matches!(key, SurfaceKey::Popup(_)) {
                 continue;
             }
+            let popup_enabled = self.surface_accepts_input(key);
             let node_index = self.surfaces.node_index(key).expect("active popup must remain retained");
             let node = &mut self.surfaces.nodes[node_index];
-            // Popup shells retain the ordinary inactive-frame role used before window activation
+            // Popup shells retain the ordinary passive frame role used before window activation
             // existed, while their transient contents remain visually active.
-            record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, style, false, false);
-            node.surface.body.paint(&mut self.display_list, style, atlas, focus_surface == Some(key), true);
+            record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, style, false, false, popup_enabled);
+            node.surface.body.paint(
+                &mut self.display_list,
+                style,
+                atlas,
+                popup_enabled && focus_surface == Some(key),
+                true,
+                popup_enabled,
+            );
         }
     }
 
@@ -2956,7 +3074,7 @@ impl WindowManager {
 
     /// Records the exact keyboard surface selected by one pointer press.
     fn activate_pointer_surface(&mut self, surface: SurfaceKey) {
-        if self.surfaces.node(surface).is_some() {
+        if self.surfaces.node(surface).is_some() && self.surface_accepts_input(surface) {
             // A popup is not collapsed to its owner: its independent widget runtime must receive
             // subsequent Tab, key, and text transitions until focus leaves that surface.
             self.active_surface = Some(surface);
@@ -3056,18 +3174,15 @@ impl WindowManager {
             .iter()
             .rev()
             .copied()
-            .find(|key| self.surface_is_eligible(*key, modal))
+            .find(|key| self.surface_is_eligible(*key, modal) && self.surface_accepts_input(*key))
     }
 
     /// Returns the eligible surface that currently owns pointer capture.
     fn captured_input_surface(&self) -> Option<SurfaceKey> {
         let modal = self.surfaces.active_modal_root();
-        self.surfaces
-            .visible_order
-            .iter()
-            .rev()
-            .copied()
-            .find(|key| self.surface_is_eligible(*key, modal) && self.surfaces.node(*key).is_some_and(SurfaceNode::has_capture))
+        self.surfaces.visible_order.iter().rev().copied().find(|key| {
+            self.surface_is_eligible(*key, modal) && self.surface_accepts_input(*key) && self.surfaces.node(*key).is_some_and(SurfaceNode::has_capture)
+        })
     }
 
     /// Returns the surface receiving pointer-drag continuation.
@@ -3079,9 +3194,11 @@ impl WindowManager {
     fn keyboard_input_surface(&self) -> Option<SurfaceKey> {
         let modal = self.surfaces.active_modal_root();
         self.active_surface
-            .filter(|surface| self.surfaces.visible_order.contains(surface) && self.surface_is_eligible(*surface, modal))
+            .filter(|surface| {
+                self.surfaces.visible_order.contains(surface) && self.surface_is_eligible(*surface, modal) && self.surface_accepts_input(*surface)
+            })
             .or_else(|| self.captured_input_surface())
-            .or_else(|| modal.map(SurfaceKey::Root))
+            .or_else(|| modal.map(SurfaceKey::Root).filter(|surface| self.surface_accepts_input(*surface)))
             .or_else(|| self.front_input_surface())
     }
 

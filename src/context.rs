@@ -152,9 +152,10 @@ impl<'a> Ui<'a> {
         self.window_manager.set_window_size(window, size)
     }
 
-    /// Replaces the chrome options for a retained window or dialog.
+    /// Replaces the presentation and interaction options for a retained window or dialog.
     pub fn set_window_options(&mut self, window: &WindowHandle, options: WindowOption) -> Result<(), SurfaceMutationError> {
-        // Apply option-dependent capture cleanup in the concrete WindowManager implementation.
+        // Apply option-dependent capture cleanup and enabled-tree propagation in the concrete
+        // WindowManager implementation rather than mirroring either policy in this façade.
         self.window_manager.set_window_options(window, options)
     }
 

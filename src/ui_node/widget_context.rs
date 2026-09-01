@@ -433,7 +433,7 @@ impl<'a> WidgetPaintCtx<'a> {
     /// Draws an atlas icon through a widget-local painter.
     pub(crate) fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
         // Callers resolve a semantic foreground before reaching this primitive, so explicit image
-        // tints and role-specific inactive colors are preserved exactly.
+        // tints and role-specific state colors are preserved exactly.
         self.painter().icon(id, rect, color);
     }
 

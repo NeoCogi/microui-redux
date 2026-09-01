@@ -87,9 +87,10 @@ menus and records one clipped, inside-aligned outline around the focused widget 
 ordinary, child, and custom-render output. The outline reuses the widest frame inset with a minimum
 of one pixel and does
 not affect measurement or hit geometry. `Style::window_focus_color` fills the active title and
-outlines an active framed window. Deactivated windows retain their remembered widget focus while
-their chrome, client backgrounds, child appearances, text, and icons resolve the theme's distinct
-inactive presentation.
+outlines an active framed window. Deactivated windows retain their remembered widget focus and
+enabled client presentation while their frame and title select passive chrome roles. Only an
+explicit `WindowOption::DISABLED` resolves the chrome, intrinsic menu, client backgrounds, child
+appearances, text, and icons through the theme's `disabled` state.
 
 ## Focus performance validation
 

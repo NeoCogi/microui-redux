@@ -482,6 +482,7 @@ pub(super) fn record_root_background(
     style: &Style,
     dialog: bool,
     active_frame: bool,
+    enabled: bool,
 ) {
     // Chrome uses a screen-space painter because it is outside the retained application tree.
     let mut painter = Painter::screen_space(display_list, viewport);
@@ -489,9 +490,11 @@ pub(super) fn record_root_background(
     // eight edge cells in the overlay pass, avoiding duplicate border work while still protecting
     // chrome from overflowing descendants. Unframed roots use this same center-only body path.
     // Pointer interaction belongs to the frame edge and title controls, not the application body.
-    // Resolve the body from Normal so merely crossing a resize edge or transferring activation
-    // cannot recolor the complete window interior. Active/passive frame roles select chrome only.
-    let patch = root_frame_patch(style, dialog, active_frame, VisualState::Normal).with_insets(crate::SliceInsets::ZERO);
+    // Resolve enabled bodies from Normal so merely crossing a resize edge or transferring
+    // activation cannot recolor the complete window interior. Explicit root disabling selects the
+    // shared Disabled state, including its flat fallback center when no PNG was supplied.
+    let state = if enabled { VisualState::Normal } else { VisualState::Disabled };
+    let patch = root_frame_patch(style, dialog, active_frame && enabled, state).with_insets(crate::SliceInsets::ZERO);
     let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch);
 }
 
@@ -507,24 +510,34 @@ pub(super) fn record_root_overlay(
     atlas: &AtlasHandle,
     dialog: bool,
     active: bool,
+    enabled: bool,
     visual: RootChromeVisualState,
 ) {
     // Reuse committed geometry so hit-testing and painting cannot disagree within one UI commit.
     let mut painter = Painter::screen_space(display_list, viewport);
-    // Interaction affects active chrome only. Passive chrome resolves Normal even if it retains a
-    // stale hover snapshot, because losing activation does not disable the window or its controls.
-    let chrome_state = |state| if active { state } else { VisualState::Normal };
+    // Explicit disabling wins over interaction. Passive enabled chrome resolves Normal even if it
+    // retains a stale hover snapshot, because losing activation does not disable the window.
+    let chrome_active = active && enabled;
+    let chrome_state = |state| {
+        if !enabled {
+            VisualState::Disabled
+        } else if chrome_active {
+            state
+        } else {
+            VisualState::Normal
+        }
+    };
     if options.intersects(WindowOption::FRAME) {
         // Background recording already filled the framed interior before application content. Draw
         // only the border again in the overlay pass so an unclipped child may extend beyond the
         // parent body without covering parent-owned frame chrome.
         painter.nine_patch(
             outer,
-            root_frame_patch(style, dialog, active, chrome_state(visual.frame_state())).without_center(),
+            root_frame_patch(style, dialog, chrome_active, chrome_state(visual.frame_state())).without_center(),
         );
     }
     if let Some(title) = geometry.title {
-        let role = if active {
+        let role = if chrome_active {
             AppearanceRole::WindowTitleActive
         } else {
             AppearanceRole::WindowTitle
@@ -552,23 +565,33 @@ pub(super) fn record_root_overlay(
         }
         for button in [RootCaptionButton::Minimize, RootCaptionButton::Maximize, RootCaptionButton::Close] {
             if let Some(rect) = geometry.caption(button) {
-                paint_caption_button(&mut painter, rect, button, style, active, visual);
+                paint_caption_button(&mut painter, rect, button, style, chrome_active, enabled, visual);
             }
         }
     }
-    if let Some(grip) = geometry
-        .resize(RootResizeAxis::Both)
-        .filter(|resize| resize.width > 0 && resize.height > 0)
-        .and_then(|resize| resize.positive_intersection(geometry.client))
+    if enabled
+        && let Some(grip) = geometry
+            .resize(RootResizeAxis::Both)
+            .filter(|resize| resize.width > 0 && resize.height > 0)
+            .and_then(|resize| resize.positive_intersection(geometry.client))
     {
-        // The grip has an independent role so classic themes can supply dedicated corner artwork.
+        // A disabled window exposes no resize action, so omit its grip instead of inventing a
+        // disabled rectangle when a classic theme deliberately uses transparent normal artwork.
         let state = chrome_state(visual.part_state(RootChromePart::Resize(RootResizeAxis::Both)));
         let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, grip, style.appearance(AppearanceRole::WindowResizeGrip, state));
     }
 }
 
 /// Records one stateful caption patch and its manager-owned flat fallback symbol.
-fn paint_caption_button(painter: &mut Painter<'_>, rect: Recti, button: RootCaptionButton, style: &Style, window_active: bool, visual: RootChromeVisualState) {
+fn paint_caption_button(
+    painter: &mut Painter<'_>,
+    rect: Recti,
+    button: RootCaptionButton,
+    style: &Style,
+    window_active: bool,
+    window_enabled: bool,
+    visual: RootChromeVisualState,
+) {
     let role = match button {
         RootCaptionButton::Minimize => AppearanceRole::WindowMinimizeButton,
         RootCaptionButton::Maximize if visual.maximized => AppearanceRole::WindowRestoreButton,
@@ -581,7 +604,9 @@ fn paint_caption_button(painter: &mut Painter<'_>, rect: Recti, button: RootCapt
         RootCaptionButton::Maximize => AppearanceRole::WindowMaximizeGlyph,
         RootCaptionButton::Close => AppearanceRole::WindowCloseGlyph,
     };
-    let state = if window_active {
+    let state = if !window_enabled {
+        VisualState::Disabled
+    } else if window_active {
         visual.part_state(RootChromePart::Caption(button))
     } else {
         VisualState::Normal

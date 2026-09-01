@@ -81,6 +81,11 @@ bitflags! {
         const MINIMIZE_BUTTON = 1;
         /// Shows a maximize caption button that toggles the inherited viewport and saved rectangle.
         const MAXIMIZE_BUTTON = 2;
+        /// Keeps the surface visible while disabling its chrome, menus, and complete widget tree.
+        ///
+        /// Disabled roots continue ordinary update traversal so programmatic state stays current,
+        /// but they cannot own pointer, keyboard, popup, move, resize, or caption interactions.
+        const DISABLED = 4;
         /// Gives the surface a Style-owned outer border and inset content area.
         const FRAME = 1024;
         /// Adapts the surface width to its content while retaining its programmed height.

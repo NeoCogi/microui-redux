@@ -1009,6 +1009,180 @@ fn deactivated_window_keeps_enabled_child_widget_appearance() {
     assert!(atlas_quads_with_color(&events, disabled_text_color).is_empty());
 }
 
+/// Verifies explicit window disabling owns presentation and input without hiding retained state.
+#[test]
+fn disabled_window_propagates_disabled_presentation_and_rejects_input() {
+    // Give each layer of the retained window a unique Disabled color. Their simultaneous presence
+    // proves that disabling reaches passive chrome, the intrinsic menu, and the widget tree rather
+    // than being inferred from whichever surface happens to lack activation or keyboard focus.
+    let atlas = test_atlas();
+    let disabled_frame_color = color(17, 29, 43, 255);
+    let forbidden_active_frame_color = color(53, 67, 83, 255);
+    let disabled_caption_color = color(97, 109, 127, 255);
+    let disabled_menu_color = color(139, 149, 163, 255);
+    let disabled_menu_text_color = color(173, 181, 193, 255);
+    let disabled_control_color = color(199, 207, 217, 255);
+    let disabled_control_text_color = color(227, 233, 239, 255);
+    let mut style = test_style(&atlas);
+
+    let mut passive_frame = style.appearances.get(AppearanceRole::WindowFrame);
+    passive_frame.set(VisualState::Disabled, NinePatch::solid(disabled_frame_color));
+    style.appearances.set(AppearanceRole::WindowFrame, passive_frame);
+    let mut active_frame = style.appearances.get(AppearanceRole::WindowFrameActive);
+    active_frame.set(VisualState::Disabled, NinePatch::solid(forbidden_active_frame_color));
+    style.appearances.set(AppearanceRole::WindowFrameActive, active_frame);
+    let mut close = style.appearances.get(AppearanceRole::WindowCloseButton);
+    close.set(VisualState::Disabled, NinePatch::solid(disabled_caption_color));
+    style.appearances.set(AppearanceRole::WindowCloseButton, close);
+    let mut menu_bar = style.appearances.get(AppearanceRole::MenuBar);
+    menu_bar.set(VisualState::Disabled, NinePatch::solid(disabled_menu_color));
+    style.appearances.set(AppearanceRole::MenuBar, menu_bar);
+    let mut menu_title_text = style.foregrounds.get(AppearanceRole::MenuTitle);
+    menu_title_text.set(VisualState::Disabled, disabled_menu_text_color);
+    style.foregrounds.set(AppearanceRole::MenuTitle, menu_title_text);
+    let mut checkbox_box = style.appearances.get(AppearanceRole::Checkbox);
+    checkbox_box.set(VisualState::Disabled, NinePatch::solid(disabled_control_color));
+    style.appearances.set(AppearanceRole::Checkbox, checkbox_box);
+    let mut checkbox_text = style.foregrounds.get(AppearanceRole::Checkbox);
+    checkbox_text.set(VisualState::Disabled, disabled_control_text_color);
+    style.foregrounds.set(AppearanceRole::Checkbox, checkbox_text);
+
+    let (checkbox, checkbox_node) = Checkbox::create(CheckboxParameters::new("disabled child", false));
+    let checkbox_id = checkbox_node.id();
+    let (backend, log) = recording_backend(atlas);
+    let mut ctx = Context::<_>::new(backend);
+    ctx.set_style(style);
+    let root = ctx
+        .ui()
+        .create_window(Window::new("disabled window", rect(30, 25, 190, 130), checkbox_node).menu_bar(MenuBar::new([Menu::new("File")])));
+    let dimensions = Dimensioni::new(320, 240);
+    ctx.update_ui(dimensions);
+    // Establish a remembered keyboard target before disabling. The root must suspend that focus,
+    // not discard it, so re-enabling can resume the exact retained widget without another Tab.
+    ctx.key(KeyEvent::pressed(Key::Tab, Modifiers::NONE));
+    ctx.update_ui(dimensions);
+    ctx.ui().set_window_options(&root, WindowOption::FRAME | WindowOption::DISABLED).unwrap();
+    ctx.update_ui(dimensions);
+
+    log.clear();
+    ctx.frame(frame_info(dimensions)).render_ui().unwrap();
+    let events = log.snapshot();
+    for expected in [
+        disabled_frame_color,
+        disabled_caption_color,
+        disabled_menu_color,
+        disabled_menu_text_color,
+        disabled_control_color,
+        disabled_control_text_color,
+    ] {
+        assert!(
+            !atlas_quads_with_color(&events, expected).is_empty(),
+            "disabled window layer must select its explicit state color"
+        );
+    }
+    assert!(
+        atlas_quads_with_color(&events, forbidden_active_frame_color).is_empty(),
+        "disabled windows use the passive frame role even when they were most recently active"
+    );
+
+    // Pointer delivery, caption actions, and resizing are all rejected while the visible surface
+    // remains present. The disabled root still owns its hit region, so none of these events can
+    // fall through to another window behind it.
+    let menu_title = ctx
+        .debug_menu_anchor_rects(root.id())
+        .and_then(|anchors| anchors.into_iter().next().flatten())
+        .expect("disabled intrinsic menu retains its heading geometry");
+    let menu_center = Vec2i::new(menu_title.x + menu_title.width / 2, menu_title.y + menu_title.height / 2);
+    ctx.mousedown(menu_center.x, menu_center.y, MouseButton::LEFT);
+    ctx.mouseup(menu_center.x, menu_center.y, MouseButton::LEFT);
+    ctx.update_ui(dimensions);
+    assert!(ctx.debug_active_popup_names().is_empty());
+
+    let checkbox_rect = ctx.debug_root_node_rect(root.id(), checkbox_id).expect("disabled checkbox remains laid out");
+    let checkbox_center = Vec2i::new(checkbox_rect.x + checkbox_rect.width / 2, checkbox_rect.y + checkbox_rect.height / 2);
+    ctx.mousedown(checkbox_center.x, checkbox_center.y, MouseButton::LEFT);
+    ctx.mouseup(checkbox_center.x, checkbox_center.y, MouseButton::LEFT);
+    ctx.update_ui(dimensions);
+    assert_eq!(checkbox.checked(), Some(false));
+    ctx.key(KeyEvent::pressed(Key::Space, Modifiers::NONE));
+    ctx.update_ui(dimensions);
+    assert_eq!(checkbox.checked(), Some(false));
+
+    let close = ctx
+        .debug_root_chrome(root.id())
+        .and_then(|(_, close, _)| close)
+        .expect("default title retains its close geometry");
+    let close_center = Vec2i::new(close.x + close.width / 2, close.y + close.height / 2);
+    ctx.mousedown(close_center.x, close_center.y, MouseButton::LEFT);
+    ctx.mouseup(close_center.x, close_center.y, MouseButton::LEFT);
+    ctx.update_ui(dimensions);
+    assert_eq!(ctx.debug_root_visible(root.id()), Some(true));
+
+    let right = ctx
+        .debug_root_chrome_controls(root.id())
+        .and_then(|controls| controls.resize_right)
+        .expect("disabled window retains deterministic resize geometry");
+    let before = ctx.debug_root_rect(root.id()).expect("disabled root remains retained");
+    let resize_point = Vec2i::new(right.x + right.width / 2, right.y + right.height / 2);
+    ctx.mousedown(resize_point.x, resize_point.y, MouseButton::LEFT);
+    ctx.update_ui(dimensions);
+    ctx.mousemove(resize_point.x + 20, resize_point.y);
+    ctx.mouseup(resize_point.x + 20, resize_point.y, MouseButton::LEFT);
+    ctx.update_ui(dimensions);
+    assert_eq!(ctx.debug_root_rect(root.id()).map(rect_values), Some(rect_values(before)));
+
+    // Removing only the explicit flag restores ordinary routing and the remembered focus without
+    // recreating either the window or its typed widget. The same Space command now reaches the
+    // checkbox, proving the disabled state is policy rather than lost retained state.
+    ctx.ui().set_window_options(&root, WindowOption::FRAME).unwrap();
+    ctx.update_ui(dimensions);
+    ctx.key(KeyEvent::pressed(Key::Space, Modifiers::NONE));
+    ctx.update_ui(dimensions);
+    assert_eq!(checkbox.checked(), Some(true));
+}
+
+/// Verifies structural inheritance and modal independence for whole-window disabling.
+#[test]
+fn disabled_parent_disables_child_windows_but_not_its_modal_dialog() {
+    let mut ctx = context();
+    let parent = ctx.ui().create_window(Window::new("parent", rect(5, 5, 290, 220), empty_content()));
+    let (child_checkbox, child_node) = Checkbox::create(CheckboxParameters::new("child", false));
+    let child_id = child_node.id();
+    let child = ctx
+        .ui()
+        .create_child_window(&parent, Window::new("child", rect(20, 45, 120, 80), child_node))
+        .expect("ordinary parent accepts a structural child");
+    let (dialog_checkbox, dialog_node) = Checkbox::create(CheckboxParameters::new("dialog", false));
+    let dialog_id = dialog_node.id();
+    let dialog = ctx
+        .ui()
+        .create_dialog(&parent, Window::new("dialog", rect(155, 45, 120, 80), dialog_node))
+        .expect("ordinary parent accepts a modal dialog");
+    ctx.ui().set_window_options(&parent, WindowOption::FRAME | WindowOption::DISABLED).unwrap();
+    let dimensions = Dimensioni::new(320, 240);
+    ctx.update_ui(dimensions);
+
+    // The child has no local disabled flag, but its structural ancestry excludes its complete
+    // surface from input. The disabled surface still owns the point and does not click through.
+    let child_rect = ctx.debug_root_node_rect(child.id(), child_id).expect("structural child remains laid out");
+    let child_center = Vec2i::new(child_rect.x + child_rect.width / 2, child_rect.y + child_rect.height / 2);
+    ctx.mousedown(child_center.x, child_center.y, MouseButton::LEFT);
+    ctx.mouseup(child_center.x, child_center.y, MouseButton::LEFT);
+    ctx.update_ui(dimensions);
+    assert_eq!(child_checkbox.checked(), Some(false));
+
+    // A dialog is a distinct modal interaction root rather than structural content. Showing it
+    // above the disabled owner therefore provides the enabled surface needed to dismiss or edit it.
+    ctx.ui().set_window_visible(&dialog, true).unwrap();
+    ctx.update_ui(dimensions);
+    let dialog_rect = ctx.debug_root_node_rect(dialog.id(), dialog_id).expect("enabled dialog remains laid out");
+    let dialog_center = Vec2i::new(dialog_rect.x + dialog_rect.width / 2, dialog_rect.y + dialog_rect.height / 2);
+    ctx.mousedown(dialog_center.x, dialog_center.y, MouseButton::LEFT);
+    ctx.mouseup(dialog_center.x, dialog_center.y, MouseButton::LEFT);
+    ctx.update_ui(dimensions);
+    assert_eq!(dialog_checkbox.checked(), Some(true));
+}
+
 /// Verifies pointer location cannot recolor passive window and container backgrounds.
 #[test]
 fn window_and_container_backgrounds_ignore_hover_state_artwork() {

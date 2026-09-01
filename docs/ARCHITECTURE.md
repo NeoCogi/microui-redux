@@ -209,6 +209,14 @@ within-scope raising and changes only the manager's active surface, so every win
 its focused widget. An application popup closes before the switch; hidden roots are skipped, an
 intrinsic menu retains its narrower keyboard scope, and an active modal dialog cannot be escaped.
 
+`WindowOption::DISABLED` is independent from activation and visibility. A disabled root remains in
+layout, update, paint, and hit-test order so retained state stays current and its pixels still
+occlude lower windows, but it is excluded from pointer, keyboard, popup, menu, and chrome routing.
+Painting passes one explicit enabled fact through passive window chrome, the intrinsic menu, and
+the root widget runtime; it does not synthesize disabled state merely because a different window is
+active. Structural children inherit their parent's disabled policy. Modal dialogs own their policy
+independently, allowing an enabled dialog to remain usable above a disabled owner.
+
 The frontmost dialog replaces the ordinary active window as the keyboard scope while modal. An
 intrinsic menu opened by pointer, F10, or an unchorded Alt tap uses the same active `SurfaceKey` as
 windows and application popups. The root key denotes its intrinsic menu bar; each menu-popup key

@@ -70,12 +70,22 @@ impl UiRuntime {
         atlas: crate::AtlasHandle,
         focus_visible: bool,
         window_active: bool,
+        root_enabled: bool,
     ) {
         // Every runtime remembers focus independently, but only the manager-selected keyboard
         // surface may present it. This prevents passive windows and menu-suspended widgets from
         // showing simultaneous carets, fills, or outlines. Activation remains available to custom
         // widget paint code but does not rewrite the semantic state of enabled descendants.
-        if let Some(indicator) = self.paint_node_ref(root, self.root_transform, display_list, style, atlas, focus_visible, window_active, true) {
+        if let Some(indicator) = self.paint_node_ref(
+            root,
+            self.root_transform,
+            display_list,
+            style,
+            atlas,
+            focus_visible,
+            window_active,
+            root_enabled,
+        ) {
             indicator.record(display_list);
         }
     }
@@ -111,7 +121,13 @@ impl UiRuntime {
             // Semantic framing belongs beneath the widget's own paint and descendant paint.
             // A container frame describes passive structure rather than a selectable control, so
             // pointer hover and capture must not replace its background or border artwork.
-            let frame_state = if node.is_container() { crate::VisualState::Normal } else { visual_state };
+            let frame_state = if !enabled {
+                crate::VisualState::Disabled
+            } else if node.is_container() {
+                crate::VisualState::Normal
+            } else {
+                visual_state
+            };
             let mut painter = crate::render::Painter::screen_space(display_list, screen_clip);
             crate::ui_node::frame::paint_internal_frame(&mut painter, screen_rect, style.appearance(role, frame_state));
         }

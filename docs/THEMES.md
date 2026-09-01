@@ -165,6 +165,15 @@ use normal center artwork for the application body even when a resize edge is ho
 Interactive descendants, resize borders, caption controls, and the title remain free to resolve
 their own hover and pressed states while enabled.
 
+`WindowOption::DISABLED` is the explicit whole-window counterpart. It keeps the root visible and
+keeps its retained update traversal running, but resolves the passive frame/title roles, intrinsic
+menu bar, caption controls, and complete widget tree through `disabled`. It also rejects pointer,
+keyboard, popup, move, resize, and caption input while retaining focus for later re-enabling. A
+structural child window inherits a disabled structural parent; an owned modal dialog remains an
+independent root so it can stay enabled above a deliberately disabled owner. This policy is
+separate from ordinary activation: selecting another window never disables the former window's
+children.
+
 ## Window borders and caption controls
 
 `style.window_border` is the window's structural border thickness. Its four values drive client
