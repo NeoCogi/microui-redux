@@ -654,9 +654,17 @@ mod tests {
         assert_eq!(uploads, 13, "each shared PNG path must be uploaded exactly once");
         let insets = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (3, 3, 3, 3));
+        let active_title = loaded.style().appearance(AppearanceRole::WindowTitleActive, VisualState::Pressed);
+        assert!(matches!(active_title.content, crate::NinePatchContent::Image { image } if image.source.height == 16));
+
+        // Hovering or pressing an inactive frame must not borrow the darker active-frame bitmap.
+        // This guards the Platinum distinction before the manager supplies the later active state.
+        let normal_frame = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Normal);
+        let pressed_frame = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Pressed);
         assert!(matches!(
-            loaded.style().appearance(AppearanceRole::WindowTitleActive, VisualState::Pressed).content,
-            crate::NinePatchContent::Image { .. }
+            (normal_frame.content, pressed_frame.content),
+            (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: pressed })
+                if normal.texture == pressed.texture
         ));
     }
 }

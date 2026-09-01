@@ -18,15 +18,15 @@
       "title_text": [0, 0, 0, 255],
       "panel_background": [221, 221, 221, 255],
       "button": [221, 221, 221, 255],
-      "button_hover": [238, 238, 238, 255],
-      "input": [255, 255, 255, 255],
-      "input_hover": [255, 255, 255, 255],
+      "button_hover": [221, 221, 221, 255],
+      "input": [238, 238, 238, 255],
+      "input_hover": [238, 238, 238, 255],
       "scrollbar_track": [221, 221, 221, 255],
       "scrollbar_thumb": [221, 221, 221, 255],
-      "focus": [51, 102, 204, 255],
-      "window_focus": [136, 174, 232, 255],
+      "focus": [102, 102, 204, 255],
+      "window_focus": [204, 204, 204, 255],
       "menu_foreground": [0, 0, 0, 255],
-      "menu_background": [238, 238, 238, 255]
+      "menu_background": [221, 221, 221, 255]
     }
   },
   "appearances": {
@@ -126,7 +126,7 @@
       "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
       "normal": { "png": "window-frame.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
       "hovered": { "png": "window-frame.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-      "pressed": { "png": "window-frame-active.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+      "pressed": { "png": "window-frame.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
     },
     "window_frame_active": {
       "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
@@ -173,8 +173,8 @@
     "window_resize_grip": {
       "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
       "normal": { "png": "resize-grip.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 } },
-      "hovered": { "png": "resize-grip.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 }, "tint": [224, 235, 255, 255] },
-      "pressed": { "png": "resize-grip.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 }, "tint": [187, 211, 246, 255] }
+      "hovered": { "png": "resize-grip.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 } },
+      "pressed": { "png": "resize-grip.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 }, "tint": [187, 187, 187, 255] }
     }
   }
 }
