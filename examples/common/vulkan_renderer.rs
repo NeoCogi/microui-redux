@@ -46,14 +46,17 @@
 //! This module implements the `RendererBackend` trait, texture uploads, UI batching, swapchain handling,
 //! and optional custom mesh rendering for the demo application.
 
-use std::{collections::HashMap, convert::TryFrom, ffi::CString, io::Cursor, mem, ptr};
+use std::{collections::HashMap, convert::TryFrom, io::Cursor, mem, ptr};
 
 use ash::{khr, util::read_spv, vk, Entry};
 use microui_redux::{prelude::*, render::Vertex};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use sdl2::video::Window;
 
-use super::mesh::{CustomRenderArea, MeshSubmission, MeshVertex};
+use super::{
+    mesh::{CustomRenderArea, MeshSubmission, MeshVertex},
+    resource_guard::ResourceGuard,
+};
 
 type Result<T> = std::result::Result<T, String>;
 type Surface = khr::surface::Instance;
@@ -155,6 +158,38 @@ const UI_FRAG_SPV: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/
 const MESH_VERT_SPV: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/vulkan/mesh.vert.spv"));
 const MESH_FRAG_SPV: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/shaders/vulkan/mesh.frag.spv"));
 
+/// Creates exactly one graphics pipeline and destroys any handles returned alongside an error.
+///
+/// Vulkan may return a successful prefix in `Err((pipelines, error))`; simply mapping that error
+/// drops copyable handles without destroying them. Centralizing this unusual result shape keeps
+/// both example pipelines leak-free and also handles a non-conforming empty success defensively.
+fn create_single_graphics_pipeline(device: &ash::Device, info: vk::GraphicsPipelineCreateInfo<'_>) -> Result<vk::Pipeline> {
+    let infos = [info];
+    let pipelines = match unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &infos, None) } {
+        Ok(pipelines) => pipelines,
+        Err((partial, err)) => {
+            for pipeline in partial {
+                if pipeline != vk::Pipeline::null() {
+                    unsafe { device.destroy_pipeline(pipeline, None) };
+                }
+            }
+            return Err(format!("create_graphics_pipelines failed: {err:?}"));
+        }
+    };
+
+    let mut pipelines = pipelines.into_iter();
+    let pipeline = pipelines.next().ok_or_else(|| "create_graphics_pipelines returned no pipeline".to_string())?;
+    for unexpected in pipelines {
+        if unexpected != vk::Pipeline::null() {
+            unsafe { device.destroy_pipeline(unexpected, None) };
+        }
+    }
+    if pipeline == vk::Pipeline::null() {
+        return Err("create_graphics_pipelines returned a null pipeline".into());
+    }
+    Ok(pipeline)
+}
+
 /// Native swapchain image and synchronization slot acquired before display-list execution.
 struct AcquiredVulkanFrame {
     frame: usize,
@@ -243,23 +278,35 @@ impl VulkanRenderer {
     }
 
     /// Rebinds backend-owned texture descriptors after a swapchain/UI resource rebuild.
-    fn handle_swapchain_updates(&mut self) {
+    fn handle_swapchain_updates(&mut self) -> Result<()> {
         let generation = self.context.swapchain_generation();
         if self.last_swapchain_generation != generation {
-            self.last_swapchain_generation = generation;
             // Texture descriptor sets belong to the UI descriptor pool, so a swapchain/UI rebuild
-            // invalidates them even though the logical texture map stays the same.
-            if let Err(err) = self.rebind_texture_descriptors() {
-                eprintln!("[microui-redux][vulkan] failed to rebind texture descriptors: {err}");
-            }
+            // invalidates them even though the logical texture map stays the same. Publish the new
+            // generation only after every replacement descriptor has been allocated successfully.
+            self.rebind_texture_descriptors()?;
+            self.last_swapchain_generation = generation;
         }
+        Ok(())
     }
 
-    /// Allocates fresh descriptor sets for every backend-owned texture image.
+    /// Allocates fresh descriptors for every texture, committing none until the batch succeeds.
     fn rebind_texture_descriptors(&mut self) -> Result<()> {
-        for texture in self.textures.values_mut() {
+        let mut replacements = Vec::new();
+        replacements
+            .try_reserve(self.textures.len())
+            .map_err(|err| format!("failed to reserve descriptor replacement transaction: {err}"))?;
+        for (&id, texture) in &self.textures {
             let descriptor = self.context.allocate_texture_descriptor(&texture.image)?;
-            texture.descriptor_set = descriptor;
+            replacements.push((id, descriptor.guarded(&self.context.device)));
+        }
+
+        // No fallible operations remain. Old-generation descriptors refer to an already-destroyed
+        // pool and are invalidated without a Vulkan free; current-generation retry state is freed.
+        for (id, descriptor) in replacements {
+            let texture = self.textures.get_mut(&id).expect("rebind keys remain stable during the transaction");
+            self.context.free_texture_descriptor(&mut texture.descriptor);
+            texture.descriptor = descriptor.into_inner();
         }
         Ok(())
     }
@@ -303,7 +350,7 @@ impl VulkanFrameOps for VulkanRenderer {
         }
 
         self.ensure_swapchain_extent(self.width, self.height)?;
-        self.handle_swapchain_updates();
+        self.handle_swapchain_updates()?;
         Ok(())
     }
 
@@ -362,17 +409,29 @@ impl VulkanFrameOps for VulkanRenderer {
         if self.device_lost {
             return Err(String::from("Vulkan device is lost"));
         }
-        // The opaque capability is the sole dimension source validated by the core renderer.
+        self.textures
+            .try_reserve(1)
+            .map_err(|err| format!("failed to reserve texture ownership entry: {err}"))?;
+        // The opaque capability is the sole dimension source validated by the Context executor.
         let dimensions = id.size();
         let texture = self.context.create_texture_resource(dimensions.width, dimensions.height, pixels)?;
-        self.textures.insert(id, texture);
+        // A replacement is committed only after the new image is complete. Destroying the old
+        // image after insertion also keeps the map leak-free if an ID is retried unexpectedly.
+        if let Some(mut previous) = self.textures.insert(id, texture) {
+            previous.destroy(&self.context);
+        }
         Ok(())
     }
 
     /// Destroys a backend-owned sampled texture if it is still tracked.
     fn destroy_texture(&mut self, id: TextureId) {
         if let Some(mut texture) = self.textures.remove(&id) {
-            texture.image.destroy(&self.context.device);
+            // Texture destruction is rare in the examples; a simple idle boundary guarantees no
+            // submitted frame still samples the image before its view/memory are released.
+            unsafe {
+                self.context.device.device_wait_idle().ok();
+            }
+            texture.destroy(&self.context);
         }
     }
 
@@ -381,7 +440,7 @@ impl VulkanFrameOps for VulkanRenderer {
         if self.device_lost {
             return;
         }
-        let descriptor = match self.textures.get(&id).map(|tex| tex.descriptor_set) {
+        let descriptor = match self.textures.get(&id).map(|tex| tex.descriptor.set) {
             Some(desc) => desc,
             None => return,
         };
@@ -389,12 +448,12 @@ impl VulkanFrameOps for VulkanRenderer {
         let mut quad = Vec::with_capacity(6);
         quad.extend_from_slice(&[vertices[0], vertices[1], vertices[2], vertices[0], vertices[2], vertices[3]]);
 
-        // `Renderer` already clipped the quad and adjusted UVs, so the texture command's draw area
+        // The Context executor already clipped the quad and adjusted UVs, so the texture command's draw area
         // is just the submitted geometry bounds used to preserve ordering.
         let area_rect = rect_from_vertices(&vertices);
         let area = CustomRenderArea { rect: area_rect, clip: area_rect };
 
-        // Renderer owns the pre-texture ordering boundary.
+        // The Context executor owns the pre-texture ordering boundary.
         self.commands.push(FrameCommand::Custom(CustomRenderJob {
             area,
             kind: "texture",
@@ -408,6 +467,20 @@ impl VulkanFrameOps for VulkanRenderer {
                 mesh_indices: 0,
             },
         }));
+    }
+}
+
+impl Drop for VulkanRenderer {
+    /// Destroys user images while the context/device they depend on are still alive.
+    fn drop(&mut self) {
+        // `VulkanContext::drop` also waits, but renderer-owned images must be released before the
+        // context field itself is dropped. Establish the idle boundary here first.
+        unsafe {
+            self.context.device.device_wait_idle().ok();
+        }
+        for (_, mut texture) in self.textures.drain() {
+            texture.destroy(&self.context);
+        }
     }
 }
 
@@ -537,7 +610,38 @@ impl VulkanRenderer {
 
 struct VulkanTexture {
     image: ImageResource,
-    descriptor_set: vk::DescriptorSet,
+    descriptor: TextureDescriptor,
+}
+
+impl VulkanTexture {
+    /// Releases the individually allocated descriptor before destroying its referenced image.
+    fn destroy(&mut self, context: &VulkanContext) {
+        context.free_texture_descriptor(&mut self.descriptor);
+        self.image.destroy(&context.device);
+    }
+}
+
+/// Identifies both a descriptor set and the exact pool generation that owns its allocation.
+#[derive(Clone, Copy)]
+struct TextureDescriptor {
+    set: vk::DescriptorSet,
+    pool: vk::DescriptorPool,
+    generation: u64,
+}
+
+impl TextureDescriptor {
+    /// Arms reclamation for a newly allocated set until its texture or rebind batch commits.
+    fn guarded(self, device: &ash::Device) -> ResourceGuard<Self, impl FnOnce(Self) + use<>> {
+        let device = device.clone();
+        ResourceGuard::new(self, move |descriptor| unsafe {
+            let _ = device.free_descriptor_sets(descriptor.pool, &[descriptor.set]);
+        })
+    }
+
+    /// Requires generation as well as pool equality because Vulkan may reuse a destroyed handle.
+    fn belongs_to(self, generation: u64, pool: vk::DescriptorPool) -> bool {
+        self.generation == generation && self.pool == pool
+    }
 }
 
 struct Buffer {
@@ -547,10 +651,21 @@ struct Buffer {
 }
 
 impl Buffer {
+    /// Arms destruction for a complete buffer/memory pair until a parent owner commits it.
+    fn guarded(self, device: &ash::Device) -> ResourceGuard<Self, impl FnOnce(Self) + use<>> {
+        let device = device.clone();
+        ResourceGuard::new(self, move |mut buffer| buffer.destroy(&device))
+    }
+
+    /// Destroys the Vulkan buffer before releasing the memory bound to it.
     fn destroy(&mut self, device: &ash::Device) {
         unsafe {
-            device.destroy_buffer(self.buffer, None);
-            device.free_memory(self.memory, None);
+            if self.buffer != vk::Buffer::null() {
+                device.destroy_buffer(self.buffer, None);
+            }
+            if self.memory != vk::DeviceMemory::null() {
+                device.free_memory(self.memory, None);
+            }
         }
         self.buffer = vk::Buffer::null();
         self.memory = vk::DeviceMemory::null();
@@ -565,12 +680,15 @@ struct MappedBuffer {
 
 impl MappedBuffer {
     fn new(buffer: Buffer, device: &ash::Device) -> Result<Self> {
+        // Mapping is the final fallible step, but the passed buffer is not yet owned by any
+        // persistent structure. Guard it so a map failure releases both handle and memory.
+        let buffer = buffer.guarded(device);
         let ptr = unsafe {
             device
-                .map_memory(buffer.memory, 0, buffer.size, vk::MemoryMapFlags::empty())
+                .map_memory(buffer.get().memory, 0, buffer.get().size, vk::MemoryMapFlags::empty())
                 .map_err(|err| format!("map_memory (staging) failed: {err:?}"))?
         } as *mut u8;
-        Ok(Self { buffer, ptr })
+        Ok(Self { buffer: buffer.into_inner(), ptr })
     }
 
     fn size(&self) -> vk::DeviceSize {
@@ -801,11 +919,24 @@ fn opengl_to_vulkan_clip_matrix() -> Mat4f {
 }
 
 impl ImageResource {
+    /// Arms reverse-order destruction for a complete image/memory/view aggregate.
+    fn guarded(self, device: &ash::Device) -> ResourceGuard<Self, impl FnOnce(Self) + use<>> {
+        let device = device.clone();
+        ResourceGuard::new(self, move |mut image| image.destroy(&device))
+    }
+
+    /// Destroys the dependent view first, then the image and its backing allocation.
     fn destroy(&mut self, device: &ash::Device) {
         unsafe {
-            device.destroy_image_view(self.view, None);
-            device.destroy_image(self.image, None);
-            device.free_memory(self.memory, None);
+            if self.view != vk::ImageView::null() {
+                device.destroy_image_view(self.view, None);
+            }
+            if self.image != vk::Image::null() {
+                device.destroy_image(self.image, None);
+            }
+            if self.memory != vk::DeviceMemory::null() {
+                device.free_memory(self.memory, None);
+            }
         }
         self.image = vk::Image::null();
         self.memory = vk::DeviceMemory::null();
@@ -814,6 +945,8 @@ impl ImageResource {
 }
 
 const MAX_DESCRIPTOR_SETS: u32 = 128;
+/// Individual external textures must return descriptor capacity when their capabilities die.
+const DESCRIPTOR_POOL_FLAGS: vk::DescriptorPoolCreateFlags = vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET;
 
 struct UiResources {
     descriptor_set_layout: vk::DescriptorSetLayout,
@@ -851,26 +984,43 @@ impl UiResources {
 
     fn new(ctx: &VulkanContext) -> Result<Self> {
         let device = &ctx.device;
-        let descriptor_set_layout = Self::create_descriptor_set_layout(device)?;
-        let pipeline_layout = Self::create_pipeline_layout(device, descriptor_set_layout)?;
-        let pipeline = Self::create_pipeline(ctx, pipeline_layout)?;
-        let sampler = Self::create_sampler(device)?;
-        let descriptor_pool = Self::create_descriptor_pool(device)?;
-        let descriptor_set = Self::allocate_descriptor_set(device, descriptor_pool, descriptor_set_layout)?;
+        // UI setup is a six-stage transaction. Each independently destroyable handle remains
+        // guarded until descriptor allocation proves the complete resource set is usable.
+        let descriptor_set_layout = ResourceGuard::new(Self::create_descriptor_set_layout(device)?, |layout| unsafe {
+            device.destroy_descriptor_set_layout(layout, None)
+        });
+        let pipeline_layout = ResourceGuard::new(Self::create_pipeline_layout(device, *descriptor_set_layout.get())?, |layout| unsafe {
+            device.destroy_pipeline_layout(layout, None)
+        });
+        let pipeline = ResourceGuard::new(Self::create_pipeline(ctx, *pipeline_layout.get())?, |pipeline| unsafe {
+            device.destroy_pipeline(pipeline, None)
+        });
+        let sampler = ResourceGuard::new(Self::create_sampler(device)?, |sampler| unsafe { device.destroy_sampler(sampler, None) });
+        let descriptor_pool = ResourceGuard::new(Self::create_descriptor_pool(device)?, |pool| unsafe {
+            device.destroy_descriptor_pool(pool, None)
+        });
+        let descriptor_set = Self::allocate_descriptor_set(device, *descriptor_pool.get(), *descriptor_set_layout.get())?;
+
+        // Finish all potentially allocating CPU bookkeeping while the driver handles are still
+        // guarded. The struct literal below then only moves completed state into its final owner.
+        let staging_buffers = (0..ctx.max_frames_in_flight).map(|_| None).collect();
+        let staging_offsets = vec![0; ctx.max_frames_in_flight];
+        let retired_vertex_buffers = (0..ctx.max_frames_in_flight).map(|_| Vec::new()).collect();
+        let retired_staging_buffers = (0..ctx.max_frames_in_flight).map(|_| Vec::new()).collect();
         Ok(Self {
-            descriptor_set_layout,
-            pipeline_layout,
-            pipeline,
-            sampler,
-            descriptor_pool,
+            descriptor_set_layout: descriptor_set_layout.into_inner(),
+            pipeline_layout: pipeline_layout.into_inner(),
+            pipeline: pipeline.into_inner(),
+            sampler: sampler.into_inner(),
+            descriptor_pool: descriptor_pool.into_inner(),
             descriptor_set,
             vertex_buffer: None,
-            staging_buffers: (0..ctx.max_frames_in_flight).map(|_| None).collect(),
+            staging_buffers,
             atlas: None,
             vertex_offset: 0,
-            staging_offsets: vec![0; ctx.max_frames_in_flight],
-            retired_vertex_buffers: (0..ctx.max_frames_in_flight).map(|_| Vec::new()).collect(),
-            retired_staging_buffers: (0..ctx.max_frames_in_flight).map(|_| Vec::new()).collect(),
+            staging_offsets,
+            retired_vertex_buffers,
+            retired_staging_buffers,
         })
     }
 
@@ -933,19 +1083,25 @@ impl UiResources {
 
     fn create_pipeline(ctx: &VulkanContext, pipeline_layout: vk::PipelineLayout) -> Result<vk::Pipeline> {
         let device = &ctx.device;
-        let vert_module = Self::create_shader_module(device, UI_VERT_SPV)?;
-        let frag_module = Self::create_shader_module(device, UI_FRAG_SPV)?;
-        let entry = CString::new("main").unwrap();
+        // Shader modules are construction-only objects. Their guards intentionally remain armed
+        // on success, so they are destroyed as soon as pipeline creation returns.
+        let vert_module = ResourceGuard::new(Self::create_shader_module(device, UI_VERT_SPV)?, |module| unsafe {
+            device.destroy_shader_module(module, None)
+        });
+        let frag_module = ResourceGuard::new(Self::create_shader_module(device, UI_FRAG_SPV)?, |module| unsafe {
+            device.destroy_shader_module(module, None)
+        });
+        let entry = c"main";
         let stage_infos = [
             vk::PipelineShaderStageCreateInfo::builder()
                 .stage(vk::ShaderStageFlags::VERTEX)
-                .module(vert_module)
-                .name(&entry)
+                .module(*vert_module.get())
+                .name(entry)
                 .build(),
             vk::PipelineShaderStageCreateInfo::builder()
                 .stage(vk::ShaderStageFlags::FRAGMENT)
-                .module(frag_module)
-                .name(&entry)
+                .module(*frag_module.get())
+                .name(entry)
                 .build(),
         ];
 
@@ -1029,14 +1185,7 @@ impl UiResources {
             .layout(pipeline_layout)
             .render_pass(ctx.render_pass)
             .subpass(0);
-        let pipeline_infos = [pipeline_info.build()];
-        let pipeline = unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &pipeline_infos, None) }
-            .map_err(|(_, err)| format!("create_graphics_pipelines failed: {err:?}"))?[0];
-
-        unsafe {
-            device.destroy_shader_module(vert_module, None);
-            device.destroy_shader_module(frag_module, None);
-        }
+        let pipeline = create_single_graphics_pipeline(device, pipeline_info.build())?;
 
         Ok(pipeline)
     }
@@ -1058,7 +1207,12 @@ impl UiResources {
             .descriptor_count(MAX_DESCRIPTOR_SETS)
             .build();
         let pool_sizes = [pool_size];
-        let info = vk::DescriptorPoolCreateInfo::builder().pool_sizes(&pool_sizes).max_sets(MAX_DESCRIPTOR_SETS);
+        // External texture sets have independent lifetimes, so the pool must permit reclaiming
+        // each set instead of monotonically consuming `MAX_DESCRIPTOR_SETS` until recreation.
+        let info = vk::DescriptorPoolCreateInfo::builder()
+            .flags(DESCRIPTOR_POOL_FLAGS)
+            .pool_sizes(&pool_sizes)
+            .max_sets(MAX_DESCRIPTOR_SETS);
         unsafe { device.create_descriptor_pool(&info, None) }.map_err(|err| format!("create_descriptor_pool failed: {err:?}"))
     }
 
@@ -1069,10 +1223,14 @@ impl UiResources {
         Ok(sets[0])
     }
 
-    fn allocate_texture_descriptor(&mut self, ctx: &VulkanContext, image: &ImageResource) -> Result<vk::DescriptorSet> {
+    fn allocate_texture_descriptor(&mut self, ctx: &VulkanContext, image: &ImageResource) -> Result<TextureDescriptor> {
         let descriptor_set = Self::allocate_descriptor_set(&ctx.device, self.descriptor_pool, self.descriptor_set_layout)?;
         self.update_descriptor(&ctx.device, descriptor_set, image);
-        Ok(descriptor_set)
+        Ok(TextureDescriptor {
+            set: descriptor_set,
+            pool: self.descriptor_pool,
+            generation: ctx.swapchain_generation,
+        })
     }
 
     fn create_shader_module(device: &ash::Device, code: &[u8]) -> Result<vk::ShaderModule> {
@@ -1101,25 +1259,23 @@ impl UiResources {
         let width_u32 = u32::try_from(width).map_err(|_| "atlas width exceeds u32 range")?;
         let height_u32 = u32::try_from(height).map_err(|_| "atlas height exceeds u32 range")?;
 
-        debug_assert!(self.atlas.is_none());
-        self.atlas = Some(ctx.create_image_resource(width_u32, height_u32)?);
+        // Keep both upload resources pending until the transfer and descriptor update complete;
+        // an error leaves any previously installed atlas untouched.
+        let mut atlas_image = ctx.create_image_resource(width_u32, height_u32)?.guarded(&ctx.device);
+        let staging = ctx
+            .create_buffer(
+                data.len() as u64,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            )?
+            .guarded(&ctx.device);
+        ctx.write_buffer(staging.get(), &data)?;
+        ctx.copy_buffer_to_image(staging.get(), atlas_image.get_mut())?;
+        self.update_descriptor(&ctx.device, self.descriptor_set, atlas_image.get());
 
-        let staging = ctx.create_buffer(
-            data.len() as u64,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
-        ctx.write_buffer(&staging, &data)?;
-
-        if let Some(atlas_image) = self.atlas.as_mut() {
-            ctx.copy_buffer_to_image(&staging, atlas_image)?;
+        if let Some(mut previous) = self.atlas.replace(atlas_image.into_inner()) {
+            previous.destroy(&ctx.device);
         }
-        if let Some(atlas_image) = self.atlas.as_ref() {
-            self.update_descriptor(&ctx.device, self.descriptor_set, atlas_image);
-        }
-
-        let mut staging = staging;
-        staging.destroy(&ctx.device);
         Ok(())
     }
 
@@ -1149,15 +1305,15 @@ impl UiResources {
                 return Err(format!("invalid frame index for UI retired vertex buffers: {}", frame));
             }
             let new_capacity = Self::grow_capacity(current_capacity, required, Self::MIN_VERTEX_CAPACITY);
-            if let Some(buffer) = self.vertex_buffer.take() {
-                self.retired_vertex_buffers[frame].push(buffer);
-            }
+            // Allocate first; only a successful replacement retires the still-usable old buffer.
             let buffer = ctx.create_buffer(
                 new_capacity,
                 vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
                 vk::MemoryPropertyFlags::DEVICE_LOCAL,
             )?;
-            self.vertex_buffer = Some(buffer);
+            if let Some(previous) = self.vertex_buffer.replace(buffer) {
+                self.retired_vertex_buffers[frame].push(previous);
+            }
             self.vertex_offset = 0;
         }
         Ok(())
@@ -1171,16 +1327,15 @@ impl UiResources {
         let needs_realloc = current_capacity.map(|cap| cap < required_total).unwrap_or(true);
         if needs_realloc {
             let new_capacity = Self::grow_capacity(current_capacity, required_total, Self::MIN_STAGING_CAPACITY);
-            if let Some(buffer) = self.staging_buffers[frame].take() {
-                self.retired_staging_buffers[frame].push(buffer);
-            }
             let buffer = ctx.create_buffer(
                 new_capacity,
                 vk::BufferUsageFlags::TRANSFER_SRC,
                 vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             )?;
             let mapped = MappedBuffer::new(buffer, &ctx.device)?;
-            self.staging_buffers[frame] = Some(mapped);
+            if let Some(previous) = self.staging_buffers[frame].replace(mapped) {
+                self.retired_staging_buffers[frame].push(previous);
+            }
             self.staging_offsets[frame] = 0;
         }
         Ok(())
@@ -1394,21 +1549,30 @@ impl MeshResources {
             .size((std::mem::size_of::<f32>() * 32) as u32)
             .build();
         let layout_info = vk::PipelineLayoutCreateInfo::builder().push_constant_ranges(std::slice::from_ref(&push_range));
-        let pipeline_layout = unsafe { device.create_pipeline_layout(&layout_info, None) }.map_err(|err| format!("create_pipeline_layout failed: {err:?}"))?;
+        // Keep the layout and temporary shader modules owned until the graphics pipeline is
+        // complete. Any intermediate driver failure then unwinds through the exact destructors.
+        let pipeline_layout = ResourceGuard::new(
+            unsafe { device.create_pipeline_layout(&layout_info, None) }.map_err(|err| format!("create_pipeline_layout failed: {err:?}"))?,
+            |layout| unsafe { device.destroy_pipeline_layout(layout, None) },
+        );
 
-        let vert_module = Self::create_shader_module(device, MESH_VERT_SPV)?;
-        let frag_module = Self::create_shader_module(device, MESH_FRAG_SPV)?;
-        let entry = CString::new("main").unwrap();
+        let vert_module = ResourceGuard::new(Self::create_shader_module(device, MESH_VERT_SPV)?, |module| unsafe {
+            device.destroy_shader_module(module, None)
+        });
+        let frag_module = ResourceGuard::new(Self::create_shader_module(device, MESH_FRAG_SPV)?, |module| unsafe {
+            device.destroy_shader_module(module, None)
+        });
+        let entry = c"main";
         let stages = [
             vk::PipelineShaderStageCreateInfo::builder()
                 .stage(vk::ShaderStageFlags::VERTEX)
-                .module(vert_module)
-                .name(&entry)
+                .module(*vert_module.get())
+                .name(entry)
                 .build(),
             vk::PipelineShaderStageCreateInfo::builder()
                 .stage(vk::ShaderStageFlags::FRAGMENT)
-                .module(frag_module)
-                .name(&entry)
+                .module(*frag_module.get())
+                .name(entry)
                 .build(),
         ];
 
@@ -1481,22 +1645,24 @@ impl MeshResources {
             .depth_stencil_state(&depth_stencil)
             .color_blend_state(&color_blend)
             .dynamic_state(&dynamic_state)
-            .layout(pipeline_layout)
+            .layout(*pipeline_layout.get())
             .render_pass(ctx.render_pass)
             .subpass(0);
 
-        let pipeline_infos = [pipeline_info.build()];
-        let pipeline = unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &pipeline_infos, None) }
-            .map_err(|(_, err)| format!("create_graphics_pipelines failed: {err:?}"))?[0];
+        let pipeline = ResourceGuard::new(create_single_graphics_pipeline(device, pipeline_info.build())?, |pipeline| unsafe {
+            device.destroy_pipeline(pipeline, None)
+        });
 
-        unsafe {
-            device.destroy_shader_module(vert_module, None);
-            device.destroy_shader_module(frag_module, None);
-        }
+        // Allocate frame bins before committing either driver handle, preserving unwind safety
+        // even if host allocation panics while the aggregate is being assembled.
+        let retired_vertex_buffers = (0..ctx.max_frames_in_flight).map(|_| Vec::new()).collect();
+        let retired_index_buffers = (0..ctx.max_frames_in_flight).map(|_| Vec::new()).collect();
+        let retired_vertex_staging = (0..ctx.max_frames_in_flight).map(|_| Vec::new()).collect();
+        let retired_index_staging = (0..ctx.max_frames_in_flight).map(|_| Vec::new()).collect();
 
         Ok(Self {
-            pipeline_layout,
-            pipeline,
+            pipeline_layout: pipeline_layout.into_inner(),
+            pipeline: pipeline.into_inner(),
             vertex_buffer: None,
             index_buffer: None,
             vertex_staging: None,
@@ -1505,10 +1671,10 @@ impl MeshResources {
             vertex_staging_offset: 0,
             index_offset: 0,
             index_staging_offset: 0,
-            retired_vertex_buffers: (0..ctx.max_frames_in_flight).map(|_| Vec::new()).collect(),
-            retired_index_buffers: (0..ctx.max_frames_in_flight).map(|_| Vec::new()).collect(),
-            retired_vertex_staging: (0..ctx.max_frames_in_flight).map(|_| Vec::new()).collect(),
-            retired_index_staging: (0..ctx.max_frames_in_flight).map(|_| Vec::new()).collect(),
+            retired_vertex_buffers,
+            retired_index_buffers,
+            retired_vertex_staging,
+            retired_index_staging,
             depth_enabled,
         })
     }
@@ -1562,15 +1728,14 @@ impl MeshResources {
                 return Err(format!("invalid frame index for mesh retired vertex buffers: {}", frame));
             }
             let new_capacity = Self::grow_capacity(current_capacity, required_total, Self::MIN_VERTEX_CAPACITY);
-            if let Some(buffer) = self.vertex_buffer.take() {
-                self.retired_vertex_buffers[frame].push(buffer);
-            }
             let buffer = ctx.create_buffer(
                 new_capacity,
                 vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
                 vk::MemoryPropertyFlags::DEVICE_LOCAL,
             )?;
-            self.vertex_buffer = Some(buffer);
+            if let Some(previous) = self.vertex_buffer.replace(buffer) {
+                self.retired_vertex_buffers[frame].push(previous);
+            }
             self.vertex_offset = 0;
         }
         Ok(())
@@ -1584,15 +1749,14 @@ impl MeshResources {
                 return Err(format!("invalid frame index for mesh retired index buffers: {}", frame));
             }
             let new_capacity = Self::grow_capacity(current_capacity, required_total, Self::MIN_INDEX_CAPACITY);
-            if let Some(buffer) = self.index_buffer.take() {
-                self.retired_index_buffers[frame].push(buffer);
-            }
             let buffer = ctx.create_buffer(
                 new_capacity,
                 vk::BufferUsageFlags::INDEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
                 vk::MemoryPropertyFlags::DEVICE_LOCAL,
             )?;
-            self.index_buffer = Some(buffer);
+            if let Some(previous) = self.index_buffer.replace(buffer) {
+                self.retired_index_buffers[frame].push(previous);
+            }
             self.index_offset = 0;
         }
         Ok(())
@@ -1606,16 +1770,15 @@ impl MeshResources {
                 return Err(format!("invalid frame index for mesh retired vertex staging buffers: {}", frame));
             }
             let new_capacity = Self::grow_capacity(current_capacity, required_total, Self::MIN_VERTEX_STAGING_CAPACITY);
-            if let Some(buffer) = self.vertex_staging.take() {
-                self.retired_vertex_staging[frame].push(buffer);
-            }
             let buffer = ctx.create_buffer(
                 new_capacity,
                 vk::BufferUsageFlags::TRANSFER_SRC,
                 vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             )?;
             let mapped = MappedBuffer::new(buffer, &ctx.device)?;
-            self.vertex_staging = Some(mapped);
+            if let Some(previous) = self.vertex_staging.replace(mapped) {
+                self.retired_vertex_staging[frame].push(previous);
+            }
             self.vertex_staging_offset = 0;
         }
         Ok(())
@@ -1629,16 +1792,15 @@ impl MeshResources {
                 return Err(format!("invalid frame index for mesh retired index staging buffers: {}", frame));
             }
             let new_capacity = Self::grow_capacity(current_capacity, required_total, Self::MIN_INDEX_STAGING_CAPACITY);
-            if let Some(buffer) = self.index_staging.take() {
-                self.retired_index_staging[frame].push(buffer);
-            }
             let buffer = ctx.create_buffer(
                 new_capacity,
                 vk::BufferUsageFlags::TRANSFER_SRC,
                 vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             )?;
             let mapped = MappedBuffer::new(buffer, &ctx.device)?;
-            self.index_staging = Some(mapped);
+            if let Some(previous) = self.index_staging.replace(mapped) {
+                self.retired_index_staging[frame].push(previous);
+            }
             self.index_staging_offset = 0;
         }
         Ok(())
@@ -1805,6 +1967,72 @@ impl MeshResources {
         unsafe { device.create_shader_module(&info, None) }.map_err(|err| format!("create_shader_module failed: {err:?}"))
     }
 }
+/// Owns the native objects acquired before a full [`VulkanContext`] can exist.
+///
+/// `VulkanContext::drop` cannot help while instance/surface/device creation is only partially
+/// complete. This bootstrap owner mirrors their dependency order and is disarmed only after the
+/// last fallible discovery step succeeds.
+struct VulkanBootstrap {
+    instance: Option<ash::Instance>,
+    surface_loader: Option<Surface>,
+    surface: vk::SurfaceKHR,
+    device: Option<ash::Device>,
+}
+
+impl VulkanBootstrap {
+    fn new(instance: ash::Instance) -> Self {
+        Self {
+            instance: Some(instance),
+            surface_loader: None,
+            surface: vk::SurfaceKHR::null(),
+            device: None,
+        }
+    }
+
+    fn instance(&self) -> &ash::Instance {
+        self.instance.as_ref().expect("bootstrap instance is present before commit")
+    }
+
+    fn surface_loader(&self) -> &Surface {
+        self.surface_loader.as_ref().expect("bootstrap surface loader is installed with the surface")
+    }
+
+    fn device(&self) -> &ash::Device {
+        self.device.as_ref().expect("bootstrap device is present after logical-device creation")
+    }
+
+    /// Transfers the completed native ownership chain into `VulkanContext`.
+    fn commit(mut self) -> (ash::Instance, Surface, vk::SurfaceKHR, ash::Device) {
+        let surface = std::mem::replace(&mut self.surface, vk::SurfaceKHR::null());
+        (
+            self.instance.take().expect("bootstrap instance cannot be committed twice"),
+            self.surface_loader.take().expect("bootstrap surface loader cannot be committed twice"),
+            surface,
+            self.device.take().expect("bootstrap device cannot be committed twice"),
+        )
+    }
+}
+
+impl Drop for VulkanBootstrap {
+    /// Tears down only the prefix that was acquired, in reverse dependency order.
+    fn drop(&mut self) {
+        unsafe {
+            if let Some(device) = self.device.take() {
+                device.destroy_device(None);
+            }
+            if self.surface != vk::SurfaceKHR::null() {
+                if let Some(loader) = self.surface_loader.as_ref() {
+                    loader.destroy_surface(self.surface, None);
+                }
+                self.surface = vk::SurfaceKHR::null();
+            }
+            if let Some(instance) = self.instance.take() {
+                instance.destroy_instance(None);
+            }
+        }
+    }
+}
+
 pub(crate) struct VulkanContext {
     // `VulkanContext` owns the actual Vulkan objects and implements the frame graph used by the
     // example renderer: acquire -> upload/record -> submit -> present -> recreate on demand.
@@ -1852,8 +2080,8 @@ impl VulkanContext {
         // Context creation front-loads the permanent objects: instance/device/queues, the shared
         // command pool, and the initial swapchain-dependent resources.
         let entry = Entry::linked();
-        let app_name = CString::new("microui-redux-examples").unwrap();
-        let engine_name = CString::new("microui-redux").unwrap();
+        let app_name = c"microui-redux-examples";
+        let engine_name = c"microui-redux";
 
         let display_handle = window.display_handle().map_err(|err| format!("failed to get display handle: {err:?}"))?;
         let window_handle = window.window_handle().map_err(|err| format!("failed to get window handle: {err:?}"))?;
@@ -1861,8 +2089,8 @@ impl VulkanContext {
         let raw_window_handle = window_handle.into();
 
         let app_info = vk::ApplicationInfo::builder()
-            .application_name(&app_name)
-            .engine_name(&engine_name)
+            .application_name(app_name)
+            .engine_name(engine_name)
             .api_version(vk::API_VERSION_1_1)
             .build();
 
@@ -1879,19 +2107,24 @@ impl VulkanContext {
             .enabled_extension_names(&extension_names)
             .build();
         let instance = unsafe { entry.create_instance(&instance_info, None) }.map_err(|err| format!("create_instance failed: {err:?}"))?;
+        let mut bootstrap = VulkanBootstrap::new(instance);
 
-        let surface = unsafe { ash_window_handle::create_surface(&entry, &instance, raw_display_handle, raw_window_handle, None) }
+        let surface_loader = Surface::new(&entry, bootstrap.instance());
+        bootstrap.surface_loader = Some(surface_loader);
+        let surface = unsafe { ash_window_handle::create_surface(&entry, bootstrap.instance(), raw_display_handle, raw_window_handle, None) }
             .map_err(|err| format!("create_surface failed: {err:?}"))?;
-        let surface_loader = Surface::new(&entry, &instance);
+        bootstrap.surface = surface;
 
-        let (physical_device, queue_indices) = Self::select_physical_device(&instance, &surface_loader, surface)?;
+        let (physical_device, queue_indices) = Self::select_physical_device(bootstrap.instance(), bootstrap.surface_loader(), surface)?;
 
-        let device = Self::create_logical_device(&instance, physical_device, &queue_indices)?;
-        let graphics_queue = unsafe { device.get_device_queue(queue_indices.graphics_family, 0) };
-        let present_queue = unsafe { device.get_device_queue(queue_indices.present_family, 0) };
+        let device = Self::create_logical_device(bootstrap.instance(), physical_device, &queue_indices)?;
+        bootstrap.device = Some(device);
+        let graphics_queue = unsafe { bootstrap.device().get_device_queue(queue_indices.graphics_family, 0) };
+        let present_queue = unsafe { bootstrap.device().get_device_queue(queue_indices.present_family, 0) };
 
+        let depth_format = Self::find_depth_format(bootstrap.instance(), physical_device)?;
+        let (instance, surface_loader, surface, device) = bootstrap.commit();
         let swapchain_loader = Swapchain::new(&instance, &device);
-        let depth_format = Self::find_depth_format(&instance, physical_device)?;
 
         let mut ctx = Self {
             entry,
@@ -2047,7 +2280,7 @@ impl VulkanContext {
             // The UI pipeline references the old render pass / descriptor pool, so it must be
             // recreated after any swapchain rebuild as well. The atlas image itself is independent
             // of the swapchain, so preserve it across the rebuild.
-            let atlas = ui.atlas.take();
+            let atlas = ui.atlas.take().map(|atlas| atlas.guarded(&self.device));
             ui.destroy(&self.device);
             atlas
         } else {
@@ -2055,8 +2288,8 @@ impl VulkanContext {
         };
         let mut ui = UiResources::new(self)?;
         if let Some(atlas) = preserved_atlas {
-            ui.update_descriptor(&self.device, ui.descriptor_set, &atlas);
-            ui.atlas = Some(atlas);
+            ui.update_descriptor(&self.device, ui.descriptor_set, atlas.get());
+            ui.atlas = Some(atlas.into_inner());
         }
         self.ui = Some(ui);
         self.swapchain_generation = self.swapchain_generation.wrapping_add(1);
@@ -2114,9 +2347,18 @@ impl VulkanContext {
                 .queue_family_indices(&queue_family_indices);
         }
 
-        self.swapchain = unsafe { self.swapchain_loader.create_swapchain(&create_info, None) }.map_err(|err| format!("create_swapchain failed: {err:?}"))?;
-        self.swapchain_images =
-            unsafe { self.swapchain_loader.get_swapchain_images(self.swapchain) }.map_err(|err| format!("get_swapchain_images failed: {err:?}"))?;
+        // Do not publish a swapchain until its image list can also be queried. The guard closes
+        // the otherwise easy-to-miss leak when `get_swapchain_images` fails.
+        let swapchain = ResourceGuard::new(
+            unsafe { self.swapchain_loader.create_swapchain(&create_info, None) }.map_err(|err| format!("create_swapchain failed: {err:?}"))?,
+            |swapchain| unsafe { self.swapchain_loader.destroy_swapchain(swapchain, None) },
+        );
+        let images = unsafe { self.swapchain_loader.get_swapchain_images(*swapchain.get()) }.map_err(|err| format!("get_swapchain_images failed: {err:?}"))?;
+        let previous = std::mem::replace(&mut self.swapchain, swapchain.into_inner());
+        if previous != vk::SwapchainKHR::null() {
+            unsafe { self.swapchain_loader.destroy_swapchain(previous, None) };
+        }
+        self.swapchain_images = images;
         self.swapchain_format = surface_format.format;
         self.extent = extent;
 
@@ -2125,32 +2367,36 @@ impl VulkanContext {
 
     /// Creates image views for every swapchain image.
     fn create_image_views(&mut self) -> Result<()> {
-        self.swapchain_image_views = self
-            .swapchain_images
-            .iter()
-            .map(|&image| {
-                let components = vk::ComponentMapping {
-                    r: vk::ComponentSwizzle::IDENTITY,
-                    g: vk::ComponentSwizzle::IDENTITY,
-                    b: vk::ComponentSwizzle::IDENTITY,
-                    a: vk::ComponentSwizzle::IDENTITY,
-                };
-                let subresource_range = vk::ImageSubresourceRange {
-                    aspect_mask: vk::ImageAspectFlags::COLOR,
-                    base_mip_level: 0,
-                    level_count: 1,
-                    base_array_layer: 0,
-                    layer_count: 1,
-                };
-                let view_info = vk::ImageViewCreateInfo::builder()
-                    .image(image)
-                    .view_type(vk::ImageViewType::TYPE_2D)
-                    .format(self.swapchain_format)
-                    .components(components)
-                    .subresource_range(subresource_range);
-                unsafe { self.device.create_image_view(&view_info, None) }.map_err(|err| format!("create_image_view failed: {err:?}"))
-            })
-            .collect::<Result<Vec<_>>>()?;
+        // Keep every newly created view guarded until the full image set succeeds; `collect` over
+        // raw Vulkan handles would leak the successful prefix on the first error.
+        let mut pending = Vec::with_capacity(self.swapchain_images.len());
+        for &image in &self.swapchain_images {
+            let components = vk::ComponentMapping {
+                r: vk::ComponentSwizzle::IDENTITY,
+                g: vk::ComponentSwizzle::IDENTITY,
+                b: vk::ComponentSwizzle::IDENTITY,
+                a: vk::ComponentSwizzle::IDENTITY,
+            };
+            let subresource_range = vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            };
+            let view_info = vk::ImageViewCreateInfo::builder()
+                .image(image)
+                .view_type(vk::ImageViewType::TYPE_2D)
+                .format(self.swapchain_format)
+                .components(components)
+                .subresource_range(subresource_range);
+            let view = unsafe { self.device.create_image_view(&view_info, None) }.map_err(|err| format!("create_image_view failed: {err:?}"))?;
+            pending.push(ResourceGuard::new(view, |view| unsafe { self.device.destroy_image_view(view, None) }));
+        }
+        let views = pending.into_iter().map(|view| view.into_inner()).collect();
+        for previous in std::mem::replace(&mut self.swapchain_image_views, views) {
+            unsafe { self.device.destroy_image_view(previous, None) };
+        }
         Ok(())
     }
 
@@ -2214,22 +2460,23 @@ impl VulkanContext {
 
     /// Creates one framebuffer per swapchain image view.
     fn create_framebuffers(&self) -> Result<Vec<vk::Framebuffer>> {
-        self.swapchain_image_views
-            .iter()
-            .enumerate()
-            .map(|(index, &view)| {
-                let depth_view = self.depth_images.get(index).map(|image| image.view).unwrap_or(vk::ImageView::null());
-                let attachments = [view, depth_view];
-                let framebuffer_info = vk::FramebufferCreateInfo::builder()
-                    .render_pass(self.render_pass)
-                    .attachments(&attachments)
-                    .width(self.extent.width)
-                    .height(self.extent.height)
-                    .layers(1);
-
-                unsafe { self.device.create_framebuffer(&framebuffer_info, None) }.map_err(|err| format!("create_framebuffer failed: {err:?}"))
-            })
-            .collect()
+        let mut pending = Vec::with_capacity(self.swapchain_image_views.len());
+        for (index, &view) in self.swapchain_image_views.iter().enumerate() {
+            let depth_view = self.depth_images.get(index).map(|image| image.view).unwrap_or(vk::ImageView::null());
+            let attachments = [view, depth_view];
+            let framebuffer_info = vk::FramebufferCreateInfo::builder()
+                .render_pass(self.render_pass)
+                .attachments(&attachments)
+                .width(self.extent.width)
+                .height(self.extent.height)
+                .layers(1);
+            let framebuffer =
+                unsafe { self.device.create_framebuffer(&framebuffer_info, None) }.map_err(|err| format!("create_framebuffer failed: {err:?}"))?;
+            pending.push(ResourceGuard::new(framebuffer, |framebuffer| unsafe {
+                self.device.destroy_framebuffer(framebuffer, None)
+            }));
+        }
+        Ok(pending.into_iter().map(|framebuffer| framebuffer.into_inner()).collect())
     }
 
     /// Creates the shared command pool used for graphics and transient copy work.
@@ -2242,35 +2489,31 @@ impl VulkanContext {
 
     /// Allocates one graphics command buffer per swapchain image.
     fn allocate_command_buffers(&mut self) -> Result<()> {
-        if !self.command_buffers.is_empty() {
-            unsafe {
-                self.device.free_command_buffers(self.command_pool, &self.command_buffers);
-            }
-        }
-
         let alloc_info = vk::CommandBufferAllocateInfo::builder()
             .command_pool(self.command_pool)
             .level(vk::CommandBufferLevel::PRIMARY)
             .command_buffer_count(self.framebuffers.len() as u32);
-        self.command_buffers =
-            unsafe { self.device.allocate_command_buffers(&alloc_info) }.map_err(|err| format!("allocate_command_buffers failed: {err:?}"))?;
+        // Allocate replacement buffers before releasing the currently valid set.
+        let buffers = unsafe { self.device.allocate_command_buffers(&alloc_info) }.map_err(|err| format!("allocate_command_buffers failed: {err:?}"))?;
+        let previous = std::mem::replace(&mut self.command_buffers, buffers);
+        if !previous.is_empty() {
+            unsafe { self.device.free_command_buffers(self.command_pool, &previous) };
+        }
         Ok(())
     }
 
     /// Allocates reusable transfer command buffers, one per frame-in-flight slot.
     fn allocate_transfer_command_buffers(&mut self) -> Result<()> {
-        if !self.transfer_command_buffers.is_empty() {
-            unsafe {
-                self.device.free_command_buffers(self.command_pool, &self.transfer_command_buffers);
-            }
-        }
-
         let alloc_info = vk::CommandBufferAllocateInfo::builder()
             .command_pool(self.command_pool)
             .level(vk::CommandBufferLevel::PRIMARY)
             .command_buffer_count(self.max_frames_in_flight as u32);
-        self.transfer_command_buffers =
+        let buffers =
             unsafe { self.device.allocate_command_buffers(&alloc_info) }.map_err(|err| format!("allocate_command_buffers (transfer) failed: {err:?}"))?;
+        let previous = std::mem::replace(&mut self.transfer_command_buffers, buffers);
+        if !previous.is_empty() {
+            unsafe { self.device.free_command_buffers(self.command_pool, &previous) };
+        }
         self.transfer_recording = vec![false; self.max_frames_in_flight];
         self.transfer_has_work = vec![false; self.max_frames_in_flight];
         Ok(())
@@ -2281,35 +2524,58 @@ impl VulkanContext {
         let semaphore_info = vk::SemaphoreCreateInfo::default();
         let fence_info = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED).build();
 
-        self.image_available_semaphores.clear();
-        self.render_finished_semaphores.clear();
-        self.in_flight_fences.clear();
-        self.transfer_complete_semaphores.clear();
+        // Build a complete replacement set under guards. A failure in any frame slot destroys all
+        // semaphores/fences created for earlier slots and preserves the installed set.
+        let mut image_available = Vec::with_capacity(self.max_frames_in_flight);
+        let mut render_finished = Vec::with_capacity(self.max_frames_in_flight);
+        let mut transfer_complete = Vec::with_capacity(self.max_frames_in_flight);
+        let mut fences = Vec::with_capacity(self.max_frames_in_flight);
 
         for _ in 0..self.max_frames_in_flight {
             unsafe {
-                let image_available = self
+                let image_available_handle = self
                     .device
                     .create_semaphore(&semaphore_info, None)
                     .map_err(|err| format!("create_semaphore failed: {err:?}"))?;
-                let render_finished = self
+                let image_available_guard = ResourceGuard::new(image_available_handle, |semaphore| self.device.destroy_semaphore(semaphore, None));
+                let render_finished_handle = self
                     .device
                     .create_semaphore(&semaphore_info, None)
                     .map_err(|err| format!("create_semaphore failed: {err:?}"))?;
-                let transfer_complete = self
+                let render_finished_guard = ResourceGuard::new(render_finished_handle, |semaphore| self.device.destroy_semaphore(semaphore, None));
+                let transfer_complete_handle = self
                     .device
                     .create_semaphore(&semaphore_info, None)
                     .map_err(|err| format!("create_semaphore failed: {err:?}"))?;
-                let fence = self
+                let transfer_complete_guard = ResourceGuard::new(transfer_complete_handle, |semaphore| self.device.destroy_semaphore(semaphore, None));
+                let fence_handle = self
                     .device
                     .create_fence(&fence_info, None)
                     .map_err(|err| format!("create_fence failed: {err:?}"))?;
+                let fence_guard = ResourceGuard::new(fence_handle, |fence| self.device.destroy_fence(fence, None));
 
-                self.image_available_semaphores.push(image_available);
-                self.render_finished_semaphores.push(render_finished);
-                self.transfer_complete_semaphores.push(transfer_complete);
-                self.in_flight_fences.push(fence);
+                image_available.push(image_available_guard);
+                render_finished.push(render_finished_guard);
+                transfer_complete.push(transfer_complete_guard);
+                fences.push(fence_guard);
             }
+        }
+
+        let image_available = image_available.into_iter().map(|guard| guard.into_inner()).collect();
+        let render_finished = render_finished.into_iter().map(|guard| guard.into_inner()).collect();
+        let transfer_complete = transfer_complete.into_iter().map(|guard| guard.into_inner()).collect();
+        let fences = fences.into_iter().map(|guard| guard.into_inner()).collect();
+        for semaphore in std::mem::replace(&mut self.image_available_semaphores, image_available) {
+            unsafe { self.device.destroy_semaphore(semaphore, None) };
+        }
+        for semaphore in std::mem::replace(&mut self.render_finished_semaphores, render_finished) {
+            unsafe { self.device.destroy_semaphore(semaphore, None) };
+        }
+        for semaphore in std::mem::replace(&mut self.transfer_complete_semaphores, transfer_complete) {
+            unsafe { self.device.destroy_semaphore(semaphore, None) };
+        }
+        for fence in std::mem::replace(&mut self.in_flight_fences, fences) {
+            unsafe { self.device.destroy_fence(fence, None) };
         }
 
         Ok(())
@@ -2578,41 +2844,47 @@ impl VulkanContext {
         let frame_width = width.max(1);
         let frame_height = height.max(1);
         let mut cursor = 0;
+        // UI resources must be moved out to satisfy the callback borrow pattern. Run recording in
+        // a local transaction, then restore the aggregate before propagating any error; destroying
+        // it here would also be unsafe while another frame may still reference its pipeline.
         let mut ui = self.ui.take();
-
-        for command in commands.drain(..) {
-            match command {
-                FrameCommand::DrawTo(end_index) => {
-                    if let Some(ref mut ui) = ui {
-                        let end = end_index.min(vertices.len());
-                        if end <= cursor {
-                            continue;
+        let record_result: Result<()> = (|| {
+            for command in commands.drain(..) {
+                match command {
+                    FrameCommand::DrawTo(end_index) => {
+                        if let Some(ref mut ui) = ui {
+                            let end = end_index.min(vertices.len());
+                            if end <= cursor {
+                                continue;
+                            }
+                            ui.record(self, command_buffer, &vertices[cursor..end], frame_width, frame_height)?;
+                            cursor = end;
                         }
-                        ui.record(self, command_buffer, &vertices[cursor..end], frame_width, frame_height)?;
-                        cursor = end;
                     }
-                }
-                FrameCommand::Custom(mut job) => {
-                    // Custom callbacks may need mutable access to the context and its helper
-                    // recorders. Temporarily returning UI resources to `self` avoids nested
-                    // mutable borrows while keeping command ordering intact.
-                    if let Some(ui_resources) = ui.take() {
-                        self.ui = Some(ui_resources);
+                    FrameCommand::Custom(mut job) => {
+                        // Custom callbacks may need mutable access to the context and its helper
+                        // recorders. Temporarily returning UI resources to `self` avoids nested
+                        // mutable borrows while keeping command ordering intact.
+                        if let Some(ui_resources) = ui.take() {
+                            self.ui = Some(ui_resources);
+                        }
+                        job.callback.record(self, command_buffer, self.extent, &job.area);
+                        ui = self.ui.take();
                     }
-                    job.callback.record(self, command_buffer, self.extent, &job.area);
-                    ui = self.ui.take();
                 }
             }
-        }
 
-        if let Some(mut ui) = ui {
-            if cursor < vertices.len() {
+            if let Some(ref mut ui) = ui
+                && cursor < vertices.len()
+            {
                 ui.record(self, command_buffer, &vertices[cursor..], frame_width, frame_height)?;
             }
+            Ok(())
+        })();
+        if let Some(ui) = ui {
             self.ui = Some(ui);
-        } else if self.ui.is_none() {
-            // If no UI draws were recorded this frame, ensure we keep the context empty.
         }
+        record_result?;
 
         unsafe {
             self.device.cmd_end_render_pass(command_buffer);
@@ -2771,15 +3043,27 @@ impl VulkanContext {
     /// Creates a Vulkan buffer and allocates/binds memory matching the requested usage.
     fn create_buffer(&self, size: vk::DeviceSize, usage: vk::BufferUsageFlags, properties: vk::MemoryPropertyFlags) -> Result<Buffer> {
         let info = vk::BufferCreateInfo::builder().size(size).usage(usage).sharing_mode(vk::SharingMode::EXCLUSIVE);
-        let buffer = unsafe { self.device.create_buffer(&info, None) }.map_err(|err| format!("create_buffer failed: {err:?}"))?;
-        let requirements = unsafe { self.device.get_buffer_memory_requirements(buffer) };
+        // Vulkan buffer creation is not atomic: the raw buffer and its allocation are separate
+        // objects. Guard each immediately, and commit neither until binding succeeds.
+        let buffer = ResourceGuard::new(
+            unsafe { self.device.create_buffer(&info, None) }.map_err(|err| format!("create_buffer failed: {err:?}"))?,
+            |buffer| unsafe { self.device.destroy_buffer(buffer, None) },
+        );
+        let requirements = unsafe { self.device.get_buffer_memory_requirements(*buffer.get()) };
         let memory_type = self.find_memory_type(requirements.memory_type_bits, properties)?;
         let alloc_info = vk::MemoryAllocateInfo::builder()
             .allocation_size(requirements.size)
             .memory_type_index(memory_type);
-        let memory = unsafe { self.device.allocate_memory(&alloc_info, None) }.map_err(|err| format!("allocate_memory failed: {err:?}"))?;
-        unsafe { self.device.bind_buffer_memory(buffer, memory, 0) }.map_err(|err| format!("bind_buffer_memory failed: {err:?}"))?;
-        Ok(Buffer { buffer, memory, size })
+        let memory = ResourceGuard::new(
+            unsafe { self.device.allocate_memory(&alloc_info, None) }.map_err(|err| format!("allocate_memory failed: {err:?}"))?,
+            |memory| unsafe { self.device.free_memory(memory, None) },
+        );
+        unsafe { self.device.bind_buffer_memory(*buffer.get(), *memory.get(), 0) }.map_err(|err| format!("bind_buffer_memory failed: {err:?}"))?;
+        Ok(Buffer {
+            buffer: buffer.into_inner(),
+            memory: memory.into_inner(),
+            size,
+        })
     }
 
     /// Writes data into a buffer starting at offset zero.
@@ -2793,12 +3077,14 @@ impl VulkanContext {
             return Ok(());
         }
         unsafe {
-            let ptr = self
+            let mapped = self
                 .device
                 .map_memory(buffer.memory, offset, data.len() as u64, vk::MemoryMapFlags::empty())
                 .map_err(|err| format!("map_memory failed: {err:?}"))?;
-            ptr::copy_nonoverlapping(data.as_ptr(), ptr as *mut u8, data.len());
-            self.device.unmap_memory(buffer.memory);
+            // Treat a successful mapping as a scoped resource as well: future edits can add a
+            // fallible validation/copy step without accidentally skipping `unmap_memory`.
+            let mapped = ResourceGuard::new(mapped, |_| self.device.unmap_memory(buffer.memory));
+            ptr::copy_nonoverlapping(data.as_ptr(), *mapped.get() as *mut u8, data.len());
         }
         Ok(())
     }
@@ -2818,17 +3104,25 @@ impl VulkanContext {
             .usage(vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST)
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .initial_layout(vk::ImageLayout::UNDEFINED);
-        let image = unsafe { self.device.create_image(&image_info, None) }.map_err(|err| format!("create_image failed: {err:?}"))?;
-        let requirements = unsafe { self.device.get_image_memory_requirements(image) };
+        // Image, memory, and view are guarded separately because every edge between those
+        // allocations can fail. The aggregate becomes visible only after all three exist.
+        let image = ResourceGuard::new(
+            unsafe { self.device.create_image(&image_info, None) }.map_err(|err| format!("create_image failed: {err:?}"))?,
+            |image| unsafe { self.device.destroy_image(image, None) },
+        );
+        let requirements = unsafe { self.device.get_image_memory_requirements(*image.get()) };
         let memory_type = self.find_memory_type(requirements.memory_type_bits, vk::MemoryPropertyFlags::DEVICE_LOCAL)?;
         let alloc = vk::MemoryAllocateInfo::builder()
             .allocation_size(requirements.size)
             .memory_type_index(memory_type);
-        let memory = unsafe { self.device.allocate_memory(&alloc, None) }.map_err(|err| format!("allocate_memory failed: {err:?}"))?;
-        unsafe { self.device.bind_image_memory(image, memory, 0) }.map_err(|err| format!("bind_image_memory failed: {err:?}"))?;
+        let memory = ResourceGuard::new(
+            unsafe { self.device.allocate_memory(&alloc, None) }.map_err(|err| format!("allocate_memory failed: {err:?}"))?,
+            |memory| unsafe { self.device.free_memory(memory, None) },
+        );
+        unsafe { self.device.bind_image_memory(*image.get(), *memory.get(), 0) }.map_err(|err| format!("bind_image_memory failed: {err:?}"))?;
 
         let view_info = vk::ImageViewCreateInfo::builder()
-            .image(image)
+            .image(*image.get())
             .view_type(vk::ImageViewType::TYPE_2D)
             .format(format)
             .subresource_range(
@@ -2838,12 +3132,15 @@ impl VulkanContext {
                     .layer_count(1)
                     .build(),
             );
-        let view = unsafe { self.device.create_image_view(&view_info, None) }.map_err(|err| format!("create_image_view failed: {err:?}"))?;
+        let view = ResourceGuard::new(
+            unsafe { self.device.create_image_view(&view_info, None) }.map_err(|err| format!("create_image_view failed: {err:?}"))?,
+            |view| unsafe { self.device.destroy_image_view(view, None) },
+        );
 
         Ok(ImageResource {
-            image,
-            memory,
-            view,
+            image: image.into_inner(),
+            memory: memory.into_inner(),
+            view: view.into_inner(),
             extent: vk::Extent2D { width, height },
             format,
             layout: vk::ImageLayout::UNDEFINED,
@@ -2852,12 +3149,15 @@ impl VulkanContext {
 
     /// Recreates the per-swapchain-image depth attachments for the current extent.
     fn create_depth_images(&mut self) -> Result<()> {
-        self.depth_images.clear();
+        // A failed nth attachment must clean the first n-1 and leave the installed set alone.
         let mut attachments = Vec::with_capacity(self.swapchain_images.len());
         for _ in &self.swapchain_images {
-            attachments.push(self.create_depth_attachment(self.extent)?);
+            attachments.push(self.create_depth_attachment(self.extent)?.guarded(&self.device));
         }
-        self.depth_images = attachments;
+        let attachments = attachments.into_iter().map(ResourceGuard::into_inner).collect();
+        for mut previous in std::mem::replace(&mut self.depth_images, attachments) {
+            previous.destroy(&self.device);
+        }
         Ok(())
     }
 
@@ -2879,14 +3179,20 @@ impl VulkanContext {
             .usage(vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT)
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .initial_layout(vk::ImageLayout::UNDEFINED);
-        let image = unsafe { self.device.create_image(&image_info, None) }.map_err(|err| format!("create_image failed: {err:?}"))?;
-        let requirements = unsafe { self.device.get_image_memory_requirements(image) };
+        let image = ResourceGuard::new(
+            unsafe { self.device.create_image(&image_info, None) }.map_err(|err| format!("create_image failed: {err:?}"))?,
+            |image| unsafe { self.device.destroy_image(image, None) },
+        );
+        let requirements = unsafe { self.device.get_image_memory_requirements(*image.get()) };
         let memory_type = self.find_memory_type(requirements.memory_type_bits, vk::MemoryPropertyFlags::DEVICE_LOCAL)?;
         let alloc = vk::MemoryAllocateInfo::builder()
             .allocation_size(requirements.size)
             .memory_type_index(memory_type);
-        let memory = unsafe { self.device.allocate_memory(&alloc, None) }.map_err(|err| format!("allocate_memory failed: {err:?}"))?;
-        unsafe { self.device.bind_image_memory(image, memory, 0) }.map_err(|err| format!("bind_image_memory failed: {err:?}"))?;
+        let memory = ResourceGuard::new(
+            unsafe { self.device.allocate_memory(&alloc, None) }.map_err(|err| format!("allocate_memory failed: {err:?}"))?,
+            |memory| unsafe { self.device.free_memory(memory, None) },
+        );
+        unsafe { self.device.bind_image_memory(*image.get(), *memory.get(), 0) }.map_err(|err| format!("bind_image_memory failed: {err:?}"))?;
 
         let aspect = if Self::has_stencil_component(format) {
             vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL
@@ -2897,7 +3203,7 @@ impl VulkanContext {
         self.single_time_commands(|cmd| {
             self.transition_image_layout(
                 cmd,
-                image,
+                *image.get(),
                 vk::ImageLayout::UNDEFINED,
                 vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                 aspect,
@@ -2905,16 +3211,19 @@ impl VulkanContext {
         })?;
 
         let view_info = vk::ImageViewCreateInfo::builder()
-            .image(image)
+            .image(*image.get())
             .view_type(vk::ImageViewType::TYPE_2D)
             .format(format)
             .subresource_range(vk::ImageSubresourceRange::builder().aspect_mask(aspect).level_count(1).layer_count(1).build());
-        let view = unsafe { self.device.create_image_view(&view_info, None) }.map_err(|err| format!("create_image_view failed: {err:?}"))?;
+        let view = ResourceGuard::new(
+            unsafe { self.device.create_image_view(&view_info, None) }.map_err(|err| format!("create_image_view failed: {err:?}"))?,
+            |view| unsafe { self.device.destroy_image_view(view, None) },
+        );
 
         Ok(ImageResource {
-            image,
-            memory,
-            view,
+            image: image.into_inner(),
+            memory: memory.into_inner(),
+            view: view.into_inner(),
             extent,
             format,
             layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
@@ -3114,28 +3423,52 @@ impl VulkanContext {
     fn create_texture_resource(&mut self, width: i32, height: i32, pixels: &[u8]) -> Result<VulkanTexture> {
         let width_u32 = u32::try_from(width).map_err(|_| "texture width out of range".to_string())?;
         let height_u32 = u32::try_from(height).map_err(|_| "texture height out of range".to_string())?;
-        let mut image = self.create_image_resource(width_u32, height_u32)?;
+        // Image and staging buffer stay pending through upload and descriptor allocation. This
+        // covers map/copy/command-buffer/pool failures without hand-written cleanup branches.
+        let mut image = self.create_image_resource(width_u32, height_u32)?.guarded(&self.device);
 
-        let staging = self.create_buffer(
-            pixels.len() as u64,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
-        self.write_buffer(&staging, pixels)?;
-        self.copy_buffer_to_image(&staging, &mut image)?;
-        let mut staging = staging;
-        staging.destroy(&self.device);
+        let staging = self
+            .create_buffer(
+                pixels.len() as u64,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            )?
+            .guarded(&self.device);
+        self.write_buffer(staging.get(), pixels)?;
+        self.copy_buffer_to_image(staging.get(), image.get_mut())?;
 
-        let descriptor_set = self.allocate_texture_descriptor(&image)?;
-        Ok(VulkanTexture { image, descriptor_set })
+        let descriptor = self.allocate_texture_descriptor(image.get())?.guarded(&self.device);
+        Ok(VulkanTexture {
+            image: image.into_inner(),
+            descriptor: descriptor.into_inner(),
+        })
     }
 
     /// Allocates a texture descriptor set from the UI descriptor pool for the supplied image.
-    fn allocate_texture_descriptor(&mut self, image: &ImageResource) -> Result<vk::DescriptorSet> {
+    fn allocate_texture_descriptor(&mut self, image: &ImageResource) -> Result<TextureDescriptor> {
         let mut ui = self.ui.take().ok_or_else(|| "UI resources not initialized".to_string())?;
-        let descriptor_set = ui.allocate_texture_descriptor(self, image)?;
+        // Always restore the aggregate owner before propagating descriptor-pool exhaustion.
+        let descriptor_set = ui.allocate_texture_descriptor(self, image);
         self.ui = Some(ui);
-        Ok(descriptor_set)
+        descriptor_set
+    }
+
+    /// Frees a texture descriptor only while the pool generation that allocated it is live.
+    fn free_texture_descriptor(&self, descriptor: &mut TextureDescriptor) {
+        if descriptor.set == vk::DescriptorSet::null() {
+            return;
+        }
+        if let Some(ui) = self.ui.as_ref()
+            && descriptor.belongs_to(self.swapchain_generation, ui.descriptor_pool)
+        {
+            unsafe {
+                // The pool was created with `FREE_DESCRIPTOR_SET`; a valid set normally cannot
+                // fail to free. On device loss the enclosing pool still reclaims it during Drop.
+                let _ = self.device.free_descriptor_sets(descriptor.pool, &[descriptor.set]);
+            }
+        }
+        descriptor.set = vk::DescriptorSet::null();
+        descriptor.pool = vk::DescriptorPool::null();
     }
 
     /// Runs a one-off command buffer for setup work like image layout transitions.
@@ -3144,21 +3477,25 @@ impl VulkanContext {
             .command_pool(self.command_pool)
             .level(vk::CommandBufferLevel::PRIMARY)
             .command_buffer_count(1);
+        // Free the transient command buffer on begin/end/submit/wait errors as well as success.
         let command_buffer =
             unsafe { self.device.allocate_command_buffers(&alloc_info) }.map_err(|err| format!("allocate_command_buffers failed: {err:?}"))?[0];
+        let command_buffer = ResourceGuard::new(command_buffer, |command_buffer| unsafe {
+            self.device.free_command_buffers(self.command_pool, &[command_buffer])
+        });
         let begin_info = vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         unsafe {
             self.device
-                .begin_command_buffer(command_buffer, &begin_info)
+                .begin_command_buffer(*command_buffer.get(), &begin_info)
                 .map_err(|err| format!("begin_command_buffer failed: {err:?}"))?;
         }
-        f(command_buffer);
+        f(*command_buffer.get());
         unsafe {
             self.device
-                .end_command_buffer(command_buffer)
+                .end_command_buffer(*command_buffer.get())
                 .map_err(|err| format!("end_command_buffer failed: {err:?}"))?;
         }
-        let command_buffers = [command_buffer];
+        let command_buffers = [*command_buffer.get()];
         let submit_info = vk::SubmitInfo::builder().command_buffers(&command_buffers);
         let submit_infos = [submit_info.build()];
         unsafe {
@@ -3168,7 +3505,6 @@ impl VulkanContext {
             self.device
                 .queue_wait_idle(self.graphics_queue)
                 .map_err(|err| format!("queue_wait_idle failed: {err:?}"))?;
-            self.device.free_command_buffers(self.command_pool, &command_buffers);
         }
         Ok(())
     }
@@ -3283,5 +3619,32 @@ struct QueueFamilyIndices {
 impl VulkanContext {
     fn scale_rect(&self, rect: Recti) -> Recti {
         scale_rect_to_surface(rect, self.logical_width, self.logical_height, self.extent.width, self.extent.height)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ash::vk::Handle;
+
+    use super::*;
+
+    #[test]
+    fn external_texture_pool_supports_individual_descriptor_reclamation() {
+        assert!(DESCRIPTOR_POOL_FLAGS.contains(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET));
+    }
+
+    #[test]
+    fn descriptor_reclamation_requires_the_exact_live_pool_generation() {
+        let pool = vk::DescriptorPool::from_raw(7);
+        let descriptor = TextureDescriptor {
+            set: vk::DescriptorSet::from_raw(11),
+            pool,
+            generation: 3,
+        };
+
+        assert!(descriptor.belongs_to(3, pool));
+        // Generation prevents a numerically reused pool handle from accepting a stale set.
+        assert!(!descriptor.belongs_to(4, pool));
+        assert!(!descriptor.belongs_to(3, vk::DescriptorPool::from_raw(8)));
     }
 }

@@ -40,7 +40,10 @@ use microui_redux::{prelude::*, render::Vertex};
 use glow::*;
 use rs_math3d::{Vec3f, Vec4f};
 
-use super::mesh::{CustomRenderArea, MeshSubmission};
+use super::{
+    mesh::{CustomRenderArea, MeshSubmission},
+    resource_guard::ResourceGuard,
+};
 
 // GL backend overview:
 // - Regular UI quads are accumulated into CPU-side vertex/index buffers and emitted in one batch
@@ -138,11 +141,16 @@ impl GLRenderer {
     pub fn new(gl: Arc<glow::Context>, atlas: AtlasHandle, width: u32, height: u32) -> Result<Self, String> {
         assert_eq!(core::mem::size_of::<Vertex>(), 20);
         unsafe {
-            // Bootstrap the persistent atlas texture and the shared buffers/program used by the
-            // ordinary UI batching path.
-            let tex_o = gl.create_texture().unwrap();
+            // Each driver object stays guarded until all four persistent resources exist. Any
+            // later GL/shader error therefore releases everything acquired earlier instead of
+            // leaking a partially constructed renderer.
+            let texture_gl = gl.clone();
+            let atlas_texture = ResourceGuard::new(
+                gl.create_texture().map_err(|err| format!("failed to create atlas texture: {err}"))?,
+                move |texture| texture_gl.delete_texture(texture),
+            );
             debug_assert!(gl.get_error() == 0);
-            gl.bind_texture(glow::TEXTURE_2D, Some(tex_o));
+            gl.bind_texture(glow::TEXTURE_2D, Some(*atlas_texture.get()));
             debug_assert!(gl.get_error() == 0);
             gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
             debug_assert!(gl.get_error() == 0);
@@ -167,15 +175,33 @@ impl GLRenderer {
             });
             let atlas_error = gl.get_error();
             if atlas_error != glow::NO_ERROR {
-                gl.delete_texture(tex_o);
                 return Err(format!("failed to upload immutable atlas texture: GL error 0x{atlas_error:04X}"));
             }
             gl.bind_texture(glow::TEXTURE_2D, None);
 
-            let vbo = gl.create_buffer().unwrap();
-            let ibo = gl.create_buffer().unwrap();
+            let vertex_gl = gl.clone();
+            let vertex_buffer = ResourceGuard::new(
+                gl.create_buffer().map_err(|err| format!("failed to create vertex buffer: {err}"))?,
+                move |buffer| vertex_gl.delete_buffer(buffer),
+            );
+            let index_gl = gl.clone();
+            let index_buffer = ResourceGuard::new(
+                gl.create_buffer().map_err(|err| format!("failed to create index buffer: {err}"))?,
+                move |buffer| index_gl.delete_buffer(buffer),
+            );
 
-            let program = create_program(&gl, VERTEX_SHADER, FRAGMENT_SHADER).unwrap();
+            let program_gl = gl.clone();
+            let program = ResourceGuard::new(
+                create_program(&gl, VERTEX_SHADER, FRAGMENT_SHADER).map_err(|err| format!("failed to create UI program: {err}"))?,
+                move |program| program_gl.delete_program(program),
+            );
+
+            // Construction is now infallible, so transfer all guarded handles together to the
+            // renderer's deterministic `Drop` implementation.
+            let tex_o = atlas_texture.into_inner();
+            let vbo = vertex_buffer.into_inner();
+            let ibo = index_buffer.into_inner();
+            let program = program.into_inner();
 
             Ok(Self {
                 gl,
@@ -342,13 +368,19 @@ impl GlFrameOps for GLRenderer {
 
     /// Creates a GL texture for a backend-owned external image.
     fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), String> {
-        // The opaque capability is the sole dimension source validated by the core renderer.
+        // The opaque capability is the sole dimension source validated by the Context executor.
         let dimensions = id.size();
+        self.textures
+            .try_reserve(1)
+            .map_err(|err| format!("failed to reserve texture ownership entry: {err}"))?;
         let gl = &self.gl;
         unsafe {
             // User textures share the same nearest-neighbor setup as the atlas.
-            let tex = gl.create_texture().map_err(|err| format!("failed to create texture: {err}"))?;
-            gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+            let texture_gl = gl.clone();
+            let texture = ResourceGuard::new(gl.create_texture().map_err(|err| format!("failed to create texture: {err}"))?, move |texture| {
+                texture_gl.delete_texture(texture)
+            });
+            gl.bind_texture(glow::TEXTURE_2D, Some(*texture.get()));
             gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
             gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
             gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
@@ -367,11 +399,16 @@ impl GlFrameOps for GLRenderer {
             let err = gl.get_error();
             if err != 0 {
                 gl.bind_texture(glow::TEXTURE_2D, None);
-                gl.delete_texture(tex);
                 return Err(format!("OpenGL texture upload failed with error 0x{err:04x}"));
             }
             gl.bind_texture(glow::TEXTURE_2D, None);
-            self.textures.insert(id, tex);
+            // IDs are normally unique, but replacing defensively keeps the ownership map sound if
+            // a caller retries an existing capability.
+            let previous = self.textures.insert(id, *texture.get());
+            let _texture = texture.into_inner();
+            if let Some(previous) = previous {
+                gl.delete_texture(previous);
+            }
         }
         Ok(())
     }
@@ -391,7 +428,7 @@ impl GlFrameOps for GLRenderer {
             None => return,
         };
         // External textures cannot be folded into the atlas batch because they change the bound
-        // GL texture object. `Renderer` has already clipped the vertices, so the one-off draw uses
+        // GL texture object. The Context executor has already clipped the vertices, so the one-off draw uses
         // the full framebuffer scissor and relies on the submitted quad geometry for clipping.
         let gl = &self.gl;
         unsafe {
@@ -442,6 +479,21 @@ impl GlFrameOps for GLRenderer {
             gl.disable_vertex_attrib_array(tex_attrib_id);
             gl.disable_vertex_attrib_array(col_attrib_id);
             gl.use_program(None);
+        }
+    }
+}
+
+impl Drop for GLRenderer {
+    /// Releases every persistent GL object, including user textures that remain live at shutdown.
+    fn drop(&mut self) {
+        unsafe {
+            for (_, texture) in self.textures.drain() {
+                self.gl.delete_texture(texture);
+            }
+            self.gl.delete_program(self.program);
+            self.gl.delete_buffer(self.ibo);
+            self.gl.delete_buffer(self.vbo);
+            self.gl.delete_texture(self.tex_o);
         }
     }
 }
@@ -672,7 +724,9 @@ impl GLRenderer {
 /// Compiles and links a GL program from vertex/fragment shader sources.
 pub fn create_program(gl: &glow::Context, vertex_shader_source: &str, fragment_shader_source: &str) -> Result<NativeProgram, io::Error> {
     unsafe {
-        let program = gl.create_program().expect("Cannot create program");
+        // Program and shader guards cover allocation errors, compile/link errors, and unwinding.
+        // Handles leave these guards only after a successful link.
+        let program = ResourceGuard::new(gl.create_program().map_err(io::Error::other)?, |program| gl.delete_program(program));
 
         let shader_sources = [(glow::VERTEX_SHADER, vertex_shader_source), (glow::FRAGMENT_SHADER, fragment_shader_source)];
 
@@ -680,37 +734,28 @@ pub fn create_program(gl: &glow::Context, vertex_shader_source: &str, fragment_s
 
         // Compile both stages first so we can bail out with a useful shader log if needed.
         for (shader_type, shader_source) in shader_sources.iter() {
-            let shader = gl.create_shader(*shader_type).expect("Cannot create shader");
-            gl.shader_source(shader, shader_source);
-            gl.compile_shader(shader);
-            if !gl.get_shader_compile_status(shader) {
-                let error_string = gl.get_shader_info_log(shader);
-                for shader in shaders {
-                    gl.delete_shader(shader);
-                }
-                gl.delete_program(program);
-                return Err(io::Error::other(error_string));
+            let shader = ResourceGuard::new(gl.create_shader(*shader_type).map_err(io::Error::other)?, |shader| gl.delete_shader(shader));
+            gl.shader_source(*shader.get(), shader_source);
+            gl.compile_shader(*shader.get());
+            if !gl.get_shader_compile_status(*shader.get()) {
+                return Err(io::Error::other(gl.get_shader_info_log(*shader.get())));
             }
-            gl.attach_shader(program, shader);
+            gl.attach_shader(*program.get(), *shader.get());
             shaders.push(shader);
         }
 
         // Link once both stages compiled successfully.
-        gl.link_program(program);
-        if !gl.get_program_link_status(program) {
-            let error_string = gl.get_program_info_log(program);
-            for shader in shaders {
-                gl.delete_shader(shader);
-            }
-            gl.delete_program(program);
-            return Err(io::Error::other(error_string));
+        gl.link_program(*program.get());
+        if !gl.get_program_link_status(*program.get()) {
+            return Err(io::Error::other(gl.get_program_info_log(*program.get())));
         }
 
         for shader in shaders {
-            gl.detach_shader(program, shader);
+            let shader = shader.into_inner();
+            gl.detach_shader(*program.get(), shader);
             gl.delete_shader(shader);
         }
 
-        Ok(program)
+        Ok(program.into_inner())
     }
 }

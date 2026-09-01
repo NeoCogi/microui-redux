@@ -62,8 +62,13 @@ compile_error!("Enable one of `example-glow`, `example-vulkan`, or `example-wgpu
 #[cfg(any(feature = "example-glow", feature = "example-vulkan", feature = "example-wgpu"))]
 pub mod application;
 pub mod atlas_assets;
+// Both native example backends acquire opaque driver handles through multi-step, fallible
+// constructors.  Keep their small transactional ownership primitive shared so cleanup semantics
+// stay identical without exposing it as part of the example API.
 #[cfg(feature = "example-glow")]
 pub mod glow_renderer;
+#[cfg(any(feature = "example-glow", feature = "example-vulkan"))]
+mod resource_guard;
 #[cfg(feature = "example-vulkan")]
 pub mod vulkan_renderer;
 #[cfg(feature = "example-wgpu")]
