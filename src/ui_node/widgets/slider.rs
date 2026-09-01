@@ -168,9 +168,14 @@ impl Slider {
         self.value
     }
 
-    /// Updates the current value, clamping it to the slider range.
+    /// Updates the current value, clamping finite input to the slider range.
+    ///
+    /// NaN and infinities are ignored so invalid external input cannot select an arbitrary endpoint
+    /// or erase the last valid retained value.
     pub fn set_value(&mut self, value: Real) {
-        self.value = clamp_slider_value(value, self.low, self.high);
+        if value.is_finite() {
+            self.value = clamp_slider_value(value, self.low, self.high);
+        }
     }
 
     /// Returns whether the inline numeric editor is active.
@@ -242,7 +247,11 @@ impl Slider {
             && base.width > 0
             && range != 0.0
         {
-            value = self.low + pointer_pos.x as Real * range / base.width as Real;
+            // Normalize screen space in f64, then interpolate from both endpoints. The endpoint
+            // form avoids both multiplication overflow and loss of a small upper bound while
+            // cancelling a much larger negative lower bound.
+            let fraction = (f64::from(pointer_pos.x) / f64::from(base.width)).clamp(0.0, 1.0);
+            value = slider_value_at_fraction(self.low, self.high, fraction);
             if self.step != 0. {
                 value = snap_slider_value(value, self.low, self.step);
             }
@@ -266,15 +275,18 @@ impl Slider {
         }
 
         let base = ctx.local_rect();
-        let range = self.high - self.low;
         ctx.draw_widget_fill(base, ControlColor::Base);
         // Measurement already treats negative theme thumb sizes as zero. Paint applies the same
         // normalization and uses saturated extent arithmetic so either public style or layout
         // input may span the i32 domain without panicking.
         let width = ctx.style().thumb_size.max(0);
         let available = base.width.max(0).saturating_sub(width);
-        let x = if range != 0.0 && available > 0 {
-            ((self.value - self.low) * available as Real / range) as i32
+        let x = if self.low != self.high && available > 0 {
+            // Resolve the normalized numeric position in f64 before multiplying by pixel width.
+            // Exact endpoints are handled explicitly by the helper, while all interior results
+            // remain bounded in `[0, 1]` and cannot overflow the layout intermediate.
+            let fraction = slider_value_fraction(self.value, self.low, self.high);
+            (fraction * f64::from(available)) as i32
         } else {
             0
         };
@@ -292,6 +304,8 @@ impl TypedWidgetHandle<Slider> {
     }
 
     /// Replaces the slider value without emitting a user event.
+    ///
+    /// Non-finite input is ignored, preserving the widget's last finite value.
     pub fn set_value(&self, value: Real) -> Option<()> {
         self.try_update(|widget| widget.set_value(value))
     }
@@ -313,11 +327,45 @@ impl crate::TypedWidget<SliderChanged> for Slider {
     }
 }
 
+/// Interpolates one bounded slider fraction without overflowing or losing exact endpoints.
+fn slider_value_at_fraction(low: Real, high: Real, fraction: f64) -> Real {
+    // Pointer normalization supplies `[0, 1]`, but endpoint branches make this helper total and
+    // preserve low/high exactly. The weighted endpoint form avoids constructing `high - low`,
+    // whose later cancellation with a large `low` can discard a much smaller finite `high`.
+    if fraction <= 0.0 {
+        low
+    } else if fraction >= 1.0 {
+        high
+    } else {
+        ((1.0 - fraction) * f64::from(low) + fraction * f64::from(high)) as Real
+    }
+}
+
+/// Converts one retained slider value to a bounded fraction of its ascending range.
+fn slider_value_fraction(value: Real, low: Real, high: Real) -> f64 {
+    // Exact endpoint checks prevent wide-range subtraction from moving either thumb endpoint.
+    // Interior subtraction is widened first; every distinct finite f32 pair remains distinct in
+    // f64, and the final clamp contains ordinary rounding at the range edges.
+    if value <= low {
+        0.0
+    } else if value >= high {
+        1.0
+    } else {
+        ((f64::from(value) - f64::from(low)) / (f64::from(high) - f64::from(low))).clamp(0.0, 1.0)
+    }
+}
+
 /// Snaps a value to the nearest step relative to the lower bound.
 fn snap_slider_value(value: Real, low: Real, step: Real) -> Real {
     // SliderParameters guarantees a finite non-negative step, so snapping never has to invent an
-    // orientation by taking an absolute value.
-    if step == 0.0 { value } else { low + ((value - low) / step).round() * step }
+    // orientation by taking an absolute value. Widening the step count is still necessary: the
+    // ratio of two finite f32 values can exceed f32 even when the reconstructed value is finite.
+    if step == 0.0 {
+        value
+    } else {
+        let steps = ((f64::from(value) - f64::from(low)) / f64::from(step)).round();
+        (f64::from(low) + steps * f64::from(step)) as Real
+    }
 }
 
 /// Clamps a slider value to its validated ascending range.
@@ -676,6 +724,82 @@ mod tests {
         assert_eq!(slider.value(), 50.0);
     }
 
+    /// Verifies pointer mapping normalizes screen space before scaling a valid maximum-size range.
+    #[test]
+    fn slider_pointer_midpoint_does_not_overflow_a_large_finite_range() {
+        let mut slider = SliderBuilder::create_widget(SliderParameters::new(0.0, 0.0, Real::MAX).expect("a maximum finite range span must remain usable"));
+        let input = vec![UiInputEvent::MouseDrag {
+            pos: vec2(50, 10),
+            delta: Vec2i::default(),
+            buttons: MouseButton::LEFT,
+        }];
+
+        run_slider_once(&mut slider, rect(0, 0, 100, 20), input, true, true, true, None);
+
+        assert_eq!(slider.value(), Real::MAX / 2.0);
+    }
+
+    /// Verifies the right edge selects a small upper bound exactly after a wide cancellation.
+    #[test]
+    fn slider_pointer_right_edge_preserves_a_small_upper_endpoint() {
+        let low = Real::MIN / 2.0;
+        let high = 1.0;
+        let mut slider = SliderBuilder::create_widget(SliderParameters::new(low, low, high).expect("a finite wide-offset range must remain usable"));
+        let input = vec![UiInputEvent::MouseDrag {
+            pos: vec2(100, 10),
+            delta: Vec2i::default(),
+            buttons: MouseButton::LEFT,
+        }];
+
+        run_slider_once(&mut slider, rect(0, 0, 100, 20), input, true, true, true, None);
+
+        assert_eq!(slider.value(), high);
+    }
+
+    /// Verifies a finite subnormal step cannot overflow the intermediate snapping step count.
+    #[test]
+    fn slider_tiny_step_keeps_a_representable_pointer_value() {
+        let minimum_step = Real::from_bits(1);
+        let mut slider = SliderBuilder::create_widget(
+            SliderParameters::with_opt(0.0, 0.0, 1.0, minimum_step, DecimalPrecision::ZERO, WidgetOption::FRAME)
+                .expect("the smallest positive finite step must remain usable"),
+        );
+        let input = vec![UiInputEvent::MouseDrag {
+            pos: vec2(50, 10),
+            delta: Vec2i::default(),
+            buttons: MouseButton::LEFT,
+        }];
+
+        run_slider_once(&mut slider, rect(0, 0, 100, 20), input, true, true, true, None);
+
+        assert_eq!(slider.value(), 0.5);
+    }
+
+    /// Verifies paint normalizes numeric space before mapping a large finite midpoint to pixels.
+    #[test]
+    fn slider_thumb_midpoint_does_not_overflow_a_large_finite_range() {
+        let atlas = make_test_atlas();
+        let mut style = test_style(&atlas);
+        // A borderless ten-pixel thumb records one unambiguous fill rectangle at the computed x.
+        style.thumb_size = 10;
+        style.frame_border_width = 0;
+        let mut slider =
+            SliderBuilder::create_widget(SliderParameters::new(Real::MAX / 2.0, 0.0, Real::MAX).expect("a maximum finite range span must remain usable"));
+        let bounds = rect(0, 0, 100, 20);
+        let mut display_list = crate::render::DisplayList::new();
+        let mut ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut display_list, bounds, &style, &atlas, false, false, false, false);
+
+        slider.paint(&mut ctx);
+
+        let fills = display_list.debug_fill_rects();
+        assert!(
+            fills
+                .iter()
+                .any(|(fill, _, _)| fill.x == 45 && fill.y == 0 && fill.width == 10 && fill.height == 20),
+            "the half-range value must place the ten-pixel thumb halfway across ninety available pixels",
+        );
+    }
+
     #[test]
     fn number_drag_records_a_typed_change_and_programmatic_setter_is_silent() {
         let mut number =
@@ -698,6 +822,62 @@ mod tests {
         assert_eq!(values, [10.0]);
     }
 
+    /// Verifies wide drag arithmetic preserves representable cancellation in both directions.
+    #[test]
+    fn number_drag_does_not_overflow_before_a_representable_result() {
+        let mut increasing = NumberBuilder::create_widget(
+            NumberParameters::new(Real::MIN, Real::MAX, DecimalPrecision::ZERO).expect("finite extreme number parameters must validate"),
+        );
+        run_number_once(
+            &mut increasing,
+            vec![UiInputEvent::MouseDrag {
+                pos: vec2(10, 10),
+                delta: vec2(2, 0),
+                buttons: MouseButton::LEFT,
+            }],
+        );
+        assert_eq!(increasing.value(), Real::MAX);
+
+        let mut decreasing = NumberBuilder::create_widget(
+            NumberParameters::new(Real::MAX, Real::MAX, DecimalPrecision::ZERO).expect("finite extreme number parameters must validate"),
+        );
+        run_number_once(
+            &mut decreasing,
+            vec![UiInputEvent::MouseDrag {
+                pos: vec2(10, 10),
+                delta: vec2(-2, 0),
+                buttons: MouseButton::LEFT,
+            }],
+        );
+        assert_eq!(decreasing.value(), Real::MIN);
+    }
+
+    /// Verifies arrow arithmetic saturates at the finite Real endpoints instead of jumping to zero.
+    #[test]
+    fn number_arrow_overflow_saturates_in_the_requested_direction() {
+        let mut increasing = NumberBuilder::create_widget(
+            NumberParameters::new(Real::MAX, Real::MAX, DecimalPrecision::ZERO).expect("finite extreme number parameters must validate"),
+        );
+        run_number_once(
+            &mut increasing,
+            vec![UiInputEvent::Key {
+                event: KeyEvent::pressed(Key::ArrowUp, Modifiers::NONE),
+            }],
+        );
+        assert_eq!(increasing.value(), Real::MAX);
+
+        let mut decreasing = NumberBuilder::create_widget(
+            NumberParameters::new(Real::MIN, Real::MAX, DecimalPrecision::ZERO).expect("finite extreme number parameters must validate"),
+        );
+        run_number_once(
+            &mut decreasing,
+            vec![UiInputEvent::Key {
+                event: KeyEvent::pressed(Key::ArrowDown, Modifiers::NONE),
+            }],
+        );
+        assert_eq!(decreasing.value(), Real::MIN);
+    }
+
     #[test]
     fn slider_programmatic_setter_is_silent() {
         let mut slider = SliderBuilder::create_widget(SliderParameters::new(0.0, -5.0, 5.0).expect("finite ascending slider parameters must validate"));
@@ -705,6 +885,20 @@ mod tests {
         slider.set_value(4.0);
         assert_eq!(slider.value(), 4.0);
         assert!(!dispatcher.dispatch(&mut Vec::new()));
+    }
+
+    /// Verifies both numeric setters retain their last finite value when given invalid input.
+    #[test]
+    fn numeric_programmatic_setters_ignore_non_finite_values() {
+        let mut number = NumberBuilder::create_widget(NumberParameters::new(3.0, 1.0, DecimalPrecision::ZERO).expect("finite number parameters must validate"));
+        let mut slider = SliderBuilder::create_widget(SliderParameters::new(4.0, 0.0, 10.0).expect("finite slider parameters must validate"));
+
+        for invalid in [Real::NAN, Real::INFINITY, Real::NEG_INFINITY] {
+            number.set_value(invalid);
+            slider.set_value(invalid);
+            assert_eq!(number.value(), 3.0);
+            assert_eq!(slider.value(), 4.0);
+        }
     }
 
     /// Verifies paint shares measurement's negative-thumb normalization without subtract overflow.

@@ -272,9 +272,7 @@ pub(super) fn number_textbox_update(
     if edit.editing {
         let res = textbox_update(ctx, input, &mut edit.buf, &mut edit.cursor, WidgetOption::NONE, font);
         if res.submitted || !ctx.focused() {
-            if let Ok(v) = edit.buf.parse::<f32>() {
-                *value = v as Real;
-            }
+            commit_finite_number(edit.buf.as_str(), value);
             edit.editing = false;
             edit.cursor = 0;
         } else {
@@ -284,7 +282,40 @@ pub(super) fn number_textbox_update(
     false
 }
 
+/// Replaces a retained numeric value only when the editor contains one finite [`Real`].
+fn commit_finite_number(text: &str, value: &mut Real) {
+    // Rust accepts spellings such as `NaN`, `inf`, and exponents that overflow to infinity. They
+    // are valid parser outputs but invalid widget state, so failed or non-finite input leaves the
+    // last committed value untouched for both Number and Slider.
+    if let Ok(parsed) = text.parse::<Real>()
+        && parsed.is_finite()
+    {
+        *value = parsed;
+    }
+}
+
 /// Paints the shared textbox editor for a numeric widget.
 pub(super) fn number_textbox_paint(ctx: &mut WidgetPaintCtx<'_>, edit: &NumberEditState, font: FontId) {
     textbox_paint(ctx, edit.buf.as_str(), edit.cursor, WidgetOption::NONE, font);
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests for the numeric editor's finite retained-state boundary.
+
+    use super::*;
+
+    /// Verifies parser-supported non-finite spellings and overflow never replace retained state.
+    #[test]
+    fn numeric_text_commit_retains_the_previous_value_for_non_finite_input() {
+        for text in ["NaN", "inf", "-inf", "1e100"] {
+            let mut value = 12.5;
+            commit_finite_number(text, &mut value);
+            assert_eq!(value, 12.5, "{text} must not enter Number or Slider state");
+        }
+
+        let mut value = 12.5;
+        commit_finite_number("-3.25", &mut value);
+        assert_eq!(value, -3.25);
+    }
 }

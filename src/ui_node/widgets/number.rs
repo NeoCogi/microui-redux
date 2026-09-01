@@ -133,9 +133,14 @@ impl Number {
         self.value
     }
 
-    /// Updates the current number value, replacing non-finite input with zero.
+    /// Updates the current number value when `value` is finite.
+    ///
+    /// NaN and infinities are ignored so invalid external input cannot erase the last valid
+    /// retained value. User interaction uses the same finite-state invariant.
     pub fn set_value(&mut self, value: Real) {
-        self.value = if value.is_finite() { value } else { 0.0 };
+        if value.is_finite() {
+            self.value = value;
+        }
     }
 
     /// Returns whether the inline numeric editor is active.
@@ -160,24 +165,23 @@ impl Number {
         if !self.edit.editing {
             // Construction guarantees one non-negative direction policy: Up increases and Down
             // decreases by the same configured amount used by horizontal dragging.
-            let amount = self.step;
+            let amount = f64::from(self.step);
             match ctx.action(input, self.keyboard_behavior()) {
-                Some(KeyboardAction::Decrease) => self.set_value(self.value - amount),
-                Some(KeyboardAction::Increase) => self.set_value(self.value + amount),
+                Some(KeyboardAction::Decrease) => self.value = add_number_delta(self.value, -amount),
+                Some(KeyboardAction::Increase) => self.value = add_number_delta(self.value, amount),
                 Some(KeyboardAction::Activate | KeyboardAction::Expand | KeyboardAction::Collapse) | None => {}
             }
         }
-        if !number_textbox_update(ctx, input, &mut self.edit, self.precision, font, &mut self.value) {
-            if ctx.focused()
-                && ctx.mouse_buttons().intersects(MouseButton::LEFT)
-                && let Some(UiInputEvent::MouseDrag { delta, .. }) = input
-            {
-                self.set_value(self.value + delta.x as Real * self.step);
-            } else {
-                self.set_value(self.value);
-            }
-        } else {
-            self.set_value(self.value);
+        if !number_textbox_update(ctx, input, &mut self.edit, self.precision, font, &mut self.value)
+            && ctx.focused()
+            && ctx.mouse_buttons().intersects(MouseButton::LEFT)
+            && let Some(UiInputEvent::MouseDrag { delta, .. }) = input
+        {
+            // Widen both multiplication and addition. An i32 drag multiplied by a finite f32 step
+            // always fits f64, including cancellation cases whose correct result fits Real even
+            // though the intermediate f32 product would be infinite.
+            let drag_delta = f64::from(delta.x) * f64::from(self.step);
+            self.value = add_number_delta(self.value, drag_delta);
         }
         let changed = (self.value != last).then_some(NumberChanged { value: self.value });
         if let Some(event) = changed {
@@ -207,6 +211,8 @@ impl TypedWidgetHandle<Number> {
     }
 
     /// Replaces the number value without emitting a user event.
+    ///
+    /// Non-finite input is ignored, preserving the widget's last finite value.
     pub fn set_value(&self, value: Real) -> Option<()> {
         self.try_update(|widget| widget.set_value(value))
     }
@@ -226,6 +232,15 @@ impl crate::TypedWidget<NumberChanged> for Number {
     fn event(&self) -> crate::WidgetEventPortHandle<NumberChanged> {
         crate::WidgetEventPortHandle::new(&self.changed_event)
     }
+}
+
+/// Adds one interaction delta in a wider domain and narrows with directional saturation.
+fn add_number_delta(value: Real, delta: f64) -> Real {
+    // Parameters and retained state are finite f32 values, while pointer deltas are i32. Their
+    // complete product and sum fit f64, so clamping there prevents valid cancellation from being
+    // lost to an infinite f32 intermediate and keeps overflow at the corresponding finite limit.
+    let result = f64::from(value) + delta;
+    result.clamp(f64::from(Real::MIN), f64::from(Real::MAX)) as Real
 }
 
 impl Widget for Number {
