@@ -1002,10 +1002,9 @@ fn frame_acquisition_failure_discards_the_list_without_finalization() {
     painter(&mut list, viewport()).fill_polygon(&[Vec2f::new(0.0, 0.0), Vec2f::new(8.0, 0.0), Vec2f::new(0.0, 8.0)], color(255, 255, 255, 255));
     let capacities = list_capacities(&list);
 
-    assert_eq!(
-        renderer.render(frame_info(32, 32), &mut list),
-        Err(RenderError::Frame(FrameError::new("acquire failed")))
-    );
+    let error = renderer.render(frame_info(32, 32), &mut list).unwrap_err();
+    assert_eq!(error, RenderError::Frame(FrameError::new("acquire failed")));
+    assert_eq!(Error::source(&error).map(ToString::to_string).as_deref(), Some("acquire failed"));
     assert_eq!(attempts.get(), 1);
     assert!(list.is_empty());
     assert_eq!(list_capacities(&list), capacities);

@@ -108,7 +108,19 @@ impl fmt::Display for RenderError {
     }
 }
 
-impl Error for RenderError {}
+impl Error for RenderError {
+    /// Exposes the concrete backend-frame cause while keeping validation failures terminal.
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        // Only Frame composes another standard error. The remaining variants directly describe
+        // executor-owned validation failures and therefore have no lower-level source to expose.
+        match self {
+            Self::Frame(source) => Some(source),
+            Self::UiUpdateRequired | Self::UnknownTexture { .. } | Self::UnknownFont { .. } | Self::UnknownIcon { .. } | Self::UnknownCustomRenderer { .. } => {
+                None
+            }
+        }
+    }
+}
 
 impl From<FrameError> for RenderError {
     fn from(error: FrameError) -> Self {
