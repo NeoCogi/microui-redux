@@ -1373,7 +1373,7 @@ impl State {
         #[cfg(not(any(feature = "builder", feature = "png_source")))]
         let image_texture = None;
         let white_uv = {
-            let atlas = ctx.renderer().atlas();
+            let atlas = ctx.atlas();
             let rect = atlas.get_icon_rect(atlas.white_icon());
             let dim = atlas.get_texture_dimension();
             let rect_min = Vec2f::new(rect.x as f32, rect.y as f32);

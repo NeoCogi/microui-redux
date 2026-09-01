@@ -38,7 +38,7 @@ boundaries; an individual word is not split when it exceeds the available width.
 
 An atlas used with `Context` must have a `body` font and the standard semantic icon names
 `close`, `expand`, `collapse`, `check`, `expand_down`, `open_folder`, `closed_folder`, and `file`.
-Every atlas, including a fontless atlas used only by a low-level `Renderer`, has a validated opaque
+Every atlas, including a fontless atlas prepared before Context construction, has a validated opaque
 white tile named `white` for solid geometry; no resource depends on a numeric table position.
 `AtlasHandle::try_from` validates dimensions, decoded pixels, unique names and glyphs, font
 metrics, the mandatory underscore entries, every glyph/icon rectangle, and the opaque white tile
@@ -109,6 +109,6 @@ let (_title, title_node) = TextBlock::create(
 );
 ```
 
-`builder::Config::fonts` may be empty for an atlas used directly by `Renderer`. A `Context` atlas
-must name one entry `body`; optional roles that are absent fall back to that same atlas-owned body
-font.
+`builder::Config::fonts` may be empty when an application needs to prepare atlas data separately.
+A `Context` atlas must name one entry `body`; optional roles that are absent fall back to that same
+atlas-owned body font.

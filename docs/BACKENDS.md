@@ -77,7 +77,7 @@ Context::frame(FrameInfo)             logical ContextFrame
         |
 ContextFrame::render_ui(self)         paint-only internal display-list recording
         |
-Renderer preflight                    validate texture/custom-render keys
+Context executor preflight           validate texture/custom-render keys
         |
 RendererBackend::frame(&mut backend)  acquire SelectedBackend::Frame<'_>
         |
@@ -88,9 +88,9 @@ drop backend frame                    finalize/submit/present as applicable; rel
 drop logical frame                    release the exclusive Context borrow
 ```
 
-The renderer acquires the backend frame only after resource preflight succeeds. Normal UI
+Context's executor acquires the backend frame only after resource preflight succeeds. Normal UI
 operations use the backend-neutral `RendererFrame` methods. Immediately before a custom-render
-operation, the renderer closes the current UI batch and invokes the registered callback with
+operation, the executor closes the current UI batch and invokes the registered callback with
 `&mut SelectedFrame<'_>`. Later UI commands continue after that callback, preserving painter
 order. Acquisition failures are returned as `FrameError` before callbacks execute. Once a frame
 exists, its `Drop` path must be non-panicking and best-effort because Rust destructors cannot
@@ -127,7 +127,7 @@ higher-ranked lifetime means the callback can use the active frame but cannot sa
 state. The returned `CustomRenderHandle<B>` is tagged with `B`, so registration and removal through
 a Context using another backend type fail at compile time. `Node::custom_render` erases the handle
 to its backend-neutral registry key after checking the backend type; a key originating from any
-other Context retains a different concrete renderer identity and is rejected during renderer
+other Context retains a different concrete owner identity and is rejected during Context
 preflight before a backend frame is acquired.
 
 `CustomRenderArgs` carries the geometry needed at execution time:
@@ -137,7 +137,7 @@ preflight before a backend frame is acquired.
   window, and scroll clipping;
 - `dimensions` is the validated drawable size of the active frame.
 
-Renderer does not invoke the callback when that intersection is empty. Do not intersect
+The executor does not invoke the callback when that intersection is empty. Do not intersect
 `content_area` and `view` again inside the callback.
 
 Custom callbacks receive no input and should not acquire another frame, mutate the atlas, or

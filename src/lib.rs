@@ -204,12 +204,12 @@
 //! Widget::paint
 //!      |
 //!      v
-//!   Painter  --->  DisplayList  --->  Renderer  --->  RendererBackend::Frame
-//! (records)         (owns ops)        (executes)       (submits/presents)
+//!   Painter  --->  DisplayList  --->  Context executor  --->  RendererBackend::Frame
+//! (records)         (owns ops)        (executes)            (submits/presents)
 //! ```
 //!
 //! Widgets obtain a [`render::Painter`] from [`WidgetPaintCtx::painter`] and record
-//! backend-neutral operations. [`render::Renderer`] executes the resulting crate-owned display
+//! backend-neutral operations. A crate-private Context executor consumes the resulting display
 //! list, performs final clipping and tessellation, and submits final
 //! [`render::Vertex`] values through [`render::RendererBackend`]. Applications normally import
 //! retained UI types from [`prelude`], while backend integrations import frame contracts from
@@ -259,7 +259,7 @@ pub mod retained {
 /// Common imports for retained UI applications.
 ///
 /// The prelude intentionally favors retained authoring, widget state, style/input/image types, and
-/// renderer integration. Low-level backend and Renderer types live under [`render`].
+/// renderer integration. Low-level backend contracts live under [`render`].
 pub mod prelude {
     pub use crate::event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventPortHandle};
     pub use crate::atlas::{AtlasError, AtlasHandle, AtlasSource, CharEntry, FontEntry, FontId, IconId, SourceFormat};

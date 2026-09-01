@@ -126,7 +126,7 @@ fn context() -> Context<TestBackend> {
 #[test]
 fn downstream_style_and_theme_are_constructed_from_atlas_capabilities() {
     let mut context = context();
-    let atlas = context.renderer().atlas();
+    let atlas = context.atlas();
     let icons = ThemeIcons::from_atlas(&atlas);
     let mut style = Style::from_atlas(&atlas);
 

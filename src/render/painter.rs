@@ -41,8 +41,8 @@ use rs_math3d::{Recti, Vec2f, Vec2i, color4b};
 ///
 /// A Painter borrows the crate-owned display list for the current frame. It translates local
 /// primitives into screen space, attaches the current effective screen-space clip to every
-/// operation, and tessellates custom solid geometry without consulting style, input, atlas,
-/// Renderer, or RendererBackend state.
+/// operation, and tessellates custom solid geometry without consulting style, input, atlas, the
+/// context-owned executor, or [`crate::render::RendererBackend`] state.
 ///
 /// Custom widgets obtain a painter from their [`WidgetPaintCtx`](crate::WidgetPaintCtx):
 ///
@@ -171,8 +171,9 @@ impl<'a> Painter<'a> {
 
     /// Records one UTF-8 string at a local position using the selected atlas font's glyph coverage.
     ///
-    /// Text measurement remains outside Painter. Renderer performs final glyph lookup, clipping,
-    /// and the same underscore substitution used by [`crate::AtlasHandle::get_text_size`].
+    /// Text measurement remains outside Painter. Context's executor performs final glyph lookup,
+    /// clipping, and the same underscore substitution used by
+    /// [`crate::AtlasHandle::get_text_size`].
     pub fn text(&mut self, font: FontId, text: &str, pos: Vec2i, color: Color) {
         if text.is_empty() || color.a == 0 || !self.clip.has_positive_area() {
             return;

@@ -29,10 +29,10 @@
 //
 //! Single-pass display-list execution and high-level frame resources.
 //!
-//! [`Renderer`] is deliberately not a drawing context. It owns frame resources and executes an
-//! already-recorded [`DisplayList`]. Every operation carries its own clip, and the private
-//! [`DisplayListExecutor`] intersects that clip with the current viewport immediately before
-//! submission.
+//! The crate-private [`Renderer`] is deliberately not a drawing context. It owns frame resources
+//! and executes an already-recorded [`DisplayList`]. Every operation carries its own clip, and the
+//! private [`DisplayListExecutor`] intersects that clip with the current viewport immediately
+//! before submission.
 
 use super::{
     backend::{
@@ -59,21 +59,21 @@ pub enum RenderError {
     UiUpdateRequired,
     /// The backend could not acquire per-frame resources.
     Frame(FrameError),
-    /// An external texture operation references a texture not owned by this Renderer.
+    /// An external texture operation references a texture not owned by this Context.
     UnknownTexture {
         /// Unknown texture identifier.
         id: TextureId,
         /// Painter-order operation index containing the reference.
         operation_index: usize,
     },
-    /// A text operation references a font not owned by this Renderer atlas.
+    /// A text operation references a font not owned by this Context's atlas.
     UnknownFont {
         /// Foreign font capability recorded by the painter.
         id: FontId,
         /// Painter-order operation index containing the reference.
         operation_index: usize,
     },
-    /// An icon operation references an icon not owned by this Renderer atlas.
+    /// An icon operation references an icon not owned by this Context's atlas.
     UnknownIcon {
         /// Foreign icon capability recorded by the painter.
         id: IconId,
@@ -116,7 +116,7 @@ impl From<FrameError> for RenderError {
     }
 }
 
-/// High-level UI renderer that owns backend resources and executes crate-recorded UI frames.
+/// Crate-private UI executor that owns backend resources and submits recorded frames.
 ///
 /// A Renderer uniquely owns its backend and is intended to remain on its owning thread. Backend
 /// frames and registered custom-render callbacks execute synchronously during
@@ -126,7 +126,7 @@ impl From<FrameError> for RenderError {
 /// display-list operations, making execution deterministic and independent of prior draw calls.
 /// Applications paint through [`WidgetPaintCtx::painter`](crate::WidgetPaintCtx::painter); display
 /// list construction and submission remain crate-owned.
-pub struct Renderer<B: RendererBackend> {
+pub(crate) struct Renderer<B: RendererBackend> {
     /// Process-unique identity copied into every resource capability owned by this renderer.
     id: RendererId,
     /// Uniquely owned backend.
@@ -151,7 +151,7 @@ pub struct Renderer<B: RendererBackend> {
 
 impl<B: RendererBackend> Renderer<B> {
     /// Creates a renderer with unique ownership of the provided backend.
-    pub fn new(backend: B) -> Self {
+    pub(crate) fn new(backend: B) -> Self {
         // Allocate provenance once at the concrete Renderer ownership boundary. Textures and custom
         // callbacks copy this same identity rather than maintaining independent global namespaces.
         let id = RendererId::allocate();
@@ -232,7 +232,8 @@ impl<B: RendererBackend> Renderer<B> {
     }
 
     /// Returns the atlas associated with the renderer.
-    pub fn atlas(&self) -> AtlasHandle {
+    pub(crate) fn atlas(&self) -> AtlasHandle {
+        // Return the cheap immutable capability rather than exposing the executor's backend owner.
         self.atlas.clone()
     }
 
@@ -249,28 +250,8 @@ impl<B: RendererBackend> Renderer<B> {
         self.custom_renderers.remove(handle)
     }
 
-    /// Attempts to upload raw RGBA pixels as a backend-owned texture.
-    ///
-    /// Dimensions and byte length are checked before an id is allocated or backend state is
-    /// mutated. The texture is tracked by the renderer only after the backend reports success.
-    ///
-    /// ```
-    /// use microui_redux::{
-    ///     prelude::TextureId,
-    ///     render::{Renderer, RendererBackend},
-    /// };
-    ///
-    /// fn upload_checkerboard<B: RendererBackend>(
-    ///     renderer: &mut Renderer<B>,
-    /// ) -> Result<TextureId, String> {
-    ///     let rgba = [
-    ///         255, 255, 255, 255, 0, 0, 0, 255,
-    ///         0, 0, 0, 255, 255, 255, 255, 255,
-    ///     ];
-    ///     renderer.try_load_texture_rgba(2, 2, &rgba)
-    /// }
-    /// ```
-    pub fn try_load_texture_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> Result<TextureId, String> {
+    /// Uploads one validated RGBA buffer through the context's sole public image API.
+    pub(crate) fn try_load_texture_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> Result<TextureId, String> {
         crate::image::validate_rgba_buffer(width, height, pixels.len())?;
         // Compute the next slot without committing it, so exhaustion and failed backend uploads
         // leave allocator state unchanged. The zero initial value keeps every usable u32 slot.
@@ -288,21 +269,12 @@ impl<B: RendererBackend> Renderer<B> {
         Ok(id)
     }
 
-    /// Uploads raw RGBA pixels as a backend-owned texture.
-    ///
-    /// Panics if the RGBA dimensions/byte length are invalid or the backend rejects the upload.
-    /// Prefer [`Renderer::try_load_texture_rgba`] when callers can handle upload failure.
-    #[track_caller]
-    pub fn load_texture_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> TextureId {
-        self.try_load_texture_rgba(width, height, pixels).expect("failed to upload RGBA texture")
-    }
-
-    /// Destroys a texture allocated via [`Renderer::load_texture_rgba`].
+    /// Destroys one texture after the context has relinquished its public capability.
     ///
     /// Destroying an unknown or already-freed handle triggers a debug assertion. In release builds
     /// the repeated operation is an idempotent no-op. The backend is never called more than once
     /// for the same live handle.
-    pub fn free_texture(&mut self, id: TextureId) {
+    pub(crate) fn free_texture(&mut self, id: TextureId) {
         let removed = self.textures.remove(&id);
         debug_assert!(removed, "attempted to destroy an unknown or already-freed texture: {id:?}");
         if removed {

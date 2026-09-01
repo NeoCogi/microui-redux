@@ -2,8 +2,8 @@
 
 ## Key concepts
 
-- **Context**: owns the high-level `Renderer`, the only ordered input queue, the concrete retained
-  surface forest, and typed application subscriptions. `Context<B>` applications call
+- **Context**: owns the crate-private render executor, the only ordered input queue, the concrete
+  retained surface forest, and typed application subscriptions. `Context<B>` applications call
   `update_ui(dimensions)`, while `Context<B, State>` applications call
   `update_ui_state(dimensions, state)` to dispatch typed events. Both commit layout before
   `frame(FrameInfo).render_ui()?` paints and submits once; neither rebuilds windows or polls
@@ -12,7 +12,7 @@
 - **Layout engine + flows**: parent container widgets measure and assign child rectangles through scoped child-aware APIs and `ContainerLayoutCtx`. Linear, Grid, and Disclosure expose their layout configuration and topology through `TypedWidgetHandle<W>`; ScrollArea accepts one arbitrary content node and owns only viewport state.
 - **Widget**: the common update/paint contract. A leaf additionally implements `LeafWidget` for intrinsic measurement; a branch implements `ContainerWidget` for child-aware measurement and placement. Concrete widgets combine semantic values, interaction state, native event ports, and runtime phases; `*Parameters` are only one-shot initialization.
 - **Node**: the non-cloneable owner of one concrete leaf or container runtime. Leaf storage is erased to `Rc<RefCell<dyn LeafWidget>>`; container storage erases to `Rc<RefCell<dyn ContainerWidget>>`. Applications and coordinating widgets may retain a weak `TypedWidgetHandle<W>` without affecting node lifetime. A `Node` receives private process-unique identity when constructed and transfers exactly once into a window, an application popup, or an opaque `Children` collection; attached nodes cannot be detached or reparented.
-- **Rendering**: widgets obtain a local `Painter` from `WidgetPaintCtx`; retained traversal owns the internal display list, and `Renderer` executes it through one exclusively borrowed `RendererBackend::Frame`. The portable target supports drawables up to 8192x8192 and geometry up to four maximum drawable spans beyond the viewport; see the [render subsystem guide](RENDER.md#supported-coordinate-domain) for the complete coordinate contract and integration API.
+- **Rendering**: widgets obtain a local `Painter` from `WidgetPaintCtx`; retained traversal owns the internal display list, and Context's private executor submits it through one exclusively borrowed `RendererBackend::Frame`. The portable target supports drawables up to 8192x8192 and geometry up to four maximum drawable spans beyond the viewport; see the [render subsystem guide](RENDER.md#supported-coordinate-domain) for the complete coordinate contract and integration API.
 - **Typography**: atlases can bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while text-bearing `*Parameters` select a per-widget font with `.font(...)`.
 - **Style overrides**: every retained node can supply a `Style` in place of its inherited style. A container passes that style to its descendants until another node replaces it. The same effective value drives measurement, placement, input localization, update, and paint.
 - **Application components**: application state may coordinate multiple retained windows and
@@ -25,7 +25,7 @@ The public API is intentionally centered on `microui_redux::prelude` for applica
 
 ## Rendering
 
-Widgets record backend-neutral drawing through a framework-created `Painter`; `Renderer` executes the crate-owned display list and submits final geometry through `RendererBackend`. The [render subsystem guide](RENDER.md) covers architecture, clipping, textures, custom callbacks, backend implementation, and compiling code examples.
+Widgets record backend-neutral drawing through a framework-created `Painter`; Context's private executor consumes the crate-owned display list and submits final geometry through `RendererBackend`. The [render subsystem guide](RENDER.md) covers architecture, clipping, textures, custom callbacks, backend implementation, and compiling code examples.
 
 ## Retained authoring model
 

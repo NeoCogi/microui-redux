@@ -192,11 +192,11 @@ fn main() {
     let mut app = Application::new(atlas, |_backend, ctx| {
         let angle = Rc::new(Cell::new(0.0_f32));
         let callback_angle = angle.clone();
-        let white_uv = white_uv(&ctx.renderer().atlas());
+        let white_uv = white_uv(&ctx.atlas());
 
         let cube_renderer = ctx
             .register_custom_renderer(move |frame: &mut SelectedFrame<'_>, args: CustomRenderArgs| {
-                // Renderer invokes this callback only for the authoritative visible view.
+                // Context's executor invokes this callback only for the authoritative visible view.
                 let area = CustomRenderArea { rect: args.content_area, clip: args.view };
                 let vertices = build_cube_vertices(args.content_area, white_uv, callback_angle.get());
 
@@ -217,7 +217,7 @@ fn main() {
 
     app.event_loop(|_ctx, state, _dimensions| {
         // Application state changes before Application creates ContextFrame. The typed callback
-        // reads this value later while Renderer is executing that frame's custom-render command.
+        // reads this value later while Context executes that frame's custom-render command.
         state.angle.set((state.angle.get() + 0.018) % std::f32::consts::TAU);
     });
 }

@@ -75,8 +75,8 @@ pub struct AtlasSource<'a> {
     ///
     /// Names must be unique and every rectangle must be positive and in bounds. An entry named
     /// `white` must exist and every pixel in its rectangle must be opaque white.
-    /// [`crate::render::Renderer`] resolves that atlas-owned capability by name when drawing solid
-    /// geometry; table position has no public meaning.
+    /// Context's private render executor resolves that atlas-owned capability by name when drawing
+    /// solid geometry; table position has no public meaning.
     pub icons: &'a [(&'a str, Recti)],
     /// Fonts baked into the atlas.
     ///

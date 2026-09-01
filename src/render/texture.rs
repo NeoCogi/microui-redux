@@ -28,39 +28,39 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-//! Renderer-owned external texture handles.
+//! Context-owned external texture handles.
 
 use crate::identity::ProcessUniqueId;
 use rs_math3d::Dimensioni;
 
-/// Concrete identity assigned once to one [`crate::render::Renderer`].
+/// Concrete identity assigned once to one context-owned render executor.
 ///
 /// Keeping this wrapper distinct from other process-unique owners prevents an atlas, retained
 /// surface, or unrelated registry identity from being used as texture provenance inside the crate.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub(crate) struct RendererId(
-    /// Shared non-reused process identity hidden behind the renderer-specific type boundary.
+    /// Shared non-reused process identity hidden behind the executor-specific type boundary.
     ProcessUniqueId,
 );
 
 impl RendererId {
-    /// Allocates the identity retained by one newly constructed renderer.
+    /// Allocates the identity retained by one newly constructed Context executor.
     pub(crate) fn allocate() -> Self {
-        // Renderer construction is the sole allocation boundary. Every later texture copies this
-        // value, so provenance never depends on a backend address or renderer-local counter alone.
+        // Context executor construction is the sole allocation boundary. Every later texture
+        // copies this value, so provenance never depends on a backend address or local counter.
         Self(ProcessUniqueId::allocate())
     }
 }
 
-/// Handle referencing an external texture managed by the renderer.
+/// Handle referencing an external texture managed by one Context.
 ///
-/// Equality and hashing include the owning renderer, its local allocation slot, and the immutable
-/// dimensions carried by the handle. Two renderers can therefore issue the same local slot without
-/// either accepting, drawing, or destroying the other's texture.
+/// Equality and hashing include the owning Context executor, its local allocation slot, and the
+/// immutable dimensions carried by the handle. Two contexts can therefore issue the same local
+/// slot without either accepting, drawing, or destroying the other's texture.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TextureId {
-    /// Process-unique identity of the renderer that created this texture.
+    /// Process-unique identity of the Context executor that created this texture.
     renderer: RendererId,
     /// Monotonically allocated slot meaningful only within `renderer`.
     slot: u32,
@@ -71,10 +71,10 @@ pub struct TextureId {
 }
 
 impl TextureId {
-    /// Creates one renderer-owned texture capability with immutable dimensions.
+    /// Creates one Context-owned texture capability with immutable dimensions.
     pub(crate) fn new(renderer: RendererId, slot: u32, width: i32, height: i32) -> Self {
-        // Only Renderer calls this production constructor after validating dimensions and before
-        // transferring the complete capability to its backend.
+        // Only the private executor calls this production constructor after validating dimensions
+        // and before transferring the complete capability to its backend.
         Self { renderer, slot, width, height }
     }
 
@@ -93,7 +93,7 @@ impl TextureId {
         Dimensioni::new(self.width, self.height)
     }
 
-    /// Creates an isolated opaque texture capability for unit tests that do not own a Renderer.
+    /// Creates an isolated opaque texture capability for unit tests without a Context.
     #[cfg(test)]
     pub(crate) fn new_test(slot: u32, width: i32, height: i32) -> Self {
         // A fresh owner prevents synthetic handles from accidentally comparing equal across tests;

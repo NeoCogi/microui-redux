@@ -844,7 +844,7 @@ impl WgpuFrameOps for WgpuRenderer {
             return;
         }
 
-        // Renderer owns the pre-texture ordering boundary and has already clipped/adjusted UVs.
+        // The Context executor owns the ordering boundary and has already clipped/adjusted UVs.
         let mut quad = Vec::with_capacity(6);
         Self::append_quad(&mut quad, &vertices[0], &vertices[1], &vertices[2], &vertices[3]);
         self.commands.push(RenderCommand::DrawTexture { id, vertices: quad });

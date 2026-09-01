@@ -1,8 +1,8 @@
 # Rendering
 
 The `render` module is the boundary between retained UI painting and a concrete
-GPU or software backend. Widgets record backend-neutral operations; the
-renderer expands and clips those operations; the backend receives final
+GPU or software backend. Widgets record backend-neutral operations; Context's
+private executor expands and clips those operations; the backend receives final
 vertices and texture commands.
 
 Most application code only needs `WidgetPaintCtx::painter()` and the rendering types
@@ -22,9 +22,9 @@ use microui_redux::{
 Widget::paint
      |
      v
-  Painter  --->  DisplayList  --->  Renderer  --->  RendererBackend::Frame
-  records       owns ordered     expands and       batches, submits,
-  primitives    draw operations  clips work        and presents work
+  Painter  --->  DisplayList  --->  Context executor  --->  RendererBackend::Frame
+  records       owns ordered     expands and clips      batches, submits,
+  primitives    draw operations  crate-owned work       and presents work
 ```
 
 Each layer has one responsibility:
@@ -33,7 +33,7 @@ Each layer has one responsibility:
 | --- | --- | --- |
 | `Painter` | Local-to-screen translation, operation recording, scoped clip intersection, solid-shape tessellation | Backend state, frame lifecycle, atlas lookup, input, style policy |
 | Internal display list | Ordered operations, operation clips, owned text, custom-render keys, solid triangles, reusable recording storage | Execution, backend access, textures |
-| `Renderer` | Unique backend ownership, atlas expansion, final clipping, texture lifetime, display-list execution, reusable execution scratch | Widget input, widget layout, mutable drawing state |
+| Context render executor | Unique backend ownership, atlas expansion, final clipping, texture lifetime, display-list execution, reusable execution scratch | Public standalone submission, widget input, widget layout, mutable drawing state |
 | `RendererBackend` | Persistent GPU/software and texture resources | UI input, widget state, clipping decisions |
 | `RendererBackend::Frame` | One acquired frame, batching, texture binding, final submission/presentation | Persistent application ownership |
 
@@ -46,7 +46,7 @@ src/render/
 ├── geometry.rs      internal tessellation and final clipping geometry
 ├── painter.rs       public widget-local recorder
 ├── performance.rs   test-only timing, allocation, and submission benchmark
-└── renderer.rs      public frame/resource owner and operation executor
+└── renderer.rs      crate-private frame/resource owner and operation executor
 
 docs/
 └── RENDER.md        architecture and integration guide
@@ -69,8 +69,9 @@ The normal `Context` path is:
 ```text
 Context::update_ui(positive dimensions)
     -> run one synchronization layout
-    -> drain raw input in FIFO order
-    -> for each event: route once, update every eligible widget, commit layout
+    -> if input is empty: update every eligible widget once, commit layout
+    -> otherwise drain raw input in FIFO order
+       -> for each event: route once, update every eligible widget, commit layout
 
 Context::frame(validated FrameInfo)
     -> returns an exclusively borrowed ContextFrame
@@ -80,7 +81,7 @@ ContextFrame::render_ui(self)
     -> Widget::paint records one ordered DisplayList
     -> preflight resource keys
     -> RendererBackend::frame acquires native frame resources
-    -> Renderer executes and drains the DisplayList once
+    -> Context's private executor drains and submits the DisplayList once
     -> backend frame Drop flushes, submits, and presents
 ```
 
@@ -208,7 +209,7 @@ atlas measurement and drawing likewise treat CRLF as one line ending.
 
 `FontId` is an opaque capability containing one runtime atlas owner and one local font slot.
 Cloned handles to the same atlas mint equal IDs; separately loading identical metadata does not.
-Renderer preflight rejects a foreign font before acquiring a backend frame.
+Context preflight rejects a foreign font before acquiring a backend frame.
 
 Retained text widgets center the font baseline inside their cells, and each line receives a small
 vertical pad so glyphs do not touch widget borders. `TextBlock` supports wrapped multi-line content
@@ -221,7 +222,7 @@ Three coordinate concepts are deliberately separate:
 1. Widget methods and `Painter` primitives use local coordinates.
 2. `Painter` translates recorded geometry into screen coordinates using its
    fixed origin.
-3. `Renderer` consumes screen-space operations and clips them to the current
+3. Context's private executor consumes screen-space operations and clips them to the current
    viewport immediately before backend submission.
 
 Every display-list operation owns its effective screen-space clip. A clip is
@@ -294,7 +295,7 @@ custom-render registry keys, and solid geometry. No operation borrows widget or 
 The list is designed to be reused:
 
 - recording appends into retained operation and geometry allocations;
-- Renderer submission preflights resource keys, then drains operations directly
+- Context submission preflights resource keys, then drains operations directly
   from the list through one frame-owned executor;
 - the outer submission boundary clears operations and solid geometry after
   success or a returned error while retaining their allocations;
@@ -317,7 +318,7 @@ icons addressed by atlas-owned `IconId` capabilities. `ThemeIcons::from_atlas`
 resolves the semantic icons used by built-in components, while applications may
 look up other named icons. Like fonts, foreign icon IDs are rejected during
 renderer preflight before backend acquisition.
-General images are external textures owned through `Renderer` and addressed
+General images are external textures owned through `Context` and addressed
 directly by `TextureId`; `ImageSource` describes upload input, but there is no
 persistent image-resource wrapper or atlas-slot path.
 
@@ -349,37 +350,19 @@ Use `Context::free_image` when the texture is no longer needed.
 RGBA data and panics on invalid dimensions, invalid byte length, or backend
 upload failure.
 
-Low-level integrations use the equivalent renderer methods:
-
-```rust
-use microui_redux::{
-    prelude::TextureId,
-    render::{Renderer, RendererBackend},
-};
-
-fn upload_checkerboard<B: RendererBackend>(
-    renderer: &mut Renderer<B>,
-) -> Result<TextureId, String> {
-    let rgba = [
-        255, 255, 255, 255, 0, 0, 0, 255,
-        0, 0, 0, 255, 255, 255, 255, 255,
-    ];
-    renderer.try_load_texture_rgba(2, 2, &rgba)
-}
-```
-
 Texture dimensions and RGBA byte length are validated before a texture ID is
 consumed. Failed backend creation does not leave a tracked texture behind.
 `TextureId` carries its renderer identity, renderer-local allocation slot, and
 immutable dimensions. Equality and hashing cover all three, so matching local
-slots from separate renderers remain distinct capabilities. Renderer tracks
-the complete live handles without storing a second copy of their dimensions.
+slots from separate contexts remain distinct capabilities. The private executor
+tracks complete live handles without storing a second copy of their dimensions.
 `RendererBackend::create_texture` receives only the ID and pixel bytes; it uses
 `TextureId::size` rather than accepting contradictory dimension arguments.
-Repeated `free_image`/`free_texture` calls for the same handle are debug-asserted
+Repeated `free_image` calls for the same handle are debug-asserted
 as lifecycle mistakes and become idempotent no-ops in release builds; they
-notify the backend only once. Dropping `Renderer` destroys every external
-texture it still owns.
+notify the backend only once. Dropping `Context` destroys every external
+texture it still owns. Applications inspect atlas metadata through
+`Context::atlas`; they never need access to the crate-owned executor.
 
 ## Custom-render callbacks
 
@@ -413,13 +396,13 @@ The callback receives:
   retained clipping;
 - `dimensions`: the validated active-frame dimensions.
 
-Renderer skips the callback when that intersection is empty; callbacks must not intersect
+The executor skips the callback when that intersection is empty; callbacks must not intersect
 `content_area` and `view` again. The callback deliberately receives no input. Interaction remains
 in widget update.
 The first callback argument is `&mut B::Frame<'_>`, so backend-specific methods
 can be called without raw backend exposure or a second frame acquisition.
 `Node::custom_render` checks the backend-typed `CustomRenderHandle<B>` and stores
-only its private backend-neutral registry key. Renderer preflight validates that
+only its private backend-neutral registry key. Context preflight validates that
 key before acquiring a backend frame.
 
 ## Implementing a backend
@@ -428,7 +411,7 @@ A backend implements `RendererBackend` and consumes `render::Vertex`:
 
 ```rust
 use microui_redux::{
-    prelude::{AtlasHandle, TextureId},
+    prelude::{AtlasHandle, Context, TextureId},
     render::{FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex},
 };
 
@@ -467,6 +450,11 @@ impl RendererBackend for Backend {
 
     fn destroy_texture(&mut self, _id: TextureId) {}
 }
+
+fn install_backend(backend: Backend) -> Context<Backend> {
+    // Context takes unique ownership and supplies all display-list execution and resource tracking.
+    Context::new(backend)
+}
 ```
 
 Backend rules:
@@ -490,16 +478,18 @@ Backend rules:
 - `destroy_texture` releases the matching backend resource.
 - the backend does not calculate UI clipping or inspect input.
 
-`Renderer` uniquely owns the backend. Safe Rust therefore prevents persistent
-resource mutation or another frame acquisition while a backend frame exists.
+`Context::new` uniquely owns the backend behind its private executor. Safe Rust
+therefore prevents persistent resource mutation or another frame acquisition
+while a backend frame exists. Applications implement `RendererBackend` and
+`RendererFrame`; they do not construct or replace the executor itself.
 
-`Context`, `Renderer`, backend frames, and custom-render callbacks remain on
-their owning thread. `RendererBackend` and `CustomRender` intentionally have
+Context, backend frames, and custom-render callbacks remain on their owning
+thread. `RendererBackend` and `CustomRender` intentionally have
 no `Send` or `Sync` bounds, and the retained tree and immutable atlas use
 single-threaded shared ownership. Cross-thread application work should produce
 owned results and deliver them to Context before `Context::frame`; callbacks
-then execute synchronously while Renderer interprets that frame's display
-list.
+then execute synchronously while Context's executor interprets that frame's
+display list.
 
 Tests that need to inspect backend work keep a separate `Rc<RefCell<_>>`
 recording log. They do not clone, lock, or expose the backend itself.
@@ -515,9 +505,9 @@ cargo test --release render_performance_baseline \
 ```
 
 It uses a counting global allocator and a counter-only backend. The reported
-frame count covers `Renderer::render`, excluding setup and texture upload.
+frame count covers private executor submission, excluding setup and texture upload.
 Allocation counts include both Painter
-recording and Renderer execution. Timings include the allocation counter's
+recording and executor work. Timings include the allocation counter's
 atomic instrumentation and are intended as a reproducible regression baseline,
 not as GPU frame timings.
 
@@ -553,7 +543,7 @@ structurally:
 | Custom barriers | One normal scope per segment plus two flush scopes per barrier | Typed callback on the active frame after one executor-owned flush |
 | Replay clipping | Allocated a `Vec` clip stack for every normal replay segment | No replay clip stack; each operation owns its effective clip |
 | Concave polygon recording | Allocated simplified-point and index vectors per polygon | Reuses `SolidGeometry` polygon and triangle storage; zero warmed allocations |
-| Glyph expansion | Reused Canvas-owned rectangle scratch | Reuses Renderer-owned rectangle scratch |
+| Glyph expansion | Reused Canvas-owned rectangle scratch | Reuses executor-owned rectangle scratch |
 | Custom-widget rectangles | Batched as two solid triangles, submitting six vertices per rectangle | Remain semantic atlas quads, submitting four vertices per rectangle |
 | Recording storage | Reused command and flat vertex vectors | Reuses operation and strongly typed triangle vectors |
 
@@ -566,7 +556,7 @@ meaningful regression that requires a follow-up.
 
 The performance tests also enforce the architectural constraints: normal
 operations and typed custom callbacks remain inside one backend frame, final
-clipping stays in Renderer, and no state commands or
+clipping stays in the private executor, and no state commands or
 recording-time software triangle clipping are introduced for benchmark gains.
 
 ## Working examples

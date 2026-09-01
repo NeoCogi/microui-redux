@@ -40,7 +40,7 @@ use crate::window_manager::{LayerBinding, PopupHandle, SurfaceCreationError, Sur
 #[cfg(test)]
 use crate::window_manager::RootId;
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, FrameInfo, RenderError, Renderer, RendererBackend};
-use crate::{Dimensioni, ImageSource, KeyEvent, MouseButton, Node, Recti, Style, TextureId};
+use crate::{AtlasHandle, Dimensioni, ImageSource, KeyEvent, MouseButton, Node, Recti, Style, TextureId};
 
 /// Short-lived access to retained UI state owned by a [`Context`].
 ///
@@ -584,7 +584,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     ///
     /// Every font and icon capability must originate from this Context's atlas. Start from
     /// `*context.style()` when changing scalar values, or use [`Style::from_atlas`] with the handle
-    /// returned by `context.renderer().atlas()`.
+    /// returned by [`Context::atlas`].
     ///
     /// # Panics
     ///
@@ -601,12 +601,15 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         self.window_manager.style()
     }
 
-    /// Returns the high-level renderer used for frame execution and resource management.
+    /// Returns the immutable atlas capability supplied by this context's rendering backend.
     ///
-    /// Application code should prefer the higher-level context image APIs and retained widget
-    /// rendering. Backend integrations can use this accessor for atlas metadata.
-    pub fn renderer(&self) -> &Renderer<B> {
-        &self.renderer
+    /// Applications use this handle to resolve named fonts/icons and to construct a compatible
+    /// [`Style`]. Frame execution and resource bookkeeping remain context-owned implementation
+    /// details; custom GPU work continues through [`Context::register_custom_renderer`].
+    pub fn atlas(&self) -> AtlasHandle {
+        // AtlasHandle is a cheap shared capability. Returning a clone avoids exposing the internal
+        // display-list executor or lending its backend through an abstraction-breaking accessor.
+        self.renderer.atlas()
     }
 
     /// Attempts to upload an RGBA image to the renderer and returns its [`TextureId`].

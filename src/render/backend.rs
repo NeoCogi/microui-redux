@@ -246,10 +246,10 @@ pub trait RendererFrame {
 
 /// Trait implemented by render backends used by the UI context.
 ///
-/// Backends and their frames execute on the owning Renderer thread. This trait deliberately has no
+/// Backends and their frames execute on the owning Context thread. This trait deliberately has no
 /// `Send` or `Sync` bound.
 ///
-/// Backends consume final [`Vertex`] values from the [`crate::render::Renderer`]:
+/// Backends consume final [`Vertex`] values from Context's crate-private display-list executor:
 ///
 /// ```
 /// use microui_redux::{
@@ -334,7 +334,7 @@ pub trait RendererBackend: 'static {
 
 /// Backend-specific callback invoked synchronously with the statically typed active frame.
 ///
-/// Callbacks stay on the owning Context/Renderer thread. This trait deliberately has no `Send` or
+/// Callbacks stay on the owning Context thread. This trait deliberately has no `Send` or
 /// `Sync` bound. A callback may update private rendering-only caches, but is observational with
 /// respect to retained application state, topology, interaction, and layout. Mutating retained UI
 /// through a captured typed widget handle during the callback violates the update-before-paint contract.
