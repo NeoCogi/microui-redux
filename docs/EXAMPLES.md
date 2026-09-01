@@ -13,7 +13,8 @@
 - [`demo-full`](../examples/demo-full.rs) combines retained widgets, per-window File/View/Help
   menus, dialogs, custom drawing, external textures, and custom backend rendering. Its menu shows
   grouped and disabled commands, shortcut hints, a live checked item, radio choices in a cascading
-  View > Log Spacing submenu, and typed
+  View > Log Spacing submenu, a View > Theme radio submenu for Default Style, Windows 3.11, and
+  Mac OS 9, and typed
   item submission events into the file dialog, log, and style state. A titleless fullscreen family
   root at layer 0 renders a perspective X-Y grid beneath its content-clipped floating child windows.
   The grid root owns the Grid/Help menu, which records and handles above the complete child family;
@@ -21,7 +22,9 @@
   windows retain screen-space geometry and sibling activation order while inheriting that fixed
   layer. Left-drag an exposed part of the grid to rotate its arcball camera, use the mouse
   wheel there to zoom, or choose Grid > Reset View to restore the initial composition. Grid > Minor
-  Grid Lines controls its unit-spaced divisions. Grid segments are clipped in homogeneous space so
+  Grid Lines controls its unit-spaced divisions. The Demo Window exposes minimize and
+  maximize/restore caption controls; Grid > Show Demo Window restores it after minimize or close.
+  Grid segments are clipped in homogeneous space so
   rotation cannot project behind-camera endpoints into stray lines across the UI. Each `Window`
   transfers its menu bar into direct manager-owned `MenuSurface` values. Menu and ordinary
   composed-control popups are concrete forest nodes whose sole parent edges encode lifetime,
@@ -72,8 +75,9 @@ Running with only `--features example-backend` will fail intentionally at compil
 Backend features are additive for Cargo tooling. If several are enabled together, examples select
 Glow first, then Vulkan, then WGPU; enable only the backend you want for normal interactive runs.
 
-`demo-full` loads `examples/FACEPALM.png` and `assets/suzanne.obj` from disk at runtime. Run it
-from the repository root so those relative paths resolve.
+`demo-full` loads `examples/FACEPALM.png`, `assets/suzanne.obj`, and both directories under
+`themes/` from disk at runtime. Paths are anchored to the Cargo manifest directory, but the files
+must remain present in a source checkout or package.
 
 For a smaller release executable with runtime-loaded assets, build without default features and
 enable exactly one backend plus `builder`:
@@ -83,12 +87,13 @@ cargo build \
   --release \
   --example demo-full \
   --no-default-features \
-  --features "example-glow builder"
+  --features "example-glow builder theme-json"
 ```
 
 This keeps demo assets outside the executable: fonts/icons are read from `assets/`, the external
-demo image is read from `examples/FACEPALM.png`, and the Suzanne mesh is read from
-`assets/suzanne.obj`. To inspect real binary section size rather than asset size, use
+demo image is read from `examples/FACEPALM.png`, the Suzanne mesh is read from
+`assets/suzanne.obj`, and theme JSON/PNGs are read from `themes/`. To inspect real binary section
+size rather than asset size, use
 `size -A target/release/examples/demo-full`.
 
 For the smallest Linux executable, use the `build-min-size` Cargo alias with nightly. It builds for
@@ -100,7 +105,7 @@ build ID. Normal builds remain on their selected toolchain and platform:
 cargo +nightly build-min-size \
   --example demo-full \
   --no-default-features \
-  --features "example-glow builder"
+  --features "example-glow builder theme-json"
 ```
 The executable is written to
 `target/x86_64-unknown-linux-min-size/min-size/examples/demo-full`. The alias accepts ordinary Cargo

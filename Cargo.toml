@@ -78,7 +78,7 @@ required-features = ["example-backend"]
 [[example]]
 name = "demo-full"
 path = "examples/demo-full.rs"
-required-features = ["example-backend"]
+required-features = ["example-backend", "theme-json"]
 
 [[example]]
 name = "backend-frame-cube"

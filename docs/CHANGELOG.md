@@ -2,8 +2,9 @@
 
 ## Roadmap to Version 0.9
 - [ ] Async/Multi-Threading?
-- [ ] Theming/Skinning
-    - [ ] Win311 Theme
+- [x] Theming/Skinning
+    - [x] Typed flat/image nine-patches, strict JSON definitions, and per-state PNG fallbacks
+    - [x] Original Windows 3.11 and Mac OS 9 example themes with `demo-full` selection
 
 ## Version 0.8
 
@@ -25,7 +26,7 @@ superseded alpha APIs and their compatibility layers are not retained.
     - [x] `SurfaceForest` owns windows, structural child windows, dialogs, application popups, and menu popups exactly once; sole parent edges encode ownership and one deepest-popup key derives the visible transient branch.
     - [x] Forest storage is the chronological window order. One reusable visible traversal applies fixed layers, the modal band, child families, and the active popup path consistently to layout, input, paint, and diagnostics.
     - [x] Authenticated `WindowHandle` and `PopupHandle` capabilities use non-reused process identities; checked mutations reject stale, destroyed, or foreign handles through `SurfaceMutationError`, while failed child-window, dialog, and popup creation returns the unchanged unique input through `SurfaceCreationError<T>`.
-    - [x] `WindowEvent` reports geometry and close requests, while `PopupEvent::Dismissed` remains a popup-specific lifecycle stream.
+    - [x] `WindowEvent` reports geometry, close, minimize, maximize, and restore observations, while `PopupEvent::Dismissed` remains a popup-specific lifecycle stream.
 - [x] Added structural child-window composition without a general overlay graph.
     - [x] `Ui::create_child_window` accepts independent or child parents, keeps geometry in screen coordinates, inherits the family fixed layer, and preserves sibling-local raising.
     - [x] `Window::child_window_clip(ChildWindowClip::Content)` clips complete child surfaces to the parent application body, with nested descendants accumulating every ancestor boundary.
@@ -49,6 +50,8 @@ superseded alpha APIs and their compatibility layers are not retained.
     - [x] `Painter` records backend-neutral work into the framework-owned display list, and `RendererBackend::Frame<'a>` gives each backend one exclusive submission frame.
     - [x] Typed custom-render callbacks receive the selected backend frame directly; Glow, Vulkan, and WGPU examples share the same retained application lifecycle and logical input adapter.
     - [x] Atlas configuration supports named font variants and semantic font roles across runtime construction, generated Rust embedding, and external PNG metadata.
+    - [x] Flat rendering and image themes share typed 3x3 patches for every built-in role and interaction state; strict JSON themes preserve flat fallbacks when a PNG is absent.
+    - [x] Window chrome uses configurable frame thickness, right/bottom/corner resize regions, and positive minimize/maximize flags with typed lifecycle events.
 - [x] Updated `demo-full`, crate/API guides, architecture, layout, menu, event, rendering, example, and downstream API coverage for the unified 0.8 contract.
 
 ## Version 0.7.0

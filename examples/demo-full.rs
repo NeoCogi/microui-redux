@@ -1153,6 +1153,81 @@ fn centered_button(label: impl Into<String>) -> (WidgetEventPortHandle<ButtonSub
     (submitted, node)
 }
 
+/// Concrete bundled style selected from the demo's View menu.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u8)]
+enum DemoTheme {
+    /// Atlas-derived flat style installed by a new Context.
+    Default,
+    /// Image-backed early-Windows bevel theme.
+    Windows311,
+    /// Image-backed classic Macintosh Platinum theme.
+    MacOs9,
+}
+
+impl DemoTheme {
+    /// Complete choice list in the same order as style and menu-handle arrays.
+    const ALL: [Self; 3] = [Self::Default, Self::Windows311, Self::MacOs9];
+
+    /// Returns the stable array slot owned by this typed choice.
+    const fn index(self) -> usize {
+        // The private representation is contiguous and ALL fixes the corresponding public order.
+        self as usize
+    }
+
+    /// Returns the label used by menu presentation and demo logging.
+    const fn label(self) -> &'static str {
+        // Keep labels exhaustive so a new theme cannot appear without user-visible identification.
+        match self {
+            Self::Default => "Default Style",
+            Self::Windows311 => "Windows 3.11",
+            Self::MacOs9 => "Mac OS 9",
+        }
+    }
+}
+
+/// Context-bound theme styles retained for instant demo switching.
+struct DemoThemes {
+    /// Complete atlas- and renderer-compatible styles indexed by [`DemoTheme`].
+    styles: [Style; DemoTheme::ALL.len()],
+    /// Current base selection before any live Style Editor changes.
+    selected: DemoTheme,
+}
+
+impl DemoThemes {
+    /// Loads both bundled JSON themes while preserving the Context's original flat style.
+    fn load(context: &mut Context<SelectedBackend, State>) -> Self {
+        // Theme loading uploads each unique PNG once and leaves the installed Context style alone.
+        // Retaining all three concrete styles therefore permits switching without file I/O later.
+        let default = context.style().clone();
+        let windows_path = demo_asset_path("themes/windows-3.11/theme.json");
+        let windows = context
+            .load_theme_file(windows_path.as_path())
+            .unwrap_or_else(|error| panic!("failed to load bundled Windows 3.11 theme {}: {error}", windows_path.display()));
+        let mac_path = demo_asset_path("themes/mac-os-9/theme.json");
+        let mac = context
+            .load_theme_file(mac_path.as_path())
+            .unwrap_or_else(|error| panic!("failed to load bundled Mac OS 9 theme {}: {error}", mac_path.display()));
+        Self {
+            styles: [default, windows.into_style(), mac.into_style()],
+            selected: DemoTheme::Default,
+        }
+    }
+
+    /// Borrows the style associated with the current typed selection.
+    fn selected_style(&self) -> &Style {
+        // Index conversion remains centralized on the enum rather than leaking numeric slots.
+        &self.styles[self.selected.index()]
+    }
+
+    /// Changes the base selection and returns an editable copy for application state.
+    fn select(&mut self, selection: DemoTheme) -> Style {
+        // State's Style Editor intentionally mutates a clone; pristine bundled choices stay reusable.
+        self.selected = selection;
+        self.styles[selection.index()].clone()
+    }
+}
+
 /// Concrete menu item handles retained only where application state mutates live presentation.
 struct DemoMenuItems {
     /// Open is disabled while the independent file dialog is active.
@@ -1163,6 +1238,8 @@ struct DemoMenuItems {
     comfortable_spacing: MenuItemHandle,
     /// Compact is the other half of the spacing radio pair.
     compact_spacing: MenuItemHandle,
+    /// Radio-marked Default, Windows 3.11, and Mac OS 9 selectors in enum order.
+    themes: [MenuItemHandle; DemoTheme::ALL.len()],
 }
 
 /// Concrete item handles whose presentation mirrors the fullscreen grid state.
@@ -1207,6 +1284,22 @@ fn demo_menu_bar(context: &mut Context<SelectedBackend, State>) -> (MenuBar, Dem
     );
     let (compact_spacing, compact_item) = registered_menu_item(context, MenuItemParameters::new("Compact Spacing").radio(false), State::menu_compact_spacing);
 
+    let (theme_default, theme_default_item) = registered_menu_item(
+        context,
+        MenuItemParameters::new(DemoTheme::Default.label()).radio(true),
+        State::menu_theme_default,
+    );
+    let (theme_windows, theme_windows_item) = registered_menu_item(
+        context,
+        MenuItemParameters::new(DemoTheme::Windows311.label()).radio(false),
+        State::menu_theme_windows_311,
+    );
+    let (theme_mac, theme_mac_item) = registered_menu_item(
+        context,
+        MenuItemParameters::new(DemoTheme::MacOs9.label()).radio(false),
+        State::menu_theme_mac_os_9,
+    );
+
     let (about, about_item) = registered_menu_item(context, MenuItemParameters::new("About microui-redux"), State::menu_about);
 
     // Items move directly into the compact declaration. No row nodes, cell nodes, or per-item
@@ -1223,7 +1316,8 @@ fn demo_menu_bar(context: &mut Context<SelectedBackend, State>) -> (MenuBar, Dem
         Menu::new("View")
             .item(auto_scroll_item)
             .separator()
-            .submenu(Menu::new("Log Spacing").item(comfortable_item).item(compact_item)),
+            .submenu(Menu::new("Log Spacing").item(comfortable_item).item(compact_item))
+            .submenu(Menu::new("Theme").item(theme_default_item).item(theme_windows_item).item(theme_mac_item)),
         Menu::new("Help").item(about_item),
     ]);
 
@@ -1237,6 +1331,7 @@ fn demo_menu_bar(context: &mut Context<SelectedBackend, State>) -> (MenuBar, Dem
             auto_scroll,
             comfortable_spacing,
             compact_spacing,
+            themes: [theme_default, theme_windows, theme_mac],
         },
     )
 }
@@ -1251,18 +1346,23 @@ fn grid_menu_bar(context: &mut Context<SelectedBackend, State>) -> (MenuBar, Gri
         MenuItemParameters::new("Minor Grid Lines").checked(true),
         State::grid_toggle_minor_lines,
     );
+    let (show_demo, show_demo_item) = registered_menu_item(context, MenuItemParameters::new("Show Demo Window"), State::grid_show_demo_window);
     let (about_grid, about_grid_item) = registered_menu_item(context, MenuItemParameters::new("About X-Y Grid"), State::grid_about);
 
     // This bar is intentionally separate from the floating demo's File/View/Help menus. Installing
     // it on the grid Window makes every generated popup belong to the layer-zero grid window.
     let menu_bar = MenuBar::new([
-        Menu::new("Grid").item(reset_view_item).separator().item(show_minor_lines_item),
+        Menu::new("Grid")
+            .item(reset_view_item)
+            .item(show_demo_item)
+            .separator()
+            .item(show_minor_lines_item),
         Menu::new("Help").item(about_grid_item),
     ]);
 
     // These command handles need no later presentation updates; their moved item values stay alive
     // in the bar's compact menu data and continue to feed the already-subscribed event sources.
-    drop((reset_view, about_grid));
+    drop((reset_view, show_demo, about_grid));
     (menu_bar, GridMenuItems { show_minor_lines })
 }
 
@@ -1327,7 +1427,12 @@ struct State {
     combo_item_submitted: [WidgetEventPortHandle<ListItemSubmitted>; 4],
     style_color_swatch_states: [TypedWidgetHandle<ColorSwatch>; 16],
     window_info_value_states: [TypedWidgetHandle<ListItem>; 3],
+    /// Editable copy of the currently selected base theme.
     style: Style,
+    /// Pristine Context-bound styles used by the demo theme selector.
+    themes: DemoThemes,
+    /// Concrete radio items updated whenever the selected base theme changes.
+    theme_menu_items: [MenuItemHandle; DemoTheme::ALL.len()],
 
     demo_root: WindowHandle,
     combo_popup_root: PopupHandle,
@@ -1368,6 +1473,8 @@ struct State {
 
 impl State {
     pub fn new(_backend: BackendInitContext, ctx: &mut Context<SelectedBackend, Self>) -> Self {
+        // Load the two image themes once while the Context still exposes its pristine default style.
+        let themes = DemoThemes::load(ctx);
         #[cfg(any(feature = "builder", feature = "png_source"))]
         let image_texture = load_external_image_texture(ctx);
         #[cfg(not(any(feature = "builder", feature = "png_source")))]
@@ -1568,8 +1675,8 @@ impl State {
             )
             .font(FontRole::Body.into()),
         );
-        // Context already resolved every font and icon capability from its renderer atlas.
-        let style = ctx.style().clone();
+        // Begin with an editable copy of the ordinary atlas-derived default selection.
+        let style = themes.selected_style().clone();
         let (demo_content, demo_node) = root_content();
         let (style_content, style_node) = root_content();
         let (log_content, log_node) = root_content();
@@ -1630,6 +1737,9 @@ impl State {
             .ui()
             .create_child_window(&grid_root, Window::new("Demo Window", rect(40, 40, 300, 450), demo_node).menu_bar(menu_bar))
             .expect("grid root must own the demo window");
+        ctx.ui()
+            .set_window_options(&demo_root, WindowOption::FRAME | WindowOption::MINIMIZE_BUTTON | WindowOption::MAXIMIZE_BUTTON)
+            .expect("demo window must expose framed minimize and maximize chrome");
         let _style_root = ctx
             .ui()
             .create_child_window(&grid_root, Window::new("Style Editor", rect(350, 250, 300, 240), style_node))
@@ -1850,6 +1960,8 @@ impl State {
             style_color_swatch_states,
             window_info_value_states,
             style,
+            themes,
+            theme_menu_items: menu_items.themes,
             demo_root,
             combo_popup_root,
             popup_root,
@@ -2105,6 +2217,24 @@ impl State {
         self.select_menu_spacing(context, false, 1);
     }
 
+    /// Restores the atlas-derived flat style through its registered radio item.
+    fn menu_theme_default(&mut self, context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
+        // All three callbacks converge on one typed selection path so marker and style state agree.
+        self.select_demo_theme(context, DemoTheme::Default);
+    }
+
+    /// Selects the bundled Windows 3.11 bitmap style through its registered radio item.
+    fn menu_theme_windows_311(&mut self, context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
+        // The already-loaded style makes this event a pure retained-state mutation without I/O.
+        self.select_demo_theme(context, DemoTheme::Windows311);
+    }
+
+    /// Selects the bundled Mac OS 9 bitmap style through its registered radio item.
+    fn menu_theme_mac_os_9(&mut self, context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
+        // The already-loaded style makes this event a pure retained-state mutation without I/O.
+        self.select_demo_theme(context, DemoTheme::MacOs9);
+    }
+
     /// Writes application information for the registered About item.
     fn menu_about(&mut self, _context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
         self.write_log("microui-redux retained-mode full demo with per-window menus");
@@ -2138,6 +2268,16 @@ impl State {
         });
     }
 
+    /// Makes the showcase window visible again after minimize or close hides it.
+    fn grid_show_demo_window(&mut self, context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
+        // The fullscreen grid menu remains reachable when the child is hidden, providing a concrete
+        // restoration path for the minimize button without inventing a taskbar abstraction.
+        context
+            .set_window_visible(&self.demo_root, true)
+            .expect("demo window must remain registered while hidden");
+        self.write_log("Showing Demo Window");
+    }
+
     /// Describes the separate background window from its own Help menu.
     fn grid_about(&mut self, _context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
         self.write_log("Layer-0 fullscreen X-Y grid: left-drag to orbit and use the wheel to zoom");
@@ -2162,19 +2302,51 @@ impl State {
         });
     }
 
+    /// Installs one pristine bundled base style and synchronizes its menu and editor presentation.
+    fn select_demo_theme(&mut self, context: &mut Ui<'_>, selection: DemoTheme) {
+        // Radio markers are application state, so update every concrete item in the same dispatch
+        // transaction before the next menu opening can observe them.
+        for (item, candidate) in self.theme_menu_items.iter().zip(DemoTheme::ALL) {
+            context.menu_item_mut(item).expect("theme menu item unavailable").mark = MenuItemMark::Radio(candidate == selection);
+        }
+        self.style = self.themes.select(selection);
+        // The Style Editor edits this new copy rather than stale values from the preceding theme.
+        self.sync_style_controls_from_style();
+        self.write_log(format!("Selected theme: {}", selection.label()).as_str());
+    }
+
     /// Handles all manager-originated events for the ordinary floating Demo Window.
     fn demo_window_event(&mut self, context: &mut Ui<'_>, event: &WindowEvent) {
-        let WindowEvent::GeometryChanged { rect: event_rect } = event else {
-            // The demo intentionally leaves close requests observational; host shutdown policy is
-            // owned by the shared runner rather than inferred from a geometry notification.
-            return;
+        let (event_rect, enforce_demo_minimum) = match event {
+            WindowEvent::GeometryChanged { rect } => (rect, true),
+            WindowEvent::Maximized { rect } => {
+                // Maximized geometry belongs to the inherited viewport and must not be replaced by
+                // the demo's normal-mode minimum, which would also cancel saved restore state.
+                self.write_log("Maximized Demo Window");
+                (rect, false)
+            }
+            WindowEvent::Restored { rect } => {
+                self.write_log("Restored Demo Window");
+                (rect, false)
+            }
+            WindowEvent::Minimized => {
+                self.write_log("Minimized Demo Window; use Grid > Show Demo Window to restore it");
+                return;
+            }
+            WindowEvent::CloseRequested => {
+                // Close hides this example window; the persistent grid menu provides the same
+                // explicit show operation used after minimization.
+                self.write_log("Closed Demo Window; use Grid > Show Demo Window to restore it");
+                return;
+            }
         };
-        // Clamp the demo-specific minimum at the user move/resize boundary without coupling it to
-        // the fullscreen grid geometry.
+        // Clamp only ordinary move/resize geometry without disturbing maximize/restore policy.
         let mut rect = *event_rect;
-        rect.width = rect.width.max(240);
-        rect.height = rect.height.max(300);
-        if (rect.width, rect.height) != (event_rect.width, event_rect.height) {
+        if enforce_demo_minimum {
+            rect.width = rect.width.max(240);
+            rect.height = rect.height.max(300);
+        }
+        if enforce_demo_minimum && (rect.width, rect.height) != (event_rect.width, event_rect.height) {
             context.set_window_rect(&self.demo_root, rect).expect("demo window must exist");
         }
 

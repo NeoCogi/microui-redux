@@ -99,6 +99,7 @@ body without changing their screen-space geometry.
 - [Rendering and backend integration](docs/RENDER.md)
 - [Backend frames and custom rendering](docs/BACKENDS.md)
 - [Fonts and typography](docs/TYPOGRAPHY.md)
+- [JSON themes and bundled classic examples](docs/THEMES.md)
 - [Examples and demos](docs/EXAMPLES.md)
 - [Cargo features](docs/FEATURES.md)
 - [Version history and roadmap](docs/CHANGELOG.md)

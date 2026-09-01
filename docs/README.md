@@ -11,6 +11,8 @@ cover the retained UI model, integration details, and repository workflows.
 - [Application menus](MENUS.md) — concrete registered items, retained composition, popup
   coordination, and Windows-style keyboard/submenu navigation.
 - [Typography](TYPOGRAPHY.md) — semantic font roles, UTF-8 behavior, glyph coverage, and atlas setup.
+- [JSON themes](THEMES.md) — typed appearance roles and states, PNG nine-patches, flat fallbacks,
+  bundled classic themes, and window chrome metrics.
 
 ## Rendering and integration
 

@@ -8,6 +8,20 @@ The returned `LoadedTheme` contains a complete `Style`; install it with
 All PNG paths are relative to the JSON file. Theme textures remain owned by the loading Context, so
 a loaded style cannot be installed in another Context. A failed load destroys every image uploaded
 earlier in that same call.
+Repeated state entries that resolve to the same PNG path share one decoded and uploaded texture;
+their source insets, destination insets, and tints remain independent typed patch metadata.
+
+## Bundled example themes
+
+The repository includes [`themes/windows-3.11/theme.json`](../themes/windows-3.11/theme.json) and
+[`themes/mac-os-9/theme.json`](../themes/mac-os-9/theme.json). Both use original BSD-licensed pixel
+artwork authored for this project; their directory READMEs identify the GTK and gallery references
+used for visual research and explicitly document that no third-party theme files were copied.
+
+`demo-full` loads the Default Style and both bundled files once at startup. Choose them from
+`View > Theme`; each selection installs a pristine editable copy, so the existing Style Editor can
+modify it without changing the stored base theme. The example requires the `theme-json` feature and
+the theme directories must remain available beside the repository sources at runtime.
 
 ## Minimal schema
 

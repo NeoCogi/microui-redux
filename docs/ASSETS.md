@@ -22,6 +22,10 @@ original names, authorship, and license terms:
 - **Facepalm demo image** (`examples/FACEPALM.png`) — copyright Raja Lehtihet &
   Wael El Oraiby; licensed under this repository's
   [BSD 3-Clause license](../LICENSE).
+- **Windows 3.11 and Mac OS 9 theme pixels** (`themes/windows-3.11/*.png` and
+  `themes/mac-os-9/*.png`) — original artwork authored for this repository and licensed under its
+  [BSD 3-Clause license](../LICENSE). The theme-directory READMEs list visual research references;
+  no third-party reference asset is bundled.
 
 The font names above come from the TTFs' embedded name records; `NORMAL.ttf`,
 `BOLD.ttf`, and `CONSOLE.ttf` are only the filenames used by this repository.

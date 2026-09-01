@@ -162,7 +162,7 @@ impl NinePatchCell {
 ///
 /// Named fields keep style and theme construction readable and prevent a positional array from
 /// silently swapping an edge or corner. Renderer traversal still obtains one fixed array without
-/// allocation through the private [`Self::rows`] helper.
+/// allocation through a private row-conversion helper.
 #[derive(Copy, Clone)]
 pub struct NinePatchCells {
     /// Fixed top-left corner.
