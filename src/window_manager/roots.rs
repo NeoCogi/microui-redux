@@ -478,10 +478,12 @@ impl SurfaceBody {
     }
 
     /// Paints one concrete body into the shared manager display list.
-    fn paint(&mut self, display_list: &mut crate::render::DisplayList, style: &Style, atlas: &crate::AtlasHandle, focus_visible: bool) {
+    fn paint(&mut self, display_list: &mut crate::render::DisplayList, style: &Style, atlas: &crate::AtlasHandle, focus_visible: bool, window_active: bool) {
+        // Widget and compact-menu bodies share the same activation input so neither can infer it
+        // from keyboard focus, hover, or the concrete body variant.
         match self {
-            Self::Widgets { root, runtime } => runtime.paint_tree_root(root, display_list, style, atlas.clone(), focus_visible),
-            Self::Menu(menu) => menu.paint(display_list, style, atlas),
+            Self::Widgets { root, runtime } => runtime.paint_tree_root(root, display_list, style, atlas.clone(), focus_visible, window_active),
+            Self::Menu(menu) => menu.paint(display_list, style, atlas, window_active),
         }
     }
 
@@ -2796,10 +2798,22 @@ impl WindowManager {
             // child calls borrow arbitrary later forest entries without unsafe aliasing or mirrors.
             let node_index = self.surfaces.node_index(SurfaceKey::Root(root)).expect("visible root must remain retained");
             let node = &mut self.surfaces.nodes[node_index];
-            record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, style, active_window == Some(root));
-            node.surface
-                .body
-                .paint(&mut self.display_list, style, atlas, focus_surface == Some(SurfaceKey::Root(root)));
+            let window_active = active_window == Some(root);
+            record_root_background(
+                &mut self.display_list,
+                node.surface.clip,
+                node.surface.rect,
+                style,
+                window_active,
+                !window_active,
+            );
+            node.surface.body.paint(
+                &mut self.display_list,
+                style,
+                atlas,
+                focus_surface == Some(SurfaceKey::Root(root)),
+                window_active,
+            );
         }
 
         // Forest chronology remains the sibling z-order source. Scanning direct edges avoids a
@@ -2827,10 +2841,10 @@ impl WindowManager {
             // overlay has recorded. The inverse input recursion below uses the same relationship.
             let node_index = self.surfaces.node_index(SurfaceKey::Root(root)).expect("visible root must remain retained");
             let node = &mut self.surfaces.nodes[node_index];
-            if let Some(root) = node.root_mut()
-                && let Some(bar) = root.menu_bar.as_mut()
+            if let Some(root_state) = node.root_mut()
+                && let Some(bar) = root_state.menu_bar.as_mut()
             {
-                bar.paint(&mut self.display_list, style, atlas);
+                bar.paint(&mut self.display_list, style, atlas, active_window == Some(root));
             }
             let visual = node.root().expect("root overlay must retain root policy").chrome_visual_state();
             record_root_overlay(
@@ -2859,8 +2873,10 @@ impl WindowManager {
             }
             let node_index = self.surfaces.node_index(key).expect("active popup must remain retained");
             let node = &mut self.surfaces.nodes[node_index];
-            record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, style, false);
-            node.surface.body.paint(&mut self.display_list, style, atlas, focus_surface == Some(key));
+            // Popup shells retain the ordinary inactive-frame role used before window activation
+            // existed, while their transient contents remain visually active.
+            record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, style, false, false);
+            node.surface.body.paint(&mut self.display_list, style, atlas, focus_surface == Some(key), true);
         }
     }
 

@@ -889,6 +889,76 @@ fn active_window_and_only_its_remembered_widget_use_style_focus_accents() {
     );
 }
 
+/// Verifies top-level deactivation selects its own chrome, client, control, and foreground state.
+#[test]
+fn inactive_window_state_propagates_through_chrome_and_child_widgets() {
+    // Every asserted role receives a unique flat color. Spatial checks then prove the inactive
+    // colors belong only to the right-hand window rather than merely proving they exist somewhere.
+    let atlas = test_atlas();
+    let active_window_color = color(13, 31, 47, 255);
+    let inactive_window_color = color(61, 79, 97, 255);
+    let active_control_color = color(109, 127, 149, 255);
+    let inactive_control_color = color(157, 173, 191, 255);
+    let inactive_text_color = color(199, 211, 223, 255);
+    let inactive_title_text_color = color(227, 233, 239, 255);
+    let mut style = Style {
+        inactive_text_color,
+        inactive_title_text_color,
+        ..test_style(&atlas)
+    };
+
+    let mut passive_frame = StatefulAppearance::all(NinePatch::solid(active_window_color));
+    passive_frame.set(VisualState::Inactive, NinePatch::solid(inactive_window_color));
+    style.appearances.set(AppearanceRole::WindowFrame, passive_frame);
+    style.appearances.set(
+        AppearanceRole::WindowFrameActive,
+        StatefulAppearance::all(NinePatch::solid(active_window_color)),
+    );
+    let mut button = StatefulAppearance::all(NinePatch::solid(active_control_color));
+    button.set(VisualState::Inactive, NinePatch::solid(inactive_control_color));
+    style.appearances.set(AppearanceRole::Button, button);
+
+    let (backend, log) = recording_backend(atlas);
+    let mut ctx = Context::<_>::new(backend);
+    ctx.set_style(style);
+    let (_, first_node) = Button::create(ButtonParameters::new("active child"));
+    let first_id = first_node.id();
+    let (_, second_node) = Button::create(ButtonParameters::new("inactive child"));
+    let first = ctx.ui().create_window(Window::new("active title", rect(10, 10, 150, 100), first_node));
+    let _second = ctx.ui().create_window(Window::new("inactive title", rect(220, 10, 150, 100), second_node));
+    let dimensions = Dimensioni::new(400, 240);
+    ctx.update_ui(dimensions);
+
+    // Explicitly activate the first root after both are retained so creation order cannot decide
+    // which side should receive the active presentation in this regression.
+    let first_rect = ctx.debug_root_node_rect(first.id(), first_id).expect("first button must be laid out");
+    let first_center = Vec2i::new(first_rect.x + first_rect.width / 2, first_rect.y + first_rect.height / 2);
+    ctx.mousedown(first_center.x, first_center.y, MouseButton::LEFT);
+    ctx.mouseup(first_center.x, first_center.y, MouseButton::LEFT);
+    ctx.update_ui(dimensions);
+    assert_eq!(ctx.debug_active_root(), Some(first.id()));
+
+    log.clear();
+    ctx.frame(frame_info(dimensions)).render_ui().unwrap();
+    let events = log.snapshot();
+    for (color, description) in [
+        (inactive_window_color, "inactive frame and client"),
+        (inactive_control_color, "inactive child control"),
+        (inactive_text_color, "inactive child text"),
+        (inactive_title_text_color, "inactive title and caption symbols"),
+    ] {
+        let quads = atlas_quads_with_color(&events, color);
+        assert!(!quads.is_empty(), "{description} must be recorded");
+        assert!(
+            quads.iter().all(|event| {
+                let RenderEvent::AtlasQuad(vertices) = event else { unreachable!() };
+                vertices.iter().all(|vertex| vertex.position[0] >= 200.0)
+            }),
+            "{description} must be restricted to the deactivated right-hand window"
+        );
+    }
+}
+
 /// Verifies pointer location cannot recolor passive window and container backgrounds.
 #[test]
 fn window_and_container_backgrounds_ignore_hover_state_artwork() {

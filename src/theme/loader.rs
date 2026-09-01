@@ -238,8 +238,14 @@ impl ThemeDefinition {
         self.style.apply(&mut style);
         let frame_insets = self.style.frame_insets.map(InsetsDocument::into_insets).unwrap_or_else(|| style.frame_insets());
         validate_non_negative("generic_frame", "style.frame_insets", frame_insets)?;
-        style.appearances =
-            AppearanceCatalog::from_flat_palette(frame_insets, style.colors, style.focus_color, style.window_focus_color, style.menu_background);
+        style.appearances = AppearanceCatalog::from_flat_palette(
+            frame_insets,
+            style.colors,
+            style.focus_color,
+            style.window_focus_color,
+            style.menu_background,
+            style.inactive_background_color,
+        );
         // A theme commonly reuses one small bevel PNG across several semantic roles and states.
         // Cache the Context-owned upload by its fully resolved path while retaining source slices,
         // destination slices, and tint on each independently constructed NinePatchImage.
@@ -356,6 +362,12 @@ struct ColorPaletteDocument {
     title_background: Option<ColorDocument>,
     /// Window title text.
     title_text: Option<ColorDocument>,
+    /// Text and semantic icon color used throughout a deactivated window.
+    inactive_text: Option<ColorDocument>,
+    /// Shared flat background and control fill used throughout a deactivated window.
+    inactive_background: Option<ColorDocument>,
+    /// Window title and caption-symbol color used by deactivated chrome.
+    inactive_title_text: Option<ColorDocument>,
     /// Panel and viewport background.
     panel_background: Option<ColorDocument>,
     /// Ordinary button fill.
@@ -389,6 +401,9 @@ impl ColorPaletteDocument {
         assign_color(&mut style.colors[ControlColor::WindowBG as usize], self.window_background);
         assign_color(&mut style.colors[ControlColor::TitleBG as usize], self.title_background);
         assign_color(&mut style.colors[ControlColor::TitleText as usize], self.title_text);
+        assign_color(&mut style.inactive_text_color, self.inactive_text);
+        assign_color(&mut style.inactive_background_color, self.inactive_background);
+        assign_color(&mut style.inactive_title_text_color, self.inactive_title_text);
         assign_color(&mut style.colors[ControlColor::PanelBG as usize], self.panel_background);
         assign_color(&mut style.colors[ControlColor::Button as usize], self.button);
         assign_color(&mut style.colors[ControlColor::ButtonHover as usize], self.button_hover);
@@ -423,6 +438,8 @@ struct AppearanceDocument {
     pressed_focused: Option<StateDocument>,
     /// Disabled image.
     disabled: Option<StateDocument>,
+    /// Image used when the containing top-level window is deactivated.
+    inactive: Option<StateDocument>,
 }
 
 impl AppearanceDocument {
@@ -437,6 +454,7 @@ impl AppearanceDocument {
             (VisualState::HoveredFocused, self.hovered_focused.as_ref()),
             (VisualState::PressedFocused, self.pressed_focused.as_ref()),
             (VisualState::Disabled, self.disabled.as_ref()),
+            (VisualState::Inactive, self.inactive.as_ref()),
         ]
     }
 }
@@ -579,7 +597,8 @@ mod tests {
                 "style": {
                     "colors": {
                         "button": [1, 2, 3, 255],
-                        "button_hover": [4, 5, 6, 255]
+                        "button_hover": [4, 5, 6, 255],
+                        "inactive_background": [7, 8, 9, 255]
                     }
                 },
                 "appearances": {
@@ -595,6 +614,7 @@ mod tests {
 
         let normal = loaded.style().appearance(AppearanceRole::Button, VisualState::Normal);
         let hovered = loaded.style().appearance(AppearanceRole::Button, VisualState::Hovered);
+        let inactive = loaded.style().appearance(AppearanceRole::Button, VisualState::Inactive);
         assert_eq!(normal.insets.left, 2);
         assert!(matches!(
             normal.content,
@@ -605,6 +625,11 @@ mod tests {
             hovered.content,
             crate::NinePatchContent::Flat { cells }
                 if matches!(cells.center, crate::NinePatchCell::Color { color } if color.r == 4)
+        ));
+        assert!(matches!(
+            inactive.content,
+            crate::NinePatchContent::Flat { cells }
+                if matches!(cells.center, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b) == (7, 8, 9))
         ));
     }
 
@@ -626,6 +651,10 @@ mod tests {
         assert_eq!(uploads, 11, "each shared PNG path must be uploaded exactly once");
         let insets = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (4, 4, 4, 4));
+        assert!(matches!(
+            loaded.style().appearance(AppearanceRole::Button, VisualState::Inactive).content,
+            crate::NinePatchContent::Image { .. }
+        ));
     }
 
     /// Verifies the earlier Windows theme remains a distinct definition with period title artwork.
@@ -644,6 +673,10 @@ mod tests {
             loaded.style().appearance(AppearanceRole::WindowTitleActive, VisualState::Pressed).content,
             crate::NinePatchContent::Image { .. }
         ));
+        assert!(matches!(
+            loaded.style().appearance(AppearanceRole::WindowTitle, VisualState::Inactive).content,
+            crate::NinePatchContent::Image { .. }
+        ));
     }
 
     /// Verifies the bundled Mac theme installs its controls, title strips, frame, and grip artwork.
@@ -656,6 +689,10 @@ mod tests {
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (3, 3, 3, 3));
         let active_title = loaded.style().appearance(AppearanceRole::WindowTitleActive, VisualState::Pressed);
         assert!(matches!(active_title.content, crate::NinePatchContent::Image { image } if image.source.height == 16));
+        assert!(matches!(
+            loaded.style().appearance(AppearanceRole::Button, VisualState::Inactive).content,
+            crate::NinePatchContent::Image { .. }
+        ));
 
         // Hovering or pressing an inactive frame must not borrow the darker active-frame bitmap.
         // This guards the Platinum distinction before the manager supplies the later active state.

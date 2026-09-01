@@ -202,11 +202,13 @@ pub enum VisualState {
     PressedFocused,
     /// Widget or menu item is disabled regardless of pointer position.
     Disabled,
+    /// Widget belongs to a deactivated top-level window regardless of its retained interaction.
+    Inactive,
 }
 
 impl VisualState {
     /// Number of state slots retained for every semantic role.
-    pub const COUNT: usize = Self::Disabled as usize + 1;
+    pub const COUNT: usize = Self::Inactive as usize + 1;
 
     /// Complete state list in catalog index order.
     #[cfg(feature = "theme-json")]
@@ -218,13 +220,17 @@ impl VisualState {
         Self::HoveredFocused,
         Self::PressedFocused,
         Self::Disabled,
+        Self::Inactive,
     ];
 
-    /// Resolves one exact state from concrete interaction facts.
-    pub const fn from_interaction(enabled: bool, hovered: bool, focused: bool, pressed: bool) -> Self {
-        // Disabled wins first, then a visible press, then hover and focus combinations. Keeping the
-        // precedence here prevents widgets from implementing subtly different state ladders.
-        if !enabled {
+    /// Resolves one exact state from window activation and concrete widget interaction facts.
+    pub const fn from_interaction(window_active: bool, enabled: bool, hovered: bool, focused: bool, pressed: bool) -> Self {
+        // Deactivation wins over retained widget facts because a complete inactive window must use
+        // one coherent state even when its runtime still remembers focus, hover, or capture. Within
+        // an active window, disabled wins before the ordinary press, hover, and focus ladder.
+        if !window_active {
+            Self::Inactive
+        } else if !enabled {
             Self::Disabled
         } else if pressed && focused {
             Self::PressedFocused
@@ -266,11 +272,12 @@ impl StatefulAppearance {
         hovered_focused: NinePatch,
         pressed_focused: NinePatch,
         disabled: NinePatch,
+        inactive: NinePatch,
     ) -> Self {
         // The named parameters make programmatic construction readable while the retained array
         // keeps lookup branch-free and allocation-free.
         Self {
-            patches: [normal, hovered, pressed, focused, hovered_focused, pressed_focused, disabled],
+            patches: [normal, hovered, pressed, focused, hovered_focused, pressed_focused, disabled, inactive],
         }
     }
 
@@ -348,7 +355,14 @@ impl AppearanceCatalog {
     }
 
     /// Builds the default catalog whose flat patches preserve the original Style presentation.
-    pub(crate) fn from_flat_palette(frame_insets: SliceInsets, colors: [Color; 12], focus: Color, window_focus: Color, menu_background: Color) -> Self {
+    pub(crate) fn from_flat_palette(
+        frame_insets: SliceInsets,
+        colors: [Color; 12],
+        focus: Color,
+        window_focus: Color,
+        menu_background: Color,
+        inactive_background: Color,
+    ) -> Self {
         // Resolve named palette entries once, then assemble role tables from concrete NinePatch
         // values. This is also the fallback rebuilt after a JSON theme changes flat colors.
         let border = colors[ControlColor::Border as usize];
@@ -356,46 +370,77 @@ impl AppearanceCatalog {
         let framed = |fill| NinePatch::framed(frame_insets, border, Some(fill));
         let hollow = NinePatch::framed(frame_insets, border, None);
         let solid = NinePatch::solid;
-        let states = |normal, hovered, pressed, focused, disabled| StatefulAppearance::new(normal, hovered, pressed, focused, focused, pressed, disabled);
-        let button = states(
-            framed(colors[ControlColor::Button as usize]),
-            framed(colors[ControlColor::ButtonHover as usize]),
-            framed(colors[ControlColor::Base as usize]),
-            framed(focus),
-            framed(colors[ControlColor::Button as usize]),
+        let states = |normal, hovered, pressed, focused, disabled| {
+            // Start every table from the ordinary appearance; the typed overrides below install a
+            // dedicated inactive fallback only where deactivation has a visible semantic surface.
+            StatefulAppearance::new(normal, hovered, pressed, focused, focused, pressed, disabled, normal)
+        };
+        let with_inactive = |mut appearance: StatefulAppearance, inactive| {
+            // Every flat role remains total while allowing deactivation to differ independently
+            // from disabled, normal, hover, and focus without another catalog representation.
+            appearance.set(VisualState::Inactive, inactive);
+            appearance
+        };
+        let button = with_inactive(
+            states(
+                framed(colors[ControlColor::Button as usize]),
+                framed(colors[ControlColor::ButtonHover as usize]),
+                framed(colors[ControlColor::Base as usize]),
+                framed(focus),
+                framed(colors[ControlColor::Button as usize]),
+            ),
+            framed(inactive_background),
         );
-        let input = states(
-            framed(colors[ControlColor::Base as usize]),
-            framed(colors[ControlColor::BaseHover as usize]),
-            framed(colors[ControlColor::BaseHover as usize]),
-            framed(focus),
-            framed(colors[ControlColor::Base as usize]),
+        let input = with_inactive(
+            states(
+                framed(colors[ControlColor::Base as usize]),
+                framed(colors[ControlColor::BaseHover as usize]),
+                framed(colors[ControlColor::BaseHover as usize]),
+                framed(focus),
+                framed(colors[ControlColor::Base as usize]),
+            ),
+            framed(inactive_background),
         );
-        let highlight = states(
+        let highlight = with_inactive(
+            states(
+                solid(transparent),
+                solid(colors[ControlColor::ButtonHover as usize]),
+                solid(colors[ControlColor::Button as usize]),
+                solid(focus),
+                solid(transparent),
+            ),
             solid(transparent),
-            solid(colors[ControlColor::ButtonHover as usize]),
-            solid(colors[ControlColor::Button as usize]),
-            solid(focus),
-            solid(transparent),
         );
-        let selected = states(
-            solid(focus),
-            solid(colors[ControlColor::ButtonHover as usize]),
-            solid(colors[ControlColor::Button as usize]),
-            solid(focus),
-            solid(focus),
+        let selected = with_inactive(
+            states(
+                solid(focus),
+                solid(colors[ControlColor::ButtonHover as usize]),
+                solid(colors[ControlColor::Button as usize]),
+                solid(focus),
+                solid(focus),
+            ),
+            solid(inactive_background),
         );
-        let window = states(
-            framed(colors[ControlColor::WindowBG as usize]),
-            framed(colors[ControlColor::WindowBG as usize]),
-            framed(colors[ControlColor::WindowBG as usize]),
-            framed(colors[ControlColor::WindowBG as usize]),
-            framed(colors[ControlColor::WindowBG as usize]),
+        let window = with_inactive(
+            states(
+                framed(colors[ControlColor::WindowBG as usize]),
+                framed(colors[ControlColor::WindowBG as usize]),
+                framed(colors[ControlColor::WindowBG as usize]),
+                framed(colors[ControlColor::WindowBG as usize]),
+                framed(colors[ControlColor::WindowBG as usize]),
+            ),
+            framed(inactive_background),
         );
 
         let mut catalog = Self::new(StatefulAppearance::all(NinePatch::solid(transparent)));
         catalog.set(AppearanceRole::GenericFrame, StatefulAppearance::all(hollow));
-        catalog.set(AppearanceRole::Panel, StatefulAppearance::all(framed(colors[ControlColor::PanelBG as usize])));
+        catalog.set(
+            AppearanceRole::Panel,
+            with_inactive(
+                StatefulAppearance::all(framed(colors[ControlColor::PanelBG as usize])),
+                framed(inactive_background),
+            ),
+        );
         catalog.set(AppearanceRole::Button, button);
         catalog.set(AppearanceRole::Checkbox, input);
         catalog.set(AppearanceRole::CheckboxChecked, input);
@@ -407,17 +452,29 @@ impl AppearanceCatalog {
         catalog.set(AppearanceRole::SliderThumb, button);
         catalog.set(
             AppearanceRole::ScrollbarTrack,
-            StatefulAppearance::all(solid(colors[ControlColor::ScrollBase as usize])),
+            with_inactive(
+                StatefulAppearance::all(solid(colors[ControlColor::ScrollBase as usize])),
+                solid(inactive_background),
+            ),
         );
         catalog.set(
             AppearanceRole::ScrollbarThumb,
-            StatefulAppearance::all(solid(colors[ControlColor::ScrollThumb as usize])),
+            with_inactive(
+                StatefulAppearance::all(solid(colors[ControlColor::ScrollThumb as usize])),
+                solid(inactive_background),
+            ),
         );
         catalog.set(AppearanceRole::DisclosureHeader, highlight);
-        catalog.set(AppearanceRole::MenuBar, StatefulAppearance::all(solid(menu_background)));
+        catalog.set(
+            AppearanceRole::MenuBar,
+            with_inactive(StatefulAppearance::all(solid(menu_background)), solid(inactive_background)),
+        );
         catalog.set(AppearanceRole::MenuTitle, highlight);
         catalog.set(AppearanceRole::MenuTitleOpen, selected);
-        catalog.set(AppearanceRole::MenuPopup, StatefulAppearance::all(solid(menu_background)));
+        catalog.set(
+            AppearanceRole::MenuPopup,
+            with_inactive(StatefulAppearance::all(solid(menu_background)), solid(inactive_background)),
+        );
         catalog.set(AppearanceRole::MenuItem, highlight);
         catalog.set(AppearanceRole::MenuItemSelected, selected);
         catalog.set(AppearanceRole::WindowFrame, window);
@@ -450,13 +507,14 @@ mod tests {
 
     /// Verifies the shared interaction resolver keeps every combined state independently addressable.
     #[test]
-    fn visual_state_resolution_preserves_disabled_and_combined_states() {
-        assert_eq!(VisualState::from_interaction(false, true, true, true), VisualState::Disabled);
-        assert_eq!(VisualState::from_interaction(true, true, true, true), VisualState::PressedFocused);
-        assert_eq!(VisualState::from_interaction(true, true, true, false), VisualState::HoveredFocused);
-        assert_eq!(VisualState::from_interaction(true, false, true, false), VisualState::Focused);
-        assert_eq!(VisualState::from_interaction(true, true, false, false), VisualState::Hovered);
-        assert_eq!(VisualState::from_interaction(true, false, false, false), VisualState::Normal);
+    fn visual_state_resolution_preserves_inactive_disabled_and_combined_states() {
+        assert_eq!(VisualState::from_interaction(false, true, true, true, true), VisualState::Inactive);
+        assert_eq!(VisualState::from_interaction(true, false, true, true, true), VisualState::Disabled);
+        assert_eq!(VisualState::from_interaction(true, true, true, true, true), VisualState::PressedFocused);
+        assert_eq!(VisualState::from_interaction(true, true, true, true, false), VisualState::HoveredFocused);
+        assert_eq!(VisualState::from_interaction(true, true, false, true, false), VisualState::Focused);
+        assert_eq!(VisualState::from_interaction(true, true, true, false, false), VisualState::Hovered);
+        assert_eq!(VisualState::from_interaction(true, true, false, false, false), VisualState::Normal);
     }
 
     /// Verifies a cloned catalog shares storage until one exact typed role is replaced.

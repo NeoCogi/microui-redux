@@ -156,7 +156,19 @@ fn combo_submission_carries_update_anchor_while_paint_remains_observational() {
     let open = combo.is_open();
     let paint_rect = rect(100, 110, 80, 16);
     let mut display_list = crate::render::DisplayList::new();
-    let mut paint = WidgetPaintCtx::new_with_content_geometry(paint_rect, &mut display_list, paint_rect, &style, &atlas, true, false, false, false, false);
+    let mut paint = WidgetPaintCtx::new_with_content_geometry(
+        paint_rect,
+        &mut display_list,
+        paint_rect,
+        &style,
+        &atlas,
+        true,
+        false,
+        false,
+        false,
+        false,
+        true,
+    );
     combo.paint(&mut paint);
     assert_eq!(combo.is_open(), open);
     assert!(!dispatcher.dispatch(&mut events));

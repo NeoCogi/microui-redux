@@ -5,6 +5,8 @@ Windows 95. It uses bright `#0000AA` active captions, white inactive captions an
 black outlines, tight white/dark-gray bevels, square controls, and the original gray application
 background. Pointer hover does not brighten controls because Windows 3.11 did not use a modern
 hover glow; pressed and keyboard-focused artwork remain separate states.
+Deactivation is a separate top-level state: subdued foreground and background fallbacks propagate
+through the complete child hierarchy, while the frame, title, and button can retain PNG artwork.
 
 The visual research reference was the
 [B00merang Windows 3.11 GTK/Xfwm theme](https://github.com/B00merang-Project/Windows-3.11),

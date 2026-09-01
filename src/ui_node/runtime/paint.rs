@@ -62,11 +62,20 @@ impl FocusIndicator {
 
 impl UiRuntime {
     /// Paints one persistent root and records at most one scope-visible focus outline last.
-    pub(crate) fn paint_tree_root(&mut self, root: &mut Node, display_list: &mut DisplayList, style: &Style, atlas: crate::AtlasHandle, focus_visible: bool) {
+    pub(crate) fn paint_tree_root(
+        &mut self,
+        root: &mut Node,
+        display_list: &mut DisplayList,
+        style: &Style,
+        atlas: crate::AtlasHandle,
+        focus_visible: bool,
+        window_active: bool,
+    ) {
         // Every runtime remembers focus independently, but only the manager-selected keyboard
         // surface may present it. This prevents inactive windows and menu-suspended widgets from
-        // showing simultaneous carets, fills, or outlines.
-        if let Some(indicator) = self.paint_node_ref(root, self.root_transform, display_list, style, atlas, focus_visible, true) {
+        // showing simultaneous carets, fills, or outlines. Window activation travels separately
+        // so every descendant can select Inactive without destroying retained interaction state.
+        if let Some(indicator) = self.paint_node_ref(root, self.root_transform, display_list, style, atlas, focus_visible, window_active, true) {
             indicator.record(display_list);
         }
     }
@@ -80,6 +89,7 @@ impl UiRuntime {
         style: &Style,
         atlas: crate::AtlasHandle,
         focus_visible: bool,
+        window_active: bool,
         ancestors_enabled: bool,
     ) -> Option<FocusIndicator> {
         #[cfg(test)]
@@ -96,12 +106,18 @@ impl UiRuntime {
         let screen_clip = parent_transform.clip.positive_intersection(screen_rect).unwrap_or_default();
         let enabled = ancestors_enabled && node.state.participation.accepts_input();
         let focused = focus_visible && node.state.focused;
-        let visual_state = crate::VisualState::from_interaction(enabled, node.state.hovered, focused, node.state.active && node.state.hovered);
+        let visual_state = crate::VisualState::from_interaction(window_active, enabled, node.state.hovered, focused, node.state.active && node.state.hovered);
         if let Some(role) = frame_role {
             // Semantic framing belongs beneath the widget's own paint and descendant paint.
             // A container frame describes passive structure rather than a selectable control, so
             // pointer hover and capture must not replace its background or border artwork.
-            let frame_state = if node.is_container() { crate::VisualState::Normal } else { visual_state };
+            let frame_state = if !window_active {
+                crate::VisualState::Inactive
+            } else if node.is_container() {
+                crate::VisualState::Normal
+            } else {
+                visual_state
+            };
             let mut painter = crate::render::Painter::screen_space(display_list, screen_clip);
             crate::ui_node::frame::paint_internal_frame(&mut painter, screen_rect, style.appearance(role, frame_state));
         }
@@ -134,6 +150,7 @@ impl UiRuntime {
                 focused,
                 node.state.clicked,
                 node.state.active,
+                window_active,
             );
             node.data.with_widget_mut(|widget| widget.paint(&mut widget_ctx));
         }
@@ -153,7 +170,16 @@ impl UiRuntime {
                     .iter_mut()
                     .filter(|child| node_is_visible(child) && child.intersects_clip(child_transform))
                 {
-                    if let Some(child_focus) = self.paint_node_ref(child, child_transform, display_list, style, atlas.clone(), focus_visible, enabled) {
+                    if let Some(child_focus) = self.paint_node_ref(
+                        child,
+                        child_transform,
+                        display_list,
+                        style,
+                        atlas.clone(),
+                        focus_visible,
+                        window_active,
+                        enabled,
+                    ) {
                         // Focus identity is singular by invariant. Prefer a descendant defensively
                         // if externally mutated state ever exposes both an ancestor and child.
                         focus_indicator = Some(child_focus);

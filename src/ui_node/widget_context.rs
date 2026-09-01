@@ -314,6 +314,8 @@ pub struct WidgetPaintCtx<'a> {
     common: WidgetContextData<'a>,
     /// Whether this widget and every visible ancestor accept interaction.
     enabled: bool,
+    /// Whether the containing top-level window currently owns activation.
+    window_active: bool,
     /// Display list receiving this widget's paint operations.
     display_list: &'a mut DisplayList,
 }
@@ -332,10 +334,12 @@ impl<'a> WidgetPaintCtx<'a> {
         focused: bool,
         clicked: bool,
         active: bool,
+        window_active: bool,
     ) -> Self {
         Self {
             common: WidgetContextData::new(content_rect, screen_clip, style, atlas, hovered, focused, clicked, active),
             enabled,
+            window_active,
             display_list,
         }
     }
@@ -387,11 +391,23 @@ impl<'a> WidgetPaintCtx<'a> {
         self.enabled
     }
 
+    /// Returns whether this widget belongs to the manager's active top-level window.
+    pub fn window_active(&self) -> bool {
+        // Activation is a paint-time presentation fact and does not rewrite focus or pointer state.
+        self.window_active
+    }
+
     /// Resolves the exact semantic appearance state for this paint snapshot.
     pub fn visual_state(&self) -> VisualState {
         // Capture counts as a visible press only while the pointer remains over the widget. A drag
         // outside retains capture for correct release delivery but returns to the non-pressed art.
-        VisualState::from_interaction(self.enabled, self.hovered(), self.focused(), self.active() && self.hovered())
+        VisualState::from_interaction(
+            self.window_active,
+            self.enabled,
+            self.hovered(),
+            self.focused(),
+            self.active() && self.hovered(),
+        )
     }
 
     /// Returns a widget-local painter that records directly into the current frame display list.
@@ -422,6 +438,8 @@ impl<'a> WidgetPaintCtx<'a> {
 
     /// Draws an atlas icon through a widget-local painter.
     pub(crate) fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
+        // Built-in icons participate in whole-window deactivation just like their adjacent text.
+        let color = if self.window_active { color } else { self.common.style.inactive_text_color };
         self.painter().icon(id, rect, color);
     }
 
@@ -442,6 +460,7 @@ impl<'a> WidgetPaintCtx<'a> {
     pub(crate) fn draw_appearance_state(&mut self, role: AppearanceRole, state: VisualState, rect: Recti) -> Option<Recti> {
         // Menu rows and selected list items own semantic state beyond the widget-wide interaction
         // snapshot. They still resolve the same typed catalog and checked nine-patch geometry.
+        let state = if self.window_active { state } else { VisualState::Inactive };
         let patch = self.common.style.appearance(role, state);
         let mut painter = self.painter();
         crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch)
@@ -459,14 +478,26 @@ impl<'a> WidgetPaintCtx<'a> {
         // Zero destination insets collapse all eight outer cells. Flat patches retain their center
         // cell and image patches sample only their center source, preserving the old unframed fill
         // contract without introducing a second theme asset vocabulary.
+        let state = if self.window_active { state } else { VisualState::Inactive };
         let patch = self.common.style.appearance(role, state).with_insets(crate::SliceInsets::ZERO);
         let mut painter = self.painter();
         let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch);
     }
 
+    /// Resolves one semantic control color for the containing window's activation state.
+    pub(crate) fn control_color(&self, color: ControlColor) -> Color {
+        // Built-in text and icons use the dedicated inactive foreground. Other palette roles retain
+        // their exact value because their deactivated backgrounds come from Inactive nine-patches.
+        if !self.window_active && matches!(color, ControlColor::Text | ControlColor::TitleText) {
+            self.common.style.inactive_text_color
+        } else {
+            self.common.style.colors[color as usize]
+        }
+    }
+
     /// Draws aligned control text with an explicit font.
     pub(crate) fn draw_control_text_with_font(&mut self, font: FontId, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
-        let color = self.common.style.colors[colorid as usize];
+        let color = self.control_color(colorid);
         self.draw_control_text_color_with_font(font, text, rect, color, opt);
     }
 
@@ -478,6 +509,9 @@ impl<'a> WidgetPaintCtx<'a> {
     /// and glyph-placement rules. Keeping that variation here prevents each composite from
     /// duplicating the authoritative control-text geometry.
     pub(crate) fn draw_control_text_color_with_font(&mut self, font: FontId, text: &str, rect: Recti, color: Color, opt: WidgetOption) {
+        // All built-in control text follows top-level activation even when a composite supplied an
+        // explicit enabled, selected, or disabled foreground color for its active presentation.
+        let color = if self.window_active { color } else { self.common.style.inactive_text_color };
         let pos = control_text_position_with_font(self.common.style, self.common.atlas, font, text, rect, opt);
         let mut painter = self.painter();
         painter.with_clip(rect, |painter| painter.text(font, text, pos, color));
@@ -519,18 +553,23 @@ mod tests {
         let mut list = DisplayList::new();
 
         {
-            let ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut list, bounds, &style, &atlas, true, true, true, false, true);
+            let ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut list, bounds, &style, &atlas, true, true, true, false, true, true);
             assert_eq!(ctx.visual_state(), VisualState::PressedFocused);
         }
         {
             // Capture remains active outside for release routing, but theme art is no longer pressed.
-            let ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut list, bounds, &style, &atlas, true, false, true, false, true);
+            let ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut list, bounds, &style, &atlas, true, false, true, false, true, true);
             assert_eq!(ctx.visual_state(), VisualState::Focused);
         }
         {
             // Disabled ancestry wins over stale retained interaction snapshots.
-            let ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut list, bounds, &style, &atlas, false, true, true, true, true);
+            let ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut list, bounds, &style, &atlas, false, true, true, true, true, true);
             assert_eq!(ctx.visual_state(), VisualState::Disabled);
+        }
+        {
+            // Window deactivation is independent and wins over every retained widget interaction.
+            let ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut list, bounds, &style, &atlas, true, true, true, true, true, false);
+            assert_eq!(ctx.visual_state(), VisualState::Inactive);
         }
     }
 }

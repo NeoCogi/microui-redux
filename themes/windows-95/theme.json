@@ -16,6 +16,9 @@
       "window_background": [192, 192, 192, 255],
       "title_background": [128, 128, 128, 255],
       "title_text": [255, 255, 255, 255],
+      "inactive_text": [128, 128, 128, 255],
+      "inactive_background": [208, 208, 208, 255],
+      "inactive_title_text": [192, 192, 192, 255],
       "panel_background": [192, 192, 192, 255],
       "button": [192, 192, 192, 255],
       "button_hover": [208, 208, 208, 255],
@@ -46,7 +49,8 @@
       "focused": { "png": "focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
       "hovered_focused": { "png": "focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
       "pressed_focused": { "png": "pressed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-      "disabled": { "png": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+      "disabled": { "png": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+      "inactive": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }, "tint": [240, 240, 240, 255] }
     },
     "checkbox": {
       "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
@@ -126,7 +130,8 @@
       "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 },
       "normal": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
       "hovered": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-      "pressed": { "png": "window-frame-active.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } }
+      "pressed": { "png": "window-frame-active.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
+      "inactive": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [240, 240, 240, 255] }
     },
     "window_frame_active": {
       "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 },

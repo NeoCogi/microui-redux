@@ -3,7 +3,7 @@
 This bundled theme translates the compact rectangular controls, gray raised and recessed bevels,
 navy active-window accent, muted inactive title, and square resize treatment associated with
 Windows 95 into microui-redux's typed appearance roles. Its JSON deliberately supplies PNGs for
-normal, hovered, pressed, focused, combined focus/pointer, and disabled control states while
+normal, hovered, pressed, focused, combined focus/pointer, disabled, and top-level inactive control states while
 leaving selection rows and title colors on the schema's flat fallbacks.
 
 The visual research reference was the

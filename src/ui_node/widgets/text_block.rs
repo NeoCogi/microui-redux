@@ -166,7 +166,7 @@ impl TextBlock {
 
         let bounds = ctx.local_rect();
         let font = ctx.style().resolve_font_choice(self.font);
-        let color = ctx.style().colors[ControlColor::Text as usize];
+        let color = ctx.control_color(ControlColor::Text);
         let line_height = ctx.atlas().get_font_height(font) as i32;
         let baseline = ctx.atlas().get_font_baseline(font);
         let max_width = if self.wrap == TextWrap::Word { bounds.width.max(1) } else { i32::MAX / 4 };

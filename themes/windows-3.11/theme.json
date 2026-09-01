@@ -15,7 +15,10 @@
       "border": [0, 0, 0, 255],
       "window_background": [195, 199, 203, 255],
       "title_background": [255, 255, 255, 255],
-      "title_text": [0, 0, 0, 255],
+      "title_text": [255, 255, 255, 255],
+      "inactive_text": [125, 125, 125, 255],
+      "inactive_background": [211, 211, 211, 255],
+      "inactive_title_text": [125, 125, 125, 255],
       "panel_background": [195, 199, 203, 255],
       "button": [195, 199, 203, 255],
       "button_hover": [195, 199, 203, 255],
@@ -58,7 +61,8 @@
       "focused": { "png": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
       "hovered_focused": { "png": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
       "pressed_focused": { "png": "pressed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-      "disabled": { "png": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+      "disabled": { "png": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+      "inactive": { "png": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "tint": [235, 235, 235, 255] }
     },
     "checkbox": {
       "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
@@ -131,7 +135,8 @@
       "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 },
       "normal": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
       "hovered": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-      "pressed": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } }
+      "pressed": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
+      "inactive": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [235, 235, 235, 255] }
     },
     "window_frame_active": {
       "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 },
@@ -143,7 +148,8 @@
       "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
       "normal": { "png": "title-inactive.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 } },
       "hovered": { "png": "title-inactive.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 } },
-      "pressed": { "png": "title-inactive.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 } }
+      "pressed": { "png": "title-inactive.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 } },
+      "inactive": { "png": "title-inactive.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 } }
     },
     "window_title_active": {
       "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },

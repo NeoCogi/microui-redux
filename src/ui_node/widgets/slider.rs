@@ -798,7 +798,7 @@ mod tests {
             SliderBuilder::create_widget(SliderParameters::new(Real::MAX / 2.0, 0.0, Real::MAX).expect("a maximum finite range span must remain usable"));
         let bounds = rect(0, 0, 100, 20);
         let mut display_list = crate::render::DisplayList::new();
-        let mut ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut display_list, bounds, &style, &atlas, true, false, false, false, false);
+        let mut ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut display_list, bounds, &style, &atlas, true, false, false, false, false, true);
 
         slider.paint(&mut ctx);
 
@@ -921,7 +921,7 @@ mod tests {
         let mut slider = SliderBuilder::create_widget(SliderParameters::new(0.5, 0.0, 1.0).expect("finite ascending slider parameters must validate"));
         let bounds = rect(0, 0, 100, 20);
         let mut display_list = crate::render::DisplayList::new();
-        let mut ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut display_list, bounds, &style, &atlas, true, false, false, false, false);
+        let mut ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut display_list, bounds, &style, &atlas, true, false, false, false, false, true);
 
         slider.paint(&mut ctx);
 

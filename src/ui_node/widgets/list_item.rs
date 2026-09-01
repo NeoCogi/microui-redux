@@ -203,7 +203,7 @@ impl ListItem {
             let consumed = icon_width.saturating_add(padding.saturating_mul(2));
             text_rect.x = text_rect.x.saturating_add(consumed);
             text_rect.width = text_rect.width.saturating_sub(consumed).max(0);
-            let color = ctx.style().colors[ControlColor::Text as usize];
+            let color = ctx.control_color(ControlColor::Text);
             ctx.draw_icon(icon, icon_rect, color);
         }
 
@@ -296,7 +296,7 @@ mod tests {
         let mut item = ListItemBuilder::create_widget(ListItemParameters::with_icon("item", icon));
         let bounds = rect(0, 0, 20, 20);
         let mut display_list = DisplayList::new();
-        let mut ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut display_list, bounds, &style, &atlas, true, true, false, false, false);
+        let mut ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut display_list, bounds, &style, &atlas, true, true, false, false, false, true);
 
         item.paint(&mut ctx);
 

@@ -626,7 +626,7 @@ fn common_phases_are_parent_first_and_siblings_are_forward() {
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
     log.borrow_mut().clear();
     runtime.update_tree_root(&mut root, &style, atlas.clone(), empty_input());
-    runtime.paint_tree_root(&mut root, &mut DisplayList::default(), &style, atlas, true);
+    runtime.paint_tree_root(&mut root, &mut DisplayList::default(), &style, atlas, true, true);
 
     let expected = [
         "container:update",
@@ -668,7 +668,7 @@ fn container_style_cascades_and_child_override_replaces_it_in_every_phase() {
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
     runtime.update_tree_root(&mut root, &style, atlas.clone(), empty_input());
-    runtime.paint_tree_root(&mut root, &mut DisplayList::default(), &style, atlas.clone(), true);
+    runtime.paint_tree_root(&mut root, &mut DisplayList::default(), &style, atlas.clone(), true, true);
 
     assert_eq!(observations.measure.get(), (17, 19));
     assert_eq!(observations.update.get(), (17, 19));
@@ -738,7 +738,7 @@ fn layout_participation_filters_descendants_after_state_changes() {
     container_state.try_update(|state| state.visible = false).unwrap();
     // Visibility is a layout result, so commit the state change before paint consumes the flag.
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
-    runtime.paint_tree_root(&mut root, &mut DisplayList::default(), &style, atlas, true);
+    runtime.paint_tree_root(&mut root, &mut DisplayList::default(), &style, atlas, true, true);
 
     let expected = ["container:update", "child:update", "container:paint"].map(str::to_owned);
     assert_eq!(log.borrow().as_slice(), expected.as_slice());

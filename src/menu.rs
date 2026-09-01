@@ -654,7 +654,7 @@ impl MenuSurface {
     }
 
     /// Paints the complete bar or popup from the geometry shared with measurement and hit testing.
-    pub(crate) fn paint(&mut self, display_list: &mut crate::render::DisplayList, style: &Style, atlas: &AtlasHandle) {
+    pub(crate) fn paint(&mut self, display_list: &mut crate::render::DisplayList, style: &Style, atlas: &AtlasHandle, window_active: bool) {
         // Reuse the concrete built-in paint services without retaining a `Widget`, node identity, or
         // runtime. This keeps control text and atlas clipping exactly aligned with other controls.
         let mut ctx = WidgetPaintCtx::new_with_content_geometry(
@@ -668,6 +668,7 @@ impl MenuSurface {
             false,
             false,
             self.captured,
+            window_active,
         );
         // One uninterrupted semantic panel and one slot loop replace container, row, and cell
         // paint passes while allowing every row state to select its own PNG.
@@ -680,7 +681,7 @@ impl MenuSurface {
                 MenuSlot::Item(item) => {
                     let hovered = self.hovered_slot == Some(slot);
                     let focused = self.keyboard_slot == Some(slot);
-                    let state = VisualState::from_interaction(item.parameters.enabled, hovered, focused, self.captured && hovered);
+                    let state = VisualState::from_interaction(window_active, item.parameters.enabled, hovered, focused, self.captured && hovered);
                     let selected = matches!(item.parameters.mark, MenuItemMark::Checked(true) | MenuItemMark::Radio(true));
                     let role = if selected {
                         AppearanceRole::MenuItemSelected
@@ -707,7 +708,7 @@ impl MenuSurface {
                 MenuSlot::Branch { label } => {
                     let hovered = self.hovered_slot == Some(slot);
                     let focused = self.keyboard_slot == Some(slot);
-                    let state = VisualState::from_interaction(true, hovered, focused, self.captured && hovered);
+                    let state = VisualState::from_interaction(window_active, true, hovered, focused, self.captured && hovered);
                     let role = if self.popup {
                         AppearanceRole::MenuItem
                     } else if self.open_slot == Some(slot) {

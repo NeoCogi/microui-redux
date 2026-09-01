@@ -191,14 +191,17 @@ impl RootChromeVisualState {
         };
         // As with widgets, a captured pointer outside its originating part is no longer visually
         // pressed even though release routing remains captured by the manager.
-        VisualState::from_interaction(true, hovered, false, captured && hovered)
+        // This helper resolves only interaction within active chrome. The recording boundary
+        // replaces the result with Inactive when the complete window is deactivated.
+        VisualState::from_interaction(true, true, hovered, false, captured && hovered)
     }
 
     /// Resolves the complete window frame from any hovered or active resize region.
     fn frame_state(self) -> VisualState {
         let hovered = matches!(self.hovered, Some(RootChromePart::Resize(_)));
         let pressed = matches!(self.interaction, RootInteraction::Resizing(_)) && hovered;
-        VisualState::from_interaction(true, hovered, false, pressed)
+        // Frame edges cannot own keyboard focus, so only hover and the matching capture contribute.
+        VisualState::from_interaction(true, true, hovered, false, pressed)
     }
 }
 
@@ -469,7 +472,14 @@ fn root_frame_patch(style: &Style, active: bool, state: VisualState) -> crate::N
 }
 
 /// Records the frame or plain background that must appear behind application content.
-pub(super) fn record_root_background(display_list: &mut crate::render::DisplayList, viewport: Recti, rect: Recti, style: &Style, active: bool) {
+pub(super) fn record_root_background(
+    display_list: &mut crate::render::DisplayList,
+    viewport: Recti,
+    rect: Recti,
+    style: &Style,
+    active_frame: bool,
+    deactivated: bool,
+) {
     // Chrome uses a screen-space painter because it is outside the retained application tree.
     let mut painter = Painter::screen_space(display_list, viewport);
     // Record only the stretchable center below application content. Framed roots repeat their
@@ -477,8 +487,10 @@ pub(super) fn record_root_background(display_list: &mut crate::render::DisplayLi
     // chrome from overflowing descendants. Unframed roots use this same center-only body path.
     // Pointer interaction belongs to the frame edge and title controls, not the application body.
     // Resolve the body from Normal so merely crossing a resize edge cannot recolor the complete
-    // window interior. Active versus inactive presentation remains selected by the role itself.
-    let patch = root_frame_patch(style, active, VisualState::Normal).with_insets(crate::SliceInsets::ZERO);
+    // window interior. Deactivation is an independent state rather than an inference from the
+    // frame role: popup shells intentionally keep the passive frame role while remaining active.
+    let state = if deactivated { VisualState::Inactive } else { VisualState::Normal };
+    let patch = root_frame_patch(style, active_frame, state).with_insets(crate::SliceInsets::ZERO);
     let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch);
 }
 
@@ -497,11 +509,14 @@ pub(super) fn record_root_overlay(
 ) {
     // Reuse committed geometry so hit-testing and painting cannot disagree within one UI commit.
     let mut painter = Painter::screen_space(display_list, viewport);
+    // Interaction affects active chrome only. Every chrome part in a deactivated root resolves the
+    // dedicated state even if it still retains a hover or capture snapshot from the previous frame.
+    let chrome_state = |state| if active { state } else { VisualState::Inactive };
     if options.intersects(WindowOption::FRAME) {
         // Background recording already filled the framed interior before application content. Draw
         // only the border again in the overlay pass so an unclipped child may extend beyond the
         // parent body without covering parent-owned frame chrome.
-        painter.nine_patch(outer, root_frame_patch(style, active, visual.frame_state()).without_center());
+        painter.nine_patch(outer, root_frame_patch(style, active, chrome_state(visual.frame_state())).without_center());
     }
     if let Some(title) = geometry.title {
         let role = if active {
@@ -509,7 +524,11 @@ pub(super) fn record_root_overlay(
         } else {
             AppearanceRole::WindowTitle
         };
-        let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, title, style.appearance(role, visual.part_state(RootChromePart::Title)));
+        let _ = crate::ui_node::frame::paint_internal_frame(
+            &mut painter,
+            title,
+            style.appearance(role, chrome_state(visual.part_state(RootChromePart::Title))),
+        );
         let mut text = title;
         let caption_start = [geometry.minimize, geometry.maximize, geometry.close]
             .into_iter()
@@ -521,13 +540,17 @@ pub(super) fn record_root_overlay(
             text.width = caption_start.saturating_sub(title.x).max(0);
         }
         if text.width > 0 && text.height > 0 {
-            let color = style.colors[ControlColor::TitleText as usize];
+            let color = if active {
+                style.colors[ControlColor::TitleText as usize]
+            } else {
+                style.inactive_title_text_color
+            };
             let position = crate::ui_node::text_layout::control_text_position_with_font(style, atlas, style.title_font, name, text, crate::WidgetOption::NONE);
             painter.with_clip(text, |painter| painter.text(style.title_font, name, position, color));
         }
         for button in [RootCaptionButton::Minimize, RootCaptionButton::Maximize, RootCaptionButton::Close] {
             if let Some(rect) = geometry.caption(button) {
-                paint_caption_button(&mut painter, rect, button, style, visual);
+                paint_caption_button(&mut painter, rect, button, style, active, visual);
             }
         }
     }
@@ -537,24 +560,32 @@ pub(super) fn record_root_overlay(
         .and_then(|resize| resize.positive_intersection(geometry.client))
     {
         // The grip has an independent role so classic themes can supply dedicated corner artwork.
-        let state = visual.part_state(RootChromePart::Resize(RootResizeAxis::Both));
+        let state = chrome_state(visual.part_state(RootChromePart::Resize(RootResizeAxis::Both)));
         let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, grip, style.appearance(AppearanceRole::WindowResizeGrip, state));
     }
 }
 
 /// Records one stateful caption patch and its manager-owned flat fallback symbol.
-fn paint_caption_button(painter: &mut Painter<'_>, rect: Recti, button: RootCaptionButton, style: &Style, visual: RootChromeVisualState) {
+fn paint_caption_button(painter: &mut Painter<'_>, rect: Recti, button: RootCaptionButton, style: &Style, window_active: bool, visual: RootChromeVisualState) {
     let role = match button {
         RootCaptionButton::Minimize => AppearanceRole::WindowMinimizeButton,
         RootCaptionButton::Maximize if visual.maximized => AppearanceRole::WindowRestoreButton,
         RootCaptionButton::Maximize => AppearanceRole::WindowMaximizeButton,
         RootCaptionButton::Close => AppearanceRole::WindowCloseButton,
     };
-    let state = visual.part_state(RootChromePart::Caption(button));
+    let state = if window_active {
+        visual.part_state(RootChromePart::Caption(button))
+    } else {
+        VisualState::Inactive
+    };
     let Some(content) = crate::ui_node::frame::paint_internal_frame(painter, rect, style.appearance(role, state)) else {
         return;
     };
-    let color = style.colors[ControlColor::TitleText as usize];
+    let color = if window_active {
+        style.colors[ControlColor::TitleText as usize]
+    } else {
+        style.inactive_title_text_color
+    };
     match button {
         RootCaptionButton::Close => {
             // Close retains the atlas icon already required by every Style and test atlas.

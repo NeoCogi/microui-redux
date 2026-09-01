@@ -132,7 +132,7 @@ impl ListBox {
             ctx.draw_control_text_with_font(font, &self.label, placement.text, ControlColor::Text, self.opt);
         }
         if let (Some(image), Some(visual)) = (self.image, placement.visual) {
-            let color = ctx.style().colors[ControlColor::Text as usize];
+            let color = ctx.control_color(ControlColor::Text);
             ctx.push_image(image, visual, color);
         }
     }

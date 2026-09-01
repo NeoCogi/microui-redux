@@ -347,7 +347,7 @@ impl Combo {
         ctx.draw_control_text_with_font(font, self.label.as_str(), text_rect, ControlColor::Text, self.opt);
 
         let indicator_content = ctx.draw_appearance(AppearanceRole::Button, indicator);
-        let icon_color = ctx.style().colors[ControlColor::Text as usize];
+        let icon_color = ctx.control_color(ControlColor::Text);
         if let Some(indicator_content) = indicator_content {
             ctx.draw_icon(ctx.style().icons.expand_down, indicator_content, icon_color);
         }

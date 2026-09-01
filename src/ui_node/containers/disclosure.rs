@@ -273,7 +273,7 @@ impl Widget for DisclosureHeader {
         }
 
         // Reserve a square icon cell from row height, then paint text in the remaining rectangle.
-        let text_color = ctx.style().colors[ControlColor::Text as usize];
+        let text_color = ctx.control_color(ControlColor::Text);
         ctx.draw_icon(
             if expanded { ctx.style().icons.collapse } else { ctx.style().icons.expand },
             Recti::new(row.x, row.y, row.height, row.height),

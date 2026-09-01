@@ -160,7 +160,7 @@ impl Checkbox {
         let role = if checked { AppearanceRole::CheckboxChecked } else { AppearanceRole::Checkbox };
         let box_content = ctx.draw_appearance(role, box_rect);
         if checked {
-            let color = ctx.style().colors[ControlColor::Text as usize];
+            let color = ctx.control_color(ControlColor::Text);
             if let Some(box_content) = box_content {
                 ctx.draw_icon(ctx.style().icons.check, box_content, color);
             }

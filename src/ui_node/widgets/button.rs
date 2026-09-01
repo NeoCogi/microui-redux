@@ -212,7 +212,7 @@ impl Button {
                     ctx.draw_control_text_with_font(font, label, placement.text, ControlColor::Text, self.opt);
                 }
                 if let (Some(icon), Some(visual)) = (icon, placement.visual) {
-                    let color = ctx.style().colors[ControlColor::Text as usize];
+                    let color = ctx.control_color(ControlColor::Text);
                     ctx.draw_icon(*icon, visual, color);
                 }
             }
@@ -223,7 +223,7 @@ impl Button {
                     ctx.draw_control_text_with_font(font, label, placement.text, ControlColor::Text, self.opt);
                 }
                 if let (Some(image), Some(visual)) = (*image, placement.visual) {
-                    let color = ctx.style().colors[ControlColor::Text as usize];
+                    let color = ctx.control_color(ControlColor::Text);
                     ctx.push_image(image, visual, color);
                 }
             }
@@ -238,7 +238,7 @@ impl Button {
                     ctx.draw_control_text_with_font(font, label, placement.text, ControlColor::Text, self.opt);
                 }
                 if let (Some(image), Some(visual)) = (*image, placement.visual) {
-                    let color = ctx.style().colors[ControlColor::Text as usize];
+                    let color = ctx.control_color(ControlColor::Text);
                     ctx.push_image(image, visual, color);
                 }
             }
