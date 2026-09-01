@@ -92,3 +92,23 @@ The `appearances` object accepts the following exact keys:
 
 Unknown fields and role names are errors. This prevents a misspelled state or control name from
 silently falling back to a flat appearance.
+
+## Window borders and caption controls
+
+`window_frame.insets` is the window's sole structural border thickness. Its left, top, right, and
+bottom values drive client layout, inactive and active frame paint, and hit testing together;
+`window_frame_active.insets` is normalized to that authority during painting. A resizable window
+uses the configured right and bottom thicknesses as its width-only and height-only hit regions; the
+existing bottom-right grip remains a two-axis resize region whose visible art comes from
+`window_resize_grip`.
+
+Window caption controls are enabled explicitly through `WindowOption::MINIMIZE_BUTTON` and
+`WindowOption::MAXIMIZE_BUTTON`. The close button remains enabled unless `WindowOption::NO_CLOSE`
+is present. Caption and resize roles receive `hovered` and `pressed` states from manager-owned
+pointer capture just like widgets. A press dragged away from its originating caption button is no
+longer painted pressed and does not activate on release.
+
+Minimize hides the retained window and emits `WindowEvent::Minimized`; the same `WindowHandle` can
+be shown again. Maximize saves the exact normal outer rectangle, tracks the complete inherited
+viewport, and emits `WindowEvent::Maximized`. Activating the same caption position while maximized
+uses `window_restore_button`, restores the saved rectangle, and emits `WindowEvent::Restored`.

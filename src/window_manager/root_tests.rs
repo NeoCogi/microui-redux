@@ -1127,7 +1127,10 @@ fn every_event_layout_commit_updates_hit_geometry_for_the_next_queued_event() {
     ctx.mousedown(title.x + 2, title.y + 2, MouseButton::LEFT);
     ctx.mousemove(title.x + 2 + shift.x, title.y + 2 + shift.y);
     ctx.mouseup(title.x + 2 + shift.x, title.y + 2 + shift.y, MouseButton::LEFT);
-    ctx.mousedown(close.x + close.width / 2 + shift.x, close.y + close.height / 2 + shift.y, MouseButton::LEFT);
+    let close_x = close.x + close.width / 2 + shift.x;
+    let close_y = close.y + close.height / 2 + shift.y;
+    ctx.mousedown(close_x, close_y, MouseButton::LEFT);
+    ctx.mouseup(close_x, close_y, MouseButton::LEFT);
     ctx.update_ui(dimensions);
 
     assert_eq!(ctx.debug_root_visible(root.id()), Some(false));
@@ -2732,7 +2735,10 @@ fn hiding_or_destroying_the_front_dialog_reveals_the_next_visible_dialog() {
 
     ctx.update_and_render_ui();
     let close = ctx.debug_root_chrome(second.id()).unwrap().1.unwrap();
-    ctx.mousedown(close.x + close.width / 2, close.y + close.height / 2, MouseButton::LEFT);
+    let close_x = close.x + close.width / 2;
+    let close_y = close.y + close.height / 2;
+    ctx.mousedown(close_x, close_y, MouseButton::LEFT);
+    ctx.mouseup(close_x, close_y, MouseButton::LEFT);
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_root_visible(second.id()), Some(false));
     assert_eq!(ctx.debug_modal_root(), Some(first.id()));
@@ -2848,6 +2854,7 @@ fn title_drag_and_close_record_typed_window_events() {
     let close_x = close.x + close.width / 2;
     let close_y = close.y + close.height / 2;
     ctx.mousedown(close_x, close_y, MouseButton::LEFT);
+    ctx.mouseup(close_x, close_y, MouseButton::LEFT);
     ctx.update_and_render_ui();
     assert_eq!(ctx.debug_root_visible(root.id()), Some(false));
     assert!(dispatcher.dispatch(&mut events));
@@ -2894,6 +2901,129 @@ fn resize_overlay_preempts_content_where_the_grip_overlaps_the_root_body() {
         ctx.debug_root_rect(root.id()).map(|rect| (rect.width, rect.height)),
         Some((before.width + 12, before.height + 8))
     );
+}
+
+#[test]
+fn right_bottom_and_corner_resize_only_their_declared_axes_with_thick_borders() {
+    /// Drags one committed resize region by an exact positive delta and releases capture.
+    fn drag(ctx: &mut Context<NoopRenderer>, region: Recti, delta: Vec2i, dimensions: Dimensioni) {
+        let x = region.x + region.width / 2;
+        let y = region.y + region.height / 2;
+        ctx.mousedown(x, y, MouseButton::LEFT);
+        ctx.update_ui(dimensions);
+        ctx.mousemove(x.saturating_add(delta.x), y.saturating_add(delta.y));
+        ctx.update_ui(dimensions);
+        ctx.mouseup(x.saturating_add(delta.x), y.saturating_add(delta.y), MouseButton::LEFT);
+        ctx.update_ui(dimensions);
+    }
+
+    let atlas = test_atlas();
+    let mut style = test_style(&atlas);
+    let insets = crate::SliceInsets::new(3, 4, 5, 6);
+    let frame = StatefulAppearance::all(NinePatch::framed(insets, color(10, 20, 30, 255), Some(color(40, 50, 60, 255))));
+    style.appearances.set(AppearanceRole::WindowFrame, frame);
+    style.appearances.set(AppearanceRole::WindowFrameActive, frame);
+    let grip_size = style.scrollbar_size;
+    let mut ctx = Context::new_test(NoopRenderer { atlas }, Dimensioni::new(360, 260));
+    ctx.set_style(style);
+    let root = ctx.ui().create_window(Window::new("resizable", rect(30, 30, 140, 100), empty_content()));
+    ctx.ui().set_window_options(&root, WindowOption::FRAME | WindowOption::NO_TITLE).unwrap();
+    let dimensions = Dimensioni::new(360, 260);
+    ctx.update_ui(dimensions);
+
+    let controls = ctx.debug_root_chrome_controls(root.id()).unwrap();
+    let right = controls.resize_right.expect("a resizable window must expose a right edge");
+    let bottom = controls.resize_bottom.expect("a resizable window must expose a bottom edge");
+    let corner = controls.resize_corner.expect("a resizable window must retain its bottom-right corner");
+    assert_eq!(right.width, insets.right);
+    assert_eq!(bottom.height, insets.bottom);
+    assert_eq!((corner.width, corner.height), (grip_size, grip_size));
+
+    drag(&mut ctx, right, crate::vec2(20, 17), dimensions);
+    assert_eq!(
+        ctx.debug_root_rect(root.id()).map(|rect| (rect.x, rect.y, rect.width, rect.height)),
+        Some((30, 30, 160, 100))
+    );
+
+    let bottom = ctx.debug_root_chrome_controls(root.id()).unwrap().resize_bottom.unwrap();
+    drag(&mut ctx, bottom, crate::vec2(19, 15), dimensions);
+    assert_eq!(
+        ctx.debug_root_rect(root.id()).map(|rect| (rect.x, rect.y, rect.width, rect.height)),
+        Some((30, 30, 160, 115))
+    );
+
+    let corner = ctx.debug_root_chrome_controls(root.id()).unwrap().resize_corner.unwrap();
+    drag(&mut ctx, corner, crate::vec2(12, 9), dimensions);
+    assert_eq!(
+        ctx.debug_root_rect(root.id()).map(|rect| (rect.x, rect.y, rect.width, rect.height)),
+        Some((30, 30, 172, 124))
+    );
+}
+
+#[test]
+fn positive_caption_flags_minimize_maximize_follow_viewport_and_restore_exactly() {
+    /// Presses and releases one caption button with an intermediate commit for pressed-state paint.
+    fn click_caption(ctx: &mut Context<NoopRenderer>, rect: Recti, dimensions: Dimensioni) {
+        let x = rect.x + rect.width / 2;
+        let y = rect.y + rect.height / 2;
+        ctx.mousedown(x, y, MouseButton::LEFT);
+        ctx.update_ui(dimensions);
+        ctx.mouseup(x, y, MouseButton::LEFT);
+        ctx.update_ui(dimensions);
+    }
+
+    /// Copies the complete typed window-event sequence into test-owned storage.
+    fn record(events: &mut Vec<WindowEvent>, event: &WindowEvent) {
+        events.push(*event);
+    }
+
+    /// Converts external rectangle values into equality-friendly tuples.
+    fn tuple(rect: Recti) -> (i32, i32, i32, i32) {
+        (rect.x, rect.y, rect.width, rect.height)
+    }
+
+    let mut ctx = context();
+    let normal = rect(30, 35, 150, 110);
+    let root = ctx.ui().create_window(Window::new("caption flags", normal, empty_content()));
+    ctx.ui()
+        .set_window_options(&root, WindowOption::FRAME | WindowOption::MINIMIZE_BUTTON | WindowOption::MAXIMIZE_BUTTON)
+        .unwrap();
+    let mut dispatcher = crate::event::WidgetEventDispatcher::new();
+    dispatcher.subscribe(root.events(), record).unwrap();
+    let mut events = Vec::new();
+    let initial_dimensions = Dimensioni::new(320, 240);
+    ctx.update_ui(initial_dimensions);
+
+    let controls = ctx.debug_root_chrome_controls(root.id()).unwrap();
+    assert!(
+        controls.minimize.is_some() && controls.maximize.is_some(),
+        "positive flags must create both caption buttons"
+    );
+    click_caption(&mut ctx, controls.maximize.unwrap(), initial_dimensions);
+    assert_eq!(ctx.debug_root_rect(root.id()).map(tuple), Some((0, 0, 320, 240)));
+    assert!(ctx.debug_root_chrome_controls(root.id()).unwrap().resize_right.is_none());
+    assert!(dispatcher.dispatch(&mut events));
+    assert!(matches!(events.as_slice(), [WindowEvent::Maximized { rect }] if tuple(*rect) == (0, 0, 320, 240)));
+
+    let larger_dimensions = Dimensioni::new(400, 300);
+    ctx.update_ui(larger_dimensions);
+    assert_eq!(ctx.debug_root_rect(root.id()).map(tuple), Some((0, 0, 400, 300)));
+    let restore = ctx.debug_root_chrome_controls(root.id()).unwrap().maximize.unwrap();
+    click_caption(&mut ctx, restore, larger_dimensions);
+    assert_eq!(ctx.debug_root_rect(root.id()).map(tuple), Some(tuple(normal)));
+    assert!(dispatcher.dispatch(&mut events));
+    assert!(matches!(events.as_slice(), [WindowEvent::Maximized { .. }, WindowEvent::Restored { rect }] if tuple(*rect) == tuple(normal)));
+
+    let minimize = ctx.debug_root_chrome_controls(root.id()).unwrap().minimize.unwrap();
+    click_caption(&mut ctx, minimize, larger_dimensions);
+    assert_eq!(ctx.debug_root_visible(root.id()), Some(false));
+    assert!(dispatcher.dispatch(&mut events));
+    assert!(matches!(
+        events.as_slice(),
+        [WindowEvent::Maximized { .. }, WindowEvent::Restored { .. }, WindowEvent::Minimized]
+    ));
+    ctx.ui().set_window_visible(&root, true).unwrap();
+    assert_eq!(ctx.debug_root_rect(root.id()).map(tuple), Some(tuple(normal)));
 }
 
 #[test]

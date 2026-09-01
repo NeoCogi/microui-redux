@@ -79,7 +79,8 @@ context.ui().set_window_visible(&dialog, true)?;
 context.ui().show_popup_at(&popup, anchor)?;
 ```
 
-`WindowEvent` combines `GeometryChanged { rect }` and `CloseRequested` on one window port.
+`WindowEvent` combines geometry, close, minimize, maximize, and restore observations on one typed
+window port.
 `PopupEvent::Dismissed` reports removal of an application popup from the sole active branch.
 Showing or fronting a window moves its complete forest node to the tail of the chronology in its
 structural scope; its effective layer still determines the rendered tier. Independent windows own

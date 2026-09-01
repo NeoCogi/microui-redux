@@ -854,6 +854,12 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         // Use the renderer atlas so test geometry matches production title measurement.
         self.window_manager.debug_root_chrome(root, &self.renderer.atlas())
     }
+
+    /// Returns optional caption and per-axis resize rectangles for internal window tests.
+    pub(crate) fn debug_root_chrome_controls(&self, root: RootId) -> Option<crate::window_manager::DebugRootChromeControls> {
+        // Use the renderer atlas for the same title-height calculation as committed layout.
+        self.window_manager.debug_root_chrome_controls(root, &self.renderer.atlas())
+    }
 }
 
 // Logical frame ownership and submission.

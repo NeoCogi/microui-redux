@@ -345,8 +345,8 @@ liveness without defining it. If an object later exposes several ports, each rem
 named endpoint beside the same stable object ID.
 
 Window chrome is manager-owned rather than represented by a retained widget. `WindowHandle::events`
-projects `WindowEvent::GeometryChanged { rect }` and `WindowEvent::CloseRequested`; the manager
-applies the new geometry or hides the window before queuing either observation.
+projects concrete variants for geometry changes, close requests, minimization, maximization, and
+restoration; the manager applies the new geometry or visibility before queuing an observation.
 `PopupHandle::events` projects `PopupEvent::Dismissed` whenever policy removes that application
 popup from the active branch. Private menu popups instead publish the selected item's
 `MenuItemHandle::submitted` event.
@@ -362,6 +362,10 @@ fn window_event(&mut self, ui: &mut Ui<'_>, event: &WindowEvent) {
         WindowEvent::GeometryChanged { rect } => self.last_rect = *rect,
         WindowEvent::CloseRequested => {
             ui.destroy_window(&self.window).expect("window must remain registered");
+        }
+        WindowEvent::Minimized => self.window_visible = false,
+        WindowEvent::Maximized { rect } | WindowEvent::Restored { rect } => {
+            self.last_rect = *rect;
         }
     }
 }

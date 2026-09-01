@@ -37,7 +37,10 @@ use crate::menu::{MenuAction, MenuEntry, MenuSlot, MenuSurface};
 use crate::math::RectExt;
 use crate::{MouseButton, Node, UiInputEvent, Vec2i, rect};
 
-use super::root_chrome::{RootChromeGeometry, RootChromePart, RootInteraction, record_root_background, record_root_overlay, root_chrome_geometry};
+use super::root_chrome::{
+    RootCaptionButton, RootChromeGeometry, RootChromePart, RootChromeVisualState, RootInteraction, RootResizeAxis, record_root_background, record_root_overlay,
+    root_chrome_geometry,
+};
 
 /// Failure reason reported by a checked window or popup operation.
 ///
@@ -563,12 +566,32 @@ struct RootState {
     visible: bool,
     /// Manager-owned title movement or resize gesture.
     interaction: RootInteraction,
+    /// Chrome region under the pointer during the latest routed pointer event.
+    hovered_chrome: Option<RootChromePart>,
+    /// Exact normal rectangle retained while this window is maximized.
+    ///
+    /// `None` means normal placement; `Some` simultaneously records restoration geometry and the
+    /// maximized mode without a second boolean that could disagree with it.
+    restore_rect: Option<Recti>,
     /// Strong owner of the unified window geometry/lifecycle event stream.
     events: Rc<RefCell<crate::event::WidgetEventPort<WindowEvent>>>,
     /// Optional concrete menu bar laid out above the application widget body.
     menu_bar: Option<MenuSurface>,
     /// Descendant viewport policy applied when layout enters direct structural child windows.
     child_window_clip: ChildWindowClip,
+}
+
+impl RootState {
+    /// Copies the interaction facts needed by chrome paint without lending manager policy storage.
+    fn chrome_visual_state(&self) -> RootChromeVisualState {
+        // `restore_rect` is the authoritative maximized-mode representation, so paint derives its
+        // maximize-versus-restore role from the same value used by layout and caption actions.
+        RootChromeVisualState {
+            hovered: self.hovered_chrome,
+            interaction: self.interaction,
+            maximized: self.restore_rect.is_some(),
+        }
+    }
 }
 
 /// Popup-specific policy attached to a concrete surface node.
@@ -659,6 +682,7 @@ impl SurfaceNode {
         // Only roots have manager chrome, while both roles own a concrete widget runtime.
         if let Some(root) = self.root_mut() {
             root.interaction = RootInteraction::None;
+            root.hovered_chrome = None;
         }
         if let Some(root) = self.root_mut()
             && let Some(menu) = root.menu_bar.as_mut()
@@ -672,6 +696,7 @@ impl SurfaceNode {
     fn clear_pointer_targets(&mut self) {
         if let Some(root) = self.root_mut() {
             root.interaction = RootInteraction::None;
+            root.hovered_chrome = None;
         }
         if let Some(root) = self.root_mut()
             && let Some(menu) = root.menu_bar.as_mut()
@@ -693,9 +718,26 @@ impl SurfaceNode {
     /// Replaces root chrome options and revokes a gesture disabled by the new policy.
     fn set_root_options(&mut self, options: WindowOption) {
         self.surface.options = options;
-        let interaction = self.root().expect("chrome options are defined only for roots").interaction;
+        let (interaction, restore_rect) = {
+            let root = self.root_mut().expect("chrome options are defined only for roots");
+            let restore_rect = if options.intersects(WindowOption::MAXIMIZE_BUTTON) {
+                None
+            } else {
+                // Removing the only restore affordance must leave the root in normal mode.
+                root.restore_rect.take()
+            };
+            (root.interaction, restore_rect)
+        };
+        if let Some(rect) = restore_rect {
+            // Removing the positive maximize affordance also exits its mode, preserving the exact
+            // normal rectangle rather than leaving an un-restorable maximized window.
+            self.surface.rect = rect;
+        }
         let disabled = (options.intersects(WindowOption::NO_TITLE) && interaction == RootInteraction::Moving)
-            || (options.intersects(WindowOption::NO_RESIZE | WindowOption::AUTO_SIZE) && interaction == RootInteraction::Resizing);
+            || (options.intersects(WindowOption::NO_RESIZE | WindowOption::AUTO_SIZE) && matches!(interaction, RootInteraction::Resizing(_)))
+            || (matches!(interaction, RootInteraction::Caption(RootCaptionButton::Minimize)) && !options.intersects(WindowOption::MINIMIZE_BUTTON))
+            || (matches!(interaction, RootInteraction::Caption(RootCaptionButton::Maximize)) && !options.intersects(WindowOption::MAXIMIZE_BUTTON))
+            || (matches!(interaction, RootInteraction::Caption(RootCaptionButton::Close)) && options.intersects(WindowOption::NO_CLOSE));
         if disabled {
             self.clear_transient_targets();
         }
@@ -752,11 +794,21 @@ impl SurfaceNode {
 
     /// Lays out this node and its optional root-owned menu bar through concrete bodies.
     fn layout(&mut self, style: &Style, atlas: &crate::AtlasHandle, viewport: Recti) {
+        let maximized = self.root().is_some_and(|root| root.restore_rect.is_some());
+        if maximized {
+            // Follow the effective viewport on every layout so native drawable or ancestor-clip
+            // changes resize a maximized top-level or child window without losing restoration data.
+            self.surface.rect = viewport;
+        }
         let menu_bar = match &mut self.kind {
             SurfaceKind::Root(root) => root.menu_bar.as_mut(),
             SurfaceKind::Popup(_) => None,
         };
         self.surface.layout(menu_bar, style, atlas, viewport);
+        if maximized {
+            // Maximized windows keep caption actions but expose no resize hit regions or grip.
+            self.surface.geometry = self.surface.geometry.without_resize();
+        }
     }
 }
 
@@ -1224,6 +1276,8 @@ impl WindowManager {
                 mode,
                 visible,
                 interaction: RootInteraction::None,
+                hovered_chrome: None,
+                restore_rect: None,
                 events,
                 menu_bar,
                 child_window_clip,
@@ -1346,7 +1400,11 @@ impl WindowManager {
     /// Replaces a window outer rectangle silently.
     pub fn set_window_rect(&mut self, window: &WindowHandle, rect: Recti) -> Result<(), SurfaceMutationError> {
         let root = self.window_id(window)?;
-        self.root_node_mut(root)?.surface.rect = rect;
+        let node = self.root_node_mut(root)?;
+        // An explicit application rectangle becomes the new normal placement and exits maximized
+        // mode so a later caption click cannot restore stale geometry over this request.
+        node.root_mut().expect("window identity must resolve root policy").restore_rect = None;
+        node.surface.rect = rect;
         self.invalidate_ui_commit();
         Ok(())
     }
@@ -1354,9 +1412,11 @@ impl WindowManager {
     /// Replaces a window outer size without changing its screen origin.
     pub fn set_window_size(&mut self, window: &WindowHandle, size: Dimensioni) -> Result<(), SurfaceMutationError> {
         let root = self.window_id(window)?;
-        let surface = &mut self.root_node_mut(root)?.surface;
-        surface.rect.width = size.width;
-        surface.rect.height = size.height;
+        let node = self.root_node_mut(root)?;
+        // Programmatic sizing has the same maximized-mode policy as replacing the complete rect.
+        node.root_mut().expect("window identity must resolve root policy").restore_rect = None;
+        node.surface.rect.width = size.width;
+        node.surface.rect.height = size.height;
         self.invalidate_ui_commit();
         Ok(())
     }
@@ -1904,6 +1964,24 @@ impl WindowManager {
         }
     }
 
+    /// Commits one exclusive root-chrome hover target for stateful caption and resize painting.
+    fn update_chrome_hover(&mut self, surface: Option<SurfaceKey>, point: Vec2i) {
+        // Clear every root first because input selection is topmost and exclusive. A popup or menu
+        // hover therefore removes stale caption art from the owning and underlying windows alike.
+        for node in &mut self.surfaces.nodes {
+            if let Some(root) = node.root_mut() {
+                root.hovered_chrome = None;
+            }
+        }
+        let Some(SurfaceKey::Root(root)) = surface else {
+            return;
+        };
+        let part = self.root_node(root).ok().and_then(|node| node.chrome_part_at(point));
+        if let Ok(node) = self.root_node_mut(root) {
+            node.root_mut().expect("root hover target must retain root policy").hovered_chrome = part;
+        }
+    }
+
     /// Returns whether the concrete menu attached to a visible key contains one pointer point.
     fn menu_contains(&self, key: SurfaceKey, point: Vec2i) -> bool {
         self.menu_surface(key).is_some_and(|menu| menu.contains(point))
@@ -2258,18 +2336,18 @@ impl WindowManager {
         match event {
             UiInputEvent::MouseDown { pos, button } if button.intersects(MouseButton::LEFT) => {
                 match self.root_node(root).ok().and_then(|node| node.chrome_part_at(*pos)) {
-                    Some(RootChromePart::Close) => {
-                        // Apply visibility before queuing Close so subscribers observe final policy.
-                        self.set_window_visible_id(root, false).expect("chrome target must remain registered");
-                        self.root_node_mut(root)
-                            .expect("closing a root must not destroy it")
-                            .emit_window_event(WindowEvent::CloseRequested);
-                        true
-                    }
-                    Some(RootChromePart::Resize) => {
+                    Some(RootChromePart::Caption(button)) => {
+                        // Caption actions commit on release over the same button. Capture preserves
+                        // pressed-state PNG selection and lets a drag outside cancel the action.
                         let node = self.root_node_mut(root).expect("chrome target must remain retained");
                         node.surface.body.clear_transient_targets();
-                        node.root_mut().expect("chrome target must be a root").interaction = RootInteraction::Resizing;
+                        node.root_mut().expect("chrome target must be a root").interaction = RootInteraction::Caption(button);
+                        true
+                    }
+                    Some(RootChromePart::Resize(axis)) => {
+                        let node = self.root_node_mut(root).expect("chrome target must remain retained");
+                        node.surface.body.clear_transient_targets();
+                        node.root_mut().expect("chrome target must be a root").interaction = RootInteraction::Resizing(axis);
                         true
                     }
                     Some(RootChromePart::Title) => {
@@ -2289,11 +2367,16 @@ impl WindowManager {
                         node.surface.rect.x = initial.x.saturating_add(delta.x);
                         node.surface.rect.y = initial.y.saturating_add(delta.y);
                     }
-                    RootInteraction::Resizing => {
+                    RootInteraction::Resizing(axis) => {
                         let minimum = node.surface.geometry.minimum_outer;
-                        node.surface.rect.width = initial.width.saturating_add(delta.x).max(minimum.width);
-                        node.surface.rect.height = initial.height.saturating_add(delta.y).max(minimum.height);
+                        if matches!(axis, RootResizeAxis::Width | RootResizeAxis::Both) {
+                            node.surface.rect.width = initial.width.saturating_add(delta.x).max(minimum.width);
+                        }
+                        if matches!(axis, RootResizeAxis::Height | RootResizeAxis::Both) {
+                            node.surface.rect.height = initial.height.saturating_add(delta.y).max(minimum.height);
+                        }
                     }
+                    RootInteraction::Caption(_) => return true,
                     RootInteraction::None => return node.chrome_part_at(*pos).is_some(),
                 }
                 if (node.surface.rect.x, node.surface.rect.y, node.surface.rect.width, node.surface.rect.height)
@@ -2306,7 +2389,7 @@ impl WindowManager {
                 }
                 true
             }
-            UiInputEvent::MouseUp { button, .. }
+            UiInputEvent::MouseUp { pos, button }
                 if button.intersects(MouseButton::LEFT)
                     && self
                         .root_node(root)
@@ -2314,16 +2397,65 @@ impl WindowManager {
                         .and_then(SurfaceNode::root)
                         .is_some_and(|state| state.interaction != RootInteraction::None) =>
             {
+                let (interaction, released_part) = {
+                    let node = self.root_node(root).expect("release target must remain retained");
+                    (node.root().expect("release target must be a root").interaction, node.chrome_part_at(*pos))
+                };
                 self.root_node_mut(root)
                     .expect("release target must remain retained")
                     .root_mut()
                     .expect("release target must be a root")
                     .interaction = RootInteraction::None;
+                if let RootInteraction::Caption(button) = interaction
+                    && released_part == Some(RootChromePart::Caption(button))
+                {
+                    self.activate_caption_button(root, button);
+                }
                 true
             }
             _ => event
                 .position()
                 .is_some_and(|point| self.root_node(root).ok().and_then(|node| node.chrome_part_at(point)).is_some()),
+        }
+    }
+
+    /// Applies one caption action after its capture has ended on the originating button.
+    fn activate_caption_button(&mut self, root: RootId, button: RootCaptionButton) {
+        match button {
+            RootCaptionButton::Close => {
+                // Apply visibility before queuing Close so subscribers observe final policy.
+                self.set_window_visible_id(root, false).expect("caption target must remain registered");
+                self.root_node_mut(root)
+                    .expect("closing a root must not destroy it")
+                    .emit_window_event(WindowEvent::CloseRequested);
+            }
+            RootCaptionButton::Minimize => {
+                // Minimize preserves the complete root and any saved maximized restoration rect;
+                // application code can show the same handle later without rebuilding state.
+                self.set_window_visible_id(root, false).expect("caption target must remain registered");
+                self.root_node_mut(root)
+                    .expect("minimizing a root must not destroy it")
+                    .emit_window_event(WindowEvent::Minimized);
+            }
+            RootCaptionButton::Maximize => {
+                let node = self.root_node_mut(root).expect("caption target must remain registered");
+                let restore = node.root_mut().expect("caption target must be a root").restore_rect.take();
+                let event = if let Some(rect) = restore {
+                    // Restore exactly the normal placement captured by the preceding maximize.
+                    node.surface.rect = rect;
+                    WindowEvent::Restored { rect }
+                } else {
+                    // The committed clip is the complete available viewport for top-level, child,
+                    // and modal roots. Save normal placement before replacing it.
+                    let normal = node.surface.rect;
+                    let rect = node.surface.clip;
+                    node.root_mut().expect("caption target must be a root").restore_rect = Some(normal);
+                    node.surface.rect = rect;
+                    WindowEvent::Maximized { rect }
+                };
+                node.emit_window_event(event);
+                self.invalidate_ui_commit();
+            }
         }
     }
 
@@ -2494,6 +2626,11 @@ impl WindowManager {
         let hover = (event.is_pointer() && !discard_pointer)
             .then(|| self.input_surface_at(input.mouse_pos))
             .flatten();
+        if event.is_pointer() {
+            // Hover is paint state even when no button is pressed or the selected chrome region
+            // ultimately lets the event fall through to application content.
+            self.update_chrome_hover(hover, input.mouse_pos);
+        }
         if matches!(event, UiInputEvent::MouseDown { .. })
             && self.active_menu_surface().is_some()
             && !hover.is_some_and(|surface| self.menu_contains(surface, input.mouse_pos))
@@ -2659,7 +2796,15 @@ impl WindowManager {
             // child calls borrow arbitrary later forest entries without unsafe aliasing or mirrors.
             let node_index = self.surfaces.node_index(SurfaceKey::Root(root)).expect("visible root must remain retained");
             let node = &mut self.surfaces.nodes[node_index];
-            record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, style, active_window == Some(root));
+            let visual = node.root().expect("root paint must retain root policy").chrome_visual_state();
+            record_root_background(
+                &mut self.display_list,
+                node.surface.clip,
+                node.surface.rect,
+                style,
+                active_window == Some(root),
+                visual,
+            );
             node.surface
                 .body
                 .paint(&mut self.display_list, style, atlas, focus_surface == Some(SurfaceKey::Root(root)));
@@ -2695,6 +2840,7 @@ impl WindowManager {
             {
                 bar.paint(&mut self.display_list, style, atlas);
             }
+            let visual = node.root().expect("root overlay must retain root policy").chrome_visual_state();
             record_root_overlay(
                 &mut self.display_list,
                 node.surface.clip,
@@ -2705,6 +2851,7 @@ impl WindowManager {
                 style,
                 atlas,
                 active_window == Some(root),
+                visual,
             );
         }
     }
@@ -2720,7 +2867,14 @@ impl WindowManager {
             }
             let node_index = self.surfaces.node_index(key).expect("active popup must remain retained");
             let node = &mut self.surfaces.nodes[node_index];
-            record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, style, false);
+            record_root_background(
+                &mut self.display_list,
+                node.surface.clip,
+                node.surface.rect,
+                style,
+                false,
+                RootChromeVisualState::idle(),
+            );
             node.surface.body.paint(&mut self.display_list, style, atlas, focus_surface == Some(key));
         }
     }
@@ -2998,7 +3152,7 @@ impl WindowManager {
         self.surfaces
             .root_node(root)?
             .root()
-            .map(|state| state.interaction == RootInteraction::Resizing)
+            .map(|state| matches!(state.interaction, RootInteraction::Resizing(_)))
     }
 
     /// Returns the root that owns the active concrete surface for tests.
@@ -3049,7 +3203,7 @@ impl WindowManager {
     #[cfg(test)]
     pub(crate) fn debug_root_chrome(&self, root: RootId, atlas: &crate::AtlasHandle) -> Option<(Option<Recti>, Option<Recti>, Option<Recti>)> {
         let node = self.surfaces.root_node(root)?;
-        let geometry = root_chrome_geometry(
+        let mut geometry = root_chrome_geometry(
             node.surface.rect,
             Dimensioni::default(),
             &node.surface.name,
@@ -3057,7 +3211,35 @@ impl WindowManager {
             &self.style,
             atlas,
         );
-        Some((geometry.title, geometry.close, geometry.resize))
+        if node.root().is_some_and(|state| state.restore_rect.is_some()) {
+            geometry = geometry.without_resize();
+        }
+        Some((geometry.title, geometry.close, geometry.resize_corner))
+    }
+
+    /// Returns optional minimize, maximize, right-edge, bottom-edge, and corner geometry for tests.
+    #[cfg(test)]
+    pub(crate) fn debug_root_chrome_controls(&self, root: RootId, atlas: &crate::AtlasHandle) -> Option<super::DebugRootChromeControls> {
+        let node = self.surfaces.root_node(root)?;
+        let mut geometry = root_chrome_geometry(
+            node.surface.rect,
+            Dimensioni::default(),
+            &node.surface.name,
+            node.surface.options,
+            &self.style,
+            atlas,
+        );
+        if node.root().is_some_and(|state| state.restore_rect.is_some()) {
+            // Match committed maximized geometry rather than returning raw policy candidates.
+            geometry = geometry.without_resize();
+        }
+        Some(super::DebugRootChromeControls {
+            minimize: geometry.minimize,
+            maximize: geometry.maximize,
+            resize_right: geometry.resize_right,
+            resize_bottom: geometry.resize_bottom,
+            resize_corner: geometry.resize_corner,
+        })
     }
 
     /// Returns a popup rectangle through its typed handle for tests.

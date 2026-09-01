@@ -174,6 +174,7 @@ impl Style {
     }
 
     /// Returns normalized structural frame insets shared by measurement and placement.
+    #[cfg(any(feature = "theme-json", test))]
     pub(crate) fn frame_insets(&self) -> SliceInsets {
         // NinePatch owns normalization so layout and renderer geometry cannot disagree on negative
         // application-provided style components.

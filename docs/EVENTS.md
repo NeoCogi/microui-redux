@@ -91,10 +91,10 @@ The only strong event-port owner is its retained producer. Consequently:
 - the next dispatch prunes the now-dead subscription.
 
 Manager-owned chrome follows the same concrete rule. `WindowHandle::events()` projects one weak
-`WindowEvent` port whose variants are `GeometryChanged { rect }` and `CloseRequested`; combining
-them removes a second event allocation without erasing the payload. `PopupHandle::events()`
-projects the separate `PopupEvent::Dismissed` lifecycle stream, so popup events cannot be
-subscribed through a window endpoint or vice versa.
+`WindowEvent` port whose variants report geometry changes, close requests, minimization,
+maximization, and restoration; combining them removes separate event allocations without erasing
+payloads. `PopupHandle::events()` projects the separate `PopupEvent::Dismissed` lifecycle stream,
+so popup events cannot be subscribed through a window endpoint or vice versa.
 
 Object identity remains outside this event model. Window, popup, and menu-item handles carry a
 private process-unique stable ID beside their weak endpoint. Manager lookup compares only that ID;

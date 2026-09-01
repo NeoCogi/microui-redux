@@ -730,11 +730,15 @@ impl FileDialog {
 
     /// Handles one unified event from the retained dialog window.
     fn window_event(&mut self, ui: &mut Ui<'_>, event: &WindowEvent) {
-        // Geometry changes remain observable to applications through the same port but do not alter
-        // file-picker state. A close request converges with explicit and button cancellation.
+        // Non-close lifecycle observations remain on the shared port but do not alter file-picker
+        // state. A close request converges with explicit and button cancellation.
         match event {
             WindowEvent::CloseRequested if self.active => self.finish(ui, FileDialogStatus::Cancelled),
             WindowEvent::CloseRequested | WindowEvent::GeometryChanged { .. } => {}
+            WindowEvent::Minimized | WindowEvent::Maximized { .. } | WindowEvent::Restored { .. } => {
+                // File-dialog windows do not expose minimize/maximize buttons, so these variants
+                // are exhaustive defensive handling for application-customized future options.
+            }
         }
     }
 
@@ -1194,6 +1198,7 @@ mod tests {
             .expect("dialog should have a close button");
         context.mousemove(close.x + close.width / 2, close.y + close.height / 2);
         context.mousedown(close.x + close.width / 2, close.y + close.height / 2, MouseButton::LEFT);
+        context.mouseup(close.x + close.width / 2, close.y + close.height / 2, MouseButton::LEFT);
         context.update_ui_state(dimensions(), &mut model);
         assert_eq!(model.completions, [FileDialogStatus::Cancelled]);
         assert!(!model.dialog.is_open());

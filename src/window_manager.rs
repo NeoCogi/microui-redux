@@ -67,6 +67,8 @@ mod root_chrome;
 mod roots;
 
 pub use root_chrome::{WindowEvent, WindowHandle};
+#[cfg(test)]
+pub(crate) use root_chrome::DebugRootChromeControls;
 // Popup identity/events and checked surface failures describe forest policy rather than chrome.
 // Re-export both borrowed-mutation and owner-preserving creation errors with the public window API.
 pub use roots::{PopupEvent, PopupHandle, SurfaceCreationError, SurfaceMutationError};
@@ -75,6 +77,10 @@ bitflags! {
     #[derive(Copy, Clone)]
     /// Presentation options shared by windows, dialogs, and window-owned popup surfaces.
     pub struct WindowOption : u32 {
+        /// Shows a minimize caption button that hides the retained window when activated.
+        const MINIMIZE_BUTTON = 1;
+        /// Shows a maximize caption button that toggles the inherited viewport and saved rectangle.
+        const MAXIMIZE_BUTTON = 2;
         /// Gives the surface a Style-owned outer border and inset content area.
         const FRAME = 1024;
         /// Adapts the surface width to its content while retaining its programmed height.
