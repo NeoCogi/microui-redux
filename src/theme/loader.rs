@@ -552,6 +552,23 @@ mod tests {
     use super::*;
     use crate::test_support::test_atlas;
 
+    /// Installs one repository-bundled theme through the same filesystem and PNG path as Context.
+    fn install_bundled_theme(relative_path: &str) -> (LoadedTheme, u32) {
+        // Resolve from the Cargo manifest so tests remain independent of the process working dir.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative_path);
+        let definition = ThemeDefinition::read(path.as_path()).expect("bundled theme JSON must remain valid");
+        let mut uploads = 0_u32;
+        let loaded = definition
+            .install(Style::from_atlas(&test_atlas()), |_, width, height, pixels| {
+                // The loader must present one complete validated RGBA payload for each unique path.
+                uploads += 1;
+                assert_eq!(pixels.len(), width as usize * height as usize * 4);
+                Ok(TextureId::new_test(uploads, width, height))
+            })
+            .expect("bundled theme PNGs must decode and install");
+        (loaded, uploads)
+    }
+
     /// Verifies missing state PNGs remain state-specific flat fallbacks after palette replacement.
     #[test]
     fn omitted_png_states_use_theme_flat_colors() {
@@ -604,22 +621,24 @@ mod tests {
     /// Verifies the bundled Windows theme and every original PNG install through the public schema.
     #[test]
     fn bundled_windows_311_theme_reuses_shared_png_uploads() {
-        // Resolve from the Cargo manifest so this test is independent of the process working dir.
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("themes/windows-3.11/theme.json");
-        let definition = ThemeDefinition::read(path.as_path()).expect("bundled Windows theme JSON must remain valid");
-        let mut uploads = 0_u32;
-        let loaded = definition
-            .install(Style::from_atlas(&test_atlas()), |_, width, height, pixels| {
-                // The loader must present one complete validated RGBA payload for each unique path.
-                uploads += 1;
-                assert_eq!(pixels.len(), width as usize * height as usize * 4);
-                Ok(TextureId::new_test(uploads, width, height))
-            })
-            .expect("bundled Windows theme PNGs must decode and install");
-
+        let (loaded, uploads) = install_bundled_theme("themes/windows-3.11/theme.json");
         assert_eq!(loaded.name(), "Windows 3.11");
         assert_eq!(uploads, 11, "each shared PNG path must be uploaded exactly once");
         let insets = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (4, 4, 4, 4));
+    }
+
+    /// Verifies the bundled Mac theme installs its controls, title strips, frame, and grip artwork.
+    #[test]
+    fn bundled_mac_os_9_theme_reuses_shared_png_uploads() {
+        let (loaded, uploads) = install_bundled_theme("themes/mac-os-9/theme.json");
+        assert_eq!(loaded.name(), "Mac OS 9");
+        assert_eq!(uploads, 13, "each shared PNG path must be uploaded exactly once");
+        let insets = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
+        assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (3, 3, 3, 3));
+        assert!(matches!(
+            loaded.style().appearance(AppearanceRole::WindowTitleActive, VisualState::Pressed).content,
+            crate::NinePatchContent::Image { .. }
+        ));
     }
 }
