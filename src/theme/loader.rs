@@ -1000,6 +1000,23 @@ mod tests {
             loaded.style().appearance(AppearanceRole::WindowTitle, VisualState::Disabled).content,
             crate::NinePatchContent::Image { .. }
         ));
+        for state in [
+            VisualState::Normal,
+            VisualState::Hovered,
+            VisualState::Pressed,
+            VisualState::Focused,
+            VisualState::HoveredFocused,
+            VisualState::PressedFocused,
+        ] {
+            // Passive Windows 3.11 titles are white and require black text, while selected blue
+            // titles retain white text for every enabled interaction combination.
+            let passive = loaded.style().foreground(AppearanceRole::WindowTitle, state);
+            let active = loaded.style().foreground(AppearanceRole::WindowTitleActive, state);
+            assert_eq!((passive.r, passive.g, passive.b, passive.a), (0, 0, 0, 255));
+            assert_eq!((active.r, active.g, active.b, active.a), (255, 255, 255, 255));
+        }
+        let disabled_title = loaded.style().foreground(AppearanceRole::WindowTitle, VisualState::Disabled);
+        assert_eq!((disabled_title.r, disabled_title.g, disabled_title.b, disabled_title.a), (125, 125, 125, 255));
         let minimize_glyph = loaded.style().appearance(AppearanceRole::WindowMinimizeGlyph, VisualState::Normal);
         let crate::NinePatchContent::Image { image: minimize_image } = minimize_glyph.content else {
             panic!("Windows 3.11 minimize glyph must use baked artwork");
