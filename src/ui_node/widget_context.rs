@@ -401,13 +401,7 @@ impl<'a> WidgetPaintCtx<'a> {
     pub fn visual_state(&self) -> VisualState {
         // Capture counts as a visible press only while the pointer remains over the widget. A drag
         // outside retains capture for correct release delivery but returns to the non-pressed art.
-        VisualState::from_interaction(
-            self.window_active,
-            self.enabled,
-            self.hovered(),
-            self.focused(),
-            self.active() && self.hovered(),
-        )
+        VisualState::from_interaction(self.enabled, self.hovered(), self.focused(), self.active() && self.hovered())
     }
 
     /// Returns a widget-local painter that records directly into the current frame display list.
@@ -460,7 +454,6 @@ impl<'a> WidgetPaintCtx<'a> {
     pub(crate) fn draw_appearance_state(&mut self, role: AppearanceRole, state: VisualState, rect: Recti) -> Option<Recti> {
         // Menu rows and selected list items own semantic state beyond the widget-wide interaction
         // snapshot. They still resolve the same typed catalog and checked nine-patch geometry.
-        let state = if self.window_active { state } else { VisualState::Inactive };
         let patch = self.common.style.appearance(role, state);
         let mut painter = self.painter();
         crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch)
@@ -478,7 +471,6 @@ impl<'a> WidgetPaintCtx<'a> {
         // Zero destination insets collapse all eight outer cells. Flat patches retain their center
         // cell and image patches sample only their center source, preserving the old unframed fill
         // contract without introducing a second theme asset vocabulary.
-        let state = if self.window_active { state } else { VisualState::Inactive };
         let patch = self.common.style.appearance(role, state).with_insets(crate::SliceInsets::ZERO);
         let mut painter = self.painter();
         let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch);
@@ -486,15 +478,14 @@ impl<'a> WidgetPaintCtx<'a> {
 
     /// Resolves a role foreground using this widget's complete interaction state.
     pub(crate) fn foreground(&self, role: AppearanceRole) -> Color {
-        // visual_state already gives deactivation precedence over retained hover, focus, and press.
+        // visual_state gives explicit disabling precedence over retained hover, focus, and press.
         self.common.style.foreground(role, self.visual_state())
     }
 
     /// Resolves a role foreground using a composite control's explicit interaction state.
     pub(crate) fn foreground_state(&self, role: AppearanceRole, state: VisualState) -> Color {
-        // A deactivated root always selects Inactive even when a menu or selected row retains an
-        // independently computed active-window state.
-        let state = if self.window_active { state } else { VisualState::Inactive };
+        // The composite owns this exact typed state; window activation affects chrome roles and
+        // focus visibility rather than rewriting enabled widget presentation.
         self.common.style.foreground(role, state)
     }
 
@@ -570,9 +561,9 @@ mod tests {
             assert_eq!(ctx.visual_state(), VisualState::Disabled);
         }
         {
-            // Window deactivation is independent and wins over every retained widget interaction.
+            // Window activation does not turn an otherwise enabled widget into a disabled one.
             let ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut list, bounds, &style, &atlas, true, true, true, true, true, false);
-            assert_eq!(ctx.visual_state(), VisualState::Inactive);
+            assert_eq!(ctx.visual_state(), VisualState::PressedFocused);
         }
     }
 }

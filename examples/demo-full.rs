@@ -2100,7 +2100,7 @@ impl State {
         let color_index = *index / 4;
         if color_index == 14 {
             // The editor's compact menu swatch represents the ordinary menu foreground. Preserve
-            // state-specific selected, pressed, disabled, and inactive colors while updating the
+            // state-specific selected, pressed, and disabled colors while updating the
             // Normal entry shared by each concrete menu role.
             let mut color = self.style.foreground(AppearanceRole::MenuItem, VisualState::Normal);
             let value = event.value as u8;

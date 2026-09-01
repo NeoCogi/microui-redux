@@ -314,7 +314,7 @@ impl ThemeDefinition {
             style.focus_color,
             style.window_focus_color,
             style.menu_background,
-            style.inactive_background_color,
+            style.disabled_background_color,
         );
         // A theme commonly reuses one small bevel PNG across several semantic roles and states.
         // Cache the Context-owned upload by its fully resolved path while retaining source slices,
@@ -488,16 +488,16 @@ struct ColorPaletteDocument {
     border: Option<ColorDocument>,
     /// Window body background.
     window_background: Option<ColorDocument>,
-    /// Inactive window title background.
+    /// Passive window title background.
     title_background: Option<ColorDocument>,
     /// Window title text.
     title_text: Option<ColorDocument>,
-    /// Text and semantic icon color used throughout a deactivated window.
-    inactive_text: Option<ColorDocument>,
-    /// Shared flat background and control fill used throughout a deactivated window.
-    inactive_background: Option<ColorDocument>,
-    /// Window title and caption-symbol color used by deactivated chrome.
-    inactive_title_text: Option<ColorDocument>,
+    /// Text and semantic icon color used by disabled widgets and windows.
+    disabled_text: Option<ColorDocument>,
+    /// Shared flat background and control fill used by disabled widgets and windows.
+    disabled_background: Option<ColorDocument>,
+    /// Window title and caption-symbol color used by disabled chrome.
+    disabled_title_text: Option<ColorDocument>,
     /// Panel and viewport background.
     panel_background: Option<ColorDocument>,
     /// Ordinary button fill.
@@ -532,14 +532,14 @@ impl ColorPaletteDocument {
             .menu_foreground
             .map(ColorDocument::into_color)
             .unwrap_or_else(|| style.foreground(AppearanceRole::MenuItem, VisualState::Normal));
-        let inactive_text = self
-            .inactive_text
+        let disabled_text = self
+            .disabled_text
             .map(ColorDocument::into_color)
-            .unwrap_or_else(|| style.foreground(AppearanceRole::Button, VisualState::Inactive));
-        let inactive_title_text = self
-            .inactive_title_text
+            .unwrap_or_else(|| style.foreground(AppearanceRole::Button, VisualState::Disabled));
+        let disabled_title_text = self
+            .disabled_title_text
             .map(ColorDocument::into_color)
-            .unwrap_or_else(|| style.foreground(AppearanceRole::WindowTitle, VisualState::Inactive));
+            .unwrap_or_else(|| style.foreground(AppearanceRole::WindowTitle, VisualState::Disabled));
 
         // Existing ControlColor storage remains public, so map every background and base text
         // field explicitly before rebuilding the typed foreground fallbacks below.
@@ -548,7 +548,7 @@ impl ColorPaletteDocument {
         assign_color(&mut style.colors[ControlColor::WindowBG as usize], self.window_background);
         assign_color(&mut style.colors[ControlColor::TitleBG as usize], self.title_background);
         assign_color(&mut style.colors[ControlColor::TitleText as usize], self.title_text);
-        assign_color(&mut style.inactive_background_color, self.inactive_background);
+        assign_color(&mut style.disabled_background_color, self.disabled_background);
         assign_color(&mut style.colors[ControlColor::PanelBG as usize], self.panel_background);
         assign_color(&mut style.colors[ControlColor::Button as usize], self.button);
         assign_color(&mut style.colors[ControlColor::ButtonHover as usize], self.button_hover);
@@ -563,8 +563,8 @@ impl ColorPaletteDocument {
             style.colors[ControlColor::Text as usize],
             style.colors[ControlColor::TitleText as usize],
             menu_foreground,
-            inactive_text,
-            inactive_title_text,
+            disabled_text,
+            disabled_title_text,
         );
     }
 }
@@ -589,8 +589,6 @@ struct AppearanceDocument {
     pressed_focused: Option<StateDocument>,
     /// Disabled image.
     disabled: Option<StateDocument>,
-    /// Image used when the containing top-level window is deactivated.
-    inactive: Option<StateDocument>,
 }
 
 impl AppearanceDocument {
@@ -605,7 +603,6 @@ impl AppearanceDocument {
             (VisualState::HoveredFocused, self.hovered_focused.as_ref()),
             (VisualState::PressedFocused, self.pressed_focused.as_ref()),
             (VisualState::Disabled, self.disabled.as_ref()),
-            (VisualState::Inactive, self.inactive.as_ref()),
         ]
     }
 }
@@ -752,7 +749,7 @@ mod tests {
                     "colors": {
                         "button": [1, 2, 3, 255],
                         "button_hover": [4, 5, 6, 255],
-                        "inactive_background": [7, 8, 9, 255]
+                        "disabled_background": [7, 8, 9, 255]
                     }
                 },
                 "appearances": {
@@ -769,7 +766,7 @@ mod tests {
 
         let normal = loaded.style().appearance(AppearanceRole::Button, VisualState::Normal);
         let hovered = loaded.style().appearance(AppearanceRole::Button, VisualState::Hovered);
-        let inactive = loaded.style().appearance(AppearanceRole::Button, VisualState::Inactive);
+        let disabled = loaded.style().appearance(AppearanceRole::Button, VisualState::Disabled);
         assert_eq!(normal.insets.left, 2);
         assert!(matches!(
             normal.content,
@@ -782,7 +779,7 @@ mod tests {
                 if matches!(cells.center, crate::NinePatchCell::Color { color } if color.r == 4)
         ));
         assert!(matches!(
-            inactive.content,
+            disabled.content,
             crate::NinePatchContent::Flat { cells }
                 if matches!(cells.center, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b) == (7, 8, 9))
         ));
@@ -871,7 +868,7 @@ mod tests {
         let insets = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (4, 4, 4, 4));
         assert!(matches!(
-            loaded.style().appearance(AppearanceRole::Button, VisualState::Inactive).content,
+            loaded.style().appearance(AppearanceRole::Button, VisualState::Disabled).content,
             crate::NinePatchContent::Image { .. }
         ));
         assert!(matches!(
@@ -932,14 +929,14 @@ mod tests {
             crate::NinePatchContent::Image { .. }
         ));
         assert!(matches!(
-            loaded.style().appearance(AppearanceRole::WindowTitle, VisualState::Inactive).content,
+            loaded.style().appearance(AppearanceRole::WindowTitle, VisualState::Disabled).content,
             crate::NinePatchContent::Image { .. }
         ));
         assert!(matches!(
             loaded.style().appearance(AppearanceRole::WindowMinimizeGlyph, VisualState::Normal).content,
             crate::NinePatchContent::Image { image } if image.source.width == 9 && image.source.height == 9
         ));
-        // Deactivation must preserve the raised caption face authored by the theme. Letting these
+        // Disabling must preserve the raised caption face authored by the theme. Letting these
         // roles fall back to their flat palette appearance would combine a one-pixel black frame
         // with the role's three-pixel visual insets and produce an incorrect heavy black square.
         for role in [
@@ -949,13 +946,13 @@ mod tests {
             AppearanceRole::WindowRestoreButton,
         ] {
             let normal = loaded.style().appearance(role, VisualState::Normal);
-            let inactive = loaded.style().appearance(role, VisualState::Inactive);
+            let disabled = loaded.style().appearance(role, VisualState::Disabled);
             assert!(matches!(
-                (normal.content, inactive.content),
-                (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: inactive })
-                    if normal.texture == inactive.texture
+                (normal.content, disabled.content),
+                (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: disabled })
+                    if normal.texture == disabled.texture
                         && (normal.source.x, normal.source.y, normal.source.width, normal.source.height)
-                            == (inactive.source.x, inactive.source.y, inactive.source.width, inactive.source.height)
+                            == (disabled.source.x, disabled.source.y, disabled.source.width, disabled.source.height)
             ));
         }
         let selected_text = loaded.style().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
@@ -973,7 +970,7 @@ mod tests {
         let active_title = loaded.style().appearance(AppearanceRole::WindowTitleActive, VisualState::Pressed);
         assert!(matches!(active_title.content, crate::NinePatchContent::Image { image } if image.source.height == 16));
         assert!(matches!(
-            loaded.style().appearance(AppearanceRole::Button, VisualState::Inactive).content,
+            loaded.style().appearance(AppearanceRole::Button, VisualState::Disabled).content,
             crate::NinePatchContent::Image { .. }
         ));
         assert!(matches!(
@@ -981,8 +978,8 @@ mod tests {
             crate::NinePatchContent::Image { .. }
         ));
 
-        // Hovering or pressing an inactive frame must not borrow the darker active-frame bitmap.
-        // This guards the Platinum distinction before the manager supplies the later active state.
+        // Hovering or pressing a passive frame must not borrow the darker active-frame bitmap.
+        // This guards the Platinum distinction before the manager supplies the active role.
         let normal_frame = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Normal);
         let pressed_frame = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Pressed);
         assert!(matches!(

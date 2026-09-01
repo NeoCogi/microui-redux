@@ -2800,15 +2800,7 @@ impl WindowManager {
             let node = &mut self.surfaces.nodes[node_index];
             let window_active = active_window == Some(root);
             let dialog = node.root().is_some_and(|state| state.mode == RootMode::Modal);
-            record_root_background(
-                &mut self.display_list,
-                node.surface.clip,
-                node.surface.rect,
-                style,
-                dialog,
-                window_active,
-                !window_active,
-            );
+            record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, style, dialog, window_active);
             node.surface.body.paint(
                 &mut self.display_list,
                 style,
@@ -2880,7 +2872,7 @@ impl WindowManager {
             let node = &mut self.surfaces.nodes[node_index];
             // Popup shells retain the ordinary inactive-frame role used before window activation
             // existed, while their transient contents remain visually active.
-            record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, style, false, false, false);
+            record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, style, false, false);
             node.surface.body.paint(&mut self.display_list, style, atlas, focus_surface == Some(key), true);
         }
     }

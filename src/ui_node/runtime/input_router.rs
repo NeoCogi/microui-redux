@@ -473,7 +473,7 @@ impl InputRouter {
     pub(super) fn update_pointer_capture(&mut self, owner: RuntimeNodeId, result: RouteResult, event: &UiInputEvent, mouse_buttons: MouseButton) {
         if event.is_pointer_release() && mouse_buttons.is_empty() {
             // Normal release is not an invalidation: its event was delivered to the old owner, and
-            // the following update exposes inactive state without swallowing a future gesture.
+            // the following update exposes the non-pressed state without swallowing a future gesture.
             self.capture = None;
         } else if result == RouteResult::Captured {
             self.acquire_pointer_capture(owner);

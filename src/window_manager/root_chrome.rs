@@ -191,9 +191,9 @@ impl RootChromeVisualState {
         };
         // As with widgets, a captured pointer outside its originating part is no longer visually
         // pressed even though release routing remains captured by the manager.
-        // This helper resolves only interaction within active chrome. The recording boundary
-        // replaces the result with Inactive when the complete window is deactivated.
-        VisualState::from_interaction(true, true, hovered, false, captured && hovered)
+        // This helper resolves only interaction within active chrome. The recording boundary uses
+        // Normal for passive chrome so deactivation never masquerades as disabled presentation.
+        VisualState::from_interaction(true, hovered, false, captured && hovered)
     }
 
     /// Resolves the complete window frame from any hovered or active resize region.
@@ -201,7 +201,7 @@ impl RootChromeVisualState {
         let hovered = matches!(self.hovered, Some(RootChromePart::Resize(_)));
         let pressed = matches!(self.interaction, RootInteraction::Resizing(_)) && hovered;
         // Frame edges cannot own keyboard focus, so only hover and the matching capture contribute.
-        VisualState::from_interaction(true, true, hovered, false, pressed)
+        VisualState::from_interaction(true, hovered, false, pressed)
     }
 }
 
@@ -482,7 +482,6 @@ pub(super) fn record_root_background(
     style: &Style,
     dialog: bool,
     active_frame: bool,
-    deactivated: bool,
 ) {
     // Chrome uses a screen-space painter because it is outside the retained application tree.
     let mut painter = Painter::screen_space(display_list, viewport);
@@ -490,11 +489,9 @@ pub(super) fn record_root_background(
     // eight edge cells in the overlay pass, avoiding duplicate border work while still protecting
     // chrome from overflowing descendants. Unframed roots use this same center-only body path.
     // Pointer interaction belongs to the frame edge and title controls, not the application body.
-    // Resolve the body from Normal so merely crossing a resize edge cannot recolor the complete
-    // window interior. Deactivation is an independent state rather than an inference from the
-    // frame role: popup shells intentionally keep the passive frame role while remaining active.
-    let state = if deactivated { VisualState::Inactive } else { VisualState::Normal };
-    let patch = root_frame_patch(style, dialog, active_frame, state).with_insets(crate::SliceInsets::ZERO);
+    // Resolve the body from Normal so merely crossing a resize edge or transferring activation
+    // cannot recolor the complete window interior. Active/passive frame roles select chrome only.
+    let patch = root_frame_patch(style, dialog, active_frame, VisualState::Normal).with_insets(crate::SliceInsets::ZERO);
     let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch);
 }
 
@@ -514,9 +511,9 @@ pub(super) fn record_root_overlay(
 ) {
     // Reuse committed geometry so hit-testing and painting cannot disagree within one UI commit.
     let mut painter = Painter::screen_space(display_list, viewport);
-    // Interaction affects active chrome only. Every chrome part in a deactivated root resolves the
-    // dedicated state even if it still retains a hover or capture snapshot from the previous frame.
-    let chrome_state = |state| if active { state } else { VisualState::Inactive };
+    // Interaction affects active chrome only. Passive chrome resolves Normal even if it retains a
+    // stale hover snapshot, because losing activation does not disable the window or its controls.
+    let chrome_state = |state| if active { state } else { VisualState::Normal };
     if options.intersects(WindowOption::FRAME) {
         // Background recording already filled the framed interior before application content. Draw
         // only the border again in the overlay pass so an unclipped child may extend beyond the
@@ -587,7 +584,7 @@ fn paint_caption_button(painter: &mut Painter<'_>, rect: Recti, button: RootCapt
     let state = if window_active {
         visual.part_state(RootChromePart::Caption(button))
     } else {
-        VisualState::Inactive
+        VisualState::Normal
     };
     let Some(content) = crate::ui_node::frame::paint_internal_frame(painter, rect, style.appearance(role, state)) else {
         return;

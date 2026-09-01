@@ -67,8 +67,7 @@ the theme directories must remain available beside the repository sources at run
       "focused": { "png": "button-focused.png" },
       "hovered_focused": { "png": "button-hovered-focused.png" },
       "pressed_focused": { "png": "button-pressed-focused.png" },
-      "disabled": { "png": "button-disabled.png", "tint": [255, 255, 255, 160] },
-      "inactive": { "png": "button-inactive.png" }
+      "disabled": { "png": "button-disabled.png", "tint": [255, 255, 255, 160] }
     }
   }
 }
@@ -113,7 +112,7 @@ The optional `style` object accepts these integer metrics:
 The optional `colors` object accepts RGBA byte arrays under these keys:
 
 - `text`, `border`, `window_background`, `title_background`, `title_text`
-- `inactive_text`, `inactive_background`, `inactive_title_text`
+- `disabled_text`, `disabled_background`, `disabled_title_text`
 - `panel_background`, `button`, `button_hover`, `input`, `input_hover`
 - `scrollbar_track`, `scrollbar_thumb`, `focus`, `window_focus`
 - `menu_foreground`, `menu_background`
@@ -157,14 +156,14 @@ Unknown fields and role names are errors. This prevents a misspelled state or co
 silently falling back to a flat appearance.
 
 `panel` and container-owned generic frames are passive structure: their body and border resolve the
-normal appearance while the pointer moves across them. When a top-level window deactivates, its
-chrome and complete retained widget hierarchy resolve the separate `inactive` state instead;
-deactivation does not erase remembered focus or masquerade as hover, ordinary focus, or disabled.
-The inactive foreground colors apply to built-in text and semantic icons, and the inactive
-background supplies flat fallbacks for roles without an `inactive` PNG. Likewise, the ordinary
-`window_frame` pair and modal `dialog_frame` pair use normal center artwork for the application body
-even when a resize edge is hovered or captured. Interactive descendants, resize borders, caption
-controls, and the title remain free to resolve their own hover and pressed states.
+normal appearance while the pointer moves across them. Losing top-level activation selects the
+passive `window_frame`, `dialog_frame`, and `window_title` roles but does not rewrite enabled child
+widgets. A disabled widget or subtree resolves `disabled` independently of activation; its
+foreground uses `disabled_text` (or `disabled_title_text` for chrome), and omitted PNG states use
+`disabled_background` as their flat fallback. The ordinary frame pair and modal dialog pair also
+use normal center artwork for the application body even when a resize edge is hovered or captured.
+Interactive descendants, resize borders, caption controls, and the title remain free to resolve
+their own hover and pressed states while enabled.
 
 ## Window borders and caption controls
 

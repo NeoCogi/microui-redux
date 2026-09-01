@@ -5,8 +5,9 @@ Windows 95. It uses bright `#0000AA` active captions, white inactive captions an
 black outlines, tight white/dark-gray bevels, square controls, and the original gray application
 background. Pointer hover does not brighten controls because Windows 3.11 did not use a modern
 hover glow; pressed and keyboard-focused artwork remain separate states.
-Deactivation is a separate top-level state: subdued foreground and background fallbacks propagate
-through the complete child hierarchy, while the frame, title, and button can retain PNG artwork.
+Activation selects the blue or white title and the corresponding frame role without recoloring the
+client hierarchy. Disabled foreground, background, button, and glyph artwork remains a separate
+explicit state rather than an inference from which window currently owns activation.
 
 The visual research reference was the
 [B00merang Windows 3.11 GTK/Xfwm theme](https://github.com/B00merang-Project/Windows-3.11),
@@ -20,7 +21,7 @@ The four-pixel window edge follows the period's black-gray-gray-black outline. I
 independent from the four-pixel client inset and resize hit thickness. The bottom-right L is the
 visible two-axis affordance; the larger semantic grip image is intentionally transparent, so no
 filled rectangle appears over the client. Those L-shaped roles belong only to ordinary windows.
-Modal dialogs instead use a uniform four-pixel outer frame: black while inactive and the period
+Modal dialogs instead use a uniform four-pixel outer frame: black while passive and the period
 `#0000AA` focus blue while active.
 
 Menu bars and popup interiors are white, popup shells use a solid two-pixel black frame instead of

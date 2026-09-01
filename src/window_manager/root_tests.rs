@@ -36,8 +36,8 @@ use crate::{
     ControlColor, Custom, Color, CustomParameters, Constraints, Context, DecimalPrecision, Dimensioni, Disclosure, DisclosureParameters, Ui, Grid,
     GridParameters, Key, KeyEvent, KeyboardBehavior, Linear, LinearItem, LinearParameters, Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters,
     MenuItemSubmitted, MouseButton, Node, NinePatch, ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Slider,
-    SliderParameters, StatefulAppearance, Style, TextArea, TextAreaParameters, Textbox, TextboxChanged, TextBlock, TextBlockParameters, TextboxParameters,
-    TrackSize, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, VisualState, WidgetUpdateCtx, Modifiers,
+    SliderParameters, StatefulAppearance, StatefulColor, Style, TextArea, TextAreaParameters, Textbox, TextboxChanged, TextBlock, TextBlockParameters,
+    TextboxParameters, TrackSize, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, VisualState, WidgetUpdateCtx, Modifiers,
 };
 use crate::render::{FrameInfo, RenderError};
 use std::{
@@ -936,42 +936,30 @@ fn modal_dialog_uses_its_own_active_frame_role() {
     assert!(!atlas_quads_with_color(&events, dialog_frame_color).is_empty());
 }
 
-/// Verifies top-level deactivation selects its own chrome, client, control, and foreground state.
+/// Verifies top-level deactivation changes chrome roles without disabling retained widgets.
 #[test]
-fn inactive_window_state_propagates_through_chrome_and_child_widgets() {
-    // Every asserted role receives a unique flat color. Spatial checks then prove the inactive
-    // colors belong only to the right-hand window rather than merely proving they exist somewhere.
+fn deactivated_window_keeps_enabled_child_widget_appearance() {
+    // Distinct role and state colors make activation and disabling independently observable.
     let atlas = test_atlas();
     let active_window_color = color(13, 31, 47, 255);
-    let inactive_window_color = color(61, 79, 97, 255);
-    let active_control_color = color(109, 127, 149, 255);
-    let inactive_control_color = color(157, 173, 191, 255);
-    let inactive_text_color = color(199, 211, 223, 255);
-    let inactive_title_text_color = color(227, 233, 239, 255);
+    let passive_window_color = color(61, 79, 97, 255);
+    let enabled_control_color = color(109, 127, 149, 255);
+    let disabled_control_color = color(157, 173, 191, 255);
+    let enabled_text_color = color(199, 211, 223, 255);
+    let disabled_text_color = color(227, 233, 239, 255);
     let mut style = test_style(&atlas);
-    // Assign the inactive foreground to the exact semantic roles exercised by this fixture. The
-    // catalog keeps client text and caption contrast independent without global inactive fields.
-    style.foregrounds.set_state(AppearanceRole::Button, VisualState::Inactive, inactive_text_color);
-    for role in [
-        AppearanceRole::WindowTitle,
-        AppearanceRole::WindowTitleActive,
-        AppearanceRole::WindowCloseButton,
-        AppearanceRole::WindowMinimizeButton,
-        AppearanceRole::WindowMaximizeButton,
-        AppearanceRole::WindowRestoreButton,
-    ] {
-        style.foregrounds.set_state(role, VisualState::Inactive, inactive_title_text_color);
-    }
-
-    let mut passive_frame = StatefulAppearance::all(NinePatch::solid(active_window_color));
-    passive_frame.set(VisualState::Inactive, NinePatch::solid(inactive_window_color));
-    style.appearances.set(AppearanceRole::WindowFrame, passive_frame);
+    let mut button_foreground = StatefulColor::all(enabled_text_color);
+    button_foreground.set(VisualState::Disabled, disabled_text_color);
+    style.foregrounds.set(AppearanceRole::Button, button_foreground);
+    style
+        .appearances
+        .set(AppearanceRole::WindowFrame, StatefulAppearance::all(NinePatch::solid(passive_window_color)));
     style.appearances.set(
         AppearanceRole::WindowFrameActive,
         StatefulAppearance::all(NinePatch::solid(active_window_color)),
     );
-    let mut button = StatefulAppearance::all(NinePatch::solid(active_control_color));
-    button.set(VisualState::Inactive, NinePatch::solid(inactive_control_color));
+    let mut button = StatefulAppearance::all(NinePatch::solid(enabled_control_color));
+    button.set(VisualState::Disabled, NinePatch::solid(disabled_control_color));
     style.appearances.set(AppearanceRole::Button, button);
 
     let (backend, log) = recording_backend(atlas);
@@ -979,9 +967,9 @@ fn inactive_window_state_propagates_through_chrome_and_child_widgets() {
     ctx.set_style(style);
     let (_, first_node) = Button::create(ButtonParameters::new("active child"));
     let first_id = first_node.id();
-    let (_, second_node) = Button::create(ButtonParameters::new("inactive child"));
+    let (_, second_node) = Button::create(ButtonParameters::new("passive child"));
     let first = ctx.ui().create_window(Window::new("active title", rect(10, 10, 150, 100), first_node));
-    let _second = ctx.ui().create_window(Window::new("inactive title", rect(220, 10, 150, 100), second_node));
+    let _second = ctx.ui().create_window(Window::new("passive title", rect(220, 10, 150, 100), second_node));
     let dimensions = Dimensioni::new(400, 240);
     ctx.update_ui(dimensions);
 
@@ -997,22 +985,28 @@ fn inactive_window_state_propagates_through_chrome_and_child_widgets() {
     log.clear();
     ctx.frame(frame_info(dimensions)).render_ui().unwrap();
     let events = log.snapshot();
-    for (color, description) in [
-        (inactive_window_color, "inactive frame and client"),
-        (inactive_control_color, "inactive child control"),
-        (inactive_text_color, "inactive child text"),
-        (inactive_title_text_color, "inactive title and caption symbols"),
-    ] {
+    let passive_frame = atlas_quads_with_color(&events, passive_window_color);
+    assert!(!passive_frame.is_empty());
+    assert!(passive_frame.iter().all(|event| {
+        let RenderEvent::AtlasQuad(vertices) = event else { unreachable!() };
+        vertices.iter().all(|vertex| vertex.position[0] >= 200.0)
+    }));
+
+    // Both buttons and both labels retain enabled colors. Neither disabled state may appear merely
+    // because the right-hand window no longer owns activation.
+    for color in [enabled_control_color, enabled_text_color] {
         let quads = atlas_quads_with_color(&events, color);
-        assert!(!quads.is_empty(), "{description} must be recorded");
-        assert!(
-            quads.iter().all(|event| {
-                let RenderEvent::AtlasQuad(vertices) = event else { unreachable!() };
-                vertices.iter().all(|vertex| vertex.position[0] >= 200.0)
-            }),
-            "{description} must be restricted to the deactivated right-hand window"
-        );
+        assert!(quads.iter().any(|event| {
+            let RenderEvent::AtlasQuad(vertices) = event else { unreachable!() };
+            vertices.iter().all(|vertex| vertex.position[0] < 200.0)
+        }));
+        assert!(quads.iter().any(|event| {
+            let RenderEvent::AtlasQuad(vertices) = event else { unreachable!() };
+            vertices.iter().all(|vertex| vertex.position[0] >= 200.0)
+        }));
     }
+    assert!(atlas_quads_with_color(&events, disabled_control_color).is_empty());
+    assert!(atlas_quads_with_color(&events, disabled_text_color).is_empty());
 }
 
 /// Verifies pointer location cannot recolor passive window and container backgrounds.

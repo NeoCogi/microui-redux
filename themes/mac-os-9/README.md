@@ -4,8 +4,9 @@ This bundled theme maps the late-1990s Platinum visual language onto microui-red
 appearance catalog. It uses chamfered pixel corners, black outlines, pale raised controls, recessed
 off-white inputs, restrained lavender focus accents, gray racing-stripe active title artwork, a
 flat receding inactive frame, and a compact beveled resize grip.
-Normal, hovered, pressed, focused, combined focus/pointer, disabled, and top-level inactive control states are separate
-PNGs; ordinary selection rows and menu backgrounds demonstrate the schema's flat fallbacks.
+Normal, hovered, pressed, focused, combined focus/pointer, and disabled control states are separate
+PNGs; ordinary selection rows and menu backgrounds demonstrate the schema's flat fallbacks. The
+inactive frame is a passive chrome role, not a disabled state propagated into client widgets.
 
 The visual research references were the
 [Apple Mac OS 8 Human Interface Guidelines](https://dev.os9.ca/techpubs/mac/pdf/HIGOS8Guidelines.pdf)

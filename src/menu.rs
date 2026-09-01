@@ -681,7 +681,7 @@ impl MenuSurface {
                 MenuSlot::Item(item) => {
                     let hovered = self.hovered_slot == Some(slot);
                     let focused = self.keyboard_slot == Some(slot);
-                    let state = VisualState::from_interaction(window_active, item.parameters.enabled, hovered, focused, self.captured && hovered);
+                    let state = VisualState::from_interaction(item.parameters.enabled, hovered, focused, self.captured && hovered);
                     let selected = matches!(item.parameters.mark, MenuItemMark::Checked(true) | MenuItemMark::Radio(true));
                     let role = if selected {
                         AppearanceRole::MenuItemSelected
@@ -706,7 +706,7 @@ impl MenuSurface {
                 MenuSlot::Branch { label } => {
                     let hovered = self.hovered_slot == Some(slot);
                     let focused = self.keyboard_slot == Some(slot);
-                    let state = VisualState::from_interaction(window_active, true, hovered, focused, self.captured && hovered);
+                    let state = VisualState::from_interaction(true, hovered, focused, self.captured && hovered);
                     let role = if self.popup {
                         AppearanceRole::MenuItem
                     } else if self.open_slot == Some(slot) {

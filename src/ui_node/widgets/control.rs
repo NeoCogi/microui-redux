@@ -184,7 +184,7 @@ pub(super) fn widget_fill_visible(ctx: &WidgetPaintCtx<'_>, fill: WidgetFillOpti
     // catalog. Combined focus states accept either relevant policy bit; a pressed state remains a
     // click visual even when pointer capture outlives the one-update clicked transition.
     match ctx.visual_state() {
-        VisualState::Normal | VisualState::Disabled | VisualState::Inactive => fill.intersects(WidgetFillOption::NORMAL),
+        VisualState::Normal | VisualState::Disabled => fill.intersects(WidgetFillOption::NORMAL),
         VisualState::Hovered => fill.intersects(WidgetFillOption::HOVER),
         VisualState::Pressed | VisualState::Focused | VisualState::PressedFocused => fill.intersects(WidgetFillOption::CLICK),
         VisualState::HoveredFocused => fill.intersects(WidgetFillOption::HOVER | WidgetFillOption::CLICK),

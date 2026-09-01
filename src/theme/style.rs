@@ -110,11 +110,11 @@ pub struct Style {
     pub window_focus_color: Color,
     /// Background color used by menu bars, popup menus, and cascading submenus.
     pub menu_background: Color,
-    /// Shared flat fallback fill used by backgrounds and controls in a deactivated window.
+    /// Shared flat fallback fill used by disabled backgrounds and controls.
     ///
-    /// Image-backed themes normally replace individual Inactive patches, while this value keeps
+    /// Image-backed themes normally replace individual Disabled patches, while this value keeps
     /// omitted roles and entirely flat themes visually coherent without requiring a PNG.
-    pub inactive_background_color: Color,
+    pub disabled_background_color: Color,
     /// Palette of [`crate::ControlColor`] entries.
     pub colors: [Color; 12],
 }
@@ -149,7 +149,7 @@ impl Style {
         let focus_color = Color { r: 0, g: 120, b: 215, a: 255 };
         let window_focus_color = Color { r: 0, g: 120, b: 215, a: 255 };
         let menu_background = Color { r: 50, g: 50, b: 50, a: 255 };
-        let inactive_background_color = colors[ControlColor::WindowBG as usize];
+        let disabled_background_color = colors[ControlColor::WindowBG as usize];
         let foregrounds = ForegroundCatalog::from_flat_palette(
             colors[ControlColor::Text as usize],
             colors[ControlColor::TitleText as usize],
@@ -165,7 +165,7 @@ impl Style {
             focus_color,
             window_focus_color,
             menu_background,
-            inactive_background_color,
+            disabled_background_color,
         );
         Self {
             font,
@@ -187,7 +187,7 @@ impl Style {
             focus_color,
             window_focus_color,
             menu_background,
-            inactive_background_color,
+            disabled_background_color,
             colors,
         }
     }
