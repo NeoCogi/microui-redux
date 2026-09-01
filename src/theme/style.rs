@@ -56,6 +56,16 @@ use super::{AppearanceCatalog, AppearanceRole, Color, ControlColor, FontChoice, 
 use crate::atlas::{AtlasHandle, FontId};
 use crate::render::{NinePatch, SliceInsets};
 
+/// Platform-oriented arrangement used for manager-owned window titles and caption buttons.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub enum WindowChromeLayout {
+    /// Places every caption button on the trailing edge and left-aligns title text.
+    #[default]
+    TrailingButtons,
+    /// Uses centered title text, a leading close box, and compact trailing zoom/windowshade boxes.
+    ClassicMac,
+}
+
 #[derive(Clone)]
 /// Collection of visual constants that drive widget appearance.
 pub struct Style {
@@ -81,6 +91,11 @@ pub struct Style {
     pub indent: i32,
     /// Height of window title bars.
     pub title_height: i32,
+    /// Platform-oriented title alignment and caption-button arrangement.
+    ///
+    /// This controls geometry only. Button faces, title stripes, and every interaction state remain
+    /// ordinary typed appearance roles supplied by the active theme.
+    pub window_chrome_layout: WindowChromeLayout,
     /// Structural thickness reserved for each top-level window border edge.
     ///
     /// This is deliberately independent from the fixed corner span in the window-frame
@@ -179,6 +194,7 @@ impl Style {
             spacing: 4,
             indent: 24,
             title_height: 24,
+            window_chrome_layout: WindowChromeLayout::TrailingButtons,
             window_border: SliceInsets::uniform(1),
             scrollbar_size: 12,
             thumb_size: 8,

@@ -69,6 +69,11 @@ name = "atlas_export"
 path = "tools/atlas_export.rs"
 required-features = ["builder", "save-to-rust", "png_source"]
 
+[[bin]]
+name = "mac_os_9_theme_export"
+path = "tools/mac_os_9_theme_export.rs"
+required-features = ["png_source"]
+
 # Examples listed explicitly to ensure shared assets compile across feature sets.
 [[example]]
 name = "simple"

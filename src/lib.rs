@@ -282,7 +282,7 @@ pub mod prelude {
     pub use crate::math::{expand_rect, rect, vec2};
     pub use crate::theme::{
         AppearanceCatalog, AppearanceRole, Color, ControlColor, FontChoice, FontRole, ForegroundCatalog, StatefulAppearance, StatefulColor, Style, ThemeIcons,
-        VisualState, color,
+        VisualState, WindowChromeLayout, color,
     };
     #[cfg(feature = "theme-json")]
     pub use crate::theme::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};
@@ -315,7 +315,7 @@ pub use math::{expand_rect, rect, vec2};
 pub use render::{AtlasUploadError, NinePatch, NinePatchCell, NinePatchCells, NinePatchContent, NinePatchImage, SliceInsets, TextureError, TextureId};
 pub use theme::{
     AppearanceCatalog, AppearanceRole, Color, ControlColor, FontChoice, FontRole, ForegroundCatalog, StatefulAppearance, StatefulColor, Style, ThemeIcons,
-    VisualState, color,
+    VisualState, WindowChromeLayout, color,
 };
 #[cfg(feature = "theme-json")]
 pub use theme::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};

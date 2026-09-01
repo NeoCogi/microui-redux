@@ -445,6 +445,8 @@ struct StyleDocument {
     indent: Option<i32>,
     /// Window title height override.
     title_height: Option<i32>,
+    /// Optional platform-oriented title and caption-button arrangement.
+    window_chrome_layout: Option<WindowChromeLayoutDocument>,
     /// Structural window-edge thickness independent from frame-art corner spans.
     window_border: Option<InsetsDocument>,
     /// Scrollbar cross-axis thickness override.
@@ -467,6 +469,11 @@ impl StyleDocument {
         assign_if_some(&mut style.spacing, self.spacing);
         assign_if_some(&mut style.indent, self.indent);
         assign_if_some(&mut style.title_height, self.title_height);
+        if let Some(window_chrome_layout) = self.window_chrome_layout {
+            // The schema enum converts once into the public runtime enum, keeping deserialization
+            // details out of Style when JSON support is not compiled.
+            style.window_chrome_layout = window_chrome_layout.into_layout();
+        }
         if let Some(window_border) = self.window_border {
             // Keep the schema-to-runtime conversion explicit because negative components are
             // rejected by installation before they can affect layout or hit testing.
@@ -475,6 +482,28 @@ impl StyleDocument {
         assign_if_some(&mut style.scrollbar_size, self.scrollbar_size);
         assign_if_some(&mut style.thumb_size, self.thumb_size);
         self.colors.apply(style);
+    }
+}
+
+/// Strict JSON spelling for the two supported manager-owned window chrome arrangements.
+#[derive(Copy, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum WindowChromeLayoutDocument {
+    /// Conventional left title with all caption controls at the trailing edge.
+    TrailingButtons,
+    /// Platinum-style centered title with a leading close box and compact trailing controls.
+    ClassicMac,
+}
+
+impl WindowChromeLayoutDocument {
+    /// Converts one schema value into its public runtime counterpart without string dispatch.
+    const fn into_layout(self) -> crate::WindowChromeLayout {
+        // Exhaustive matching keeps a future schema spelling from silently inheriting an unrelated
+        // runtime policy.
+        match self {
+            Self::TrailingButtons => crate::WindowChromeLayout::TrailingButtons,
+            Self::ClassicMac => crate::WindowChromeLayout::ClassicMac,
+        }
     }
 }
 
@@ -964,11 +993,13 @@ mod tests {
     fn bundled_mac_os_9_theme_reuses_shared_png_uploads() {
         let (loaded, uploads) = install_bundled_theme("themes/mac-os-9/theme.json");
         assert_eq!(loaded.name(), "Mac OS 9");
-        assert_eq!(uploads, 13, "each shared PNG path must be uploaded exactly once");
+        assert_eq!(uploads, 24, "each shared PNG path must be uploaded exactly once");
+        assert_eq!(loaded.style().window_chrome_layout, crate::WindowChromeLayout::ClassicMac);
+        assert_eq!(loaded.style().title_height, 18);
         let insets = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (3, 3, 3, 3));
         let active_title = loaded.style().appearance(AppearanceRole::WindowTitleActive, VisualState::Pressed);
-        assert!(matches!(active_title.content, crate::NinePatchContent::Image { image } if image.source.height == 16));
+        assert!(matches!(active_title.content, crate::NinePatchContent::Image { image } if image.source.width == 8 && image.source.height == 18));
         assert!(matches!(
             loaded.style().appearance(AppearanceRole::Button, VisualState::Disabled).content,
             crate::NinePatchContent::Image { .. }
@@ -987,5 +1018,22 @@ mod tests {
             (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: pressed })
                 if normal.texture == pressed.texture
         ));
+
+        // The Mac layout consumes complete caption-face images and does not overlay generic
+        // Windows glyphs. Pressed artwork remains a distinct upload for visible inset feedback.
+        let close = loaded.style().appearance(AppearanceRole::WindowCloseButton, VisualState::Normal);
+        let close_pressed = loaded.style().appearance(AppearanceRole::WindowCloseButton, VisualState::Pressed);
+        assert!(matches!(
+            (close.content, close_pressed.content),
+            (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: pressed })
+                if normal.source.width == 12 && normal.source.height == 12 && normal.texture != pressed.texture
+        ));
+
+        // Platinum popup selection uses black image-backed rows with white foreground text, while
+        // the popup itself retains its authored thick black and beveled frame.
+        let menu_popup = loaded.style().appearance(AppearanceRole::MenuPopup, VisualState::Normal);
+        assert!(matches!(menu_popup.content, crate::NinePatchContent::Image { image } if image.source.width == 7 && image.source.height == 7));
+        let selected_text = loaded.style().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
+        assert_eq!((selected_text.r, selected_text.g, selected_text.b, selected_text.a), (255, 255, 255, 255));
     }
 }

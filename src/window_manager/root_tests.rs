@@ -3426,6 +3426,79 @@ fn positive_caption_flags_minimize_maximize_follow_viewport_and_restore_exactly(
 }
 
 #[test]
+fn classic_mac_chrome_places_compact_close_and_trailing_controls_on_opposite_edges() {
+    let atlas = test_atlas();
+    let mut style = test_style(&atlas);
+    style.window_chrome_layout = crate::WindowChromeLayout::ClassicMac;
+    style.title_height = 24;
+    let mut ctx = Context::new_test(NoopRenderer { atlas }, Dimensioni::new(360, 260));
+    ctx.set_style(style);
+    let root = ctx
+        .ui()
+        .create_window(Window::new("centered Platinum title", rect(30, 35, 190, 120), empty_content()));
+    ctx.ui()
+        .set_window_options(&root, WindowOption::FRAME | WindowOption::MINIMIZE_BUTTON | WindowOption::MAXIMIZE_BUTTON)
+        .unwrap();
+    ctx.update_ui(Dimensioni::new(360, 260));
+
+    let (title, close, _) = ctx.debug_root_chrome(root.id()).unwrap();
+    let title = title.expect("a titled Mac window must allocate its title strip");
+    let close = close.expect("the default Mac title must retain its leading close box");
+    let controls = ctx.debug_root_chrome_controls(root.id()).unwrap();
+    let minimize = controls.minimize.expect("the windowshade flag must allocate its trailing box");
+    let maximize = controls.maximize.expect("the zoom flag must allocate its trailing box");
+    let extent = title.height.saturating_sub(6);
+
+    // Platinum keeps three title pixels above and below every compact box. Close starts on the
+    // leading edge while zoom remains farthest trailing and windowshade sits directly before it.
+    assert_eq!((close.x, close.y, close.width, close.height), (title.x, title.y + 3, extent, extent));
+    assert_eq!(
+        (maximize.x, maximize.y, maximize.width, maximize.height),
+        (title.x + title.width - extent, title.y + 3, extent, extent)
+    );
+    assert_eq!(
+        (minimize.x, minimize.y, minimize.width, minimize.height),
+        (maximize.x - extent, title.y + 3, extent, extent)
+    );
+}
+
+#[test]
+fn passive_classic_mac_caption_reserve_activates_title_without_triggering_hidden_button() {
+    let atlas = test_atlas();
+    let mut style = test_style(&atlas);
+    style.window_chrome_layout = crate::WindowChromeLayout::ClassicMac;
+    let dimensions = Dimensioni::new(460, 260);
+    let mut ctx = Context::new_test(NoopRenderer { atlas }, dimensions);
+    ctx.set_style(style);
+    let passive = ctx.ui().create_window(Window::new("passive", rect(20, 25, 170, 120), empty_content()));
+    let active = ctx.ui().create_window(Window::new("active", rect(240, 25, 170, 120), empty_content()));
+    ctx.update_ui(dimensions);
+
+    // Select the second window through ordinary content so the first window paints its passive
+    // title without caption faces.
+    let active_body = ctx.debug_root_body(active.id()).unwrap();
+    let active_point = crate::vec2(active_body.x + active_body.width / 2, active_body.y + active_body.height / 2);
+    ctx.mousedown(active_point.x, active_point.y, MouseButton::LEFT);
+    ctx.update_ui(dimensions);
+    ctx.mouseup(active_point.x, active_point.y, MouseButton::LEFT);
+    ctx.update_ui(dimensions);
+    assert_eq!(ctx.debug_active_root(), Some(active.id()));
+
+    let close = ctx.debug_root_chrome(passive.id()).unwrap().1.unwrap();
+    let reserved_point = crate::vec2(close.x + close.width / 2, close.y + close.height / 2);
+    ctx.mousedown(reserved_point.x, reserved_point.y, MouseButton::LEFT);
+    ctx.update_ui(dimensions);
+
+    // The hidden close allocation behaves as title for this first activation press. It begins a
+    // move capture and cannot hide the window when the matching release arrives at the same point.
+    assert_eq!(ctx.debug_active_root(), Some(passive.id()));
+    assert_eq!(ctx.debug_root_moving(passive.id()), Some(true));
+    ctx.mouseup(reserved_point.x, reserved_point.y, MouseButton::LEFT);
+    ctx.update_ui(dimensions);
+    assert_eq!(ctx.debug_root_visible(passive.id()), Some(true));
+}
+
+#[test]
 fn content_capture_remains_exclusive_while_dragging_across_root_chrome() {
     let (probe_state, probe) = OrderedProbe::create(WidgetOption::NONE);
     let mut ctx = context();

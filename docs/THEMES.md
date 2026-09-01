@@ -46,6 +46,7 @@ the theme directories must remain available beside the repository sources at run
     "padding": 4,
     "spacing": 4,
     "title_height": 20,
+    "window_chrome_layout": "trailing_buttons",
     "frame_insets": { "left": 1, "top": 1, "right": 1, "bottom": 1 },
     "colors": {
       "text": [0, 0, 0, 255],
@@ -104,6 +105,7 @@ The optional `style` object accepts these integer metrics:
 - `spacing`
 - `indent`
 - `title_height`
+- `window_chrome_layout` (`trailing_buttons` or `classic_mac`)
 - `window_border` (`left`, `top`, `right`, and `bottom` structural edge thicknesses)
 - `scrollbar_size`
 - `thumb_size`
@@ -191,6 +193,13 @@ Window caption controls are enabled explicitly through `WindowOption::MINIMIZE_B
 is present. Caption and resize roles receive `hovered` and `pressed` states from manager-owned
 pointer capture just like widgets. A press dragged away from its originating caption button is no
 longer painted pressed and does not activate on release.
+
+`style.window_chrome_layout` selects concrete platform geometry without changing the semantic
+caption roles. `trailing_buttons` preserves the ordinary left-aligned title and places every
+caption control at the trailing edge. `classic_mac` centers the title, places a compact close box
+at the leading edge, places compact zoom/windowshade controls at the trailing edge, and omits those
+faces from passive titles. Classic Mac caption PNGs are complete faces, so this layout does not
+overlay the generic procedural glyphs used by flat and Windows-oriented styles.
 
 The optional caption-glyph roles paint centered image artwork inside their corresponding button
 face. If a glyph role is transparent or omitted, the renderer uses its deterministic procedural

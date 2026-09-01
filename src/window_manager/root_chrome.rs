@@ -39,7 +39,7 @@ use std::fmt;
 
 use crate::math::RectExt;
 use crate::render::Painter;
-use crate::{AppearanceRole, AtlasHandle, Dimensioni, Recti, Style, VisualState, WidgetEventPortHandle, WindowOption};
+use crate::{AppearanceRole, AtlasHandle, ControlColor, Dimensioni, Recti, Style, VisualState, WidgetEventPortHandle, WindowChromeLayout, WindowOption};
 
 /// Active pointer gesture owned by manager-rendered window chrome.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -333,10 +333,19 @@ pub(super) fn root_chrome_geometry(
     let mut minimum_height = if auto_height { 1 } else { 64 };
     if !options.intersects(WindowOption::NO_TITLE) {
         // The title minimum retains enough room for text, padding, and every enabled caption button.
-        let caption_count = i32::from(!options.intersects(WindowOption::NO_CLOSE))
-            .saturating_add(i32::from(options.intersects(WindowOption::MINIMIZE_BUTTON)))
-            .saturating_add(i32::from(options.intersects(WindowOption::MAXIMIZE_BUTTON)));
-        let caption_width = title_height.saturating_mul(caption_count);
+        let close_count = i32::from(!options.intersects(WindowOption::NO_CLOSE));
+        let trailing_count =
+            i32::from(options.intersects(WindowOption::MINIMIZE_BUTTON)).saturating_add(i32::from(options.intersects(WindowOption::MAXIMIZE_BUTTON)));
+        let caption_extent = root_caption_extent(style.window_chrome_layout, title_height);
+        let caption_width = match style.window_chrome_layout {
+            WindowChromeLayout::TrailingButtons => caption_extent.saturating_mul(close_count.saturating_add(trailing_count)),
+            WindowChromeLayout::ClassicMac => {
+                // Centered titles reserve equal space on both sides using the larger control bank.
+                // This keeps the title centered on the complete window even though one close box
+                // occupies the leading side and up to two controls occupy the trailing side.
+                caption_extent.saturating_mul(close_count.max(trailing_count)).saturating_mul(2)
+            }
+        };
         let title_minimum_width = atlas
             .get_text_size(style.title_font, name)
             .width
@@ -375,19 +384,37 @@ pub(super) fn root_chrome_geometry(
     let title =
         (!options.intersects(WindowOption::NO_TITLE)).then(|| Recti::new(client.x, client.y, client.width.max(0), title_height.min(client.height.max(0))));
     let (close, maximize, minimize) = if let Some(title) = title {
-        // Allocate caption buttons from the trailing edge in conventional close/maximize/minimize
-        // order. Each button is square unless a programmed tiny title exhausts remaining width.
-        let mut trailing_x = title.x.saturating_add(title.width);
-        let mut allocate = || {
-            let remaining = trailing_x.saturating_sub(title.x).max(0);
-            let width = title.height.min(remaining);
-            trailing_x = trailing_x.saturating_sub(width);
-            Recti::new(trailing_x, title.y, width, title.height)
-        };
-        let close = (!options.intersects(WindowOption::NO_CLOSE)).then(&mut allocate);
-        let maximize = options.intersects(WindowOption::MAXIMIZE_BUTTON).then(&mut allocate);
-        let minimize = options.intersects(WindowOption::MINIMIZE_BUTTON).then(&mut allocate);
-        (close, maximize, minimize)
+        let extent = root_caption_extent(style.window_chrome_layout, title.height).min(title.height.max(0));
+        let button_y = title.y.saturating_add(title.height.saturating_sub(extent).max(0) / 2);
+        match style.window_chrome_layout {
+            WindowChromeLayout::TrailingButtons => {
+                // Conventional chrome allocates close/maximize/minimize from the trailing edge.
+                let mut trailing_x = title.x.saturating_add(title.width);
+                let mut allocate = || allocate_trailing_caption(title.x, button_y, extent, &mut trailing_x);
+                let close = (!options.intersects(WindowOption::NO_CLOSE)).then(&mut allocate);
+                let maximize = options.intersects(WindowOption::MAXIMIZE_BUTTON).then(&mut allocate);
+                let minimize = options.intersects(WindowOption::MINIMIZE_BUTTON).then(&mut allocate);
+                (close, maximize, minimize)
+            }
+            WindowChromeLayout::ClassicMac => {
+                // Platinum puts its blank close box at the leading edge and compact zoom/windowshade
+                // controls at the trailing edge, leaving the racing stripes visible between them.
+                let mut leading_x = title.x;
+                let far_x = title.x.saturating_add(title.width);
+                let close = (!options.intersects(WindowOption::NO_CLOSE)).then(|| {
+                    let remaining = far_x.saturating_sub(leading_x).max(0);
+                    let width = extent.min(remaining);
+                    let rect = Recti::new(leading_x, button_y, width, extent);
+                    leading_x = leading_x.saturating_add(width);
+                    rect
+                });
+                let mut trailing_x = far_x;
+                let mut allocate = || allocate_trailing_caption(leading_x, button_y, extent, &mut trailing_x);
+                let maximize = options.intersects(WindowOption::MAXIMIZE_BUTTON).then(&mut allocate);
+                let minimize = options.intersects(WindowOption::MINIMIZE_BUTTON).then(&mut allocate);
+                (close, maximize, minimize)
+            }
+        }
     } else {
         (None, None, None)
     };
@@ -444,6 +471,67 @@ pub(super) fn root_chrome_geometry(
         resize_corner,
         minimum_outer,
         intrinsic_outer,
+    }
+}
+
+/// Returns the square caption-control extent selected by one platform chrome arrangement.
+fn root_caption_extent(layout: WindowChromeLayout, title_height: i32) -> i32 {
+    // Platinum boxes leave three pixels above and below inside an eighteen-pixel title. Conventional
+    // layouts preserve the prior full-height square behavior exactly.
+    match layout {
+        WindowChromeLayout::TrailingButtons => title_height.max(0),
+        WindowChromeLayout::ClassicMac => title_height.saturating_sub(6).max(1),
+    }
+}
+
+/// Removes one square caption allocation from the remaining trailing title span.
+fn allocate_trailing_caption(leading_x: i32, y: i32, extent: i32, trailing_x: &mut i32) -> Recti {
+    // Saturating arithmetic keeps tiny or extreme programmed windows total while preserving exact
+    // ordinary pixel geometry.
+    let remaining = trailing_x.saturating_sub(leading_x).max(0);
+    let width = extent.min(remaining);
+    *trailing_x = trailing_x.saturating_sub(width);
+    Recti::new(*trailing_x, y, width, extent)
+}
+
+/// Returns the title-text allocation after reserving the selected layout's caption banks.
+fn root_title_text_rect(title: Recti, geometry: RootChromeGeometry, layout: WindowChromeLayout) -> Recti {
+    match layout {
+        WindowChromeLayout::TrailingButtons => {
+            // All conventional controls occupy the trailing edge, so the earliest control begins
+            // the region excluded from the ordinary left-aligned title label.
+            let caption_start = [geometry.minimize, geometry.maximize, geometry.close]
+                .into_iter()
+                .flatten()
+                .map(|caption| caption.x)
+                .min()
+                .unwrap_or_else(|| title.x.saturating_add(title.width));
+            Recti::new(title.x, title.y, caption_start.saturating_sub(title.x).max(0), title.height)
+        }
+        WindowChromeLayout::ClassicMac => {
+            // A centered Platinum title needs equal clear spans even though the close bank and the
+            // zoom/windowshade bank contain different numbers of controls. The larger actual bank
+            // therefore determines both reservations.
+            let title_end = title.x.saturating_add(title.width);
+            let leading_reserve = geometry
+                .close
+                .map(|caption| caption.x.saturating_add(caption.width).saturating_sub(title.x).max(0))
+                .unwrap_or(0);
+            let trailing_start = [geometry.minimize, geometry.maximize]
+                .into_iter()
+                .flatten()
+                .map(|caption| caption.x)
+                .min()
+                .unwrap_or(title_end);
+            let trailing_reserve = title_end.saturating_sub(trailing_start).max(0);
+            let reserve = leading_reserve.max(trailing_reserve).min(title.width.max(0) / 2);
+            Recti::new(
+                title.x.saturating_add(reserve),
+                title.y,
+                title.width.saturating_sub(reserve.saturating_mul(2)).max(0),
+                title.height,
+            )
+        }
     }
 }
 
@@ -547,25 +635,34 @@ pub(super) fn record_root_overlay(
             title,
             style.appearance(role, chrome_state(visual.part_state(RootChromePart::Title))),
         );
-        let mut text = title;
-        let caption_start = [geometry.minimize, geometry.maximize, geometry.close]
-            .into_iter()
-            .flatten()
-            .map(|caption| caption.x)
-            .min();
-        if let Some(caption_start) = caption_start {
-            // Reserve every trailing caption square so title text cannot paint beneath any button.
-            text.width = caption_start.saturating_sub(title.x).max(0);
-        }
+        let text = root_title_text_rect(title, geometry, style.window_chrome_layout);
         if text.width > 0 && text.height > 0 {
             let state = chrome_state(visual.part_state(RootChromePart::Title));
             let color = style.foreground(role, state);
-            let position = crate::ui_node::text_layout::control_text_position_with_font(style, atlas, style.title_font, name, text, crate::WidgetOption::NONE);
+            let options = match style.window_chrome_layout {
+                WindowChromeLayout::TrailingButtons => crate::WidgetOption::NONE,
+                WindowChromeLayout::ClassicMac => crate::WidgetOption::ALIGN_CENTER,
+            };
+            let position = crate::ui_node::text_layout::control_text_position_with_font(style, atlas, style.title_font, name, text, options);
+            if chrome_active && style.window_chrome_layout == WindowChromeLayout::ClassicMac {
+                // Platinum interrupts the active racing stripes with a flat label field. Paint only
+                // the measured title span plus compact horizontal breathing room so stripes remain
+                // visible on both sides and long titles still clip inside their symmetric reserve.
+                let measured = atlas.get_text_size(style.title_font, name);
+                let desired_label = Recti::new(position.x.saturating_sub(4), title.y, measured.width.saturating_add(8), title.height);
+                if let Some(label) = desired_label.positive_intersection(text) {
+                    painter.fill_rect(label, style.colors[ControlColor::TitleBG as usize]);
+                }
+            }
             painter.with_clip(text, |painter| painter.text(style.title_font, name, position, color));
         }
-        for button in [RootCaptionButton::Minimize, RootCaptionButton::Maximize, RootCaptionButton::Close] {
-            if let Some(rect) = geometry.caption(button) {
-                paint_caption_button(&mut painter, rect, button, style, chrome_active, enabled, visual);
+        if chrome_active || style.window_chrome_layout != WindowChromeLayout::ClassicMac {
+            // Classic Mac OS removes caption boxes from passive titles rather than presenting them
+            // as disabled heavy frames. Conventional layouts retain their historical visible faces.
+            for button in [RootCaptionButton::Minimize, RootCaptionButton::Maximize, RootCaptionButton::Close] {
+                if let Some(rect) = geometry.caption(button) {
+                    paint_caption_button(&mut painter, rect, button, style, chrome_active, enabled, visual);
+                }
             }
         }
     }
@@ -614,6 +711,12 @@ fn paint_caption_button(
     let Some(content) = crate::ui_node::frame::paint_internal_frame(painter, rect, style.appearance(role, state)) else {
         return;
     };
+    if style.window_chrome_layout == WindowChromeLayout::ClassicMac {
+        // Platinum caption PNGs contain their complete period-specific box marks. Skipping the
+        // generic semantic glyph layer prevents Windows-style X, underscore, and outlined-square
+        // symbols from being superimposed on those compact controls.
+        return;
+    }
     let glyph = style.appearance(glyph_role, state);
     if glyph.is_visible() {
         // Image glyphs retain their authored pixel dimensions and are centered in the button's
@@ -700,5 +803,23 @@ mod tests {
         };
         assert_eq!(width_pressed.part_state(right), VisualState::Pressed);
         assert_eq!(width_pressed.frame_state(), VisualState::Pressed);
+    }
+
+    /// Verifies asymmetric Platinum caption banks still leave a symmetric title-label allocation.
+    #[test]
+    fn classic_mac_title_text_reserves_equal_leading_and_trailing_spans() {
+        let title = Recti::new(20, 30, 160, 18);
+        let geometry = RootChromeGeometry {
+            title: Some(title),
+            close: Some(Recti::new(20, 33, 12, 12)),
+            minimize: Some(Recti::new(156, 33, 12, 12)),
+            maximize: Some(Recti::new(168, 33, 12, 12)),
+            ..RootChromeGeometry::default()
+        };
+
+        // The two-control trailing bank is twenty-four pixels wide, so the centered title must
+        // reserve the same twenty-four pixels even though the leading bank contains only close.
+        let text = root_title_text_rect(title, geometry, WindowChromeLayout::ClassicMac);
+        assert_eq!((text.x, text.y, text.width, text.height), (44, 30, 112, 18));
     }
 }

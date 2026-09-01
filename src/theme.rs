@@ -44,5 +44,5 @@ pub use icons::ThemeIcons;
 #[cfg(feature = "theme-json")]
 pub use loader::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};
 pub use palette::ControlColor;
-pub use style::Style;
+pub use style::{Style, WindowChromeLayout};
 pub use typography::{FontChoice, FontRole};

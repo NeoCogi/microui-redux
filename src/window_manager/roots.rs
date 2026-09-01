@@ -2418,14 +2418,14 @@ impl WindowManager {
     }
 
     /// Routes one event to window chrome and reports whether the overlay consumed it.
-    fn route_chrome_event(&mut self, root: RootId, event: &UiInputEvent) -> bool {
+    fn route_chrome_event(&mut self, root: RootId, event: &UiInputEvent, caption_controls_visible: bool) -> bool {
         if self.root_node(root).is_err() || !self.surface_accepts_input(SurfaceKey::Root(root)) {
             return false;
         }
         match event {
             UiInputEvent::MouseDown { pos, button } if button.intersects(MouseButton::LEFT) => {
                 match self.root_node(root).ok().and_then(|node| node.chrome_part_at(*pos)) {
-                    Some(RootChromePart::Caption(button)) => {
+                    Some(RootChromePart::Caption(button)) if caption_controls_visible => {
                         // Caption actions commit on release over the same button. Capture preserves
                         // pressed-state PNG selection and lets a drag outside cancel the action.
                         let node = self.root_node_mut(root).expect("chrome target must remain retained");
@@ -2439,7 +2439,10 @@ impl WindowManager {
                         node.root_mut().expect("chrome target must be a root").interaction = RootInteraction::Resizing(axis);
                         true
                     }
-                    Some(RootChromePart::Title) => {
+                    Some(RootChromePart::Caption(_)) | Some(RootChromePart::Title) => {
+                        // A passive Classic Mac title does not display caption boxes. Its first
+                        // press therefore treats their reserved geometry as ordinary title rather
+                        // than activating an invisible close, zoom, or windowshade action.
                         let node = self.root_node_mut(root).expect("chrome target must remain retained");
                         node.surface.body.clear_transient_targets();
                         node.root_mut().expect("chrome target must be a root").interaction = RootInteraction::Moving;
@@ -2719,6 +2722,12 @@ impl WindowManager {
         // routable targets. Keeping both facts prevents click-through without a second stacking
         // model or a special disabled-window event path.
         let interactive_hover = hover.filter(|surface| self.surface_accepts_input(*surface));
+        let active_window_before_press = self
+            .active_menu_root()
+            .or_else(|| self.keyboard_input_surface().and_then(|surface| self.surfaces.owning_root(surface)));
+        let pointer_owner_was_active = interactive_hover
+            .and_then(|surface| self.surfaces.owning_root(surface))
+            .is_some_and(|owner| active_window_before_press == Some(owner));
         if event.is_pointer() {
             // Hover is paint state even when no button is pressed or the selected chrome region
             // ultimately lets the event fall through to application content.
@@ -2803,7 +2812,9 @@ impl WindowManager {
                                 .and_then(SurfaceNode::root)
                                 .is_some_and(|state| state.interaction != RootInteraction::None);
                             if chrome_captured {
-                                self.route_chrome_event(root, event)
+                                // Continuation belongs to an already-visible caption or another
+                                // chrome capture, so passive first-press filtering no longer applies.
+                                self.route_chrome_event(root, event, true)
                             } else {
                                 self.surfaces
                                     .surface_mut(surface)
@@ -2824,7 +2835,13 @@ impl WindowManager {
                 }
             }
             if !handled && let Some(surface) = pointer {
-                handled = matches!(surface, SurfaceKey::Root(root) if self.route_chrome_event(root, event));
+                handled = match surface {
+                    SurfaceKey::Root(root) => {
+                        let caption_controls_visible = pointer_owner_was_active || style.window_chrome_layout != crate::WindowChromeLayout::ClassicMac;
+                        self.route_chrome_event(root, event, caption_controls_visible)
+                    }
+                    SurfaceKey::Popup(_) => false,
+                };
                 if !handled && self.menu_contains(surface, input.mouse_pos) {
                     let route = self.route_menu_pointer(surface, event).expect("hit menu surface must remain retained");
                     staged_menu_action = route.action.map(|action| (surface, action));
