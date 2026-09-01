@@ -407,7 +407,7 @@ impl<B: RendererBackend> DisplayListExecutor<'_, '_, B> {
             .get_mut(renderer)
             .expect("custom-render keys were validated before backend-frame acquisition");
         self.frame.flush();
-        callback.render(
+        callback(
             &mut self.frame,
             CustomRenderArgs {
                 dimensions: Dimensioni::new(self.viewport.width, self.viewport.height),

@@ -488,12 +488,12 @@ while a backend frame exists. Applications implement `RendererBackend` and
 `RendererFrame`; they do not construct or replace the executor itself.
 
 Context, backend frames, and custom-render callbacks remain on their owning
-thread. `RendererBackend` and `CustomRender` intentionally have
-no `Send` or `Sync` bounds, and the retained tree and immutable atlas use
-single-threaded shared ownership. Cross-thread application work should produce
-owned results and deliver them to Context before `Context::frame`; callbacks
-then execute synchronously while Context's executor interprets that frame's
-display list.
+thread. `RendererBackend` and the callback closures accepted by
+`Context::register_custom_renderer` intentionally have no `Send` or `Sync`
+bounds, and the retained tree and immutable atlas use single-threaded shared
+ownership. Cross-thread application work should produce owned results and
+deliver them to Context before `Context::frame`; callbacks then execute
+synchronously while Context's executor interprets that frame's display list.
 
 Tests that need to inspect backend work keep a separate `Rc<RefCell<_>>`
 recording log. They do not clone, lock, or expose the backend itself.

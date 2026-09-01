@@ -326,26 +326,13 @@ pub trait RendererBackend: 'static {
     fn destroy_texture(&mut self, id: TextureId);
 }
 
-/// Backend-specific callback invoked synchronously with the statically typed active frame.
+/// Private heterogeneous storage shape for one backend-specialized callback closure.
 ///
-/// Callbacks stay on the owning Context thread. This trait deliberately has no `Send` or
-/// `Sync` bound. A callback may update private rendering-only caches, but is observational with
-/// respect to retained application state, topology, interaction, and layout. Mutating retained UI
-/// through a captured typed widget handle during the callback violates the update-before-paint contract.
-pub trait CustomRender<B: RendererBackend>: 'static {
-    /// Records backend-specific work at the current painter-order position.
-    fn render<'frame>(&mut self, frame: &mut B::Frame<'frame>, args: CustomRenderArgs);
-}
-
-impl<B, F> CustomRender<B> for F
-where
-    B: RendererBackend,
-    F: for<'frame> FnMut(&mut B::Frame<'frame>, CustomRenderArgs) + 'static,
-{
-    fn render<'frame>(&mut self, frame: &mut B::Frame<'frame>, args: CustomRenderArgs) {
-        self(frame, args);
-    }
-}
+/// Context registration accepts this same higher-ranked `FnMut` contract directly. Keeping only
+/// the closure shape avoids exposing a named trait that applications could implement but no public
+/// registration API could consume. Callbacks remain on the owning Context thread and therefore
+/// deliberately have no `Send` or `Sync` bound.
+type CustomRenderCallback<B> = dyn for<'frame> FnMut(&mut <B as RendererBackend>::Frame<'frame>, CustomRenderArgs) + 'static;
 
 /// Backend-neutral key retained by UI nodes and display-list operations.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -403,7 +390,7 @@ pub(crate) struct CustomRenderRegistry<B: RendererBackend> {
     /// Last callback slot allocated by this registry.
     next_slot: u64,
     /// Live callbacks keyed by renderer provenance and local slot.
-    callbacks: HashMap<CustomRenderKey, Box<dyn CustomRender<B>>>,
+    callbacks: HashMap<CustomRenderKey, Box<CustomRenderCallback<B>>>,
 }
 
 impl<B: RendererBackend> CustomRenderRegistry<B> {
@@ -448,7 +435,7 @@ impl<B: RendererBackend> CustomRenderRegistry<B> {
     }
 
     /// Borrows a live callback only when its key belongs to this renderer.
-    pub(crate) fn get_mut(&mut self, key: CustomRenderKey) -> Option<&mut Box<dyn CustomRender<B>>> {
+    pub(crate) fn get_mut(&mut self, key: CustomRenderKey) -> Option<&mut Box<CustomRenderCallback<B>>> {
         if key.renderer != self.renderer {
             return None;
         }
