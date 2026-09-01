@@ -4,7 +4,7 @@
 - [ ] Async/Multi-Threading?
 - [x] Theming/Skinning
     - [x] Typed flat/image nine-patches, strict JSON definitions, and per-state PNG fallbacks
-    - [x] Original Windows 95 and Mac OS 9 example themes with `demo-full` selection
+    - [x] Original Windows 3.11, Windows 95, and Mac OS 9 example themes with `demo-full` selection
 
 ## Version 0.8
 

@@ -13,12 +13,14 @@ their source insets, destination insets, and tints remain independent typed patc
 
 ## Bundled example themes
 
-The repository includes [`themes/windows-95/theme.json`](../themes/windows-95/theme.json) and
-[`themes/mac-os-9/theme.json`](../themes/mac-os-9/theme.json). Both use original BSD-licensed pixel
-artwork authored for this project; their directory READMEs identify the GTK and gallery references
-used for visual research and explicitly document that no third-party theme files were copied.
+The repository includes [`themes/windows-3.11/theme.json`](../themes/windows-3.11/theme.json),
+[`themes/windows-95/theme.json`](../themes/windows-95/theme.json), and
+[`themes/mac-os-9/theme.json`](../themes/mac-os-9/theme.json). All use original BSD-licensed pixel
+artwork authored for this project; their directory READMEs identify the GTK, platform-guideline,
+and gallery references used for visual research and explicitly document that no third-party theme
+files were copied.
 
-`demo-full` loads the Default Style and both bundled files once at startup. Choose them from
+`demo-full` loads the Default Style and every bundled file once at startup. Choose them from
 `View > Theme`; each selection installs a pristine editable copy, so the existing Style Editor can
 modify it without changing the stored base theme. The example requires the `theme-json` feature and
 the theme directories must remain available beside the repository sources at runtime.

@@ -628,6 +628,24 @@ mod tests {
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (4, 4, 4, 4));
     }
 
+    /// Verifies the earlier Windows theme remains a distinct definition with period title artwork.
+    #[test]
+    fn bundled_windows_311_theme_uses_white_and_blue_title_images() {
+        let (loaded, uploads) = install_bundled_theme("themes/windows-3.11/theme.json");
+        assert_eq!(loaded.name(), "Windows 3.11 for Workgroups");
+        assert_eq!(uploads, 13, "each shared PNG path must be uploaded exactly once");
+        let insets = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
+        assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (4, 4, 4, 4));
+        assert!(matches!(
+            loaded.style().appearance(AppearanceRole::WindowTitle, VisualState::Pressed).content,
+            crate::NinePatchContent::Image { .. }
+        ));
+        assert!(matches!(
+            loaded.style().appearance(AppearanceRole::WindowTitleActive, VisualState::Pressed).content,
+            crate::NinePatchContent::Image { .. }
+        ));
+    }
+
     /// Verifies the bundled Mac theme installs its controls, title strips, frame, and grip artwork.
     #[test]
     fn bundled_mac_os_9_theme_reuses_shared_png_uploads() {
