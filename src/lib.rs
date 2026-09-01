@@ -267,7 +267,9 @@ pub mod prelude {
     pub use crate::menu::{Menu, MenuBar, MenuItem, MenuItemAccessError, MenuItemHandle, MenuItemMark, MenuItemParameters, MenuItemSubmitted};
     pub use crate::image::{ImageError, ImageSource, ImageStorageError, MAX_DECODED_RGBA_BYTES, load_image_bytes};
     pub use crate::input::{Key, KeyEvent, KeyState, Modifiers, MouseButton};
-    pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame, TextureError, TextureId};
+    pub use crate::render::{
+        FrameError, FrameInfo, FrameInfoError, NinePatch, NinePatchCell, NinePatchCells, RendererBackend, RendererFrame, SliceInsets, TextureError, TextureId,
+    };
     pub use crate::retained::{
         ChildParticipation, ChildWindowClip, Children, Container, ContainerLayoutCtx, ContainerWidget, Context, ContextFrame, Ui, CustomRenderArgs,
         AvailableSpace, Constraints, CustomRenderHandle, Disclosure, DisclosureParameters, Grid, GridItem, GridParameters, GridSpan, KeyboardAction,
@@ -304,7 +306,7 @@ pub use menu::{Menu, MenuBar, MenuItem, MenuItemAccessError, MenuItemHandle, Men
 pub use image::{ImageError, ImageSource, ImageStorageError, MAX_DECODED_RGBA_BYTES, load_image_bytes};
 pub use input::{Key, KeyEvent, KeyState, Modifiers, MouseButton};
 pub use math::{expand_rect, rect, vec2};
-pub use render::{TextureError, TextureId};
+pub use render::{NinePatch, NinePatchCell, NinePatchCells, SliceInsets, TextureError, TextureId};
 pub use theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, color};
 pub use ui_node::{
     AvailableSpace, ChildParticipation, Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, Disclosure, DisclosureParameters, Grid,

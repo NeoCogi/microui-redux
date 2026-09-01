@@ -205,7 +205,7 @@ impl<'a> WidgetUpdateCtx<'a> {
         )
     }
 
-    /// Creates update services for one traversal-derived content surface.
+    /// Creates update services for one traversal-derived content rectangle.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_with_content_geometry(
         content_rect: Recti,
@@ -317,7 +317,7 @@ pub struct WidgetPaintCtx<'a> {
 }
 
 impl<'a> WidgetPaintCtx<'a> {
-    /// Creates paint services for one traversal-derived content surface.
+    /// Creates paint services for one traversal-derived content rectangle.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_with_content_geometry(
         content_rect: Recti,
@@ -423,9 +423,9 @@ impl<'a> WidgetPaintCtx<'a> {
     /// Interaction-wide colors such as [`Style::focus_color`] do not belong to one base palette
     /// family. This helper keeps their geometry on the same authoritative frame path.
     pub(crate) fn draw_internal_frame_color(&mut self, rect: Recti, color: Color) -> Option<Recti> {
-        let border = self.common.style.frame_border();
+        let patch = self.common.style.frame_nine_patch(Some(color));
         let mut painter = self.painter();
-        crate::ui_node::frame::paint_internal_frame(&mut painter, rect, Some(color), border)
+        crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch)
     }
 
     /// Draws an explicit widget-owned internal frame with interaction fill coloring.

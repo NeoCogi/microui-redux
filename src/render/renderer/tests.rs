@@ -696,9 +696,9 @@ fn custom_barrier_flushes_clips_and_preserves_order() {
         })
         .unwrap();
     let mut list = DisplayList::new();
-    list.push_fill_rect(viewport(), Recti::new(0, 0, 4, 4), color(255, 0, 0, 255));
+    list.push_nine_patch(viewport(), Recti::new(0, 0, 4, 4), crate::NinePatch::solid(color(255, 0, 0, 255)));
     list.push_custom(Recti::new(10, 10, 20, 20), custom_renderer.key, Recti::new(0, 0, 40, 40));
-    list.push_fill_rect(viewport(), Recti::new(4, 0, 4, 4), color(0, 0, 255, 255));
+    list.push_nine_patch(viewport(), Recti::new(4, 0, 4, 4), crate::NinePatch::solid(color(0, 0, 255, 255)));
 
     renderer.render(frame_info(20, 20), &mut list).unwrap();
 

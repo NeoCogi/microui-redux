@@ -53,14 +53,8 @@
 //! Atlas-bound UI style values used across the crate.
 
 use crate::atlas::{AtlasHandle, FontId};
+use crate::render::{SliceInsets, NinePatch};
 use super::{Color, FontChoice, FontRole, ThemeIcons};
-
-/// Style-resolved border appearance for outer and internal frames.
-#[derive(Copy, Clone)]
-pub(crate) struct FrameBorder {
-    pub(crate) width: i32,
-    pub(crate) color: Color,
-}
 
 #[derive(Copy, Clone)]
 /// Collection of visual constants that drive widget appearance.
@@ -91,8 +85,11 @@ pub struct Style {
     pub scrollbar_size: i32,
     /// Minimum length of scrollbar thumbs and width of slider thumbs.
     pub thumb_size: i32,
-    /// Width of inside-aligned widget and container borders.
-    pub frame_border_width: i32,
+    /// Three-by-three flat patch used by framed widgets, containers, popups, and window chrome.
+    ///
+    /// The center is replaced with a role-specific fill when a concrete control paints a framed
+    /// patch. Its insets remain authoritative for layout even when every border cell is empty.
+    pub frame: NinePatch,
     /// Accent used for focused widget fills, menu selection, and the universal focus outline.
     ///
     /// Focus is an interaction scope rather than a control-family color, so this named value
@@ -138,7 +135,7 @@ impl Style {
             title_height: 24,
             scrollbar_size: 12,
             thumb_size: 8,
-            frame_border_width: 1,
+            frame: NinePatch::framed(SliceInsets::uniform(1), Color { r: 25, g: 25, b: 25, a: 255 }, None),
             focus_color: Color { r: 0, g: 120, b: 215, a: 255 },
             window_focus_color: Color { r: 0, g: 120, b: 215, a: 255 },
             menu_foreground: Color { r: 230, g: 230, b: 230, a: 255 },
@@ -172,13 +169,18 @@ impl Style {
             && self.icons.belongs_to(atlas)
     }
 
-    /// Resolves the inside-aligned frame geometry and color used by built-in widgets.
-    pub(crate) fn frame_border(&self) -> FrameBorder {
-        // Negative widths are normalized at the sole geometry boundary rather than at every caller.
-        FrameBorder {
-            width: self.frame_border_width.max(0),
-            color: self.colors[crate::ControlColor::Border as usize],
-        }
+    /// Resolves a framed patch with an optional role-specific center fill.
+    pub(crate) fn frame_nine_patch(&self, fill: Option<Color>) -> NinePatch {
+        // Copy the small concrete grid and replace only its center. This preserves independently
+        // styled corners and edges while avoiding a second border representation in widget code.
+        self.frame.with_center(fill)
+    }
+
+    /// Returns normalized structural frame insets shared by measurement and placement.
+    pub(crate) fn frame_insets(&self) -> SliceInsets {
+        // NinePatch owns normalization so layout and renderer geometry cannot disagree on negative
+        // application-provided style components.
+        self.frame.insets.normalized()
     }
 
     /// Returns the concrete font ID for the provided semantic role.
@@ -279,19 +281,14 @@ mod tests {
 
     /// Verifies frame normalization remains independent of atlas-bound asset construction.
     #[test]
-    fn frame_border_resolves_geometry_and_color_without_role_policy() {
+    fn frame_insets_normalize_each_component_without_changing_cells() {
         let atlas = make_test_atlas(&[(FontRole::Body.atlas_name(), 12)]);
         let style = Style {
-            frame_border_width: -4,
+            frame: NinePatch::framed(SliceInsets::new(-4, 2, -3, 5), Color { r: 10, g: 20, b: 30, a: 255 }, None),
             ..Style::from_atlas(&atlas)
         };
-        let border = style.frame_border();
-        let expected = style.colors[crate::ControlColor::Border as usize];
+        let insets = style.frame_insets();
 
-        assert_eq!(border.width, 0);
-        assert_eq!(
-            (border.color.r, border.color.g, border.color.b, border.color.a),
-            (expected.r, expected.g, expected.b, expected.a)
-        );
+        assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (0, 2, 0, 5));
     }
 }

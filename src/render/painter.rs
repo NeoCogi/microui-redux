@@ -33,7 +33,7 @@ use super::display_list::DisplayList;
 use crate::{
     atlas::{FontId, IconId},
     math::RectExt,
-    render::{Color, TextureId},
+    render::{Color, SliceInsets, NinePatch, TextureId},
 };
 use rs_math3d::{Recti, Vec2f, Vec2i, color4b};
 
@@ -140,7 +140,23 @@ impl<'a> Painter<'a> {
 
     /// Records a semantic filled rectangle.
     pub fn fill_rect(&mut self, rect: Recti, color: Color) {
-        self.record_rect(rect, color, |list, clip, screen_rect| list.push_fill_rect(clip, screen_rect, color));
+        // A filled rectangle is represented as a center-only three-by-three patch. Keeping this
+        // familiar convenience method lets custom widgets remain concise without bypassing the
+        // unified patch path used by built-in flat and image themes.
+        self.nine_patch(rect, NinePatch::solid(color));
+    }
+
+    /// Records one backend-neutral three-by-three patch.
+    pub fn nine_patch(&mut self, rect: Recti, patch: NinePatch) {
+        // Visibility and intersection are resolved before recording so an empty styled patch
+        // consumes neither display-list storage nor renderer traversal time.
+        if !rect.has_positive_area() || !patch.is_visible() {
+            return;
+        }
+        let screen_rect = self.screen_rect(rect);
+        if screen_rect.overlaps(self.clip) {
+            self.list.push_nine_patch(self.clip, screen_rect, patch);
+        }
     }
 
     /// Records an inside-aligned rectangle outline with the requested integer width.
@@ -148,25 +164,10 @@ impl<'a> Painter<'a> {
         if !rect.has_positive_area() || color.a == 0 || width <= 0 {
             return;
         }
-        // border_extent = leading_border_width + trailing_border_width = width * 2.
-        let border_extent = width.saturating_mul(2);
-        if border_extent >= rect.width || border_extent >= rect.height {
-            self.fill_rect(rect, color);
-            return;
-        }
-
-        // middle_height = rectangle_height - top_border - bottom_border.
-        let middle_height = rect.height.saturating_sub(border_extent);
-        // bottom_y = rectangle_y + rectangle_height - border_width.
-        let bottom_y = rect.y.saturating_add(rect.height).saturating_sub(width);
-        // middle_y = rectangle_y + border_width.
-        let middle_y = rect.y.saturating_add(width);
-        // right_x = rectangle_x + rectangle_width - border_width.
-        let right_x = rect.x.saturating_add(rect.width).saturating_sub(width);
-        self.fill_rect(Recti::new(rect.x, rect.y, rect.width, width), color);
-        self.fill_rect(Recti::new(rect.x, bottom_y, rect.width, width), color);
-        self.fill_rect(Recti::new(rect.x, middle_y, width, middle_height), color);
-        self.fill_rect(Recti::new(right_x, middle_y, width, middle_height), color);
+        // The proportional tiny-destination policy now belongs to NinePatch geometry rather than a
+        // second outline implementation. An empty center naturally produces an inside-aligned
+        // border and collapses safely when opposing sides consume the complete destination.
+        self.nine_patch(rect, NinePatch::framed(SliceInsets::uniform(width), color, None));
     }
 
     /// Records one UTF-8 string at a local position using the selected atlas font's glyph coverage.
@@ -273,7 +274,7 @@ impl<'a> Painter<'a> {
 mod tests {
     use super::*;
     use crate::test_support::test_atlas;
-    use crate::{color, TextureId};
+    use crate::{NinePatchCell, TextureId, color};
     use super::super::display_list::DrawKind;
 
     fn rect_tuple(rect: Recti) -> (i32, i32, i32, i32) {
@@ -291,10 +292,13 @@ mod tests {
         assert_eq!(list.ops.len(), 1);
         assert!(list.solid_geometry.is_empty());
         assert_eq!(rect_tuple(list.ops[0].clip), (12, 22, 50, 40));
-        let DrawKind::FillRect { rect, color } = &list.ops[0].kind else {
-            panic!("expected a semantic rectangle");
+        let DrawKind::NinePatch { rect, patch } = &list.ops[0].kind else {
+            panic!("expected a semantic nine-patch");
         };
         assert_eq!(rect_tuple(*rect), (11, 22, 10, 12));
+        let NinePatchCell::Color { color } = patch.cells.center else {
+            panic!("expected a colored center cell");
+        };
         assert_eq!((color.r, color.g, color.b, color.a), (1, 2, 3, 255));
     }
 
@@ -386,14 +390,15 @@ mod tests {
     }
 
     #[test]
-    fn stroke_rect_records_fill_rectangles_not_triangle_geometry() {
+    fn stroke_rect_records_one_nine_patch_not_triangle_geometry() {
         let mut list = DisplayList::new();
         {
             let mut painter = Painter::screen_space(&mut list, Recti::new(0, 0, 20, 20));
             painter.stroke_rect(Recti::new(2, 2, 10, 10), 2, color(255, 255, 255, 255));
         }
-        assert_eq!(list.ops.len(), 4);
-        assert!(list.ops.iter().all(|operation| matches!(operation.kind, DrawKind::FillRect { .. })));
+        assert_eq!(list.ops.len(), 1);
+        assert!(matches!(list.ops[0].kind, DrawKind::NinePatch { .. }));
+        assert_eq!(list.debug_fill_rects().len(), 8);
         assert!(list.solid_geometry.is_empty());
     }
 

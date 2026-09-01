@@ -39,7 +39,7 @@ use std::fmt;
 
 use crate::math::RectExt;
 use crate::render::Painter;
-use crate::{AtlasHandle, ControlColor, Dimensioni, Recti, Style, WidgetEventPortHandle, WindowOption};
+use crate::{AtlasHandle, ControlColor, Dimensioni, NinePatch, Recti, Style, WidgetEventPortHandle, WindowOption};
 
 /// Active pointer gesture owned by manager-rendered window chrome.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -183,13 +183,14 @@ pub(super) fn root_chrome_geometry(
         style.padding.max(0)
     };
     let title_height = root_titlebar_height(style, atlas);
-    let border = if options.intersects(WindowOption::FRAME) {
-        style.frame_border().width.max(0)
+    let frame = if options.intersects(WindowOption::FRAME) {
+        style.frame_insets()
     } else {
-        0
+        crate::SliceInsets::ZERO
     };
-    // Both leading and trailing edges contribute to the outer extent.
-    let border_extent = border.saturating_mul(2);
+    // Each pair of frame cells contributes independently to its outer axis.
+    let horizontal_frame_extent = frame.horizontal_extent();
+    let vertical_frame_extent = frame.vertical_extent();
     let padding_extent = padding.saturating_mul(2);
     let auto_width = options.intersects(WindowOption::AUTO_WIDTH);
     let auto_height = options.intersects(WindowOption::AUTO_HEIGHT);
@@ -211,20 +212,23 @@ pub(super) fn root_chrome_geometry(
         });
     }
     // The frame contributes one border on every outer edge.
-    let minimum_outer = Dimensioni::new(minimum_width.saturating_add(border_extent), minimum_height.saturating_add(border_extent));
+    let minimum_outer = Dimensioni::new(
+        minimum_width.saturating_add(horizontal_frame_extent),
+        minimum_height.saturating_add(vertical_frame_extent),
+    );
     let title_extent = if options.intersects(WindowOption::NO_TITLE) { 0 } else { title_height };
     // Intrinsic geometry adds the surface-owned frame, title, and padding to child measurement.
     let intrinsic_outer = Dimensioni::new(
         child_intrinsic
             .width
             .saturating_add(padding_extent)
-            .saturating_add(border_extent)
+            .saturating_add(horizontal_frame_extent)
             .max(minimum_outer.width),
         child_intrinsic
             .height
             .saturating_add(padding_extent)
             .saturating_add(title_extent)
-            .saturating_add(border_extent)
+            .saturating_add(vertical_frame_extent)
             .max(minimum_outer.height),
     );
 
@@ -281,7 +285,7 @@ pub(super) fn record_root_background(display_list: &mut crate::render::DisplayLi
     // Chrome uses a screen-space painter because it is outside the retained application tree.
     let mut painter = Painter::screen_space(display_list, viewport);
     if options.intersects(WindowOption::FRAME) {
-        crate::ui_node::frame::paint_internal_frame(&mut painter, rect, Some(style.colors[ControlColor::WindowBG as usize]), style.frame_border());
+        crate::ui_node::frame::paint_internal_frame(&mut painter, rect, style.frame_nine_patch(Some(style.colors[ControlColor::WindowBG as usize])));
     } else {
         painter.fill_rect(rect, style.colors[ControlColor::WindowBG as usize]);
     }
@@ -305,14 +309,14 @@ pub(super) fn record_root_overlay(
         // Background recording already filled the framed interior before application content. Draw
         // only the border again in the overlay pass so an unclipped child may extend beyond the
         // parent body without covering parent-owned frame chrome.
-        let mut border = style.frame_border();
-        if active {
+        let patch = if active {
             // An active framed window keeps the same layout geometry while its inside-aligned
             // outline remains visible even when the ordinary theme border width is zero.
-            border.width = border.width.max(1);
-            border.color = style.window_focus_color;
-        }
-        painter.stroke_rect(outer, border.width, border.color);
+            NinePatch::framed(style.frame_insets().at_least(1), style.window_focus_color, None)
+        } else {
+            style.frame_nine_patch(None)
+        };
+        painter.nine_patch(outer, patch);
     }
     if let Some(title) = geometry.title {
         let title_color = if active {
@@ -342,6 +346,10 @@ pub(super) fn record_root_overlay(
         .and_then(|resize| resize.positive_intersection(geometry.client))
     {
         // The raised frame treatment keeps the grip visible over application content.
-        crate::ui_node::frame::paint_internal_frame(&mut painter, visual, Some(style.colors[ControlColor::WindowBG as usize]), style.frame_border());
+        crate::ui_node::frame::paint_internal_frame(
+            &mut painter,
+            visual,
+            style.frame_nine_patch(Some(style.colors[ControlColor::WindowBG as usize])),
+        );
     }
 }

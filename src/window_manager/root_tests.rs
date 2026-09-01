@@ -851,7 +851,11 @@ fn active_window_and_only_its_remembered_widget_use_style_focus_accents() {
     ctx.frame(frame_info(dimensions)).render_ui().unwrap();
     let events = log.snapshot();
     let widget_focus = atlas_quads_with_color(&events, style.focus_color);
-    assert_eq!(widget_focus.len(), 4, "one inside-aligned widget outline has four rectangles");
+    assert_eq!(
+        widget_focus.len(),
+        8,
+        "one inside-aligned widget outline has eight visible nine-patch border cells"
+    );
     assert!(
         widget_focus.iter().all(|event| {
             let RenderEvent::AtlasQuad(vertices) = event else { unreachable!() };
@@ -863,8 +867,8 @@ fn active_window_and_only_its_remembered_widget_use_style_focus_accents() {
     let window_focus = atlas_quads_with_color(&events, style.window_focus_color);
     assert_eq!(
         window_focus.len(),
-        5,
-        "the active framed/title window records four border rectangles and one title fill"
+        9,
+        "the active framed/title window records eight border cells and one title fill"
     );
     assert!(
         window_focus.iter().all(|event| {
@@ -904,8 +908,8 @@ fn tab_focused_disclosure_uses_focus_fill_in_addition_to_the_shared_outline() {
     let focus_quads = atlas_quads_with_color(&events, style.focus_color);
     assert_eq!(
         focus_quads.len(),
-        5,
-        "the disclosure row fill plus the four-rectangle retained outline must use one focus color"
+        9,
+        "the disclosure row fill plus the eight-cell retained outline must use one focus color"
     );
 }
 
@@ -2974,7 +2978,7 @@ fn declarative_menu_popups_follow_heading_and_submenu_edges_when_the_window_move
     let popup_rows = ctx.debug_active_menu_row_rects();
     // Context already owns an atlas-bound Style; use its actual frame metric rather than creating
     // a disconnected resource-bearing value solely to read one scalar.
-    let border = ctx.style().frame_border().width;
+    let border = ctx.style().frame_insets().left;
     for (popup, rows) in open_popups.iter().zip(&popup_rows) {
         let first = rows.first().expect("each declared test menu must contain a row");
         let last = rows.last().unwrap();

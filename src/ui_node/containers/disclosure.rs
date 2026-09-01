@@ -222,12 +222,12 @@ impl DisclosureHeader {
         let content_width = padding.saturating_mul(2).saturating_add(icon_width).saturating_add(text_width.max(0));
         let content = Dimensioni::new(content_width, content_height);
         // A header frame is internal to this child, so preferred size must include its inset here.
-        let border = if self.opt.intersects(WidgetOption::FRAME) {
-            style.frame_border().width
+        let frame = if self.opt.intersects(WidgetOption::FRAME) {
+            style.frame_insets()
         } else {
-            0
+            crate::SliceInsets::ZERO
         };
-        crate::ui_node::frame::outer_preferred(content, border)
+        crate::ui_node::frame::outer_preferred(content, frame)
     }
 }
 

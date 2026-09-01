@@ -328,9 +328,7 @@ impl<B: RendererBackend> DisplayListExecutor<'_, '_, B> {
             return;
         };
         match kind {
-            DrawKind::FillRect { rect, color } => {
-                submit_atlas_rect(&mut self.frame, self.atlas_dim, rect, self.white_icon_rect, color, clip);
-            }
+            DrawKind::NinePatch { rect, patch } => self.draw_nine_patch(rect, patch, clip),
             DrawKind::Text { font, pos, color, text } => self.draw_text(font, &text, pos, color, clip),
             DrawKind::Icon { id, rect, color } => self.draw_icon(id, rect, color, clip),
             DrawKind::Image { id, rect, color } => self.draw_texture(id, rect, color, clip),
@@ -355,6 +353,22 @@ impl<B: RendererBackend> DisplayListExecutor<'_, '_, B> {
             // origin before one coordinate clamp, retaining cancellation between the two terms.
             submit_atlas_rect(frame, atlas_dim, dst, src, color, clip);
         });
+    }
+
+    /// Expands one semantic patch and submits each visible color cell through the atlas batch.
+    fn draw_nine_patch(&mut self, rect: Recti, patch: crate::render::NinePatch, clip: Recti) {
+        // NinePatch geometry and named cell ordering are resolved together here, making the renderer
+        // the only production boundary that turns one compact three-by-three operation into quads.
+        let geometry = patch.geometry(rect);
+        let cells = patch.cells.rows();
+        for row in 0..3 {
+            for column in 0..3 {
+                let crate::render::NinePatchCell::Color { color } = cells[row][column] else {
+                    continue;
+                };
+                submit_atlas_rect(&mut self.frame, self.atlas_dim, geometry[row][column], self.white_icon_rect, color, clip);
+            }
+        }
     }
 
     /// Centers an icon inside its semantic destination and submits it.

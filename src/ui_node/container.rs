@@ -31,7 +31,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::math::RectExt;
-use crate::{Constraints, Dimensioni, Recti, Style, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption};
+use crate::{Constraints, Dimensioni, Recti, SliceInsets, Style, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption};
 
 use super::{ChildParticipation, Children, NodeLayout, NodeRuntime, UiRuntime, WidgetStorage};
 
@@ -185,21 +185,21 @@ impl Container {
             .place(ctx, &mut children, rect);
     }
 
-    /// Resolves frame width and measures content under one typed-runtime borrow.
-    pub(crate) fn measure_content_with_frame(&mut self, style: &Style, atlas: &crate::AtlasHandle, constraints: Constraints) -> (i32, Dimensioni) {
+    /// Resolves frame insets and measures content under one typed-runtime borrow.
+    pub(crate) fn measure_content_with_frame(&mut self, style: &Style, atlas: &crate::AtlasHandle, constraints: Constraints) -> (SliceInsets, Dimensioni) {
         let mut children = self
             .children
             .try_borrow_mut()
             .unwrap_or_else(|_| panic!("retained child invariant violated: collection is already borrowed during measurement"));
         let widget = self.widget.try_borrow().unwrap_or_else(|_| typed_container_borrow_conflict());
-        let border_width = if widget.widget.effective_widget_opt().intersects(WidgetOption::FRAME) {
-            style.frame_border().width.max(0)
+        let frame_insets = if widget.widget.effective_widget_opt().intersects(WidgetOption::FRAME) {
+            style.frame_insets()
         } else {
-            0
+            SliceInsets::ZERO
         };
         let mut ctx = MeasureCtx::new(style, atlas, &mut children);
-        let measured = ContainerWidget::measure(&widget.widget, &mut ctx, super::frame::content_constraints(constraints, border_width));
-        (border_width, measured)
+        let measured = ContainerWidget::measure(&widget.widget, &mut ctx, super::frame::content_constraints(constraints, frame_insets));
+        (frame_insets, measured)
     }
 
     /// Returns the concrete widget's effective options.

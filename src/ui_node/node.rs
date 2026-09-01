@@ -33,7 +33,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::math::RectExt;
-use crate::{AtlasHandle, Constraints, Dimensioni, FontId, IconId, LeafWidget, Recti, Style, TypedWidgetHandle, Widget};
+use crate::{AtlasHandle, Constraints, Dimensioni, FontId, IconId, LeafWidget, Recti, SliceInsets, Style, TypedWidgetHandle, Widget};
 
 use super::{ChildParticipation, Children, Container, NodeLayout, RuntimeNodeId, WidgetStorage};
 
@@ -54,11 +54,17 @@ pub(crate) struct MeasurementStyleKey {
     title_height: i32,
     scrollbar_size: i32,
     thumb_size: i32,
-    frame_border_width: i32,
+    frame_left: i32,
+    frame_top: i32,
+    frame_right: i32,
+    frame_bottom: i32,
 }
 
 impl MeasurementStyleKey {
     pub(crate) fn new(style: &Style) -> Self {
+        // Cache only measurement-observable style values. Surface colors and cell payloads affect
+        // paint, while the four normalized frame insets affect the constraints seen by a widget.
+        let frame = style.frame_insets();
         Self {
             font: style.font,
             small_font: style.small_font,
@@ -75,7 +81,10 @@ impl MeasurementStyleKey {
             title_height: style.title_height,
             scrollbar_size: style.scrollbar_size,
             thumb_size: style.thumb_size,
-            frame_border_width: style.frame_border_width,
+            frame_left: frame.left,
+            frame_top: frame.top,
+            frame_right: frame.right,
+            frame_bottom: frame.bottom,
         }
     }
 }
@@ -365,22 +374,22 @@ impl Node {
         // Resolve frame policy and preferred size under one scoped widget borrow. Measurement is a
         // dominant retained-layout path, so reacquiring the same RefCell merely to read options is
         // both redundant and measurably expensive for large leaf trees.
-        let (border_width, measured_content) = match &mut self.data {
+        let (frame_insets, measured_content) = match &mut self.data {
             NodeKind::Widget(node) => {
                 let widget = node.widget.try_borrow().unwrap_or_else(|_| widget_borrow_conflict());
                 let framed = widget.widget.effective_widget_opt().intersects(crate::WidgetOption::FRAME);
-                let border_width = if framed { style.frame_border().width.max(0) } else { 0 };
+                let frame_insets = if framed { style.frame_insets() } else { SliceInsets::ZERO };
                 let measured_content = widget
                     .widget
-                    .measure(style, atlas, crate::ui_node::frame::content_constraints(constraints, border_width));
-                (border_width, measured_content)
+                    .measure(style, atlas, crate::ui_node::frame::content_constraints(constraints, frame_insets));
+                (frame_insets, measured_content)
             }
             NodeKind::Container(container) => container.measure_content_with_frame(style, atlas, constraints),
         };
         // Widgets cannot return negative geometry. Node placement policy is intentionally absent:
         // the parent consumes this desired size while resolving its own child relationship.
         let preferred_content = Dimensioni::new(measured_content.width.max(0), measured_content.height.max(0));
-        let preferred = crate::ui_node::frame::outer_preferred(preferred_content, border_width);
+        let preferred = crate::ui_node::frame::outer_preferred(preferred_content, frame_insets);
         self.state.measurement.insert(MeasurementEntry {
             constraints,
             style: style_key,

@@ -29,14 +29,14 @@
 //
 //! Owned render-operation and solid-geometry storage.
 //!
-//! Painter records through this internal operation surface and Renderer consumes it exactly once.
+//! Painter records through this internal operation interface and Renderer consumes it exactly once.
 
 use super::{
     backend::CustomRenderKey,
     geometry::{SolidGeometry, SolidTriangle, SolidTriangleRange},
 };
 use crate::atlas::{FontId, IconId};
-use crate::render::{Color, TextureId};
+use crate::render::{Color, NinePatch, TextureId};
 use rs_math3d::{Color4b, Recti, Vec2f, Vec2i};
 
 /// An owned sequence of rendering operations and their solid geometry.
@@ -61,12 +61,12 @@ pub(super) struct DrawOp {
 
 /// Private rendering operation payload.
 pub(super) enum DrawKind {
-    /// Draws a semantic solid rectangle.
-    FillRect {
-        /// Rectangle in screen space.
+    /// Draws one semantic three-by-three patch.
+    NinePatch {
+        /// Complete destination rectangle in screen space.
         rect: Recti,
-        /// Fill color.
-        color: Color,
+        /// Typed cells and destination slice insets retained for renderer expansion.
+        patch: NinePatch,
     },
     /// Draws one UTF-8 string through an atlas font and its missing-character fallback.
     Text {
@@ -132,9 +132,12 @@ impl DisplayList {
         self.ops.is_empty() && self.solid_geometry.is_empty()
     }
 
-    /// Appends one semantic rectangle operation.
-    pub(super) fn push_fill_rect(&mut self, clip: Recti, rect: Recti, color: Color) {
-        self.push(clip, DrawKind::FillRect { rect, color });
+    /// Appends one semantic three-by-three patch operation.
+    pub(super) fn push_nine_patch(&mut self, clip: Recti, rect: Recti, patch: NinePatch) {
+        // Retain the compact patch value instead of expanding up to nine operations while the
+        // display list is recorded. Renderer execution remains the sole clipping and tessellation
+        // boundary for every concrete patch cell.
+        self.push(clip, DrawKind::NinePatch { rect, patch });
     }
 
     /// Appends one owned text operation.
@@ -202,13 +205,27 @@ impl DisplayList {
     /// Returns fill rectangle, clip, and color snapshots for retained frame-geometry assertions.
     #[cfg(test)]
     pub(crate) fn debug_fill_rects(&self) -> Vec<(Recti, Recti, Color)> {
-        self.ops
-            .iter()
-            .filter_map(|operation| match operation.kind {
-                DrawKind::FillRect { rect, color } => Some((rect, operation.clip, color)),
-                _ => None,
-            })
-            .collect()
+        // Expand patches through production geometry so frame tests continue to assert physical
+        // colored rectangles rather than depending on the display list's compact operation count.
+        let mut rectangles = Vec::new();
+        for operation in &self.ops {
+            let DrawKind::NinePatch { rect, patch } = operation.kind else {
+                continue;
+            };
+            let geometry = patch.geometry(rect);
+            let cells = patch.cells.rows();
+            for row in 0..3 {
+                for column in 0..3 {
+                    let crate::render::NinePatchCell::Color { color } = cells[row][column] else {
+                        continue;
+                    };
+                    if geometry[row][column].width > 0 && geometry[row][column].height > 0 {
+                        rectangles.push((geometry[row][column], operation.clip, color));
+                    }
+                }
+            }
+        }
+        rectangles
     }
 
     /// Returns the number of opaque operations for performance assertions.
@@ -280,7 +297,7 @@ mod tests {
             Recti::new(4, 5, 27, 37),
         ];
 
-        list.push_fill_rect(clips[0], Recti::new(0, 0, 2, 2), color(1, 2, 3, 4));
+        list.push_nine_patch(clips[0], Recti::new(0, 0, 2, 2), NinePatch::solid(color(1, 2, 3, 4)));
         list.push_text(clips[1], font, Vec2i::new(4, 5), color(5, 6, 7, 8), "text");
         list.push_icon(clips[2], icon, Recti::new(6, 7, 8, 9), color(9, 10, 11, 12));
         list.push_image(clips[3], TextureId::new_test(1, 12, 13), Recti::new(10, 11, 12, 13), color(13, 14, 15, 16));
@@ -289,7 +306,7 @@ mod tests {
         for (operation, expected) in list.ops.iter().zip(clips) {
             assert_eq!(rect_tuple(operation.clip), rect_tuple(expected));
         }
-        assert!(matches!(list.ops[0].kind, DrawKind::FillRect { .. }));
+        assert!(matches!(list.ops[0].kind, DrawKind::NinePatch { .. }));
         assert!(matches!(list.ops[1].kind, DrawKind::Text { .. }));
         assert!(matches!(list.ops[2].kind, DrawKind::Icon { .. }));
         assert!(matches!(list.ops[3].kind, DrawKind::Image { .. }));
@@ -300,7 +317,7 @@ mod tests {
         let mut list = DisplayList::new();
         let clip = Recti::new(0, 0, 100, 100);
         for offset in 0..32 {
-            list.push_fill_rect(clip, Recti::new(offset, offset, 1, 1), color(255, 255, 255, 255));
+            list.push_nine_patch(clip, Recti::new(offset, offset, 1, 1), NinePatch::solid(color(255, 255, 255, 255)));
         }
         list.push_solid_triangles(clip, &[triangle_at(0.0)]);
         list.solid_geometry.reserve_polygon_capacity(32);
@@ -344,7 +361,7 @@ mod tests {
 
         list.push_solid_triangles(first_clip, &[triangle_at(0.0)]);
         list.push_solid_triangles(second_clip, &[triangle_at(10.0)]);
-        list.push_fill_rect(first_clip, Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
+        list.push_nine_patch(first_clip, Recti::new(0, 0, 1, 1), NinePatch::solid(color(255, 255, 255, 255)));
         list.push_solid_triangles(second_clip, &[triangle_at(20.0)]);
 
         assert_eq!(list.ops.len(), 4);

@@ -35,7 +35,7 @@ use super::*;
 /// Deferred focus-outline geometry captured while painting one retained widget tree.
 ///
 /// The outline is emitted only after the complete tree, including custom rendering, so later
-/// descendants and siblings cannot cover the current keyboard target inside the same surface.
+/// descendants and siblings cannot cover the current keyboard target inside the same root.
 #[derive(Copy, Clone)]
 struct FocusIndicator {
     /// Focused widget's complete outer allocation in screen coordinates.
@@ -96,7 +96,7 @@ impl UiRuntime {
         if framed {
             // Generic framing belongs beneath the widget's own paint and descendant paint.
             let mut painter = crate::render::Painter::screen_space(display_list, screen_clip);
-            crate::ui_node::frame::paint_internal_frame(&mut painter, screen_rect, None, style.frame_border());
+            crate::ui_node::frame::paint_internal_frame(&mut painter, screen_rect, style.frame_nine_patch(None));
         }
         let child_transform = parent_transform.push(node.state.layout);
         let local_clip = screen_clip.relative_to(screen_origin);
@@ -110,7 +110,7 @@ impl UiRuntime {
             rect: screen_rect,
             clip: screen_clip,
             color: style.focus_color,
-            width: style.frame_border_width.max(1),
+            width: style.frame_insets().maximum_component().max(1),
         });
         {
             // Limit the mutable display-list borrow to this widget call before custom/child output.
@@ -137,7 +137,7 @@ impl UiRuntime {
 
         let traverse_children = node.is_container();
         if traverse_children {
-            // Children paint after their ordinary parent surface, matching reverse-order hit tests.
+            // Children paint after their ordinary parent background, matching reverse-order hit tests.
             node.with_children_mut(|children| {
                 for child in children
                     .iter_mut()

@@ -1030,7 +1030,7 @@ mod tests {
         let mut runtime = UiRuntime::new();
         let atlas = test_atlas();
         let style = Style {
-            frame_border_width: 3,
+            frame: crate::NinePatch::framed(crate::SliceInsets::uniform(3), crate::color(1, 2, 3, 255), None),
             padding: 5,
             scrollbar_size: 10,
             ..crate::test_support::test_style(&atlas)
@@ -1045,8 +1045,8 @@ mod tests {
         assert_eq!(
             (screen_before.x, screen_before.y),
             (
-                outer.x + style.frame_border_width + style.padding,
-                outer.y + style.frame_border_width + style.padding
+                outer.x + style.frame.insets.left + style.padding,
+                outer.y + style.frame.insets.top + style.padding
             )
         );
 

@@ -29,8 +29,7 @@
 //
 
 use crate::render::Painter;
-use crate::theme::FrameBorder;
-use crate::{AvailableSpace, Color, Constraints, Dimensioni, Recti, Style};
+use crate::{AvailableSpace, Constraints, Dimensioni, Recti, SliceInsets, Style, NinePatch};
 
 /// Geometry derived from one authoritative outer allocation.
 #[derive(Copy, Clone, Debug)]
@@ -48,100 +47,73 @@ impl FrameGeometry {
 
 /// Resolves the border box and its derived content rectangle.
 pub(crate) fn frame_geometry(outer: Recti, framed: bool, style: &Style) -> FrameGeometry {
-    let border_width = if framed { style.frame_border().width } else { 0 };
+    // A non-framed node uses zero insets but otherwise follows the same checked geometry path.
+    let insets = if framed { style.frame_insets() } else { SliceInsets::ZERO };
     let content = if outer.width <= 0 || outer.height <= 0 {
         None
-    } else if border_width == 0 {
+    } else if insets.horizontal_extent() == 0 && insets.vertical_extent() == 0 {
         Some(outer)
     } else {
-        checked_inset(outer, border_width)
+        checked_inset(outer, insets)
     };
     FrameGeometry { outer, content }
 }
 
 /// Removes a frame from each finite measurement bound while preserving unbounded axes.
-pub(crate) fn content_constraints(constraints: Constraints, border_width: i32) -> Constraints {
-    // border_extent = leading_border_width + trailing_border_width = border_width * 2.
-    let border_extent = border_width.saturating_mul(2);
+pub(crate) fn content_constraints(constraints: Constraints, insets: SliceInsets) -> Constraints {
+    // Each axis removes its independently configured pair of patch cells. Unbounded space stays
+    // unbounded because a finite frame cannot constrain an intrinsically open measurement axis.
     Constraints::new(
-        inset_available(constraints.width, border_extent),
-        inset_available(constraints.height, border_extent),
+        inset_available(constraints.width, insets.horizontal_extent()),
+        inset_available(constraints.height, insets.vertical_extent()),
     )
 }
 
 /// Adds a resolved frame to positive preferred content dimensions.
-pub(crate) fn outer_preferred(preferred: Dimensioni, border_width: i32) -> Dimensioni {
+pub(crate) fn outer_preferred(preferred: Dimensioni, insets: SliceInsets) -> Dimensioni {
+    // Positive content receives both fixed patch sides on each axis. Non-positive sentinel
+    // dimensions retain their established meaning instead of becoming visible solely due to chrome.
     Dimensioni::new(
-        expand_positive_axis(preferred.width, border_width),
-        expand_positive_axis(preferred.height, border_width),
+        expand_positive_axis(preferred.width, insets.horizontal_extent()),
+        expand_positive_axis(preferred.height, insets.vertical_extent()),
     )
 }
 
 /// Paints a checked inside-aligned internal frame and returns its usable interior.
-pub(crate) fn paint_internal_frame(painter: &mut Painter<'_>, outer: Recti, fill: Option<Color>, border: FrameBorder) -> Option<Recti> {
-    let mut content = None;
+pub(crate) fn paint_internal_frame(painter: &mut Painter<'_>, outer: Recti, patch: NinePatch) -> Option<Recti> {
+    // Invalid outer geometry produces neither layout content nor paint. Positive rectangles share
+    // the same normalized inset calculation used by node layout before one compact patch record.
+    if outer.width <= 0 || outer.height <= 0 {
+        return None;
+    }
+    let insets = patch.insets.normalized();
+    let content = if insets.horizontal_extent() == 0 && insets.vertical_extent() == 0 {
+        Some(outer)
+    } else {
+        checked_inset(outer, insets)
+    };
     painter.with_clip(outer, |painter| {
-        content = paint_clipped_frame(painter, outer, fill, border);
+        // NinePatch itself decides which of its nine cells are visible. Structural insets therefore
+        // remain effective even when border artwork or colors are transparent.
+        painter.nine_patch(outer, patch);
     });
     content
 }
 
-fn paint_clipped_frame(painter: &mut Painter<'_>, outer: Recti, fill: Option<Color>, border: FrameBorder) -> Option<Recti> {
-    if outer.width <= 0 || outer.height <= 0 {
+/// Removes four normalized patch insets from one positive outer rectangle.
+fn checked_inset(outer: Recti, insets: SliceInsets) -> Option<Recti> {
+    // Reject a fully consumed axis so callers represent the lack of usable content explicitly.
+    let insets = insets.normalized();
+    let horizontal = insets.left.checked_add(insets.right)?;
+    let vertical = insets.top.checked_add(insets.bottom)?;
+    if horizontal >= outer.width || vertical >= outer.height {
         return None;
     }
-
-    let width = border.width.max(0);
-    if width == 0 {
-        if let Some(fill) = fill.filter(|color| color.a != 0) {
-            painter.fill_rect(outer, fill);
-        }
-        return Some(outer);
-    }
-
-    let Some(content) = checked_inset(outer, width) else {
-        if border.color.a != 0 {
-            painter.fill_rect(outer, border.color);
-        }
-        return None;
-    };
-
-    if border.color.a != 0 {
-        let top = Recti::new(outer.x, outer.y, outer.width, width);
-        // bottom_y = outer_y + outer_height - border_width.
-        let bottom_y = checked_add(outer.y, outer.height - width)?;
-        let bottom = Recti::new(outer.x, bottom_y, outer.width, width);
-        // middle_y = outer_y + border_width.
-        let middle_y = checked_add(outer.y, width)?;
-        let left = Recti::new(outer.x, middle_y, width, content.height);
-        // right_x = outer_x + outer_width - border_width.
-        let right_x = checked_add(outer.x, outer.width - width)?;
-        let right = Recti::new(right_x, middle_y, width, content.height);
-        painter.fill_rect(top, border.color);
-        painter.fill_rect(bottom, border.color);
-        painter.fill_rect(left, border.color);
-        painter.fill_rect(right, border.color);
-    }
-
-    if let Some(fill) = fill.filter(|color| color.a != 0) {
-        painter.fill_rect(content, fill);
-    }
-    Some(content)
-}
-
-fn checked_inset(outer: Recti, width: i32) -> Option<Recti> {
-    let width = width.max(0);
-    // border_extent = leading_border_width + trailing_border_width = width * 2.
-    let twice = width.checked_mul(2)?;
-    if twice >= outer.width || twice >= outer.height {
-        return None;
-    }
-    // content_origin = outer_origin + border_width.
-    let x = checked_add(outer.x, width)?;
-    let y = checked_add(outer.y, width)?;
-    // content_extent = outer_extent - leading_border - trailing_border.
-    let content_width = outer.width.checked_sub(twice)?;
-    let content_height = outer.height.checked_sub(twice)?;
+    // Leading insets move the content origin while both opposing sides reduce its dimensions.
+    let x = checked_add(outer.x, insets.left)?;
+    let y = checked_add(outer.y, insets.top)?;
+    let content_width = outer.width.checked_sub(horizontal)?;
+    let content_height = outer.height.checked_sub(vertical)?;
     Some(Recti::new(x, y, content_width, content_height))
 }
 
@@ -153,15 +125,13 @@ fn inset_available(space: AvailableSpace, inset: i32) -> AvailableSpace {
     }
 }
 
-fn expand_positive_axis(value: i32, border_width: i32) -> i32 {
+fn expand_positive_axis(value: i32, inset_extent: i32) -> i32 {
     if value <= 0 {
         value
     } else {
-        // border_outset = leading_border_width + trailing_border_width.
-        let outset = border_width.max(0).saturating_mul(2);
         // Preferred geometry is allowed to saturate; exact placement will still be bounded by its
         // parent constraint, and an extreme font or style must not turn measurement into a panic.
-        value.saturating_add(outset)
+        value.saturating_add(inset_extent.max(0))
     }
 }
 
@@ -173,7 +143,7 @@ fn checked_add(left: i32, right: i32) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::color;
+    use crate::{Color, color};
     use crate::render::DisplayList;
     use crate::test_support::{test_atlas, test_style};
 
@@ -181,7 +151,7 @@ mod tests {
     fn frame_geometry_derives_inside_content() {
         let atlas = test_atlas();
         let style = Style {
-            frame_border_width: 2,
+            frame: NinePatch::framed(SliceInsets::uniform(2), color(1, 2, 3, 255), None),
             ..test_style(&atlas)
         };
         let geometry = frame_geometry(Recti::new(10, 20, 30, 40), true, &style);
@@ -193,7 +163,7 @@ mod tests {
     fn zero_width_frame_keeps_the_complete_content_rect() {
         let atlas = test_atlas();
         let style = Style {
-            frame_border_width: 0,
+            frame: NinePatch::framed(SliceInsets::ZERO, color(1, 2, 3, 255), None),
             ..test_style(&atlas)
         };
         let outer = Recti::new(10, 20, 30, 40);
@@ -204,11 +174,10 @@ mod tests {
     #[test]
     fn transparent_border_keeps_structural_inset() {
         let atlas = test_atlas();
-        let mut style = Style {
-            frame_border_width: 1,
+        let style = Style {
+            frame: NinePatch::framed(SliceInsets::uniform(1), color(0, 0, 0, 0), None),
             ..test_style(&atlas)
         };
-        style.colors[crate::ControlColor::Border as usize] = color(0, 0, 0, 0);
         assert_eq!(frame_geometry(Recti::new(4, 5, 8, 7), true, &style).content.map(rect_tuple), Some((5, 6, 6, 5)));
     }
 
@@ -221,7 +190,7 @@ mod tests {
 
     #[test]
     fn preferred_measurement_preserves_non_positive_results() {
-        let preferred = outer_preferred(Dimensioni::new(10, -1), 2);
+        let preferred = outer_preferred(Dimensioni::new(10, -1), SliceInsets::uniform(2));
         assert_eq!((preferred.width, preferred.height), (14, -1));
     }
 
@@ -229,7 +198,7 @@ mod tests {
     fn frame_inset_preserves_zero_and_unbounded_as_distinct_constraints() {
         let constraints = Constraints::new(AvailableSpace::Bounded(1), AvailableSpace::Unbounded);
         assert_eq!(
-            content_constraints(constraints, 2),
+            content_constraints(constraints, SliceInsets::uniform(2)),
             Constraints::new(AvailableSpace::Bounded(0), AvailableSpace::Unbounded)
         );
     }
@@ -243,16 +212,32 @@ mod tests {
         let mut list = DisplayList::new();
         let mut painter = Painter::screen_space(&mut list, viewport);
 
-        let content = paint_internal_frame(&mut painter, outer, Some(fill), FrameBorder { width: 1, color: border });
+        let content = paint_internal_frame(&mut painter, outer, NinePatch::framed(SliceInsets::uniform(1), border, Some(fill)));
         assert_eq!(content.map(rect_tuple), Some((11, 21, 6, 5)));
 
         let recorded = list.debug_fill_rects();
-        assert_eq!(recorded.len(), 5);
+        assert_eq!(recorded.len(), 9);
         assert_eq!(
             recorded.iter().map(|(rect, _, _)| rect_tuple(*rect)).collect::<Vec<_>>(),
-            vec![(10, 20, 8, 1), (10, 26, 8, 1), (10, 21, 1, 5), (17, 21, 1, 5), (11, 21, 6, 5)]
+            vec![
+                (10, 20, 1, 1),
+                (11, 20, 6, 1),
+                (17, 20, 1, 1),
+                (10, 21, 1, 5),
+                (11, 21, 6, 5),
+                (17, 21, 1, 5),
+                (10, 26, 1, 1),
+                (11, 26, 6, 1),
+                (17, 26, 1, 1),
+            ]
         );
-        assert!(recorded[..4].iter().all(|(_, _, color)| color_tuple(*color) == color_tuple(border)));
+        assert!(
+            recorded
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| *index != 4)
+                .all(|(_, (_, _, color))| color_tuple(*color) == color_tuple(border))
+        );
         assert_eq!(color_tuple(recorded[4].2), color_tuple(fill));
     }
 
@@ -264,11 +249,17 @@ mod tests {
         let mut list = DisplayList::new();
         let mut painter = Painter::screen_space(&mut list, viewport);
 
-        assert!(paint_internal_frame(&mut painter, outer, Some(color(10, 11, 12, 255)), FrameBorder { width: 1, color: border }).is_none());
+        assert!(
+            paint_internal_frame(
+                &mut painter,
+                outer,
+                NinePatch::framed(SliceInsets::uniform(1), border, Some(color(10, 11, 12, 255))),
+            )
+            .is_none()
+        );
         let recorded = list.debug_fill_rects();
-        assert_eq!(recorded.len(), 1);
-        assert_eq!(rect_tuple(recorded[0].0), rect_tuple(outer));
-        assert_eq!(color_tuple(recorded[0].2), color_tuple(border));
+        assert_eq!(recorded.len(), 6);
+        assert!(recorded.iter().all(|(_, _, color)| color_tuple(*color) == color_tuple(border)));
     }
 
     #[test]
@@ -279,7 +270,7 @@ mod tests {
         let mut list = DisplayList::new();
         let mut painter = Painter::screen_space(&mut list, viewport);
 
-        let content = paint_internal_frame(&mut painter, outer, Some(fill), FrameBorder { width: 2, color: color(0, 0, 0, 0) });
+        let content = paint_internal_frame(&mut painter, outer, NinePatch::framed(SliceInsets::uniform(2), color(0, 0, 0, 0), Some(fill)));
         assert_eq!(content.map(rect_tuple), Some((7, 8, 5, 4)));
         let recorded = list.debug_fill_rects();
         assert_eq!(recorded.len(), 1);

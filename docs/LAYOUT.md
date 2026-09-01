@@ -84,7 +84,8 @@ intrinsic menus retain their narrower keyboard scopes instead of participating i
 Paint exposes focus only for the manager-selected keyboard surface even though every window runtime
 retains its own target. `Style::focus_color` fills selected controls such as disclosure rows and
 menus and records one clipped, inside-aligned outline around the focused widget after its complete
-ordinary, child, and custom-render output. The outline reuses `max(frame_border_width, 1)` and does
+ordinary, child, and custom-render output. The outline reuses the widest frame inset with a minimum
+of one pixel and does
 not affect measurement or hit geometry. `Style::window_focus_color` fills the active title and
 outlines an active framed window; inactive windows retain their ordinary title and border colors.
 

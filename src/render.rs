@@ -34,6 +34,7 @@ mod backend;
 mod color;
 pub(crate) mod display_list;
 pub(crate) mod geometry;
+mod nine_patch;
 mod painter;
 #[cfg(test)]
 mod performance;
@@ -47,4 +48,5 @@ pub(crate) use display_list::DisplayList;
 pub use painter::Painter;
 pub use renderer::RenderError;
 pub(crate) use renderer::Renderer;
+pub use nine_patch::{NinePatch, NinePatchCell, NinePatchCells, SliceInsets};
 pub use texture::{TextureError, TextureId};

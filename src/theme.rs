@@ -39,5 +39,4 @@ pub use crate::render::{Color, color};
 pub use icons::ThemeIcons;
 pub use palette::ControlColor;
 pub use style::Style;
-pub(crate) use style::FrameBorder;
 pub use typography::{FontChoice, FontRole};
