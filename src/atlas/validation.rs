@@ -30,12 +30,11 @@
 //! Structural validation shared by serialized and builder-produced atlases.
 
 use super::*;
-use crate::image::{CheckedImageDimensions, ImageStorageError};
+use crate::image::{CheckedImageDimensions, ImageError};
 use std::{
     collections::HashSet,
     error::Error,
     fmt::{Display, Formatter},
-    io,
 };
 
 /// Concrete failure returned when atlas bytes or metadata cannot form a safe runtime atlas.
@@ -44,55 +43,10 @@ use std::{
 /// failures without parsing an I/O error string or accepting a partially initialized fallback.
 #[derive(Debug)]
 pub enum AtlasError {
-    /// The declared texture dimensions are zero or cannot be represented by runtime rectangles.
-    DimensionsOutOfRange {
-        /// Declared texture width in pixels.
-        width: usize,
-        /// Declared texture height in pixels.
-        height: usize,
-    },
-    /// Texture pixel or byte counts overflow the platform allocation range.
-    PixelStorageOverflow {
-        /// Declared texture width in pixels.
-        width: usize,
-        /// Declared texture height in pixels.
-        height: usize,
-    },
-    /// Decoded or normalized texture storage exceeds the crate's fixed image-allocation budget.
-    PixelStorageTooLarge {
-        /// Declared texture width in pixels.
-        width: usize,
-        /// Declared texture height in pixels.
-        height: usize,
-        /// Larger of the decoded RGBA and normalized-color allocations required by the texture.
-        required_bytes: usize,
-        /// Maximum permitted size of either decoded allocation.
-        maximum_bytes: usize,
-    },
-    /// Raw RGBA bytes do not exactly fill the declared texture.
-    RawPixelLengthMismatch {
-        /// Required RGBA byte length derived from the validated dimensions.
-        expected: usize,
-        /// Actual number of bytes supplied by the source.
-        actual: usize,
-    },
-    /// Compressed image data could not be decoded.
-    PixelDecode {
-        /// Concrete decoder or input error reported by the image layer.
-        source: io::Error,
-    },
-    /// Compressed pixel data is animated rather than one static atlas texture.
-    AnimatedPngUnsupported,
-    /// A decoded compressed image has different dimensions from its atlas metadata.
-    DecodedDimensionsMismatch {
-        /// Width declared by the atlas metadata.
-        declared_width: usize,
-        /// Height declared by the atlas metadata.
-        declared_height: usize,
-        /// Width declared inside the decoded image.
-        decoded_width: usize,
-        /// Height declared inside the decoded image.
-        decoded_height: usize,
+    /// Atlas texture dimensions or pixel data violate the shared image contract.
+    Image {
+        /// Concrete dimension, storage, raw-buffer, or decoder failure from the image layer.
+        source: ImageError,
     },
     /// Two icons use the same lookup key.
     DuplicateIconName {
@@ -174,35 +128,7 @@ impl Display for AtlasError {
         // Keep diagnostics next to their concrete variants so adding a validation rule requires a
         // deliberate public message instead of falling back to an opaque debug dump.
         match self {
-            Self::DimensionsOutOfRange { width, height } => {
-                write!(formatter, "atlas dimensions must each be in 1..=i32::MAX, received {width}x{height}")
-            }
-            Self::PixelStorageOverflow { width, height } => {
-                write!(formatter, "atlas dimensions {width}x{height} overflow addressable RGBA storage")
-            }
-            Self::PixelStorageTooLarge {
-                width,
-                height,
-                required_bytes,
-                maximum_bytes,
-            } => write!(
-                formatter,
-                "atlas dimensions {width}x{height} require {required_bytes} bytes, exceeding the {maximum_bytes}-byte image-allocation limit"
-            ),
-            Self::RawPixelLengthMismatch { expected, actual } => {
-                write!(formatter, "atlas raw pixels require {expected} RGBA bytes, received {actual}")
-            }
-            Self::PixelDecode { source } => write!(formatter, "atlas pixel decode failed: {source}"),
-            Self::AnimatedPngUnsupported => formatter.write_str("animated PNG data cannot be used as a static atlas texture"),
-            Self::DecodedDimensionsMismatch {
-                declared_width,
-                declared_height,
-                decoded_width,
-                decoded_height,
-            } => write!(
-                formatter,
-                "atlas declares {declared_width}x{declared_height} pixels but the image contains {decoded_width}x{decoded_height}"
-            ),
+            Self::Image { source } => write!(formatter, "atlas image is invalid: {source}"),
             Self::DuplicateIconName { name } => write!(formatter, "atlas icon name `{name}` is duplicated"),
             Self::DuplicateFontName { name } => write!(formatter, "atlas font name `{name}` is duplicated"),
             Self::DuplicateGlyph { font, character } => {
@@ -233,43 +159,34 @@ impl Display for AtlasError {
 }
 
 impl Error for AtlasError {
-    /// Exposes the concrete decoder error only for failures originating below atlas validation.
+    /// Exposes the concrete image error for failures originating below atlas validation.
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        // Structural failures are fully represented by this enum; only image decoding has a
-        // lower-level error worth retaining in the standard error chain.
+        // Structural failures are fully represented by this enum. Image validation keeps its own
+        // storage or decoder cause so callers can continue down the standard error chain.
         match self {
-            Self::PixelDecode { source } => Some(source),
+            Self::Image { source } => Some(source),
             _ => None,
         }
     }
 }
 
-/// Applies the image layer's single dimension and allocation policy to an atlas extent.
-pub(super) fn checked_atlas_dimensions(width: usize, height: usize) -> Result<CheckedImageDimensions, AtlasError> {
-    // Mapping changes only the public error vocabulary. The concrete image token remains the sole
-    // owner of axis, checked-arithmetic, addressability, and fixed-budget validation.
-    CheckedImageDimensions::try_new(width, height).map_err(map_image_storage_error)
+impl From<ImageError> for AtlasError {
+    /// Retains one image-layer failure as the atlas error's concrete source.
+    fn from(source: ImageError) -> Self {
+        // Composition keeps every typed image field and its error chain available without
+        // repeating the same variants in the atlas vocabulary.
+        Self::Image { source }
+    }
 }
 
-/// Maps one concrete image-storage failure into the corresponding public atlas failure.
-pub(super) fn map_image_storage_error(error: ImageStorageError) -> AtlasError {
-    // Preserve every numeric field so callers can classify and diagnose the failure without an
-    // opaque I/O wrapper or message parsing.
-    match error {
-        ImageStorageError::DimensionsOutOfRange { width, height } => AtlasError::DimensionsOutOfRange { width, height },
-        ImageStorageError::Overflow { width, height } => AtlasError::PixelStorageOverflow { width, height },
-        ImageStorageError::TooLarge {
-            width,
-            height,
-            required_bytes,
-            maximum_bytes,
-        } => AtlasError::PixelStorageTooLarge {
-            width,
-            height,
-            required_bytes,
-            maximum_bytes,
-        },
-    }
+/// Applies the image layer's single dimension and allocation policy to an atlas extent.
+pub(super) fn checked_atlas_dimensions(width: usize, height: usize) -> Result<CheckedImageDimensions, AtlasError> {
+    // The checked image token remains the sole owner of axis, arithmetic, addressability, and
+    // allocation-budget validation. AtlasError composes that concrete failure rather than
+    // duplicating its fields under atlas-specific variant names.
+    CheckedImageDimensions::try_new(width, height)
+        .map_err(ImageError::from)
+        .map_err(AtlasError::from)
 }
 
 impl AtlasCandidate {
@@ -457,6 +374,7 @@ fn rectangle_fits(rectangle: Recti, dimensions: &CheckedImageDimensions, allow_e
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::image::ImageStorageError;
 
     /// Returns a small pixel buffer whose second pixel is the required opaque-white rendering
     /// source while the other pixels remain visibly distinct.
@@ -559,9 +477,13 @@ mod tests {
             };
             assert!(matches!(
                 error,
-                AtlasError::DimensionsOutOfRange {
-                    width: actual_width,
-                    height: actual_height,
+                AtlasError::Image {
+                    source: ImageError::Storage {
+                        source: ImageStorageError::DimensionsOutOfRange {
+                            width: actual_width,
+                            height: actual_height,
+                        },
+                    },
                 } if actual_width == width && actual_height == height
             ));
         }
@@ -581,9 +503,13 @@ mod tests {
         };
         assert!(matches!(
             error,
-            AtlasError::PixelStorageOverflow {
-                width: actual_width,
-                height: actual_height,
+            AtlasError::Image {
+                source: ImageError::Storage {
+                    source: ImageStorageError::Overflow {
+                        width: actual_width,
+                        height: actual_height,
+                    },
+                },
             } if actual_width == width && actual_height == height
         ));
     }
@@ -598,11 +524,15 @@ mod tests {
         let error = construction_error(&source);
         assert!(matches!(
             error,
-            AtlasError::PixelStorageTooLarge {
-                width: 4096,
-                height: 4097,
-                required_bytes: 67_125_248,
-                maximum_bytes: crate::image::MAX_DECODED_RGBA_BYTES,
+            AtlasError::Image {
+                source: ImageError::Storage {
+                    source: ImageStorageError::TooLarge {
+                        width: 4096,
+                        height: 4097,
+                        required_bytes: 67_125_248,
+                        maximum_bytes: crate::image::MAX_DECODED_RGBA_BYTES,
+                    },
+                },
             }
         ));
     }
@@ -618,11 +548,15 @@ mod tests {
 
         assert!(matches!(
             error,
-            AtlasError::PixelStorageTooLarge {
-                width: 4096,
-                height: 4097,
-                required_bytes: 67_125_248,
-                maximum_bytes: crate::image::MAX_DECODED_RGBA_BYTES,
+            AtlasError::Image {
+                source: ImageError::Storage {
+                    source: ImageStorageError::TooLarge {
+                        width: 4096,
+                        height: 4097,
+                        required_bytes: 67_125_248,
+                        maximum_bytes: crate::image::MAX_DECODED_RGBA_BYTES,
+                    },
+                },
             }
         ));
     }
@@ -638,7 +572,9 @@ mod tests {
             let error = construction_error(&source);
             assert!(matches!(
                 error,
-                AtlasError::RawPixelLengthMismatch { expected: 16, actual } if actual == pixels.len()
+                AtlasError::Image {
+                    source: ImageError::RawPixelLengthMismatch { expected: 16, actual },
+                } if actual == pixels.len()
             ));
         }
     }
@@ -989,7 +925,7 @@ mod tests {
             format: SourceFormat::Png,
         };
 
-        assert!(matches!(construction_error(&source), AtlasError::PixelDecode { .. }));
+        assert!(matches!(construction_error(&source), AtlasError::Image { source: ImageError::Decode { .. } }));
     }
 
     /// Verifies APNG input is rejected by format rather than misread as a partial static texture.
@@ -1006,7 +942,12 @@ mod tests {
             format: SourceFormat::Png,
         };
 
-        assert!(matches!(construction_error(&source), AtlasError::AnimatedPngUnsupported));
+        assert!(matches!(
+            construction_error(&source),
+            AtlasError::Image {
+                source: ImageError::AnimatedPngUnsupported,
+            }
+        ));
     }
 
     /// Verifies PNG dimensions are compared at the header boundary before normalized allocation.
@@ -1025,11 +966,13 @@ mod tests {
 
         assert!(matches!(
             construction_error(&source),
-            AtlasError::DecodedDimensionsMismatch {
-                declared_width: 2,
-                declared_height: 1,
-                decoded_width: 1,
-                decoded_height: 1,
+            AtlasError::Image {
+                source: ImageError::DimensionMismatch {
+                    expected_width: 2,
+                    expected_height: 1,
+                    actual_width: 1,
+                    actual_height: 1,
+                },
             }
         ));
     }

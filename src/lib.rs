@@ -265,7 +265,7 @@ pub mod prelude {
     pub use crate::atlas::{AtlasError, AtlasHandle, AtlasSource, CharEntry, FontEntry, FontId, IconId, SourceFormat};
     pub use crate::file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};
     pub use crate::menu::{Menu, MenuBar, MenuItem, MenuItemAccessError, MenuItemHandle, MenuItemMark, MenuItemParameters, MenuItemSubmitted};
-    pub use crate::image::{ImageSource, MAX_DECODED_RGBA_BYTES, load_image_bytes};
+    pub use crate::image::{ImageError, ImageSource, ImageStorageError, MAX_DECODED_RGBA_BYTES, load_image_bytes};
     pub use crate::input::{Key, KeyEvent, KeyState, Modifiers, MouseButton};
     pub use crate::render::{FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame, TextureId};
     pub use crate::retained::{
@@ -301,7 +301,7 @@ pub use window_manager::{
 pub use event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventPortHandle};
 pub use file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};
 pub use menu::{Menu, MenuBar, MenuItem, MenuItemAccessError, MenuItemHandle, MenuItemMark, MenuItemParameters, MenuItemSubmitted};
-pub use image::{ImageSource, MAX_DECODED_RGBA_BYTES, load_image_bytes};
+pub use image::{ImageError, ImageSource, ImageStorageError, MAX_DECODED_RGBA_BYTES, load_image_bytes};
 pub use input::{Key, KeyEvent, KeyState, Modifiers, MouseButton};
 pub use math::{expand_rect, rect, vec2};
 pub use render::TextureId;

@@ -38,7 +38,7 @@
 use super::*;
 mod packer;
 use packer::Packer;
-use crate::image::{ImageSource, MAX_DECODED_RGBA_BYTES, load_image_bytes};
+use crate::image::{ImageError, ImageSource, MAX_DECODED_RGBA_BYTES, load_image_bytes};
 use fontdue::{Font as RasterFont, FontSettings, Metrics};
 use std::{
     error::Error,
@@ -76,8 +76,9 @@ struct PlannedGlyph {
 
 /// Concrete failure returned while loading, packing, or finalizing a build-time atlas.
 ///
-/// Structural atlas failures retain their matchable [`AtlasError`]. File, decoder, font, and packer
-/// failures use one I/O-oriented error because they originate in heterogeneous external libraries.
+/// Structural atlas and image-decoding failures retain their matchable concrete errors. File,
+/// font, and packer failures use an I/O-oriented error because they originate in heterogeneous
+/// operational APIs.
 #[derive(Debug)]
 pub enum BuilderError {
     /// Candidate dimensions or finalized atlas metadata violate the runtime atlas contract.
@@ -85,7 +86,14 @@ pub enum BuilderError {
         /// Concrete structural validation failure.
         source: AtlasError,
     },
-    /// An asset could not be read, decoded, rasterized, or packed.
+    /// An icon asset could be read but could not be decoded as a supported static image.
+    Image {
+        /// Path of the invalid icon asset.
+        path: String,
+        /// Concrete image validation or decoding failure.
+        source: ImageError,
+    },
+    /// An asset could not be read, rasterized, or packed.
     Asset {
         /// Concrete operational error produced by the builder pipeline.
         source: io::Error,
@@ -95,10 +103,11 @@ pub enum BuilderError {
 impl Display for BuilderError {
     /// Delegates to the retained concrete cause without flattening it into stored text.
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        // Both variants already own a complete diagnostic; the enum preserves which construction
-        // layer failed instead of adding a second generic message prefix.
+        // Every variant already owns a complete diagnostic. Only image decoding adds the asset
+        // path that its lower-level source cannot know.
         match self {
             Self::Atlas { source } => Display::fmt(source, formatter),
+            Self::Image { path, source } => write!(formatter, "cannot decode icon asset `{path}`: {source}"),
             Self::Asset { source } => Display::fmt(source, formatter),
         }
     }
@@ -107,9 +116,10 @@ impl Display for BuilderError {
 impl Error for BuilderError {
     /// Exposes the retained atlas or asset error through the standard cause chain.
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        // Both variants retain one concrete lower-level cause.
+        // Every variant retains one concrete lower-level cause.
         match self {
             Self::Atlas { source } => Some(source),
+            Self::Image { source, .. } => Some(source),
             Self::Asset { source } => Some(source),
         }
     }
@@ -371,9 +381,9 @@ impl Builder {
     /// Loads an icon image from disk and normalizes it to RGBA pixels.
     fn load_icon(path: &str) -> Result<(usize, usize, Vec<Color4b>), BuilderError> {
         let bytes = Self::read_asset_file(path)?;
-        load_image_bytes(ImageSource::Png { bytes: bytes.as_slice() })
-            .map_err(|source| io::Error::new(source.kind(), format!("Cannot decode icon asset `{path}`: {source}")))
-            .map_err(BuilderError::from)
+        // ImageError already owns the precise format/storage classification. Add only the asset
+        // path at this boundary instead of converting it through an unrelated io::Error kind.
+        load_image_bytes(ImageSource::Png { bytes: bytes.as_slice() }).map_err(|source| BuilderError::Image { path: path.to_string(), source })
     }
 
     /// Reads one builder asset while bounding compressed images and font files before allocation.
@@ -555,9 +565,29 @@ mod tests {
         assert!(matches!(
             error,
             BuilderError::Atlas {
-                source: AtlasError::DimensionsOutOfRange { width: 0, height: 32 },
+                source: AtlasError::Image {
+                    source: ImageError::Storage {
+                        source: crate::image::ImageStorageError::DimensionsOutOfRange { width: 0, height: 32 },
+                    },
+                },
             }
         ));
+    }
+
+    /// Verifies successful file I/O followed by invalid PNG bytes retains ImageError and the path.
+    #[test]
+    fn invalid_icon_bytes_use_the_composed_image_error_variant() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
+        let error = Builder::load_icon(path).expect_err("Cargo.toml bytes cannot decode as a PNG icon");
+
+        assert!(matches!(
+            &error,
+            BuilderError::Image {
+                path: actual_path,
+                source: ImageError::Decode { .. },
+            } if actual_path == path
+        ));
+        assert!(std::error::Error::source(&error).is_some());
     }
 
     /// Verifies unrepresentable rasterization sizes fail concretely before fontdue reads the font.

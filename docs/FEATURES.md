@@ -18,6 +18,13 @@ declared texture. Public image decoding, serialized atlas construction, builder 
 and builder icon decoding share a 64-MiB limit for each decoded RGBA or normalized color buffer
 (`MAX_DECODED_RGBA_BYTES`, exactly 4,096 × 4,096 four-byte pixels).
 
+`load_image_bytes` returns the concrete `ImageError`. Its variants distinguish invalid signed raw
+dimensions, checked storage failures, exact RGBA-length mismatches, dimension mismatches, decoder
+failures, and unsupported animation. `ImageStorageError` retains the failed dimensions and
+allocation limit. Higher layers preserve that structure: `AtlasError::Image` and
+`BuilderError::Image` expose `ImageError` as their standard error source instead of translating it
+through `std::io::Error` or matching diagnostic text.
+
 The demos build their atlas at runtime unless you opt into `prebuilt-atlas`, so `--no-default-features` example builds should include `builder`:
 `cargo run --example demo-full --no-default-features --features "example-vulkan builder"`
 

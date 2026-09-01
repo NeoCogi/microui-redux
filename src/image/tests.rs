@@ -107,11 +107,50 @@ fn checked_dimensions_enforce_the_decoded_storage_budget_without_allocating() {
     );
 }
 
+/// Verifies the public raw loader exposes invalid signed dimensions without an I/O wrapper.
+#[test]
+fn public_raw_loader_returns_typed_dimension_errors() {
+    let error = load_image_bytes(ImageSource::Raw { width: -3, height: 7, pixels: &[] })
+        .expect_err("a negative raw-image axis must be rejected before byte validation");
+
+    assert!(matches!(error, ImageError::RawDimensionsOutOfRange { width: -3, height: 7 }));
+}
+
+/// Verifies exact raw-byte requirements remain directly matchable by public callers.
+#[test]
+fn public_raw_loader_returns_typed_pixel_length_errors() {
+    let error = load_image_bytes(ImageSource::Raw { width: 2, height: 1, pixels: &[0; 7] }).expect_err("seven bytes cannot fill two RGBA pixels");
+
+    assert!(matches!(error, ImageError::RawPixelLengthMismatch { expected: 8, actual: 7 }));
+}
+
+/// Verifies the public loader preserves the shared allocation classification and error chain.
+#[test]
+fn public_raw_loader_composes_storage_errors() {
+    let error = load_image_bytes(ImageSource::Raw { width: 4096, height: 4097, pixels: &[] })
+        .expect_err("an oversized raw source must fail before its empty bytes are inspected");
+
+    assert!(matches!(
+        &error,
+        ImageError::Storage {
+            source: ImageStorageError::TooLarge {
+                width: 4096,
+                height: 4097,
+                required_bytes: 67_125_248,
+                maximum_bytes: MAX_DECODED_RGBA_BYTES,
+            }
+        }
+    ));
+    assert!(std::error::Error::source(&error).is_some());
+}
+
 #[cfg(any(feature = "builder", feature = "png_source"))]
 #[test]
-fn png_decode_error_returns_err() {
-    let res = load_image_bytes(ImageSource::Png { bytes: &[] });
-    assert!(res.is_err());
+fn png_decode_error_returns_a_concrete_public_variant() {
+    let error = load_image_bytes(ImageSource::Png { bytes: &[] }).expect_err("empty bytes are not a PNG stream");
+
+    assert!(matches!(&error, ImageError::Decode { .. }));
+    assert!(std::error::Error::source(&error).is_some());
 }
 
 #[cfg(any(feature = "builder", feature = "png_source"))]
@@ -184,7 +223,7 @@ fn checked_png_decode_rejects_header_dimensions_before_frame_decode() {
         .expect_err("the checked path must reject the 2x1 header against a 1x1 expectation");
 
     match error {
-        CheckedImageLoadError::DimensionMismatch {
+        ImageError::DimensionMismatch {
             expected_width,
             expected_height,
             actual_width,
@@ -193,12 +232,13 @@ fn checked_png_decode_rejects_header_dimensions_before_frame_decode() {
             assert_eq!((expected_width, expected_height), (1, 1));
             assert_eq!((actual_width, actual_height), (2, 1));
         }
-        CheckedImageLoadError::Decode { source } => {
+        ImageError::Decode { source } => {
             panic!("dimension validation ran too late and attempted frame decoding: {source}")
         }
-        CheckedImageLoadError::Storage { source } => panic!("small checked dimensions unexpectedly failed storage validation: {source}"),
-        CheckedImageLoadError::RawPixelLengthMismatch { .. } => panic!("PNG input was misclassified as raw RGBA bytes"),
-        CheckedImageLoadError::AnimatedPngUnsupported => {
+        ImageError::Storage { source } => panic!("small checked dimensions unexpectedly failed storage validation: {source}"),
+        ImageError::RawDimensionsOutOfRange { .. } => panic!("PNG input was misclassified as signed raw dimensions"),
+        ImageError::RawPixelLengthMismatch { .. } => panic!("PNG input was misclassified as raw RGBA bytes"),
+        ImageError::AnimatedPngUnsupported => {
             panic!("ordinary static PNG fixture was misclassified as animated")
         }
     }
@@ -218,7 +258,7 @@ fn png_decode_rejects_oversized_header_before_frame_decode() {
         .expect_err("a PNG exceeding the decoded-image budget must fail during header validation");
     assert!(matches!(
         error,
-        CheckedImageLoadError::Storage {
+        ImageError::Storage {
             source: ImageStorageError::TooLarge {
                 width: 4096,
                 height: 4097,
@@ -238,7 +278,7 @@ fn checked_raw_decode_reports_both_dimension_pairs() {
 
     // Pattern matching exposes all four typed values without parsing the Display message.
     match error {
-        CheckedImageLoadError::DimensionMismatch {
+        ImageError::DimensionMismatch {
             expected_width,
             expected_height,
             actual_width,
@@ -247,10 +287,11 @@ fn checked_raw_decode_reports_both_dimension_pairs() {
             assert_eq!((expected_width, expected_height), (1, 1));
             assert_eq!((actual_width, actual_height), (2, 1));
         }
-        CheckedImageLoadError::Decode { source } => panic!("valid raw bytes failed before the dimension check: {source}"),
-        CheckedImageLoadError::Storage { source } => panic!("small checked dimensions unexpectedly failed storage validation: {source}"),
-        CheckedImageLoadError::RawPixelLengthMismatch { .. } => panic!("dimension comparison must precede raw byte-length validation"),
+        ImageError::Decode { source } => panic!("valid raw bytes failed before the dimension check: {source}"),
+        ImageError::Storage { source } => panic!("small checked dimensions unexpectedly failed storage validation: {source}"),
+        ImageError::RawDimensionsOutOfRange { .. } => panic!("positive raw dimensions were misclassified as invalid"),
+        ImageError::RawPixelLengthMismatch { .. } => panic!("dimension comparison must precede raw byte-length validation"),
         #[cfg(any(feature = "builder", feature = "png_source"))]
-        CheckedImageLoadError::AnimatedPngUnsupported => panic!("raw RGBA bytes cannot describe an animated PNG"),
+        ImageError::AnimatedPngUnsupported => panic!("raw RGBA bytes cannot describe an animated PNG"),
     }
 }

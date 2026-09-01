@@ -67,14 +67,20 @@ pub enum ImageSource<'a> {
     },
 }
 
-/// Failure returned by the crate-internal image path that enforces declared dimensions.
+/// Concrete failure returned while validating or decoding an [`ImageSource`].
 ///
-/// Atlas construction needs to distinguish malformed image data from a valid image whose header
-/// disagrees with its separately stored metadata. Keeping that distinction concrete lets the
-/// atlas layer map each case into its own typed construction error without inspecting text from an
-/// [`std::io::Error`].
+/// The same error is used by the public image loader and the atlas loader's dimension-checked
+/// path. Keeping one classification prevents those entry points from flattening image failures
+/// into unrelated I/O errors or duplicating the decoder's validation rules.
 #[derive(Debug)]
-pub(crate) enum CheckedImageLoadError {
+pub enum ImageError {
+    /// A raw source uses a non-positive signed dimension.
+    RawDimensionsOutOfRange {
+        /// Invalid raw-image width in pixels.
+        width: i32,
+        /// Invalid raw-image height in pixels.
+        height: i32,
+    },
     /// The image bytes or raw RGBA description could not be decoded or validated.
     Decode {
         /// Concrete error produced by the shared image decoder.
@@ -108,29 +114,15 @@ pub(crate) enum CheckedImageLoadError {
     AnimatedPngUnsupported,
 }
 
-impl CheckedImageLoadError {
-    /// Converts the richer atlas-only classification into the public image API's I/O error.
-    fn into_io_error(self) -> Error {
-        // Preserve an original decoder error exactly. A dimension mismatch is unreachable through
-        // the unchecked public path, but retaining a total conversion keeps the shared dispatcher
-        // independent of that calling convention.
-        match self {
-            Self::Decode { source } => source,
-            Self::Storage { source } => Error::other(source),
-            mismatch @ Self::RawPixelLengthMismatch { .. } => Error::other(mismatch),
-            mismatch @ Self::DimensionMismatch { .. } => Error::other(mismatch),
-            #[cfg(any(feature = "builder", feature = "png_source"))]
-            animated @ Self::AnimatedPngUnsupported => Error::other(animated),
-        }
-    }
-}
-
-impl fmt::Display for CheckedImageLoadError {
+impl fmt::Display for ImageError {
     /// Formats either the underlying decode failure or both sides of a dimension mismatch.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Dimension values are included explicitly so callers can diagnose stale sidecar metadata
         // without parsing or re-decoding the image themselves.
         match self {
+            Self::RawDimensionsOutOfRange { width, height } => {
+                write!(f, "raw image dimensions must be positive, received {width}x{height}")
+            }
             Self::Decode { source } => write!(f, "{source}"),
             Self::Storage { source } => write!(f, "{source}"),
             Self::RawPixelLengthMismatch { expected, actual } => {
@@ -151,12 +143,13 @@ impl fmt::Display for CheckedImageLoadError {
     }
 }
 
-impl std::error::Error for CheckedImageLoadError {
+impl std::error::Error for ImageError {
     /// Exposes the concrete decoder error when image parsing, rather than dimensions, failed.
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         // A mismatch is fully represented by this enum's integer fields and has no lower-level
         // cause. Decoder failures retain their original error chain.
         match self {
+            Self::RawDimensionsOutOfRange { .. } => None,
             Self::Decode { source } => Some(source),
             Self::Storage { source } => Some(source),
             Self::RawPixelLengthMismatch { .. } => None,
@@ -167,7 +160,7 @@ impl std::error::Error for CheckedImageLoadError {
     }
 }
 
-impl From<Error> for CheckedImageLoadError {
+impl From<Error> for ImageError {
     /// Wraps one concrete decoder or raw-buffer validation error.
     fn from(source: Error) -> Self {
         // Centralizing this conversion keeps every `?` in the shared decoder on the typed path.
@@ -175,18 +168,18 @@ impl From<Error> for CheckedImageLoadError {
     }
 }
 
-impl From<ImageStorageError> for CheckedImageLoadError {
-    /// Preserves a concrete checked-storage failure on the internal image-loading path.
+impl From<ImageStorageError> for ImageError {
+    /// Preserves a concrete checked-storage failure on the shared image-loading path.
     fn from(source: ImageStorageError) -> Self {
-        // Keeping storage separate from decoder I/O lets atlas construction map the same invariant
-        // to its public AtlasError without classifying an error message.
+        // Keeping storage separate from decoder I/O lets callers inspect the same invariant through
+        // ImageError and any higher-level error that composes it.
         Self::Storage { source }
     }
 }
 
 /// Concrete failure returned before allocating decoded or normalized image storage.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub(crate) enum ImageStorageError {
+pub enum ImageStorageError {
     /// One image axis is zero or exceeds the runtime rectangle coordinate domain.
     DimensionsOutOfRange {
         /// Requested image width in pixels.
@@ -221,10 +214,10 @@ impl fmt::Display for ImageStorageError {
         // allocation failure from the platform.
         match self {
             Self::DimensionsOutOfRange { width, height } => {
-                write!(formatter, "decoded image dimensions must each be in 1..=i32::MAX, received {width}x{height}")
+                write!(formatter, "image dimensions must each be in 1..=i32::MAX, received {width}x{height}")
             }
             Self::Overflow { width, height } => {
-                write!(formatter, "decoded image dimensions {width}x{height} overflow addressable RGBA storage")
+                write!(formatter, "image dimensions {width}x{height} overflow addressable RGBA storage")
             }
             Self::TooLarge {
                 width,
@@ -233,7 +226,7 @@ impl fmt::Display for ImageStorageError {
                 maximum_bytes,
             } => write!(
                 formatter,
-                "decoded image dimensions {width}x{height} require {required_bytes} bytes, exceeding the {maximum_bytes}-byte allocation limit"
+                "image dimensions {width}x{height} require {required_bytes} bytes, exceeding the {maximum_bytes}-byte allocation limit"
             ),
         }
     }
@@ -301,14 +294,14 @@ impl CheckedImageDimensions {
 ///
 /// # Errors
 ///
-/// Returns an I/O error when raw dimensions or byte counts are invalid, or when static PNG data is
-/// malformed, uses an unsupported normalized representation, contains animation metadata, or
-/// requires more than [`MAX_DECODED_RGBA_BYTES`] for either decoded allocation.
-pub fn load_image_bytes(source: ImageSource) -> std::io::Result<(usize, usize, Vec<Color4b>)> {
+/// Returns a concrete [`ImageError`] when raw dimensions or byte counts are invalid, or when static
+/// PNG data is malformed, uses an unsupported normalized representation, contains animation
+/// metadata, or requires more than [`MAX_DECODED_RGBA_BYTES`] for either decoded allocation.
+pub fn load_image_bytes(source: ImageSource) -> Result<(usize, usize, Vec<Color4b>), ImageError> {
     // The public API accepts the dimensions carried by the image source itself. It deliberately
     // delegates to the same implementation as checked atlas loading so format normalization cannot
     // diverge between the two entry points.
-    load_image_bytes_impl(source, None).map_err(CheckedImageLoadError::into_io_error)
+    load_image_bytes_impl(source, None)
 }
 
 /// Decodes image data only when its declared dimensions equal the caller's expected dimensions.
@@ -319,14 +312,14 @@ pub fn load_image_bytes(source: ImageSource) -> std::io::Result<(usize, usize, V
 ///
 /// Returns a concrete decode or dimension-mismatch variant so the atlas layer never classifies an
 /// error by inspecting its display text.
-pub(crate) fn load_image_bytes_checked(source: ImageSource, expected: CheckedImageDimensions) -> Result<(usize, usize, Vec<Color4b>), CheckedImageLoadError> {
+pub(crate) fn load_image_bytes_checked(source: ImageSource, expected: CheckedImageDimensions) -> Result<(usize, usize, Vec<Color4b>), ImageError> {
     // The caller supplies the same checked token it will retain with the decoded pixels. Matching
     // sources therefore reuse its cached counts instead of evaluating the allocation policy twice.
     load_image_bytes_impl(source, Some(expected))
 }
 
 /// Shared raw/PNG dispatcher used by both public and dimension-checked loading.
-fn load_image_bytes_impl(source: ImageSource, expected: Option<CheckedImageDimensions>) -> Result<(usize, usize, Vec<Color4b>), CheckedImageLoadError> {
+fn load_image_bytes_impl(source: ImageSource, expected: Option<CheckedImageDimensions>) -> Result<(usize, usize, Vec<Color4b>), ImageError> {
     // Each format validates its dimensions before allocating normalized color storage. PNG keeps
     // the expected extent through header parsing so compressed input receives the same guarantee.
     match source {
@@ -334,13 +327,13 @@ fn load_image_bytes_impl(source: ImageSource, expected: Option<CheckedImageDimen
             if width <= 0 || height <= 0 {
                 // Raw public input has signed dimensions, whereas the shared checked token stores
                 // only valid positive extents. Reject invalid signs before converting to usize.
-                return Err(Error::other("Image dimensions must be positive").into());
+                return Err(ImageError::RawDimensionsOutOfRange { width, height });
             }
             let width_usize = width as usize;
             let height_usize = height as usize;
             let dimensions = resolve_dimensions(expected, width_usize, height_usize)?;
             if pixels.len() != dimensions.rgba_byte_count {
-                return Err(CheckedImageLoadError::RawPixelLengthMismatch {
+                return Err(ImageError::RawPixelLengthMismatch {
                     expected: dimensions.rgba_byte_count,
                     actual: pixels.len(),
                 });
@@ -359,16 +352,12 @@ fn load_image_bytes_impl(source: ImageSource, expected: Option<CheckedImageDimen
 }
 
 /// Resolves one checked dimensions token without allocating pixel storage.
-fn resolve_dimensions(
-    expected: Option<CheckedImageDimensions>,
-    actual_width: usize,
-    actual_height: usize,
-) -> Result<CheckedImageDimensions, CheckedImageLoadError> {
+fn resolve_dimensions(expected: Option<CheckedImageDimensions>, actual_width: usize, actual_height: usize) -> Result<CheckedImageDimensions, ImageError> {
     // Atlas loading reuses its existing token after an exact extent comparison. The public loader
     // has no token, so this is its single dimension/arithmetic/budget validation point.
     if let Some(expected) = expected {
         if actual_width != expected.width || actual_height != expected.height {
-            return Err(CheckedImageLoadError::DimensionMismatch {
+            return Err(ImageError::DimensionMismatch {
                 expected_width: expected.width,
                 expected_height: expected.height,
                 actual_width,
@@ -377,7 +366,7 @@ fn resolve_dimensions(
         }
         return Ok(expected);
     }
-    CheckedImageDimensions::try_new(actual_width, actual_height).map_err(CheckedImageLoadError::from)
+    CheckedImageDimensions::try_new(actual_width, actual_height).map_err(ImageError::from)
 }
 
 /// Returns the byte length required for an RGBA buffer with positive dimensions.
@@ -404,7 +393,7 @@ pub(crate) fn validate_rgba_buffer(width: i32, height: i32, len: usize) -> std::
 
 #[cfg(any(feature = "builder", feature = "png_source"))]
 /// Decodes a PNG stream into normalized RGBA pixels after an optional header-size check.
-fn decode_png_to_colors(bytes: &[u8], expected: Option<CheckedImageDimensions>) -> Result<(usize, usize, Vec<Color4b>), CheckedImageLoadError> {
+fn decode_png_to_colors(bytes: &[u8], expected: Option<CheckedImageDimensions>) -> Result<(usize, usize, Vec<Color4b>), ImageError> {
     // Reading PNG metadata does not require an output pixel buffer. Keep the cursor and decoder
     // local so neither the public nor checked entry point can bypass the header validation below.
     let mut cursor = Cursor::new(bytes);
@@ -422,7 +411,7 @@ fn decode_png_to_colors(bytes: &[u8], expected: Option<CheckedImageDimensions>) 
         // `next_frame` returns an APNG frame rectangle rather than a composited canvas. Treating
         // that subframe as a static atlas would make the normalized pixel count disagree with the
         // already validated IHDR extent, so reject the unsupported format before allocation.
-        return Err(CheckedImageLoadError::AnimatedPngUnsupported);
+        return Err(ImageError::AnimatedPngUnsupported);
     }
 
     let buf_size = reader

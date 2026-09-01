@@ -31,7 +31,7 @@
 //! Serializable atlas source metadata and decoding.
 
 use super::*;
-use crate::image::{CheckedImageLoadError, ImageSource, load_image_bytes_checked};
+use crate::image::{ImageSource, load_image_bytes_checked};
 
 /// Describes a font baked into an [`AtlasSource`].
 pub struct FontEntry<'a> {
@@ -114,7 +114,7 @@ impl<'source> TryFrom<&AtlasSource<'source>> for AtlasHandle {
             #[cfg(feature = "png_source")]
             SourceFormat::Png => ImageSource::Png { bytes: source.pixels },
         };
-        let (_, _, pixels) = load_image_bytes_checked(image, dimensions).map_err(map_image_error)?;
+        let (_, _, pixels) = load_image_bytes_checked(image, dimensions).map_err(AtlasError::from)?;
 
         // Copy borrowed metadata into the duplicate-preserving candidate representation. Runtime
         // hash maps are deliberately built only after the common finalizer accepts every key.
@@ -138,29 +138,5 @@ impl<'source> TryFrom<&AtlasSource<'source>> for AtlasHandle {
             .collect();
         let candidate = AtlasCandidate::from_decoded(dimensions, pixels, fonts, icons);
         AtlasHandle::finish(candidate)
-    }
-}
-
-/// Maps the concrete checked-image failure into its equally concrete atlas-layer variant.
-fn map_image_error(error: CheckedImageLoadError) -> AtlasError {
-    // Preserve decoded dimensions as integers and retain decoder errors as the standard error
-    // source. No caller needs to parse an image-layer diagnostic to classify the failure.
-    match error {
-        CheckedImageLoadError::Decode { source } => AtlasError::PixelDecode { source },
-        CheckedImageLoadError::Storage { source } => super::validation::map_image_storage_error(source),
-        CheckedImageLoadError::RawPixelLengthMismatch { expected, actual } => AtlasError::RawPixelLengthMismatch { expected, actual },
-        #[cfg(any(feature = "builder", feature = "png_source"))]
-        CheckedImageLoadError::AnimatedPngUnsupported => AtlasError::AnimatedPngUnsupported,
-        CheckedImageLoadError::DimensionMismatch {
-            expected_width,
-            expected_height,
-            actual_width,
-            actual_height,
-        } => AtlasError::DecodedDimensionsMismatch {
-            declared_width: expected_width,
-            declared_height: expected_height,
-            decoded_width: actual_width,
-            decoded_height: actual_height,
-        },
     }
 }
