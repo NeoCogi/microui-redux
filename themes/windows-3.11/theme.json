@@ -37,7 +37,7 @@
       "input_hover": [255, 255, 255, 255],
       "scrollbar_track": [195, 199, 203, 255],
       "scrollbar_thumb": [195, 199, 203, 255],
-      "focus": [0, 0, 170, 255],
+      "focus": [0, 0, 0, 255],
       "window_focus": [0, 0, 170, 255],
       "menu_foreground": [0, 0, 0, 255],
       "menu_background": [255, 255, 255, 255]
@@ -119,9 +119,9 @@
       "normal": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
       "hovered": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
       "pressed": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-      "focused": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-      "hovered_focused": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-      "pressed_focused": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+      "focused": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+      "hovered_focused": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+      "pressed_focused": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
       "disabled": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }, "tint": [184, 184, 184, 255] }
     },
     "slider_thumb": {

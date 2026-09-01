@@ -3,8 +3,9 @@
 This bundled theme implements the earlier Windows 3.11 visual language as a theme distinct from
 Windows 95. It uses bright `#0000AA` active captions, white inactive captions and menus, compact
 black outlines, tight white/dark-gray bevels, square controls, and the original gray application
-background. Pointer hover does not brighten controls because Windows 3.11 did not use a modern
-hover glow; pressed and keyboard-focused artwork remain separate states.
+background. Keyboard focus keeps the black period control frame instead of borrowing the blue
+selection color reserved for active titles and selected rows. Pointer hover remains deliberately
+subtle rather than using a modern glow, while pressed and keyboard-focused artwork stay separate.
 Activation selects the blue or white title and the corresponding frame role without recoloring the
 client hierarchy. Disabled foreground, background, button, and glyph artwork remains a separate
 explicit state rather than an inference from which window currently owns activation.

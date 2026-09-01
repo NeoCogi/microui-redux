@@ -1056,6 +1056,19 @@ mod tests {
         }
         let selected_text = loaded.style().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
         assert_eq!((selected_text.r, selected_text.g, selected_text.b, selected_text.a), (255, 255, 255, 255));
+        let focus = loaded.style().focus_color;
+        assert_eq!(
+            (focus.r, focus.g, focus.b, focus.a),
+            (0, 0, 0, 255),
+            "period control focus must preserve black combo and slider frames"
+        );
+        let slider_normal = loaded.style().appearance(AppearanceRole::SliderTrack, VisualState::Normal);
+        let slider_focused = loaded.style().appearance(AppearanceRole::SliderTrack, VisualState::Focused);
+        assert!(matches!(
+            (slider_normal.content, slider_focused.content),
+            (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: focused })
+                if normal.icon == focused.icon
+        ));
     }
 
     /// Verifies the bundled Mac theme installs its controls, title strips, frame, and grip artwork.
