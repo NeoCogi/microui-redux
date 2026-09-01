@@ -137,7 +137,7 @@ impl ColorSwatch {
         ctx.draw_rect(rect, self.fill);
         if !self.label.is_empty() {
             let font = ctx.style().resolve_font_choice(self.font);
-            ctx.draw_control_text_with_font(font, self.label.as_str(), rect, ControlColor::Text, self.opt);
+            ctx.draw_control_text_with_font(font, self.label.as_str(), rect, AppearanceRole::Button, self.opt);
         }
     }
 }

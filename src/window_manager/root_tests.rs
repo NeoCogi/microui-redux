@@ -901,11 +901,20 @@ fn inactive_window_state_propagates_through_chrome_and_child_widgets() {
     let inactive_control_color = color(157, 173, 191, 255);
     let inactive_text_color = color(199, 211, 223, 255);
     let inactive_title_text_color = color(227, 233, 239, 255);
-    let mut style = Style {
-        inactive_text_color,
-        inactive_title_text_color,
-        ..test_style(&atlas)
-    };
+    let mut style = test_style(&atlas);
+    // Assign the inactive foreground to the exact semantic roles exercised by this fixture. The
+    // catalog keeps client text and caption contrast independent without global inactive fields.
+    style.foregrounds.set_state(AppearanceRole::Button, VisualState::Inactive, inactive_text_color);
+    for role in [
+        AppearanceRole::WindowTitle,
+        AppearanceRole::WindowTitleActive,
+        AppearanceRole::WindowCloseButton,
+        AppearanceRole::WindowMinimizeButton,
+        AppearanceRole::WindowMaximizeButton,
+        AppearanceRole::WindowRestoreButton,
+    ] {
+        style.foregrounds.set_state(role, VisualState::Inactive, inactive_title_text_color);
+    }
 
     let mut passive_frame = StatefulAppearance::all(NinePatch::solid(active_window_color));
     passive_frame.set(VisualState::Inactive, NinePatch::solid(inactive_window_color));

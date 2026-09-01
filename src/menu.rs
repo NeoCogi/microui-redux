@@ -691,11 +691,9 @@ impl MenuSurface {
                     let _ = ctx.draw_appearance_state(role, state, row);
                     let marker = Recti::new(row.x, row.y, self.geometry.marker_width.max(0), row.height);
                     let text = text_region(row, self.geometry.marker_width);
-                    // Preserve the theme hue while subduing disabled rows through opacity alone.
-                    let mut color = style.menu_foreground;
-                    if !item.parameters.enabled {
-                        color.a = ((u16::from(color.a) * 45) / 100).max(1) as u8;
-                    }
+                    // Text, marks, and shortcut hints resolve the same semantic role and exact
+                    // interaction state as the row background.
+                    let color = ctx.foreground_state(role, state);
                     paint_item_marker(&mut ctx, marker, item.parameters.mark, color);
                     let font = style.resolve_font_choice(item.parameters.font);
                     // Both strings share one clip so control padding is applied exactly once.
@@ -720,9 +718,10 @@ impl MenuSurface {
                     // Bar headings use their full slot; popup branches reserve the marker gutter.
                     let text = if self.popup { text_region(row, self.geometry.marker_width) } else { row };
                     let font = style.resolve_font_choice(FontChoice::Role(FontRole::Body));
-                    ctx.draw_control_text_color_with_font(font, label, text, style.menu_foreground, WidgetOption::NONE);
+                    let color = ctx.foreground_state(role, state);
+                    ctx.draw_control_text_color_with_font(font, label, text, color, WidgetOption::NONE);
                     if self.popup {
-                        paint_submenu_arrow(&mut ctx, text);
+                        paint_submenu_arrow(&mut ctx, text, color);
                     }
                 }
             }
@@ -968,12 +967,12 @@ fn paint_item_marker(ctx: &mut WidgetPaintCtx<'_>, bounds: Recti, mark: MenuItem
 }
 
 /// Paints one right-facing submenu arrow in the shared text region.
-fn paint_submenu_arrow(ctx: &mut WidgetPaintCtx<'_>, bounds: Recti) {
+fn paint_submenu_arrow(ctx: &mut WidgetPaintCtx<'_>, bounds: Recti, color: Color) {
     // Align the glyph with the right padding used by right-aligned shortcut text.
     let style = ctx.style().clone();
     let size = ctx.atlas().get_icon_size(style.icons.expand);
     let icon = trailing_rect(bounds, size, style.padding.max(1));
-    ctx.draw_icon(style.icons.expand, icon, style.menu_foreground);
+    ctx.draw_icon(style.icons.expand, icon, color);
 }
 
 /// Paints one centered subdued separator rule.
@@ -986,7 +985,7 @@ fn paint_separator(ctx: &mut WidgetPaintCtx<'_>, row: Recti) {
         row.width.saturating_sub(padding.saturating_mul(2)).max(0),
         1,
     );
-    let mut color = ctx.style().menu_foreground;
+    let mut color = ctx.foreground_state(AppearanceRole::MenuPopup, VisualState::Normal);
     color.a = ((u16::from(color.a) * 45) / 100).max(1) as u8;
     ctx.draw_rect(rule, color);
 }

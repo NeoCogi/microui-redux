@@ -38,7 +38,7 @@ mod palette;
 mod style;
 mod typography;
 
-pub use appearance::{AppearanceCatalog, AppearanceRole, StatefulAppearance, VisualState};
+pub use appearance::{AppearanceCatalog, AppearanceRole, ForegroundCatalog, StatefulAppearance, StatefulColor, VisualState};
 pub use crate::render::{Color, color};
 pub use icons::ThemeIcons;
 #[cfg(feature = "theme-json")]

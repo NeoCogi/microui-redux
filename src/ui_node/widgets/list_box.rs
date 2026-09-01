@@ -129,10 +129,10 @@ impl ListBox {
         let placement = place_inline_content(rect, ctx.style(), &self.label, visual_size);
         if !self.label.is_empty() {
             let font = ctx.style().resolve_font_choice(self.font);
-            ctx.draw_control_text_with_font(font, &self.label, placement.text, ControlColor::Text, self.opt);
+            ctx.draw_control_text_with_font(font, &self.label, placement.text, AppearanceRole::Button, self.opt);
         }
         if let (Some(image), Some(visual)) = (self.image, placement.visual) {
-            let color = ctx.control_color(ControlColor::Text);
+            let color = ctx.foreground(AppearanceRole::Button);
             ctx.push_image(image, visual, color);
         }
     }

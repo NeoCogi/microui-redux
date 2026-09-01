@@ -209,10 +209,10 @@ impl Button {
                 let visual_size = icon.map(|icon| ctx.atlas().get_icon_size(icon));
                 let placement = place_inline_content(rect, ctx.style(), label, visual_size);
                 if !label.is_empty() {
-                    ctx.draw_control_text_with_font(font, label, placement.text, ControlColor::Text, self.opt);
+                    ctx.draw_control_text_with_font(font, label, placement.text, AppearanceRole::Button, self.opt);
                 }
                 if let (Some(icon), Some(visual)) = (icon, placement.visual) {
-                    let color = ctx.control_color(ControlColor::Text);
+                    let color = ctx.foreground(AppearanceRole::Button);
                     ctx.draw_icon(*icon, visual, color);
                 }
             }
@@ -220,10 +220,10 @@ impl Button {
                 let visual_size = image.map(TextureId::size);
                 let placement = place_inline_content(rect, ctx.style(), label, visual_size);
                 if !label.is_empty() {
-                    ctx.draw_control_text_with_font(font, label, placement.text, ControlColor::Text, self.opt);
+                    ctx.draw_control_text_with_font(font, label, placement.text, AppearanceRole::Button, self.opt);
                 }
                 if let (Some(image), Some(visual)) = (*image, placement.visual) {
-                    let color = ctx.control_color(ControlColor::Text);
+                    let color = ctx.foreground(AppearanceRole::Button);
                     ctx.push_image(image, visual, color);
                 }
             }
@@ -235,10 +235,10 @@ impl Button {
                     place_inline_content(rect, ctx.style(), label, visual_size)
                 };
                 if !label.is_empty() {
-                    ctx.draw_control_text_with_font(font, label, placement.text, ControlColor::Text, self.opt);
+                    ctx.draw_control_text_with_font(font, label, placement.text, AppearanceRole::Button, self.opt);
                 }
                 if let (Some(image), Some(visual)) = (*image, placement.visual) {
-                    let color = ctx.control_color(ControlColor::Text);
+                    let color = ctx.foreground(AppearanceRole::Button);
                     ctx.push_image(image, visual, color);
                 }
             }

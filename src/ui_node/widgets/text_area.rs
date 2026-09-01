@@ -647,7 +647,7 @@ fn textarea_paint(ctx: &mut WidgetPaintCtx<'_>, state: &TextArea, font: FontId) 
     // Fill the translated content surface with the editable base color; Painter clips the large
     // semantic rectangle to the effective ScrollArea viewport.
     ctx.draw_appearance_center(AppearanceRole::TextInput, layout.bounds);
-    let color = ctx.control_color(ControlColor::Text);
+    let color = ctx.foreground(AppearanceRole::TextInput);
     let cursor_pos = clamp_cursor_boundary(&state.buf, state.cursor);
     let cursor_line = line_index_for_cursor(&layout.lines, cursor_pos, state.interaction.caret_affinity);
     let caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());

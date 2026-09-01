@@ -52,7 +52,7 @@ the theme directories must remain available beside the repository sources at run
         "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }
       },
       "hovered": { "png": "button-hovered.png" },
-      "pressed": { "png": "button-pressed.png" },
+      "pressed": { "png": "button-pressed.png", "foreground": [255, 255, 255, 255] },
       "focused": { "png": "button-focused.png" },
       "hovered_focused": { "png": "button-hovered-focused.png" },
       "pressed_focused": { "png": "button-pressed-focused.png" },
@@ -64,8 +64,10 @@ the theme directories must remain available beside the repository sources at run
 ```
 
 An appearance or state may be omitted. Every omitted state keeps its own flat-color fallback; it
-does not borrow another state's PNG. This makes partial themes predictable and lets a theme use
-images only where they add value.
+does not borrow another state's PNG. A state may set `foreground` without a PNG to recolor its text
+and semantic glyphs over that fallback. Conversely, a PNG state may omit `foreground` and retain
+the fallback color. This makes partial themes predictable and lets a theme use images only where
+they add value.
 
 `insets` controls destination layout and stretching. `source_insets` divides the PNG and defaults to
 the role's destination insets. Source insets must be non-negative and opposing values must fit
@@ -93,7 +95,10 @@ The optional `colors` object accepts RGBA byte arrays under these keys:
 - `scrollbar_track`, `scrollbar_thumb`, `focus`, `window_focus`
 - `menu_foreground`, `menu_background`
 
-These colors construct the complete flat fallback catalog before any PNG state is installed.
+These colors construct the complete flat appearance and foreground fallback catalogs before any
+per-state PNG or `foreground` override is installed. `Style::foreground(role, state)` and the
+public `ForegroundCatalog` provide the same concrete enum-indexed lookup and mutation model as
+background appearances; no erased or string-keyed payload participates at paint time.
 
 ## Appearance roles
 

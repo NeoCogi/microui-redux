@@ -160,7 +160,7 @@ impl Checkbox {
         let role = if checked { AppearanceRole::CheckboxChecked } else { AppearanceRole::Checkbox };
         let box_content = ctx.draw_appearance(role, box_rect);
         if checked {
-            let color = ctx.control_color(ControlColor::Text);
+            let color = ctx.foreground(role);
             if let Some(box_content) = box_content {
                 ctx.draw_icon(ctx.style().icons.check, box_content, color);
             }
@@ -168,7 +168,7 @@ impl Checkbox {
         let text_rect = rect(bounds.x + box_rect.width, bounds.y, bounds.width - box_rect.width, bounds.height);
         if !self.label.is_empty() {
             let font = ctx.style().resolve_font_choice(self.font);
-            ctx.draw_control_text_with_font(font, &self.label, text_rect, ControlColor::Text, self.opt);
+            ctx.draw_control_text_with_font(font, &self.label, text_rect, role, self.opt);
         }
     }
 }

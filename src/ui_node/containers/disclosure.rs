@@ -31,14 +31,14 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    AppearanceRole, AtlasHandle, ChildParticipation, Container, ContainerWidget, ControlColor, Dimensioni, MeasureCtx, Recti, Style, TypedWidgetHandle,
-    UiInputEvent, VisualState, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
+    AppearanceRole, AtlasHandle, ChildParticipation, Container, ContainerWidget, Dimensioni, MeasureCtx, Recti, Style, TypedWidgetHandle, UiInputEvent,
+    VisualState, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
 use super::{Children, ContainerLayoutCtx, LinearItem, Node};
 use crate::{Linear, LinearParameters};
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 enum DisclosureVariant {
     Header,
     Tree,
@@ -273,7 +273,12 @@ impl Widget for DisclosureHeader {
         }
 
         // Reserve a square icon cell from row height, then paint text in the remaining rectangle.
-        let text_color = ctx.control_color(ControlColor::Text);
+        let foreground_role = if self.variant == DisclosureVariant::Header && self.opt.intersects(WidgetOption::FRAME) {
+            AppearanceRole::Button
+        } else {
+            AppearanceRole::DisclosureHeader
+        };
+        let text_color = ctx.foreground(foreground_role);
         ctx.draw_icon(
             if expanded { ctx.style().icons.collapse } else { ctx.style().icons.expand },
             Recti::new(row.x, row.y, row.height, row.height),
@@ -283,7 +288,7 @@ impl Widget for DisclosureHeader {
         let offset = row.height.saturating_sub(ctx.style().padding);
         // text_x = row_x + text_offset; text_width = row_width - text_offset.
         let text_rect = Recti::new(row.x.saturating_add(offset), row.y, row.width.saturating_sub(offset), row.height);
-        ctx.draw_control_text_with_font(ctx.style().font, &self.label, text_rect, ControlColor::Text, self.opt);
+        ctx.draw_control_text_with_font(ctx.style().font, &self.label, text_rect, foreground_role, self.opt);
     }
 
     // Framing belongs to the header sub-rectangle, not the complete descendant allocation.

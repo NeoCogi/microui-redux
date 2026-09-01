@@ -2083,11 +2083,34 @@ impl State {
 
     fn style_color_changed(&mut self, index: &usize, event: &SliderChanged) {
         let color_index = *index / 4;
+        if color_index == 14 {
+            // The editor's compact menu swatch represents the ordinary menu foreground. Preserve
+            // state-specific selected, pressed, disabled, and inactive colors while updating the
+            // Normal entry shared by each concrete menu role.
+            let mut color = self.style.foreground(AppearanceRole::MenuItem, VisualState::Normal);
+            let value = event.value as u8;
+            match *index % 4 {
+                0 => color.r = value,
+                1 => color.g = value,
+                2 => color.b = value,
+                _ => color.a = value,
+            }
+            for role in [
+                AppearanceRole::MenuBar,
+                AppearanceRole::MenuTitle,
+                AppearanceRole::MenuTitleOpen,
+                AppearanceRole::MenuPopup,
+                AppearanceRole::MenuItem,
+                AppearanceRole::MenuItemSelected,
+            ] {
+                self.style.foregrounds.set_state(role, VisualState::Normal, color);
+            }
+            return;
+        }
         let color = match color_index {
             0..=11 => &mut self.style.colors[color_index],
             12 => &mut self.style.focus_color,
             13 => &mut self.style.window_focus_color,
-            14 => &mut self.style.menu_foreground,
             15 => &mut self.style.menu_background,
             _ => return,
         };
@@ -2410,7 +2433,7 @@ impl State {
         let colors = self.style.colors.into_iter().chain([
             self.style.focus_color,
             self.style.window_focus_color,
-            self.style.menu_foreground,
+            self.style.foreground(AppearanceRole::MenuItem, VisualState::Normal),
             self.style.menu_background,
         ]);
         for (i, color) in colors.enumerate() {
@@ -2835,7 +2858,12 @@ impl State {
     }
 
     fn style_window(&mut self, ctx: &mut Context<SelectedBackend, Self>) {
-        let colors = self.style.colors.into_iter().chain([self.style.menu_foreground, self.style.menu_background]);
+        let colors = self.style.colors.into_iter().chain([
+            self.style.focus_color,
+            self.style.window_focus_color,
+            self.style.foreground(AppearanceRole::MenuItem, VisualState::Normal),
+            self.style.menu_background,
+        ]);
         for (swatch, color) in self.style_color_swatch_states.iter().zip(colors) {
             swatch.try_update(|swatch| swatch.set_fill(color)).expect("style swatch state unavailable");
         }

@@ -52,7 +52,7 @@
 //
 //! Atlas-bound UI style values used across the crate.
 
-use super::{AppearanceCatalog, AppearanceRole, Color, ControlColor, FontChoice, FontRole, ThemeIcons, VisualState};
+use super::{AppearanceCatalog, AppearanceRole, Color, ControlColor, FontChoice, FontRole, ForegroundCatalog, ThemeIcons, VisualState};
 use crate::atlas::{AtlasHandle, FontId};
 use crate::render::{NinePatch, SliceInsets};
 
@@ -87,6 +87,11 @@ pub struct Style {
     pub thumb_size: i32,
     /// Typed state tables used by built-in widgets, containers, menus, and window chrome.
     pub appearances: AppearanceCatalog,
+    /// Typed foreground tables resolved with the same semantic roles and states as appearances.
+    ///
+    /// A foreground colors text and semantic glyphs; it never changes background geometry or
+    /// substitutes for an appearance PNG. Theme files can override either half independently.
+    pub foregrounds: ForegroundCatalog,
     /// Accent used for focused widget fills, menu selection, and the universal focus outline.
     ///
     /// Focus is an interaction scope rather than a control-family color, so this named value
@@ -97,26 +102,13 @@ pub struct Style {
     /// Keeping window activation separate lets themes distinguish application chrome from the
     /// focused control within that window even when both defaults use the same accent.
     pub window_focus_color: Color,
-    /// Foreground color used by menu bars, menu items, and cascading submenu items.
-    pub menu_foreground: Color,
     /// Background color used by menu bars, popup menus, and cascading submenus.
     pub menu_background: Color,
-    /// Foreground used for built-in widget text and semantic icons in a deactivated window.
-    ///
-    /// Window activation is independent from widget focus and enabled state. A separate color lets
-    /// classic themes subdue a complete inactive hierarchy without presenting its controls as
-    /// disabled or mutating the ordinary [`Self::colors`] palette.
-    pub inactive_text_color: Color,
     /// Shared flat fallback fill used by backgrounds and controls in a deactivated window.
     ///
     /// Image-backed themes normally replace individual Inactive patches, while this value keeps
     /// omitted roles and entirely flat themes visually coherent without requiring a PNG.
     pub inactive_background_color: Color,
-    /// Foreground used for title text and caption symbols in deactivated window chrome.
-    ///
-    /// This remains separate from [`Self::inactive_text_color`] because classic systems commonly
-    /// use different contrast rules for a title strip and for controls in the client area.
-    pub inactive_title_text_color: Color,
     /// Palette of [`crate::ControlColor`] entries.
     pub colors: [Color; 12],
 }
@@ -152,6 +144,13 @@ impl Style {
         let window_focus_color = Color { r: 0, g: 120, b: 215, a: 255 };
         let menu_background = Color { r: 50, g: 50, b: 50, a: 255 };
         let inactive_background_color = colors[ControlColor::WindowBG as usize];
+        let foregrounds = ForegroundCatalog::from_flat_palette(
+            colors[ControlColor::Text as usize],
+            colors[ControlColor::TitleText as usize],
+            Color { r: 230, g: 230, b: 230, a: 255 },
+            colors[ControlColor::Text as usize],
+            colors[ControlColor::TitleText as usize],
+        );
         // Build the catalog from the same concrete flat values stored below. JSON theme loading
         // follows this identical fallback constructor before replacing explicitly supplied PNGs.
         let appearances = AppearanceCatalog::from_flat_palette(
@@ -177,13 +176,11 @@ impl Style {
             scrollbar_size: 12,
             thumb_size: 8,
             appearances,
+            foregrounds,
             focus_color,
             window_focus_color,
-            menu_foreground: Color { r: 230, g: 230, b: 230, a: 255 },
             menu_background,
-            inactive_text_color: colors[ControlColor::Text as usize],
             inactive_background_color,
-            inactive_title_text_color: colors[ControlColor::TitleText as usize],
             colors,
         }
     }
@@ -212,6 +209,12 @@ impl Style {
     pub fn appearance(&self, role: AppearanceRole, state: VisualState) -> NinePatch {
         // AppearanceCatalog guarantees both enum-indexed tables are complete.
         self.appearances.resolve(role, state)
+    }
+
+    /// Returns the exact foreground assigned to one semantic role and visual state.
+    pub fn foreground(&self, role: AppearanceRole, state: VisualState) -> Color {
+        // ForegroundCatalog guarantees the same total enum-indexed lookup contract as appearances.
+        self.foregrounds.resolve(role, state)
     }
 
     /// Returns the concrete font ID for the provided semantic role.

@@ -59,7 +59,7 @@ use crate::math::RectExt;
 use crate::render::{DisplayList, Painter, TextureId};
 use crate::input::{Modifiers, MouseButton};
 use crate::{KeyboardAction, KeyboardBehavior, WidgetOption};
-use crate::theme::{AppearanceRole, Color, ControlColor, Style, VisualState};
+use crate::theme::{AppearanceRole, Color, Style, VisualState};
 use crate::ui_node::text_layout::control_text_position_with_font;
 
 use super::UiInputEvent;
@@ -438,8 +438,8 @@ impl<'a> WidgetPaintCtx<'a> {
 
     /// Draws an atlas icon through a widget-local painter.
     pub(crate) fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
-        // Built-in icons participate in whole-window deactivation just like their adjacent text.
-        let color = if self.window_active { color } else { self.common.style.inactive_text_color };
+        // Callers resolve a semantic foreground before reaching this primitive, so explicit image
+        // tints and role-specific inactive colors are preserved exactly.
         self.painter().icon(id, rect, color);
     }
 
@@ -484,34 +484,37 @@ impl<'a> WidgetPaintCtx<'a> {
         let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch);
     }
 
-    /// Resolves one semantic control color for the containing window's activation state.
-    pub(crate) fn control_color(&self, color: ControlColor) -> Color {
-        // Built-in text and icons use the dedicated inactive foreground. Other palette roles retain
-        // their exact value because their deactivated backgrounds come from Inactive nine-patches.
-        if !self.window_active && matches!(color, ControlColor::Text | ControlColor::TitleText) {
-            self.common.style.inactive_text_color
-        } else {
-            self.common.style.colors[color as usize]
-        }
+    /// Resolves a role foreground using this widget's complete interaction state.
+    pub(crate) fn foreground(&self, role: AppearanceRole) -> Color {
+        // visual_state already gives deactivation precedence over retained hover, focus, and press.
+        self.common.style.foreground(role, self.visual_state())
     }
 
-    /// Draws aligned control text with an explicit font.
-    pub(crate) fn draw_control_text_with_font(&mut self, font: FontId, text: &str, rect: Recti, colorid: ControlColor, opt: WidgetOption) {
-        let color = self.control_color(colorid);
+    /// Resolves a role foreground using a composite control's explicit interaction state.
+    pub(crate) fn foreground_state(&self, role: AppearanceRole, state: VisualState) -> Color {
+        // A deactivated root always selects Inactive even when a menu or selected row retains an
+        // independently computed active-window state.
+        let state = if self.window_active { state } else { VisualState::Inactive };
+        self.common.style.foreground(role, state)
+    }
+
+    /// Draws aligned control text using the foreground for one semantic appearance role.
+    pub(crate) fn draw_control_text_with_font(&mut self, font: FontId, text: &str, rect: Recti, role: AppearanceRole, opt: WidgetOption) {
+        // Resolve the same state as the adjacent appearance before mutable display-list recording.
+        let color = self.foreground(role);
         self.draw_control_text_color_with_font(font, text, rect, color, opt);
     }
 
     /// Draws aligned control text with an explicit font and resolved color.
     ///
-    /// Most built-in controls select one complete semantic palette role and should continue to use
+    /// Most built-in controls select one complete semantic appearance role and should continue to use
     /// [`Self::draw_control_text_with_font`]. Composite controls such as menu panels need to derive
     /// a disabled-text color from that role while retaining the same padding, alignment, clipping,
     /// and glyph-placement rules. Keeping that variation here prevents each composite from
     /// duplicating the authoritative control-text geometry.
     pub(crate) fn draw_control_text_color_with_font(&mut self, font: FontId, text: &str, rect: Recti, color: Color, opt: WidgetOption) {
-        // All built-in control text follows top-level activation even when a composite supplied an
-        // explicit enabled, selected, or disabled foreground color for its active presentation.
-        let color = if self.window_active { color } else { self.common.style.inactive_text_color };
+        // Composite callers have already resolved an exact role/state foreground. This primitive
+        // owns only authoritative text geometry, clipping, and recording.
         let pos = control_text_position_with_font(self.common.style, self.common.atlas, font, text, rect, opt);
         let mut painter = self.painter();
         painter.with_clip(rect, |painter| painter.text(font, text, pos, color));

@@ -255,6 +255,130 @@ pub struct StatefulAppearance {
     patches: [NinePatch; VisualState::COUNT],
 }
 
+/// Complete foreground-color table for one semantic appearance role.
+///
+/// Text, semantic icons, check marks, and menu arrows use the same role and interaction state as
+/// their adjacent nine-patch. Keeping the foreground table concrete and fixed-size prevents a
+/// selected menu row, disabled input, or inactive caption from falling back to unrelated global
+/// color exceptions.
+#[derive(Copy, Clone)]
+pub struct StatefulColor {
+    /// Fixed state-indexed color table stored in [`VisualState`] discriminant order.
+    colors: [Color; VisualState::COUNT],
+}
+
+impl StatefulColor {
+    /// Creates a complete state table that initially uses `color` for every interaction state.
+    pub const fn all(color: Color) -> Self {
+        // Repetition makes every programmatically constructed role total before selected states
+        // are customized by application code or a theme document.
+        Self { colors: [color; VisualState::COUNT] }
+    }
+
+    /// Returns the exact foreground assigned to `state`.
+    pub const fn get(self, state: VisualState) -> Color {
+        // VisualState is contiguous and its final variant defines COUNT, so every enum value is a
+        // valid fixed-array index without a string lookup or fallible branch.
+        self.colors[state as usize]
+    }
+
+    /// Replaces one exact state foreground.
+    pub fn set(&mut self, state: VisualState, color: Color) {
+        // The typed enum keeps invalid numeric state slots outside the public API.
+        self.colors[state as usize] = color;
+    }
+}
+
+/// Cheaply cloneable typed catalog containing foreground colors for every appearance role.
+#[derive(Clone)]
+pub struct ForegroundCatalog {
+    /// Copy-on-write role table shared by cloned styles and detached theme variants.
+    entries: Arc<[StatefulColor; AppearanceRole::COUNT]>,
+}
+
+impl ForegroundCatalog {
+    /// Creates a complete catalog using one state table for every semantic role.
+    pub fn new(default: StatefulColor) -> Self {
+        // A fixed array guarantees total role lookup, while Arc preserves cheap Style cloning and
+        // copy-on-write value semantics for live style editors.
+        Self {
+            entries: Arc::new([default; AppearanceRole::COUNT]),
+        }
+    }
+
+    /// Returns the complete foreground table for `role`.
+    pub fn get(&self, role: AppearanceRole) -> StatefulColor {
+        // AppearanceRole discriminants are contiguous and catalog construction always allocates
+        // exactly COUNT entries.
+        self.entries[role as usize]
+    }
+
+    /// Replaces one role's complete foreground table.
+    pub fn set(&mut self, role: AppearanceRole, colors: StatefulColor) {
+        // Clone shared storage only when a caller actually customizes a style.
+        Arc::make_mut(&mut self.entries)[role as usize] = colors;
+    }
+
+    /// Replaces one exact role/state foreground without exposing catalog storage.
+    pub fn set_state(&mut self, role: AppearanceRole, state: VisualState, color: Color) {
+        // Read-modify-write remains a single typed operation and preserves every sibling state.
+        let mut colors = self.get(role);
+        colors.set(state, color);
+        self.set(role, colors);
+    }
+
+    /// Resolves one exact role and interaction-state foreground.
+    pub fn resolve(&self, role: AppearanceRole, state: VisualState) -> Color {
+        // Both indices are exhaustive enums, so paint-time foreground resolution cannot fail.
+        self.get(role).get(state)
+    }
+
+    /// Builds the flat fallback catalog used before optional JSON state overrides are applied.
+    pub(crate) fn from_flat_palette(text: Color, title_text: Color, menu_text: Color, inactive_text: Color, inactive_title_text: Color) -> Self {
+        // Disabled fallback text preserves the ordinary hue at reduced opacity, matching the old
+        // menu behavior while making that result a concrete state that themes can replace.
+        let mut disabled_text = text;
+        disabled_text.a = ((u16::from(disabled_text.a) * 45) / 100).max(1) as u8;
+        let mut disabled_menu_text = menu_text;
+        disabled_menu_text.a = ((u16::from(disabled_menu_text.a) * 45) / 100).max(1) as u8;
+
+        let mut body = StatefulColor::all(text);
+        body.set(VisualState::Disabled, disabled_text);
+        body.set(VisualState::Inactive, inactive_text);
+        let mut menu = StatefulColor::all(menu_text);
+        menu.set(VisualState::Disabled, disabled_menu_text);
+        menu.set(VisualState::Inactive, inactive_text);
+        let mut title = StatefulColor::all(title_text);
+        title.set(VisualState::Inactive, inactive_title_text);
+
+        let mut catalog = Self::new(body);
+        // Menu roles share one fallback family but remain independent catalog entries so a theme
+        // can change a selected row without recoloring the bar, popup, or separator.
+        for role in [
+            AppearanceRole::MenuBar,
+            AppearanceRole::MenuTitle,
+            AppearanceRole::MenuTitleOpen,
+            AppearanceRole::MenuPopup,
+            AppearanceRole::MenuItem,
+            AppearanceRole::MenuItemSelected,
+        ] {
+            catalog.set(role, menu);
+        }
+        // Title strips and caption buttons use chrome contrast rather than client-area text.
+        for role in [
+            AppearanceRole::WindowTitle,
+            AppearanceRole::WindowTitleActive,
+            AppearanceRole::WindowCloseButton,
+            AppearanceRole::WindowMinimizeButton,
+            AppearanceRole::WindowMaximizeButton,
+            AppearanceRole::WindowRestoreButton,
+        ] {
+            catalog.set(role, title);
+        }
+        catalog
+    }
+}
+
 impl StatefulAppearance {
     /// Creates a state table that initially uses one patch for every interaction state.
     pub const fn all(patch: NinePatch) -> Self {

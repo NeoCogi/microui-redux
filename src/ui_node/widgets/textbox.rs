@@ -423,7 +423,7 @@ pub(crate) fn textbox_paint(ctx: &mut WidgetPaintCtx<'_>, buf: &str, cursor: usi
 
     if ctx.focused() {
         // Focused editing path clips text/caret to the textbox bounds.
-        let color = ctx.control_color(ControlColor::Text);
+        let color = ctx.foreground(AppearanceRole::TextInput);
         let caret = caret_rect(clamp_i64_to_i32(i64::from(textx) + i64::from(caret_offset)), baseline_y, metrics, r);
         let mut painter = ctx.painter();
         painter.with_clip(r, |painter| {
@@ -431,7 +431,7 @@ pub(crate) fn textbox_paint(ctx: &mut WidgetPaintCtx<'_>, buf: &str, cursor: usi
             painter.fill_rect(caret, color);
         });
     } else {
-        ctx.draw_control_text_with_font(font, buf, r, ControlColor::Text, opt);
+        ctx.draw_control_text_with_font(font, buf, r, AppearanceRole::TextInput, opt);
     }
 }
 

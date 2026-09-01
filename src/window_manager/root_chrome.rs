@@ -39,7 +39,7 @@ use std::fmt;
 
 use crate::math::RectExt;
 use crate::render::Painter;
-use crate::{AppearanceRole, AtlasHandle, ControlColor, Dimensioni, Recti, Style, VisualState, WidgetEventPortHandle, WindowOption};
+use crate::{AppearanceRole, AtlasHandle, Dimensioni, Recti, Style, VisualState, WidgetEventPortHandle, WindowOption};
 
 /// Active pointer gesture owned by manager-rendered window chrome.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -540,11 +540,8 @@ pub(super) fn record_root_overlay(
             text.width = caption_start.saturating_sub(title.x).max(0);
         }
         if text.width > 0 && text.height > 0 {
-            let color = if active {
-                style.colors[ControlColor::TitleText as usize]
-            } else {
-                style.inactive_title_text_color
-            };
+            let state = chrome_state(visual.part_state(RootChromePart::Title));
+            let color = style.foreground(role, state);
             let position = crate::ui_node::text_layout::control_text_position_with_font(style, atlas, style.title_font, name, text, crate::WidgetOption::NONE);
             painter.with_clip(text, |painter| painter.text(style.title_font, name, position, color));
         }
@@ -581,11 +578,7 @@ fn paint_caption_button(painter: &mut Painter<'_>, rect: Recti, button: RootCapt
     let Some(content) = crate::ui_node::frame::paint_internal_frame(painter, rect, style.appearance(role, state)) else {
         return;
     };
-    let color = if window_active {
-        style.colors[ControlColor::TitleText as usize]
-    } else {
-        style.inactive_title_text_color
-    };
+    let color = style.foreground(role, state);
     match button {
         RootCaptionButton::Close => {
             // Close retains the atlas icon already required by every Style and test atlas.

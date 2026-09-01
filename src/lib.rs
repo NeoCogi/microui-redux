@@ -281,7 +281,8 @@ pub mod prelude {
     };
     pub use crate::math::{expand_rect, rect, vec2};
     pub use crate::theme::{
-        AppearanceCatalog, AppearanceRole, Color, ControlColor, FontChoice, FontRole, StatefulAppearance, Style, ThemeIcons, VisualState, color,
+        AppearanceCatalog, AppearanceRole, Color, ControlColor, FontChoice, FontRole, ForegroundCatalog, StatefulAppearance, StatefulColor, Style, ThemeIcons,
+        VisualState, color,
     };
     #[cfg(feature = "theme-json")]
     pub use crate::theme::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};
@@ -312,7 +313,10 @@ pub use image::{ImageError, ImageSource, ImageStorageError, MAX_DECODED_RGBA_BYT
 pub use input::{Key, KeyEvent, KeyState, Modifiers, MouseButton};
 pub use math::{expand_rect, rect, vec2};
 pub use render::{NinePatch, NinePatchCell, NinePatchCells, NinePatchContent, NinePatchImage, SliceInsets, TextureError, TextureId};
-pub use theme::{AppearanceCatalog, AppearanceRole, Color, ControlColor, FontChoice, FontRole, StatefulAppearance, Style, ThemeIcons, VisualState, color};
+pub use theme::{
+    AppearanceCatalog, AppearanceRole, Color, ControlColor, FontChoice, FontRole, ForegroundCatalog, StatefulAppearance, StatefulColor, Style, ThemeIcons,
+    VisualState, color,
+};
 #[cfg(feature = "theme-json")]
 pub use theme::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};
 pub use ui_node::{

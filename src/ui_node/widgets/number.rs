@@ -203,7 +203,7 @@ impl Number {
             ctx.draw_appearance_center(AppearanceRole::TextInput, base);
         }
         let label = number_label(self.value, self.precision);
-        ctx.draw_control_text_with_font(font, label.as_str(), base, ControlColor::Text, self.opt);
+        ctx.draw_control_text_with_font(font, label.as_str(), base, AppearanceRole::TextInput, self.opt);
     }
 }
 

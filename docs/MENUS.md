@@ -173,7 +173,10 @@ also consumes Ctrl+F6 window-cycle chords; window cycling resumes only after the
 
 ## Style and current scope
 
-`Style::menu_foreground` colors menu labels, item text, marks, arrows, and separators.
+The foreground catalog entries for `MenuTitle`, `MenuTitleOpen`, `MenuItem`, and
+`MenuItemSelected` color menu labels, item text, marks, and arrows in the row's exact interaction
+state. `MenuPopup` supplies the separator color. A theme can therefore pair a dark selected PNG or
+flat highlight with a light hovered/focused foreground without changing ordinary menu text.
 `Style::menu_background` fills the persistent bar and popup surfaces. Menu surfaces receive the
 resolved owning window style and paint directly; because they are not widget nodes, they do not run
 a separate menu-node style cascade. `Style::focus_color` fills the current keyboard-selected

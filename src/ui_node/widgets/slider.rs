@@ -296,7 +296,7 @@ impl Slider {
         let thumb = rect(base.x.saturating_add(x), base.y, width, base.height.max(0));
         let _ = ctx.draw_appearance(AppearanceRole::SliderThumb, thumb);
         let label = number_label(self.value, self.precision);
-        ctx.draw_control_text_with_font(font, label.as_str(), base, ControlColor::Text, self.opt);
+        ctx.draw_control_text_with_font(font, label.as_str(), base, AppearanceRole::SliderTrack, self.opt);
     }
 }
 

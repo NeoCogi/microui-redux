@@ -38,7 +38,7 @@ use std::{
 
 use serde::Deserialize;
 
-use super::{AppearanceCatalog, AppearanceRole, Style, VisualState};
+use super::{AppearanceCatalog, AppearanceRole, ForegroundCatalog, Style, VisualState};
 use crate::{Color, ControlColor, ImageError, ImageSource, NinePatch, NinePatchImage, SliceInsets, TextureError, TextureId};
 
 /// Theme-file schema version understood by this crate release.
@@ -254,6 +254,7 @@ impl ThemeDefinition {
         for (name, document) in self.appearances {
             let role = AppearanceRole::from_json_name(name.as_str()).ok_or_else(|| ThemeLoadError::UnknownAppearance { name: name.clone() })?;
             let mut appearance = style.appearances.get(role);
+            let mut foregrounds = style.foregrounds.get(role);
             let destination_insets = document
                 .insets
                 .map(InsetsDocument::into_insets)
@@ -269,6 +270,11 @@ impl ThemeDefinition {
                 let Some(state_document) = state_document else {
                     continue;
                 };
+                if let Some(foreground) = state_document.foreground {
+                    // Foreground overrides are independent from image presence: a flat fallback
+                    // can still use white selected text or a subdued disabled glyph.
+                    foregrounds.set(state, foreground.into_color());
+                }
                 let Some(relative_path) = state_document.png.as_ref() else {
                     continue;
                 };
@@ -302,6 +308,7 @@ impl ThemeDefinition {
                 appearance.set(state, NinePatch::image(destination_insets, image));
             }
             style.appearances.set(role, appearance);
+            style.foregrounds.set(role, foregrounds);
         }
 
         Ok(LoadedTheme::new(self.name, style))
@@ -395,15 +402,30 @@ struct ColorPaletteDocument {
 impl ColorPaletteDocument {
     /// Applies every supplied semantic color to its concrete Style destination.
     fn apply(&self, style: &mut Style) {
-        // Existing ControlColor storage remains public, so map every named schema field explicitly.
+        // Read fallback-only foreground values before changing the palette. Omitted values preserve
+        // the atlas-derived style's corresponding concrete role/state rather than inventing a
+        // second default inside the loader.
+        let menu_foreground = self
+            .menu_foreground
+            .map(ColorDocument::into_color)
+            .unwrap_or_else(|| style.foreground(AppearanceRole::MenuItem, VisualState::Normal));
+        let inactive_text = self
+            .inactive_text
+            .map(ColorDocument::into_color)
+            .unwrap_or_else(|| style.foreground(AppearanceRole::Button, VisualState::Inactive));
+        let inactive_title_text = self
+            .inactive_title_text
+            .map(ColorDocument::into_color)
+            .unwrap_or_else(|| style.foreground(AppearanceRole::WindowTitle, VisualState::Inactive));
+
+        // Existing ControlColor storage remains public, so map every background and base text
+        // field explicitly before rebuilding the typed foreground fallbacks below.
         assign_color(&mut style.colors[ControlColor::Text as usize], self.text);
         assign_color(&mut style.colors[ControlColor::Border as usize], self.border);
         assign_color(&mut style.colors[ControlColor::WindowBG as usize], self.window_background);
         assign_color(&mut style.colors[ControlColor::TitleBG as usize], self.title_background);
         assign_color(&mut style.colors[ControlColor::TitleText as usize], self.title_text);
-        assign_color(&mut style.inactive_text_color, self.inactive_text);
         assign_color(&mut style.inactive_background_color, self.inactive_background);
-        assign_color(&mut style.inactive_title_text_color, self.inactive_title_text);
         assign_color(&mut style.colors[ControlColor::PanelBG as usize], self.panel_background);
         assign_color(&mut style.colors[ControlColor::Button as usize], self.button);
         assign_color(&mut style.colors[ControlColor::ButtonHover as usize], self.button_hover);
@@ -413,8 +435,14 @@ impl ColorPaletteDocument {
         assign_color(&mut style.colors[ControlColor::ScrollThumb as usize], self.scrollbar_thumb);
         assign_color(&mut style.focus_color, self.focus);
         assign_color(&mut style.window_focus_color, self.window_focus);
-        assign_color(&mut style.menu_foreground, self.menu_foreground);
         assign_color(&mut style.menu_background, self.menu_background);
+        style.foregrounds = ForegroundCatalog::from_flat_palette(
+            style.colors[ControlColor::Text as usize],
+            style.colors[ControlColor::TitleText as usize],
+            menu_foreground,
+            inactive_text,
+            inactive_title_text,
+        );
     }
 }
 
@@ -463,6 +491,8 @@ impl AppearanceDocument {
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct StateDocument {
+    /// Optional text and semantic-glyph color for this exact role and state.
+    foreground: Option<ColorDocument>,
     /// PNG path relative to the containing JSON file; absence keeps the flat fallback.
     png: Option<PathBuf>,
     /// Source-space PNG slices; defaults to the role's destination insets.
@@ -631,6 +661,37 @@ mod tests {
             crate::NinePatchContent::Flat { cells }
                 if matches!(cells.center, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b) == (7, 8, 9))
         ));
+    }
+
+    /// Verifies one state can replace text and glyph color without supplying background artwork.
+    #[test]
+    fn state_foreground_override_does_not_require_a_png() {
+        let document: ThemeDefinition = serde_json::from_str(
+            r#"{
+                "schema_version": 1,
+                "name": "Foreground states",
+                "style": { "colors": { "menu_foreground": [1, 2, 3, 255] } },
+                "appearances": {
+                    "menu_item": {
+                        "hovered": { "foreground": [250, 251, 252, 255] },
+                        "disabled": { "foreground": [90, 91, 92, 255] }
+                    }
+                }
+            }"#,
+        )
+        .expect("foreground-only states must match the strict schema");
+        let loaded = document
+            .install(Style::from_atlas(&test_atlas()), |_, _, _, _| {
+                panic!("foreground-only theme must not upload a texture")
+            })
+            .expect("foreground-only theme must install");
+
+        let normal = loaded.style().foreground(AppearanceRole::MenuItem, VisualState::Normal);
+        let hovered = loaded.style().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
+        let disabled = loaded.style().foreground(AppearanceRole::MenuItem, VisualState::Disabled);
+        assert_eq!((normal.r, normal.g, normal.b, normal.a), (1, 2, 3, 255));
+        assert_eq!((hovered.r, hovered.g, hovered.b, hovered.a), (250, 251, 252, 255));
+        assert_eq!((disabled.r, disabled.g, disabled.b, disabled.a), (90, 91, 92, 255));
     }
 
     /// Verifies the strict schema rejects misspelled fields instead of silently ignoring them.

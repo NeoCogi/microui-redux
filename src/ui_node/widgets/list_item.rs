@@ -203,13 +203,13 @@ impl ListItem {
             let consumed = icon_width.saturating_add(padding.saturating_mul(2));
             text_rect.x = text_rect.x.saturating_add(consumed);
             text_rect.width = text_rect.width.saturating_sub(consumed).max(0);
-            let color = ctx.control_color(ControlColor::Text);
+            let color = ctx.foreground(AppearanceRole::ListItem);
             ctx.draw_icon(icon, icon_rect, color);
         }
 
         if !self.label.is_empty() {
             let font = ctx.style().resolve_font_choice(self.font);
-            ctx.draw_control_text_with_font(font, &self.label, text_rect, ControlColor::Text, self.opt);
+            ctx.draw_control_text_with_font(font, &self.label, text_rect, AppearanceRole::ListItem, self.opt);
         }
     }
 }
