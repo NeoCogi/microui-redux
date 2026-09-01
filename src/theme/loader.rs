@@ -1056,6 +1056,29 @@ mod tests {
         }
         let selected_text = loaded.style().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
         assert_eq!((selected_text.r, selected_text.g, selected_text.b, selected_text.a), (255, 255, 255, 255));
+        // Checked menu rows retain their marker without becoming permanently highlighted. The
+        // normal patch must therefore remain transparent over the white popup panel, while an
+        // actual hover still selects the authored blue bitmap and contrasting white foreground.
+        let checked_normal = loaded.style().appearance(AppearanceRole::MenuItemSelected, VisualState::Normal);
+        assert!(matches!(
+            checked_normal.content,
+            crate::NinePatchContent::Flat { cells }
+                if matches!(cells.center, crate::NinePatchCell::Empty)
+        ));
+        assert!(matches!(
+            loaded.style().appearance(AppearanceRole::MenuItemSelected, VisualState::Hovered).content,
+            crate::NinePatchContent::Image { .. }
+        ));
+        let checked_normal_text = loaded.style().foreground(AppearanceRole::MenuItemSelected, VisualState::Normal);
+        let checked_hovered_text = loaded.style().foreground(AppearanceRole::MenuItemSelected, VisualState::Hovered);
+        assert_eq!(
+            (checked_normal_text.r, checked_normal_text.g, checked_normal_text.b, checked_normal_text.a),
+            (0, 0, 0, 255)
+        );
+        assert_eq!(
+            (checked_hovered_text.r, checked_hovered_text.g, checked_hovered_text.b, checked_hovered_text.a),
+            (255, 255, 255, 255)
+        );
         let focus = loaded.style().focus_color;
         assert_eq!(
             (focus.r, focus.g, focus.b, focus.a),

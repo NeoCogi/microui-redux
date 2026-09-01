@@ -603,7 +603,10 @@ impl AppearanceCatalog {
             with_disabled(StatefulAppearance::all(framed(menu_background)), framed(disabled_background)),
         );
         catalog.set(AppearanceRole::MenuItem, highlight);
-        catalog.set(AppearanceRole::MenuItemSelected, selected);
+        // A checked or radio-selected menu item differs from an ordinary item by its marker, not
+        // by permanent keyboard-selection paint. Reuse the ordinary interaction ladder so its
+        // normal state exposes the popup background and only hover/focus highlights the row.
+        catalog.set(AppearanceRole::MenuItemSelected, highlight);
         let active_window = StatefulAppearance::all(NinePatch::framed(
             frame_insets.at_least(1),
             window_focus,
