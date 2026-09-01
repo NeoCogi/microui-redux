@@ -218,6 +218,11 @@ impl Style {
             && atlas.contains_font(self.heading_font)
             && atlas.contains_font(self.mono_font)
             && self.icons.belongs_to(atlas)
+            && self
+                .appearances
+                .patches()
+                .filter_map(NinePatch::image_content)
+                .all(|image| atlas.contains_icon(image.icon))
     }
 
     /// Returns normalized structural frame insets shared by measurement and placement.
@@ -297,7 +302,7 @@ mod tests {
 
     /// Verifies every concrete retained capability participates in the ownership predicate.
     #[test]
-    fn belongs_to_rejects_each_foreign_font_and_icon_field_individually() {
+    fn belongs_to_rejects_each_foreign_font_icon_and_appearance_capability() {
         let local_atlas = make_test_atlas(&[(FontRole::Body.atlas_name(), 12)]);
         let foreign_atlas = make_test_atlas(&[(FontRole::Body.atlas_name(), 12)]);
         let local = Style::from_atlas(&local_atlas);
@@ -306,7 +311,7 @@ mod tests {
         // Each candidate differs from the valid local style in exactly one capability. Keeping the
         // cases explicit makes a newly added field fail this regression until belongs_to validates
         // it, without introducing erased reflection or `Any`-based field traversal.
-        let mut candidates: [Style; 13] = std::array::from_fn(|_| local.clone());
+        let mut candidates: [Style; 14] = std::array::from_fn(|_| local.clone());
         candidates[0].font = foreign.font;
         candidates[1].small_font = foreign.small_font;
         candidates[2].title_font = foreign.title_font;
@@ -320,6 +325,13 @@ mod tests {
         candidates[10].icons.open_folder = foreign.icons.open_folder;
         candidates[11].icons.closed_folder = foreign.icons.closed_folder;
         candidates[12].icons.file = foreign.icons.file;
+        candidates[13].appearances.set(
+            AppearanceRole::Button,
+            crate::StatefulAppearance::all(NinePatch::image(
+                SliceInsets::ZERO,
+                crate::NinePatchImage::new(foreign.icons.close, SliceInsets::ZERO, Color { r: 255, g: 255, b: 255, a: 255 }),
+            )),
+        );
 
         for candidate in candidates {
             assert!(!candidate.belongs_to(&local_atlas));

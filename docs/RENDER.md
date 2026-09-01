@@ -318,6 +318,10 @@ icons addressed by atlas-owned `IconId` capabilities. `ThemeIcons::from_atlas`
 resolves the semantic icons used by built-in components, while applications may
 look up other named icons. Like fonts, foreign icon IDs are rejected during
 renderer preflight before backend acquisition.
+Image-backed `NinePatch` values also retain an `IconId`. The executor resolves that atlas rectangle,
+divides it with the patch's source insets, and submits all visible cells through the same atlas
+quad batch as text, icons, and flat fills. Theme state artwork therefore does not introduce an
+external-texture flush or one backend job per patch cell.
 General images are external textures owned through `Context` and addressed
 directly by `TextureId`; `ImageSource` describes upload input, but there is no
 persistent image-resource wrapper or atlas-slot path.

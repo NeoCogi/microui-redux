@@ -33,7 +33,7 @@
 //! therefore describe a background with nine typed cells, the display list can retain that exact
 //! description, and the renderer can expand it without consulting a widget or theme registry.
 
-use crate::{Color, Recti, TextureId};
+use crate::{Color, IconId, Recti};
 
 /// Insets separating the fixed outer rows and columns from a stretchable center cell.
 ///
@@ -185,28 +185,27 @@ pub struct NinePatchCells {
     pub bottom_right: NinePatchCell,
 }
 
-/// One texture and source rectangle divided into a three-by-three image grid.
+/// One atlas bitmap divided into a three-by-three image grid.
 ///
-/// Source insets are measured in texture pixels and may differ from destination [`SliceInsets`].
-/// This lets a theme retain crisp one-pixel artwork while requesting a thicker interactive border.
+/// Source insets are measured inside the referenced atlas icon and may differ from destination
+/// [`SliceInsets`]. The opaque [`IconId`] keeps theme artwork tied to its exact immutable atlas,
+/// while ordinary application images continue to use the separate external-texture draw path.
 #[derive(Copy, Clone)]
 pub struct NinePatchImage {
-    /// Context-owned texture containing all nine source cells.
-    pub texture: TextureId,
-    /// Complete source rectangle inside `texture`.
-    pub source: Recti,
-    /// Fixed source rows and columns measured inside `source`.
+    /// Atlas capability whose rectangle contains all nine source cells.
+    pub icon: IconId,
+    /// Fixed source rows and columns measured inside the icon rectangle.
     pub source_insets: SliceInsets,
     /// RGBA modulation applied uniformly to all nine sampled cells.
     pub tint: Color,
 }
 
 impl NinePatchImage {
-    /// Creates one explicitly sliced image description.
-    pub const fn new(texture: TextureId, source: Recti, source_insets: SliceInsets, tint: Color) -> Self {
-        // Retain exact source input so the renderer and validation layer can apply their respective
-        // clipping and ownership policies without a second image-description type.
-        Self { texture, source, source_insets, tint }
+    /// Creates one explicitly sliced atlas-image description.
+    pub const fn new(icon: IconId, source_insets: SliceInsets, tint: Color) -> Self {
+        // Retain the capability rather than raw UV coordinates. Atlas ownership validation and
+        // rectangle lookup can then remain centralized at Style and renderer boundaries.
+        Self { icon, source_insets, tint }
     }
 }
 
@@ -421,15 +420,15 @@ impl NinePatch {
                 // A border-only image also requires at least one positive destination inset. With
                 // four zero insets all eight border destinations collapse to empty rectangles.
                 let has_destination = self.center_visible || self.insets.maximum_component() > 0;
-                has_destination && image.source.width > 0 && image.source.height > 0 && image.tint.a != 0
+                has_destination && image.tint.a != 0
             }
         }
     }
 
-    /// Returns the image payload when this patch references an external texture.
+    /// Returns the image payload when this patch references atlas-backed artwork.
     pub(crate) const fn image_content(self) -> Option<NinePatchImage> {
         // The exhaustive match gives renderer preflight a typed ownership query without inspecting
-        // private enum layout or maintaining a parallel list of theme textures.
+        // private enum layout or maintaining a parallel list of theme atlas regions.
         match self.content {
             NinePatchContent::Flat { .. } => None,
             NinePatchContent::Image { image } => Some(image),
@@ -569,15 +568,15 @@ mod tests {
     /// Verifies replacing the flat center never destroys a complete image-backed patch.
     #[test]
     fn image_patch_ignores_flat_center_replacement() {
-        let texture = TextureId::new_test(7, 9, 11);
-        let image = NinePatchImage::new(texture, Recti::new(0, 0, 9, 11), SliceInsets::uniform(2), color(255, 255, 255, 255));
+        let atlas = crate::test_support::test_atlas();
+        let icon = atlas.icon_id("close").expect("test atlas must contain the close icon");
+        let image = NinePatchImage::new(icon, SliceInsets::uniform(2), color(255, 255, 255, 255));
         let patch = NinePatch::image(SliceInsets::uniform(3), image).with_center(Some(color(1, 2, 3, 255)));
 
         let Some(resolved) = patch.image_content() else {
             panic!("image content was replaced by a flat center");
         };
-        assert_eq!(resolved.texture, texture);
-        assert_eq!(resolved.source.width, 9);
+        assert_eq!(resolved.icon, icon);
         assert_eq!(resolved.source_insets.left, 2);
     }
 

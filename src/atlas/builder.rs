@@ -264,6 +264,66 @@ impl Builder {
         Ok(builder)
     }
 
+    /// Creates a builder by repacking every named icon and baked font from an existing atlas.
+    ///
+    /// Theme definitions that retain the application's typography still need a new immutable atlas
+    /// when they add state artwork. Repacking both resource tables gives those themes room for new
+    /// bitmap tiles without requiring the original font files or weakening atlas-ID provenance.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the requested dimensions are invalid or cannot contain all copied
+    /// icons, glyph bitmaps, and metadata. The source atlas remains immutable on every failure.
+    pub fn from_atlas_with_size(atlas: &AtlasHandle, width: usize, height: usize) -> Result<Builder, BuilderError> {
+        // Begin with the existing icon-copy path so required semantic icon names, including the
+        // opaque white tile, retain their table order and exact pixels in the new allocation.
+        let mut builder = Self::from_atlas_icons_with_size(atlas, width, height)?;
+        let source_pixels = atlas.pixels_clone();
+        let source_width = atlas.width();
+
+        for (name, source_font) in &atlas.0.fonts {
+            // HashMap traversal is intentionally normalized by Unicode scalar value. Stable copy
+            // order keeps atlas output reproducible and gives the rectangle packer deterministic
+            // input even when the source atlas originated from serialized metadata.
+            let mut source_entries = source_font.entries.iter().collect::<Vec<_>>();
+            source_entries.sort_unstable_by_key(|(character, _)| **character);
+            let mut entries = Vec::with_capacity(source_entries.len());
+            for (&character, source_entry) in source_entries {
+                let source_rectangle = source_entry.rect;
+                let glyph_width = usize::try_from(source_rectangle.width).expect("validated source glyph width must be nonnegative");
+                let glyph_height = usize::try_from(source_rectangle.height).expect("validated source glyph height must be nonnegative");
+                let mut glyph_pixels = Vec::with_capacity(glyph_width.saturating_mul(glyph_height));
+                let source_left = usize::try_from(source_rectangle.x).expect("validated source glyph x must be nonnegative");
+                let source_top = usize::try_from(source_rectangle.y).expect("validated source glyph y must be nonnegative");
+                for row in 0..glyph_height {
+                    // Atlas validation proves every source row is in bounds. Copying the exact
+                    // glyph rectangle prevents unrelated neighboring atlas pixels from leaking.
+                    let start = (source_top + row) * source_width + source_left;
+                    glyph_pixels.extend_from_slice(&source_pixels[start..start + glyph_width]);
+                }
+                let rectangle = builder.add_tile(glyph_width, glyph_height, glyph_pixels.as_slice())?;
+                entries.push((
+                    character,
+                    CharEntry {
+                        offset: source_entry.offset,
+                        advance: source_entry.advance,
+                        rect: rectangle,
+                    },
+                ));
+            }
+
+            let candidate = FontCandidate {
+                line_size: source_font.line_size,
+                baseline: source_font.baseline,
+                font_size: source_font.font_size,
+                entries,
+            };
+            builder.candidate.validate_font(name, &candidate)?;
+            builder.candidate.fonts.push((name.clone(), candidate));
+        }
+        Ok(builder)
+    }
+
     /// Adds an icon from the given image path and returns its [`IconId`].
     ///
     /// # Errors
@@ -298,7 +358,7 @@ impl Builder {
     ///
     /// File-backed and atlas-copy insertion share this boundary so duplicate checks, transactional
     /// packing, candidate metadata, and capability provenance cannot diverge.
-    fn add_icon_pixels_named(&mut self, name: &str, width: usize, height: usize, pixels: &[Color4b]) -> Result<IconId, BuilderError> {
+    pub(crate) fn add_icon_pixels_named(&mut self, name: &str, width: usize, height: usize, pixels: &[Color4b]) -> Result<IconId, BuilderError> {
         if self.candidate.icons.iter().any(|(existing, _)| existing == name) {
             // Name lookup would make one of two equal entries unreachable. Detect the conflict
             // before packing so a failed insertion has no side effects.
@@ -776,6 +836,27 @@ mod tests {
         );
         assert_eq!(replacement.get_font_size(replacement.font_id("body").unwrap()), 14);
         assert_eq!(replacement.clone_font_table().len(), 1);
+    }
+
+    /// Verifies an artwork-only rebuild preserves baked glyph metrics without original font files.
+    #[test]
+    fn complete_atlas_copy_repacks_existing_fonts_and_accepts_new_artwork() {
+        let source = crate::test_support::test_atlas();
+        let source_font = source.font_id("body").expect("source atlas must contain its body font");
+        let mut builder = Builder::from_atlas_with_size(&source, 64, 64).expect("copied test resources must fit the expanded atlas");
+        let pixels = [color4b(7, 8, 9, 255); 4];
+        let artwork = builder
+            .add_icon_pixels_named("@theme/test", 2, 2, &pixels)
+            .expect("theme artwork must fit beside copied resources");
+        let rebuilt = builder.build().expect("complete copied atlas must pass shared validation");
+
+        let rebuilt_font = rebuilt.font_id("body").expect("copied body font name must survive");
+        assert_eq!(rebuilt.get_font_height(rebuilt_font), source.get_font_height(source_font));
+        assert_eq!(rebuilt.get_font_baseline(rebuilt_font), source.get_font_baseline(source_font));
+        assert!(rebuilt.get_char_entry(rebuilt_font, 'a').is_some());
+        assert!(rebuilt.contains_icon(artwork));
+        let artwork_size = rebuilt.get_icon_size(artwork);
+        assert_eq!((artwork_size.width, artwork_size.height), (2, 2));
     }
 
     /// Verifies duplicate resource keys are structural errors detected before opening the supplied

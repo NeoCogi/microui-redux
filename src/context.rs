@@ -576,28 +576,20 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     ///
     /// # Panics
     ///
-    /// Panics when any font or icon capability belongs to another atlas allocation, or when an
-    /// image-backed appearance references a foreign or already-freed texture.
+    /// Panics when any font, semantic icon, or appearance-image capability belongs to another
+    /// atlas allocation.
     pub fn set_style(&mut self, style: Style) {
-        // Reject a mixed-atlas style at the mutation boundary instead of allowing layout or paint
-        // to select a same-slot resource from the wrong atlas.
+        // Style ownership includes fonts, semantic icons, and every image-backed nine-patch, so a
+        // single concrete check covers the complete immutable atlas resource vocabulary.
         assert!(style.belongs_to(&self.renderer.atlas()), "style contains font or icon IDs from another atlas");
-        assert!(
-            style
-                .appearances
-                .patches()
-                .filter_map(crate::NinePatch::image_content)
-                .all(|image| self.renderer.contains_texture(image.texture)),
-            "style contains theme texture IDs not owned by this Context"
-        );
         self.window_manager.set_style(style);
     }
 
     /// Replaces the renderer atlas and installs the matching loaded theme as one transaction.
     ///
     /// The backend uploads the theme atlas before this Context publishes its new Style. If upload
-    /// fails, both the previous renderer atlas and previous Style remain active. File-theme image
-    /// textures must still belong to this Context, just as they do for [`Context::set_style`].
+    /// fails, both the previous renderer atlas and previous Style remain active. Theme artwork is
+    /// baked into that same atlas, so no secondary texture transaction is required.
     ///
     /// # Errors
     ///
@@ -606,21 +598,11 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     ///
     /// # Panics
     ///
-    /// Panics if the bundle's Style does not belong to its own atlas or references a foreign or
-    /// already-freed Context texture.
+    /// Panics if any capability in the bundle's Style does not belong to its own atlas.
     #[cfg(feature = "theme-json")]
     pub fn set_theme(&mut self, theme: &LoadedTheme) -> Result<(), crate::AtlasUploadError> {
         let atlas = theme.atlas();
         assert!(theme.style().belongs_to(&atlas), "theme style contains font or icon IDs from another atlas");
-        assert!(
-            theme
-                .style()
-                .appearances
-                .patches()
-                .filter_map(crate::NinePatch::image_content)
-                .all(|image| self.renderer.contains_texture(image.texture)),
-            "theme style contains texture IDs not owned by this Context"
-        );
         // Renderer commits the backend texture and its CPU lookup cache first. Publishing the
         // cloned Style last makes a returned error a complete no-op at Context level.
         self.renderer.replace_atlas(atlas)?;
@@ -703,40 +685,26 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         }
     }
 
-    /// Loads a versioned JSON theme and every PNG it explicitly assigns to an appearance state.
+    /// Loads a versioned JSON theme and bakes every assigned PNG into its immutable atlas.
     ///
     /// Relative image paths are resolved against the JSON file's directory. Missing PNG entries
     /// remain concrete flat-color patches derived from the document's palette. Successfully
-    /// uploaded textures are owned by this Context for its remaining lifetime, allowing callers to
-    /// retain several [`LoadedTheme`] values and switch their matching atlases and styles safely.
+    /// Each unique PNG path becomes one atlas region, allowing callers to retain several
+    /// [`LoadedTheme`] values and switch their matching atlases and styles safely.
     ///
     /// # Errors
     ///
     /// Returns [`ThemeLoadError`] for definition I/O, strict JSON schema errors, invalid role or
-    /// slice data, font atlas construction, PNG decoding, or backend upload failure. If any image
-    /// fails, every texture uploaded earlier in the same call is destroyed before the error is
-    /// returned. Atlas construction occurs before image upload and never mutates the live backend.
+    /// slice data, font/artwork atlas construction, or PNG decoding. Loading never mutates the live
+    /// backend; only a later [`Context::set_theme`] uploads the completed atlas transactionally.
     #[cfg(feature = "theme-json")]
     pub fn load_theme_file(&mut self, path: impl AsRef<Path>) -> Result<LoadedTheme, ThemeLoadError> {
-        // Build theme typography without mutating the live renderer. This permits applications to
-        // preload several installable bundles and choose one later without repeated file I/O.
+        // Build theme typography and state artwork without mutating the live renderer. This lets
+        // applications preload several bundles and choose one later without repeated file I/O.
         let definition = crate::theme::loader::ThemeDefinition::read(path.as_ref())?;
-        let atlas = definition.build_atlas(&self.renderer.atlas())?;
-        let base = Style::from_atlas(&atlas);
-        let mut uploaded = Vec::new();
-        let result = definition.install(atlas, base, |_, width, height, pixels| {
-            let id = self.renderer.try_load_texture_rgba(width, height, pixels)?;
-            uploaded.push(id);
-            Ok(id)
-        });
-        if result.is_err() {
-            // Installation never publishes a partial Style. Releasing the exact successful prefix
-            // restores renderer state before returning the classified failing asset.
-            for id in uploaded {
-                self.renderer.free_texture(id);
-            }
-        }
-        result
+        let theme_atlas = definition.build_atlas(&self.renderer.atlas())?;
+        let base = Style::from_atlas(theme_atlas.atlas());
+        definition.install(theme_atlas, base)
     }
 }
 
@@ -951,7 +919,7 @@ mod theme_tests {
 
     use super::*;
     use crate::render::{AtlasUploadError, FrameError, RendererFrame, TextureError, Vertex};
-    use crate::test_support::{RenderEvent, recording_backend, test_atlas};
+    use crate::test_support::{recording_backend, test_atlas};
     use std::fs;
 
     /// Minimal backend that can deterministically accept or reject atlas publication.
@@ -1027,9 +995,9 @@ mod theme_tests {
         bytes
     }
 
-    /// Verifies an error after one successful upload destroys that exact partial texture prefix.
+    /// Verifies a failed theme load never mutates backend texture state.
     #[test]
-    fn failed_theme_install_rolls_back_uploaded_pngs() {
+    fn failed_theme_load_leaves_backend_textures_untouched() {
         let directory = tempfile::tempdir().expect("temporary theme directory must be available");
         fs::write(directory.path().join("button.png"), fixture_png(3, 3)).expect("fixture PNG must be writable");
         fs::write(
@@ -1059,23 +1027,10 @@ mod theme_tests {
         };
 
         assert!(matches!(error, ThemeLoadError::ImageRead { path, .. } if path.ends_with("missing.png")));
-        let events = log.snapshot();
-        let created: Vec<_> = events
-            .iter()
-            .filter_map(|event| match event {
-                RenderEvent::CreateTexture { id, .. } => Some(*id),
-                _ => None,
-            })
-            .collect();
-        let destroyed: Vec<_> = events
-            .iter()
-            .filter_map(|event| match event {
-                RenderEvent::DestroyTexture(id) => Some(*id),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(created.len(), 1);
-        assert_eq!(destroyed, created);
+        assert!(
+            log.snapshot().is_empty(),
+            "theme decoding and atlas construction must remain CPU-local until selection"
+        );
     }
 
     /// Verifies a successful selection publishes one matching atlas/style pair to the Context.

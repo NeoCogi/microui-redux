@@ -661,7 +661,7 @@ pub(super) fn record_root_overlay(
             // as disabled heavy frames. Conventional layouts retain their historical visible faces.
             for button in [RootCaptionButton::Minimize, RootCaptionButton::Maximize, RootCaptionButton::Close] {
                 if let Some(rect) = geometry.caption(button) {
-                    paint_caption_button(&mut painter, rect, button, style, chrome_active, enabled, visual);
+                    paint_caption_button(&mut painter, rect, button, style, atlas, chrome_active, enabled, visual);
                 }
             }
         }
@@ -685,6 +685,7 @@ fn paint_caption_button(
     rect: Recti,
     button: RootCaptionButton,
     style: &Style,
+    atlas: &AtlasHandle,
     window_active: bool,
     window_enabled: bool,
     visual: RootChromeVisualState,
@@ -723,8 +724,9 @@ fn paint_caption_button(
         // usable content instead of stretching to fill it. A visible flat glyph still receives the
         // complete content rectangle, keeping programmatic styles concrete and deterministic.
         let glyph_rect = if let Some(image) = glyph.image_content() {
-            let width = image.source.width.max(0).min(content.width.max(0));
-            let height = image.source.height.max(0).min(content.height.max(0));
+            let image_size = atlas.get_icon_size(image.icon);
+            let width = image_size.width.max(0).min(content.width.max(0));
+            let height = image_size.height.max(0).min(content.height.max(0));
             Recti::new(
                 content.x.saturating_add(content.width.saturating_sub(width) / 2),
                 content.y.saturating_add(content.height.saturating_sub(height) / 2),

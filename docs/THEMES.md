@@ -1,17 +1,17 @@
 # JSON themes
 
 The `theme-json` feature is enabled by default. It adds `Context::load_theme_file`, which reads one
-strict, versioned JSON definition and uploads each referenced PNG through that Context's renderer.
-The returned `LoadedTheme` contains a rebuilt font atlas and its complete matching `Style`; install
-both with `context.set_theme(&theme)`. Loading does not change the active renderer, so several
-themes can be prepared before the user selects one. Selection uploads the replacement atlas first
-and publishes the Style only after that backend transaction succeeds.
+strict, versioned JSON definition and bakes each referenced PNG into the theme's immutable atlas.
+The returned `LoadedTheme` contains that rebuilt resource atlas and its complete matching `Style`;
+install both with `context.set_theme(&theme)`. Loading does not change the active renderer, so
+several themes can be prepared before the user selects one. Selection uploads the replacement
+atlas first and publishes the Style only after that backend transaction succeeds.
 
-All PNG paths are relative to the JSON file. Theme textures remain owned by the loading Context, so
-a loaded style cannot be installed in another Context. A failed load destroys every image uploaded
-earlier in that same call.
-Repeated state entries that resolve to the same PNG path share one decoded and uploaded texture;
-their source insets, destination insets, and tints remain independent typed patch metadata.
+All PNG paths are relative to the JSON file. Repeated state entries that resolve to the same path
+share one decoded atlas region; their source insets, destination insets, and tints remain
+independent typed patch metadata. Theme nine-patches therefore join text, icons, and flat fills in
+the ordinary atlas vertex batch. External textures remain reserved for application-owned images.
+A failed load leaves the active renderer and its external textures untouched.
 
 ## Bundled example themes
 
@@ -77,8 +77,11 @@ the theme directories must remain available beside the repository sources at run
 The optional `fonts` object is all-or-nothing. When present, it declares atlas texture dimensions
 and exact file/size recipes for the five semantic roles: `body`, `small`, `title`, `heading`, and
 `mono`. Paths are relative to the JSON file. Loading copies the current atlas's named icons into a
-fresh atlas of the requested size, rasterizes only these declared fonts, and binds the resulting
-font IDs into the theme Style. The bundled classic themes all use this path.
+fresh atlas of the requested size, rasterizes these declared fonts, packs the unique state PNGs,
+and binds the resulting IDs into the theme Style. Without a font recipe, an artwork-bearing theme
+reuses the current atlas dimensions and repacks its existing icons and baked glyphs before adding
+the PNG regions. A flat palette-only theme reuses the current atlas allocation exactly. The
+bundled classic themes all provide explicit font recipes and dimensions.
 
 Atlas-scoped IDs are intentionally concrete capabilities. A widget configured with
 `FontChoice::Id` from the preceding atlas cannot survive a theme switch; use a semantic `FontRole`

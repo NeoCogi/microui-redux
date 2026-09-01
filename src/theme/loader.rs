@@ -30,7 +30,7 @@
 //! Versioned JSON theme decoding and typed appearance installation.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt, fs, io,
     path::{Path, PathBuf},
@@ -44,29 +44,29 @@ use crate::{
         AtlasHandle,
         builder::{Builder, BuilderError},
     },
-    Color, ControlColor, ImageError, ImageSource, NinePatch, NinePatchImage, SliceInsets, TextureError, TextureId,
+    Color, ControlColor, IconId, ImageError, ImageSource, NinePatch, NinePatchImage, SliceInsets,
 };
 
 /// Theme-file schema version understood by this crate release.
 pub const THEME_SCHEMA_VERSION: u32 = 1;
 
-/// A loaded theme with its display name, rebuilt font atlas, and complete resolved style.
+/// A loaded theme with its display name, rebuilt resource atlas, and complete resolved style.
 ///
-/// PNG textures in the style are owned by the Context that loaded the file, while the immutable
-/// atlas is shared by handle. Install this complete bundle through [`crate::Context::set_theme`]
-/// so renderer pixels and atlas-scoped font/icon capabilities change together.
+/// Fonts, semantic icons, and PNG state artwork share one immutable atlas. Install this complete
+/// bundle through [`crate::Context::set_theme`] so renderer pixels and every atlas-scoped
+/// capability change together in one transaction.
 #[derive(Clone)]
 pub struct LoadedTheme {
     /// Human-readable name supplied by the JSON definition.
     name: String,
-    /// Immutable atlas containing copied semantic icons and theme-declared font rasterizations.
+    /// Immutable atlas containing semantic icons, fonts, and deduplicated theme-state artwork.
     atlas: AtlasHandle,
-    /// Atlas- and Context-bound style containing resolved image texture handles.
+    /// Atlas-bound style containing resolved state-artwork capabilities.
     style: Style,
 }
 
 impl LoadedTheme {
-    /// Creates a loaded theme after schema resolution and texture upload have succeeded.
+    /// Creates a loaded theme after schema resolution and atlas construction have succeeded.
     pub(crate) fn new(name: String, atlas: AtlasHandle, style: Style) -> Self {
         // The loader constructs Style from this exact atlas, making the ownership assertion an
         // internal invariant rather than a runtime condition deferred until rendering.
@@ -77,7 +77,8 @@ impl LoadedTheme {
     /// Captures an already resolved atlas/style pair as one installable named theme.
     ///
     /// This is primarily useful for retaining an application's initial flat style beside loaded
-    /// file themes. Image-backed appearances, if any, remain valid only in their owning Context.
+    /// file themes. Image-backed appearances remain valid only with the atlas whose [`IconId`]
+    /// capabilities they retain.
     ///
     /// # Panics
     ///
@@ -94,7 +95,7 @@ impl LoadedTheme {
         self.name.as_str()
     }
 
-    /// Borrows the complete resolved style without transferring texture handles.
+    /// Borrows the complete resolved style without transferring atlas capabilities.
     pub fn style(&self) -> &Style {
         &self.style
     }
@@ -162,16 +163,9 @@ pub enum ThemeLoadError {
         /// Concrete image-layer diagnostic.
         source: ImageError,
     },
-    /// The Context backend rejected a decoded image upload.
-    ImageUpload {
-        /// Fully resolved image path.
-        path: PathBuf,
-        /// Concrete texture-layer diagnostic.
-        source: TextureError,
-    },
-    /// The theme's font files could not be read, rasterized, packed, or structurally finalized.
+    /// The theme's fonts or state artwork could not be packed or structurally finalized.
     AtlasBuild {
-        /// Concrete atlas-builder failure retaining its font path or validation classification.
+        /// Concrete atlas-builder failure retaining its asset or validation classification.
         source: BuilderError,
     },
     /// A resolved font asset path cannot be represented by the string-based atlas builder API.
@@ -206,8 +200,7 @@ impl fmt::Display for ThemeLoadError {
             }
             Self::ImageRead { path, source } => write!(formatter, "failed to read theme PNG {}: {source}", path.display()),
             Self::ImageDecode { path, source } => write!(formatter, "failed to decode theme PNG {}: {source}", path.display()),
-            Self::ImageUpload { path, source } => write!(formatter, "failed to upload theme PNG {}: {source}", path.display()),
-            Self::AtlasBuild { source } => write!(formatter, "failed to build theme font atlas: {source}"),
+            Self::AtlasBuild { source } => write!(formatter, "failed to build theme resource atlas: {source}"),
             Self::FontPathNotUtf8 { path } => write!(formatter, "theme font path is not valid UTF-8: {}", path.display()),
         }
     }
@@ -221,12 +214,32 @@ impl Error for ThemeLoadError {
             Self::DefinitionRead { source, .. } | Self::ImageRead { source, .. } => Some(source),
             Self::DefinitionJson { source, .. } => Some(source),
             Self::ImageDecode { source, .. } => Some(source),
-            Self::ImageUpload { source, .. } => Some(source),
             Self::AtlasBuild { source } => Some(source),
             Self::UnsupportedSchema { .. } | Self::EmptyName | Self::UnknownAppearance { .. } | Self::InvalidInsets { .. } | Self::FontPathNotUtf8 { .. } => {
                 None
             }
         }
+    }
+}
+
+/// One fully constructed theme atlas and the capabilities assigned to unique PNG paths.
+///
+/// Keeping this intermediate concrete prevents installation from rediscovering numeric icon slots
+/// or decoding files a second time. It is private because only a matching [`ThemeDefinition`] may
+/// translate these construction capabilities into semantic appearances.
+pub(crate) struct ThemeAtlas {
+    /// Immutable pixels and metadata ready for renderer installation.
+    atlas: AtlasHandle,
+    /// Fully resolved image paths mapped to their atlas-owned icon capabilities.
+    images: BTreeMap<PathBuf, IconId>,
+}
+
+impl ThemeAtlas {
+    /// Borrows the immutable atlas used to construct the matching base [`Style`].
+    pub(crate) fn atlas(&self) -> &AtlasHandle {
+        // Installation consumes this intermediate later; exposing only a shared handle here keeps
+        // the path-to-capability table inseparable from the atlas that minted its IDs.
+        &self.atlas
     }
 }
 
@@ -271,36 +284,77 @@ impl ThemeDefinition {
         Ok(definition)
     }
 
-    /// Builds the atlas selected by this definition while preserving the base semantic icons.
+    /// Builds the atlas selected by this definition while preserving required base resources.
     ///
-    /// A document without a `fonts` object deliberately reuses the exact base allocation. A
-    /// document that declares fonts starts with copied icons, then rasterizes all five semantic
-    /// roles so no style role can silently retain a foreign FontId.
-    pub(crate) fn build_atlas(&self, base: &AtlasHandle) -> Result<AtlasHandle, ThemeLoadError> {
-        let Some(fonts) = &self.fonts else {
-            return Ok(base.clone());
-        };
-        let mut builder =
-            Builder::from_atlas_icons_with_size(base, fonts.texture_width, fonts.texture_height).map_err(|source| ThemeLoadError::AtlasBuild { source })?;
-        for (role, font) in fonts.entries() {
-            let path = self.directory.join(font.path.as_path());
-            let path_text = path.to_str().ok_or_else(|| ThemeLoadError::FontPathNotUtf8 { path: path.clone() })?;
-            builder
-                .add_font_named(role.atlas_name(), path_text, font.size)
-                .map_err(|source| ThemeLoadError::AtlasBuild { source })?;
+    /// Every unique state PNG is packed once beside fonts and icons. A completely flat document
+    /// without a font recipe can reuse the base allocation exactly; adding artwork without new
+    /// fonts repacks existing glyph bitmaps so the original font files are not required.
+    pub(crate) fn build_atlas(&self, base: &AtlasHandle) -> Result<ThemeAtlas, ThemeLoadError> {
+        let image_paths = self.image_paths();
+        if self.fonts.is_none() && image_paths.is_empty() {
+            // No atlas-visible resource changes are requested, so preserving pointer identity also
+            // lets selecting a palette-only theme avoid an unnecessary backend atlas upload.
+            return Ok(ThemeAtlas {
+                atlas: base.clone(),
+                images: BTreeMap::new(),
+            });
         }
-        builder.build().map_err(|source| ThemeLoadError::AtlasBuild { source })
+
+        let mut decoded_images = Vec::with_capacity(image_paths.len());
+        for path in image_paths {
+            // Validate the complete file set before atlas packing. A missing or malformed later
+            // asset therefore retains its precise path classification even when a compact base
+            // atlas would also be too small for an artwork-only rebuild.
+            let bytes = fs::read(path.as_path()).map_err(|source| ThemeLoadError::ImageRead { path: path.clone(), source })?;
+            let (image_width, image_height, pixels) = crate::load_image_bytes(ImageSource::Png { bytes: bytes.as_slice() })
+                .map_err(|source| ThemeLoadError::ImageDecode { path: path.clone(), source })?;
+            decoded_images.push((path, image_width, image_height, pixels));
+        }
+
+        let (width, height) = self
+            .fonts
+            .as_ref()
+            .map(|fonts| (fonts.texture_width, fonts.texture_height))
+            .unwrap_or_else(|| (base.width(), base.height()));
+        let mut builder = if self.fonts.is_some() {
+            // Explicit theme fonts replace every semantic role, so only application icons survive
+            // from the base allocation before the new recipes are rasterized below.
+            Builder::from_atlas_icons_with_size(base, width, height)
+        } else {
+            // Artwork-only themes retain exact base typography by copying its baked glyphs.
+            Builder::from_atlas_with_size(base, width, height)
+        }
+        .map_err(|source| ThemeLoadError::AtlasBuild { source })?;
+
+        if let Some(fonts) = &self.fonts {
+            for (role, font) in fonts.entries() {
+                let path = self.directory.join(font.path.as_path());
+                let path_text = path.to_str().ok_or_else(|| ThemeLoadError::FontPathNotUtf8 { path: path.clone() })?;
+                builder
+                    .add_font_named(role.atlas_name(), path_text, font.size)
+                    .map_err(|source| ThemeLoadError::AtlasBuild { source })?;
+            }
+        }
+
+        let mut images = BTreeMap::new();
+        for (index, (path, image_width, image_height, pixels)) in decoded_images.into_iter().enumerate() {
+            // The opaque internal name is deterministic, while semantic lookup retains the fully
+            // resolved PathBuf and each appearance retains its own slice and tint metadata.
+            let icon = builder
+                .add_icon_pixels_named(format!("@microui-theme-image/{index}").as_str(), image_width, image_height, pixels.as_slice())
+                .map_err(|source| ThemeLoadError::AtlasBuild { source })?;
+            images.insert(path, icon);
+        }
+
+        let atlas = builder.build().map_err(|source| ThemeLoadError::AtlasBuild { source })?;
+        Ok(ThemeAtlas { atlas, images })
     }
 
-    /// Resolves flat fallbacks and uploads every explicitly supplied PNG through `upload`.
-    pub(crate) fn install(
-        self,
-        atlas: AtlasHandle,
-        mut style: Style,
-        mut upload: impl FnMut(&Path, i32, i32, &[u8]) -> Result<TextureId, TextureError>,
-    ) -> Result<LoadedTheme, ThemeLoadError> {
-        // Installation may only bind appearance textures onto a Style created for this exact
-        // atlas; enforcing that here prevents a LoadedTheme from ever containing mixed resources.
+    /// Resolves flat fallbacks and binds explicitly supplied PNG states to baked atlas regions.
+    pub(crate) fn install(self, theme_atlas: ThemeAtlas, mut style: Style) -> Result<LoadedTheme, ThemeLoadError> {
+        let ThemeAtlas { atlas, images } = theme_atlas;
+        // Installation may only bind appearance icons onto a Style created for this exact atlas;
+        // enforcing that here prevents a LoadedTheme from ever containing mixed resources.
         assert!(style.belongs_to(&atlas), "theme base style contains font or icon IDs from another atlas");
         // Apply palette and metric overrides before constructing fallbacks, so every omitted PNG
         // state reflects the JSON theme's own flat colors rather than the built-in default palette.
@@ -316,11 +370,6 @@ impl ThemeDefinition {
             style.menu_background,
             style.disabled_background_color,
         );
-        // A theme commonly reuses one small bevel PNG across several semantic roles and states.
-        // Cache the Context-owned upload by its fully resolved path while retaining source slices,
-        // destination slices, and tint on each independently constructed NinePatchImage.
-        let mut uploaded_images = BTreeMap::<PathBuf, (i32, i32, TextureId)>::new();
-
         for (name, document) in self.appearances {
             let role = AppearanceRole::from_json_name(name.as_str()).ok_or_else(|| ThemeLoadError::UnknownAppearance { name: name.clone() })?;
             let mut appearance = style.appearances.get(role);
@@ -350,31 +399,16 @@ impl ThemeDefinition {
                 };
                 let path = self.directory.join(relative_path);
                 let source_insets = state_document.source_insets.map(InsetsDocument::into_insets).unwrap_or(destination_insets);
-                let (width, height, texture) = if let Some(&(width, height, texture)) = uploaded_images.get(path.as_path()) {
-                    // Revalidate state-specific source slices even though the shared pixel payload
-                    // has already been decoded and uploaded for another role.
-                    validate_source_insets(name.as_str(), source_insets, width, height)?;
-                    (width, height, texture)
-                } else {
-                    let bytes = fs::read(path.as_path()).map_err(|source| ThemeLoadError::ImageRead { path: path.clone(), source })?;
-                    let (width, height, colors) = crate::load_image_bytes(ImageSource::Png { bytes: bytes.as_slice() })
-                        .map_err(|source| ThemeLoadError::ImageDecode { path: path.clone(), source })?;
-                    // Shared image validation guarantees both dimensions fit i32 and the RGBA byte
-                    // count is bounded before this exact normalization copy.
-                    let width = width as i32;
-                    let height = height as i32;
-                    validate_source_insets(name.as_str(), source_insets, width, height)?;
-                    let pixels: Vec<u8> = colors.into_iter().flat_map(|color| [color.x, color.y, color.z, color.w]).collect();
-                    let texture = upload(path.as_path(), width, height, pixels.as_slice())
-                        .map_err(|source| ThemeLoadError::ImageUpload { path: path.clone(), source })?;
-                    uploaded_images.insert(path.clone(), (width, height, texture));
-                    (width, height, texture)
-                };
+                let icon = *images
+                    .get(path.as_path())
+                    .expect("every declared theme PNG must have one baked atlas capability");
+                let image_size = atlas.get_icon_size(icon);
+                validate_source_insets(name.as_str(), source_insets, image_size.width, image_size.height)?;
                 let tint = state_document
                     .tint
                     .map(ColorDocument::into_color)
                     .unwrap_or(Color { r: 255, g: 255, b: 255, a: 255 });
-                let image = NinePatchImage::new(texture, crate::Recti::new(0, 0, width, height), source_insets, tint);
+                let image = NinePatchImage::new(icon, source_insets, tint);
                 appearance.set(state, NinePatch::image(destination_insets, image));
             }
             style.appearances.set(role, appearance);
@@ -383,6 +417,18 @@ impl ThemeDefinition {
 
         // Retain atlas and style as the only public unit that can be safely selected later.
         Ok(LoadedTheme::new(self.name, atlas, style))
+    }
+
+    /// Returns every fully resolved PNG path in deterministic deduplicated order.
+    fn image_paths(&self) -> BTreeSet<PathBuf> {
+        // Role and state documents retain independent slicing/tint metadata, while one path set is
+        // sufficient for immutable pixel packing. BTreeSet also stabilizes generated atlas names.
+        self.appearances
+            .values()
+            .flat_map(AppearanceDocument::states)
+            .filter_map(|(_, state)| state.and_then(|state| state.png.as_ref()))
+            .map(|relative| self.directory.join(relative))
+            .collect()
     }
 }
 
@@ -750,21 +796,17 @@ mod tests {
     use crate::test_support::test_atlas;
 
     /// Installs one repository-bundled theme through the same filesystem and PNG path as Context.
-    fn install_bundled_theme(relative_path: &str) -> (LoadedTheme, u32) {
+    fn install_bundled_theme(relative_path: &str) -> (LoadedTheme, usize) {
         // Resolve from the Cargo manifest so tests remain independent of the process working dir.
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative_path);
         let definition = ThemeDefinition::read(path.as_path()).expect("bundled theme JSON must remain valid");
-        let atlas = definition.build_atlas(&test_atlas()).expect("bundled theme font atlas must build");
-        let mut uploads = 0_u32;
+        let theme_atlas = definition.build_atlas(&test_atlas()).expect("bundled theme resource atlas must build");
+        let image_count = theme_atlas.images.len();
+        let style = Style::from_atlas(theme_atlas.atlas());
         let loaded = definition
-            .install(atlas.clone(), Style::from_atlas(&atlas), |_, width, height, pixels| {
-                // The loader must present one complete validated RGBA payload for each unique path.
-                uploads += 1;
-                assert_eq!(pixels.len(), width as usize * height as usize * 4);
-                Ok(TextureId::new_test(uploads, width, height))
-            })
-            .expect("bundled theme PNGs must decode and install");
-        (loaded, uploads)
+            .install(theme_atlas, style)
+            .expect("bundled theme PNGs must install from baked regions");
+        (loaded, image_count)
     }
 
     /// Verifies missing state PNGs remain state-specific flat fallbacks after palette replacement.
@@ -788,10 +830,9 @@ mod tests {
         )
         .expect("test definition must match the strict schema");
         let atlas = test_atlas();
-        let style = Style::from_atlas(&atlas);
-        let loaded = document
-            .install(atlas, style, |_, _, _, _| panic!("flat theme must not upload a texture"))
-            .expect("flat-only theme must install");
+        let theme_atlas = document.build_atlas(&atlas).expect("flat theme must retain the base atlas");
+        let style = Style::from_atlas(theme_atlas.atlas());
+        let loaded = document.install(theme_atlas, style).expect("flat-only theme must install");
 
         let normal = loaded.style().appearance(AppearanceRole::Button, VisualState::Normal);
         let hovered = loaded.style().appearance(AppearanceRole::Button, VisualState::Hovered);
@@ -832,11 +873,9 @@ mod tests {
         )
         .expect("foreground-only states must match the strict schema");
         let atlas = test_atlas();
-        let loaded = document
-            .install(atlas.clone(), Style::from_atlas(&atlas), |_, _, _, _| {
-                panic!("foreground-only theme must not upload a texture")
-            })
-            .expect("foreground-only theme must install");
+        let theme_atlas = document.build_atlas(&atlas).expect("foreground-only theme must retain the base atlas");
+        let style = Style::from_atlas(theme_atlas.atlas());
+        let loaded = document.install(theme_atlas, style).expect("foreground-only theme must install");
 
         let normal = loaded.style().foreground(AppearanceRole::MenuItem, VisualState::Normal);
         let hovered = loaded.style().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
@@ -882,10 +921,10 @@ mod tests {
 
     /// Verifies the bundled Windows theme and every original PNG install through the public schema.
     #[test]
-    fn bundled_windows_95_theme_reuses_shared_png_uploads() {
-        let (loaded, uploads) = install_bundled_theme("themes/windows-95/theme.json");
+    fn bundled_windows_95_theme_reuses_shared_png_regions() {
+        let (loaded, images) = install_bundled_theme("themes/windows-95/theme.json");
         assert_eq!(loaded.name(), "Windows 95");
-        assert_eq!(uploads, 11, "each shared PNG path must be uploaded exactly once");
+        assert_eq!(images, 11, "each shared PNG path must be baked exactly once");
         let atlas = loaded.atlas();
         assert_eq!((atlas.width(), atlas.height()), (512, 256));
         assert_eq!(
@@ -909,9 +948,9 @@ mod tests {
     /// Verifies the earlier Windows theme remains a distinct definition with period title artwork.
     #[test]
     fn bundled_windows_311_theme_uses_white_and_blue_title_images() {
-        let (loaded, uploads) = install_bundled_theme("themes/windows-3.11/theme.json");
+        let (loaded, images) = install_bundled_theme("themes/windows-3.11/theme.json");
         assert_eq!(loaded.name(), "Windows 3.11 for Workgroups");
-        assert_eq!(uploads, 21, "each shared PNG path must be uploaded exactly once");
+        assert_eq!(images, 21, "each shared PNG path must be baked exactly once");
         let insets = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (23, 23, 23, 23));
         let border = loaded.style().window_border;
@@ -961,10 +1000,12 @@ mod tests {
             loaded.style().appearance(AppearanceRole::WindowTitle, VisualState::Disabled).content,
             crate::NinePatchContent::Image { .. }
         ));
-        assert!(matches!(
-            loaded.style().appearance(AppearanceRole::WindowMinimizeGlyph, VisualState::Normal).content,
-            crate::NinePatchContent::Image { image } if image.source.width == 9 && image.source.height == 9
-        ));
+        let minimize_glyph = loaded.style().appearance(AppearanceRole::WindowMinimizeGlyph, VisualState::Normal);
+        let crate::NinePatchContent::Image { image: minimize_image } = minimize_glyph.content else {
+            panic!("Windows 3.11 minimize glyph must use baked artwork");
+        };
+        let minimize_size = loaded.atlas().get_icon_size(minimize_image.icon);
+        assert_eq!((minimize_size.width, minimize_size.height), (9, 9));
         // Disabling must preserve the raised caption face authored by the theme. Letting these
         // roles fall back to their flat palette appearance would combine a one-pixel black frame
         // with the role's three-pixel visual insets and produce an incorrect heavy black square.
@@ -979,9 +1020,7 @@ mod tests {
             assert!(matches!(
                 (normal.content, disabled.content),
                 (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: disabled })
-                    if normal.texture == disabled.texture
-                        && (normal.source.x, normal.source.y, normal.source.width, normal.source.height)
-                            == (disabled.source.x, disabled.source.y, disabled.source.width, disabled.source.height)
+                    if normal.icon == disabled.icon
             ));
         }
         let selected_text = loaded.style().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
@@ -990,16 +1029,20 @@ mod tests {
 
     /// Verifies the bundled Mac theme installs its controls, title strips, frame, and grip artwork.
     #[test]
-    fn bundled_mac_os_9_theme_reuses_shared_png_uploads() {
-        let (loaded, uploads) = install_bundled_theme("themes/mac-os-9/theme.json");
+    fn bundled_mac_os_9_theme_reuses_shared_png_regions() {
+        let (loaded, images) = install_bundled_theme("themes/mac-os-9/theme.json");
         assert_eq!(loaded.name(), "Mac OS 9");
-        assert_eq!(uploads, 24, "each shared PNG path must be uploaded exactly once");
+        assert_eq!(images, 24, "each shared PNG path must be baked exactly once");
         assert_eq!(loaded.style().window_chrome_layout, crate::WindowChromeLayout::ClassicMac);
         assert_eq!(loaded.style().title_height, 18);
         let insets = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (3, 3, 3, 3));
         let active_title = loaded.style().appearance(AppearanceRole::WindowTitleActive, VisualState::Pressed);
-        assert!(matches!(active_title.content, crate::NinePatchContent::Image { image } if image.source.width == 8 && image.source.height == 18));
+        let crate::NinePatchContent::Image { image: active_title_image } = active_title.content else {
+            panic!("Mac OS 9 active title must use baked artwork");
+        };
+        let active_title_size = loaded.atlas().get_icon_size(active_title_image.icon);
+        assert_eq!((active_title_size.width, active_title_size.height), (8, 18));
         assert!(matches!(
             loaded.style().appearance(AppearanceRole::Button, VisualState::Disabled).content,
             crate::NinePatchContent::Image { .. }
@@ -1016,23 +1059,30 @@ mod tests {
         assert!(matches!(
             (normal_frame.content, pressed_frame.content),
             (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: pressed })
-                if normal.texture == pressed.texture
+                if normal.icon == pressed.icon
         ));
 
         // The Mac layout consumes complete caption-face images and does not overlay generic
         // Windows glyphs. Pressed artwork remains a distinct upload for visible inset feedback.
         let close = loaded.style().appearance(AppearanceRole::WindowCloseButton, VisualState::Normal);
         let close_pressed = loaded.style().appearance(AppearanceRole::WindowCloseButton, VisualState::Pressed);
-        assert!(matches!(
-            (close.content, close_pressed.content),
-            (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: pressed })
-                if normal.source.width == 12 && normal.source.height == 12 && normal.texture != pressed.texture
-        ));
+        let (crate::NinePatchContent::Image { image: close_image }, crate::NinePatchContent::Image { image: pressed_image }) =
+            (close.content, close_pressed.content)
+        else {
+            panic!("Mac OS 9 close states must use baked artwork");
+        };
+        let close_size = loaded.atlas().get_icon_size(close_image.icon);
+        assert_eq!((close_size.width, close_size.height), (12, 12));
+        assert_ne!(close_image.icon, pressed_image.icon);
 
         // Platinum popup selection uses black image-backed rows with white foreground text, while
         // the popup itself retains its authored thick black and beveled frame.
         let menu_popup = loaded.style().appearance(AppearanceRole::MenuPopup, VisualState::Normal);
-        assert!(matches!(menu_popup.content, crate::NinePatchContent::Image { image } if image.source.width == 7 && image.source.height == 7));
+        let crate::NinePatchContent::Image { image: menu_popup_image } = menu_popup.content else {
+            panic!("Mac OS 9 popup must use baked artwork");
+        };
+        let menu_popup_size = loaded.atlas().get_icon_size(menu_popup_image.icon);
+        assert_eq!((menu_popup_size.width, menu_popup_size.height), (7, 7));
         let selected_text = loaded.style().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
         assert_eq!((selected_text.r, selected_text.g, selected_text.b, selected_text.a), (255, 255, 255, 255));
     }

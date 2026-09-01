@@ -232,12 +232,12 @@ impl<B: RendererBackend> Renderer<B> {
                     return Err(RenderError::UnknownIcon { id: *id, operation_index });
                 }
                 DrawKind::NinePatch { patch, .. } => {
-                    // Flat patches carry no external resource. Image patches use the same ownership
-                    // preflight as ordinary image operations before a backend frame is acquired.
+                    // Theme images are ordinary atlas capabilities. Validate their provenance just
+                    // like standalone icons before a backend frame is acquired.
                     if let Some(image) = patch.image_content()
-                        && !self.textures.contains(&image.texture)
+                        && !self.atlas.contains_icon(image.icon)
                     {
-                        return Err(RenderError::UnknownTexture { id: image.texture, operation_index });
+                        return Err(RenderError::UnknownIcon { id: image.icon, operation_index });
                     }
                 }
                 DrawKind::Image { id, .. } if !self.textures.contains(id) => {
@@ -284,13 +284,6 @@ impl<B: RendererBackend> Renderer<B> {
         self.white_icon_rect = white_icon_rect;
         self.white_uv = (white_icon_min + white_icon_extent * 0.5) / atlas_extent;
         Ok(())
-    }
-
-    /// Reports whether one external texture handle is live in this renderer.
-    pub(crate) fn contains_texture(&self, id: TextureId) -> bool {
-        // Texture identity includes renderer provenance, so one set lookup checks both ownership and
-        // whether the application has explicitly freed the handle.
-        self.textures.contains(&id)
     }
 
     /// Registers one persistent custom renderer specialized for this backend.
@@ -420,20 +413,24 @@ impl<B: RendererBackend> DisplayListExecutor<'_, '_, B> {
                 }
             }
             crate::render::NinePatchContent::Image { image } => {
-                // Close pending atlas work once before the complete image patch. Consecutive cells
-                // then retain their order without manufacturing nine independent semantic ops.
-                self.frame.flush();
-                let sources = crate::render::nine_patch::geometry_with_insets(image.source, image.source_insets);
+                // Theme artwork shares the font/icon atlas and therefore joins the ordinary UI
+                // vertex batch. Expanding nine cells no longer inserts texture switches, heap
+                // allocated backend jobs, or independent draw calls between adjacent controls.
+                let source = self.atlas.get_icon_rect(image.icon);
+                let sources = crate::render::nine_patch::geometry_with_insets(source, image.source_insets);
                 for row in 0..3 {
                     for column in 0..3 {
                         if row == 1 && column == 1 && !patch.center_visible {
                             continue;
                         }
-                        let Some(vertices) = clipped_textured_quad(destinations[row][column], sources[row][column], image.texture.size(), image.tint, clip)
-                        else {
-                            continue;
-                        };
-                        self.frame.draw_texture(image.texture, vertices);
+                        submit_atlas_rect(
+                            &mut self.frame,
+                            self.atlas_dim,
+                            destinations[row][column],
+                            sources[row][column],
+                            image.tint,
+                            clip,
+                        );
                     }
                 }
             }
