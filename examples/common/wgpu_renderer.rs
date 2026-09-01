@@ -589,7 +589,10 @@ impl WgpuRenderer {
         let mesh = &submission.mesh;
         let pvm = &submission.pvm;
 
-        for tri in mesh.indices().chunks_exact(3) {
+        // Interpret only complete index triples; an incomplete tail cannot describe a triangle
+        // and is ignored exactly as it was by the former `chunks_exact` traversal.
+        let (triangles, _) = mesh.indices().as_chunks::<3>();
+        for tri in triangles {
             let idxs = [tri[0] as usize, tri[1] as usize, tri[2] as usize];
             let mut clip_space = [Vec4f::default(); 3];
 

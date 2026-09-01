@@ -677,7 +677,10 @@ impl GLRenderer {
         let indices = mesh.indices();
         let positions = mesh.vertices();
 
-        for tri in indices.chunks_exact(3) {
+        // Interpret only complete index triples; an incomplete tail cannot describe a triangle
+        // and is ignored exactly as it was by the former `chunks_exact` traversal.
+        let (triangles, _) = indices.as_chunks::<3>();
+        for tri in triangles {
             let idxs = [tri[0] as usize, tri[1] as usize, tri[2] as usize];
             let mut clip_space = [Vec4f::default(); 3];
             for (dst, src_idx) in clip_space.iter_mut().zip(&idxs) {
