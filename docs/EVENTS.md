@@ -463,7 +463,14 @@ through `Ui::menu_item` or `Ui::menu_item_mut`; the handle's stable ID selects t
 intervenes. See the [menu guide](MENUS.md) for construction, state mutation, and the shared pointer
 and Windows-style keyboard navigation contract.
 
-```rust,ignore
+```rust
+use microui_redux::prelude::*;
+
+struct Model {
+    file_dialog: FileDialog,
+    last_completion: Option<FileDialogStatus>,
+}
+
 impl Model {
     fn file_dialog_mut(state: &mut Self) -> &mut FileDialog {
         &mut state.file_dialog
@@ -481,17 +488,24 @@ impl Model {
     }
 
     fn file_dialog_completed(&mut self, event: &FileDialogCompleted) {
-        match event.status() {
-            FileDialogStatus::Accepted(result) => self.open_file(&result.file_path),
-            FileDialogStatus::Cancelled => self.note_cancellation(),
-        }
+        self.last_completion = Some(event.status().clone());
     }
 }
 
-let file_dialog = FileDialog::new(&mut ctx, owner_window.id(), Model::file_dialog_mut);
-let completed = file_dialog.completed();
-ctx.subscribe(completed, Model::file_dialog_completed)?;
-let mut model = Model { file_dialog };
+fn install_file_dialog<B: RendererBackend>(
+    context: &mut Context<B, Model>,
+    owner_window: &WindowHandle,
+) -> Model {
+    // The owner is the public stable window capability itself; no numeric window ID is exposed.
+    let file_dialog = FileDialog::new(context, owner_window, Model::file_dialog_mut);
+    context
+        .subscribe(file_dialog.completed(), Model::file_dialog_completed)
+        .expect("the new completion source has no previous subscriber");
+    Model {
+        file_dialog,
+        last_completion: None,
+    }
+}
 ```
 
 Accepted, in-dialog cancelled, title-closed, and explicitly cancelled activations each publish one

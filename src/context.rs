@@ -546,37 +546,10 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// captured [`TypedWidgetHandle`](crate::TypedWidgetHandle) to mutate retained UI during frame
     /// execution is a contract violation rather than a deferred-next-frame update.
     ///
-    /// A callback written for another backend frame type cannot be registered:
-    ///
-    /// ```compile_fail
-    /// use microui_redux::{Context, CustomRenderArgs};
-    /// use microui_redux::render::RendererBackend;
-    ///
-    /// fn register_for_wrong_backend<A, B, F>(context: &mut Context<A>, callback: F)
-    /// where
-    ///     A: RendererBackend,
-    ///     B: RendererBackend,
-    ///     F: for<'frame> FnMut(&mut B::Frame<'frame>, CustomRenderArgs) + 'static,
-    /// {
-    ///     context.register_custom_renderer(callback).unwrap();
-    /// }
-    /// ```
-    ///
-    /// The active frame borrow cannot escape the callback invocation:
-    ///
-    /// ```compile_fail
-    /// use microui_redux::{Context, CustomRenderArgs};
-    /// use microui_redux::render::RendererBackend;
-    ///
-    /// fn retain_frame<B: RendererBackend>(context: &mut Context<B>) {
-    ///     let mut retained = None;
-    ///     context.register_custom_renderer(
-    ///         move |frame: &mut B::Frame<'_>, _args: CustomRenderArgs| {
-    ///             retained = Some(frame);
-    ///         },
-    ///     ).unwrap();
-    /// }
-    /// ```
+    /// A callback written for another backend frame type cannot be registered, and the active frame
+    /// borrow cannot escape one callback invocation. These negative guarantees are checked by the
+    /// diagnostic-matched fixtures under `tests/ui/`; ordinary doctests are unsuitable because any
+    /// unrelated compiler error would also make a `compile_fail` block appear successful.
     pub fn register_custom_renderer<F>(&mut self, callback: F) -> Result<CustomRenderHandle<B>, CustomRenderRegistryError>
     where
         F: for<'frame> FnMut(&mut B::Frame<'frame>, CustomRenderArgs) + 'static,

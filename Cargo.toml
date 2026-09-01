@@ -58,6 +58,7 @@ tempfile = { version = "3.27", optional = true }
 
 [dev-dependencies]
 rand = "0.10"
+trybuild = "1.0"
 
 [[bin]]
 name = "atlas_export"

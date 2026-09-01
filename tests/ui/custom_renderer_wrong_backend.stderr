@@ -1,0 +1,18 @@
+error[E0277]: expected an `FnMut(&mut <A as RendererBackend>::Frame<'frame>, CustomRenderArgs)` closure, found `F`
+  --> tests/ui/custom_renderer_wrong_backend.rs:12:38
+   |
+12 |     context.register_custom_renderer(callback).unwrap();
+   |             ------------------------ ^^^^^^^^ expected an `FnMut(&mut <A as RendererBackend>::Frame<'frame>, CustomRenderArgs)` closure, found `F`
+   |             |
+   |             required by a bound introduced by this call
+   |
+   = note: expected a closure with signature `for<'a, 'frame> fn(&'a mut <A as RendererBackend>::Frame<'frame>, CustomRenderArgs)`
+              found a closure with signature `fn(&mut <B as RendererBackend>::Frame<'_>, CustomRenderArgs)`
+note: required by a bound in `microui_redux::Context::<B, State>::register_custom_renderer`
+  --> src/context.rs
+   |
+   |     pub fn register_custom_renderer<F>(&mut self, callback: F) -> Result<CustomRenderHandle<B>, CustomRenderRegistryError>
+   |            ------------------------ required by a bound in this associated function
+   |     where
+   |         F: for<'frame> FnMut(&mut B::Frame<'frame>, CustomRenderArgs) + 'static,
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `Context::<B, State>::register_custom_renderer`

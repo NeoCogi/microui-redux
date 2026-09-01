@@ -1,0 +1,25 @@
+error[E0521]: borrowed data escapes outside of closure
+  --> tests/ui/custom_renderer_frame_escape.rs:12:13
+   |
+ 9 |     let mut retained = None;
+   |         ------------ `retained` declared here, outside of the closure body
+10 |     context
+11 |         .register_custom_renderer(move |frame: &mut B::Frame<'_>, _args: CustomRenderArgs| {
+   |                                         ----- `frame` is a reference that is only valid in the closure body
+12 |             retained = Some(frame);
+   |             ^^^^^^^^^^^^^^^^^^^^^^ `frame` escapes the closure body here
+
+error[E0521]: borrowed data escapes outside of closure
+  --> tests/ui/custom_renderer_frame_escape.rs:12:13
+   |
+ 9 |     let mut retained = None;
+   |         ------------ `retained` declared here, outside of the closure body
+10 |     context
+11 |         .register_custom_renderer(move |frame: &mut B::Frame<'_>, _args: CustomRenderArgs| {
+   |                                         ----- `frame` is a reference that is only valid in the closure body
+12 |             retained = Some(frame);
+   |             ^^^^^^^^^^^^^^^^^^^^^^ `frame` escapes the closure body here
+   |
+   = note: requirement occurs because of a mutable reference to `<B as RendererBackend>::Frame<'_>`
+   = note: mutable references are invariant over their type parameter
+   = help: see <https://doc.rust-lang.org/nomicon/subtyping.html> for more information about variance
