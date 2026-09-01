@@ -206,7 +206,12 @@ impl DisclosureHeader {
         let padding = style.padding.max(0);
         let vertical_pad = (padding / 2).max(1);
         let font_height = atlas.get_font_height(style.font) as i32;
-        let icon = atlas.get_icon_size(style.icons.expand);
+        // Expansion changes only presentation state, not the header's retained allocation. Reserve
+        // the component-wise maximum of both possible icons so toggling cannot clip a larger
+        // collapse image or require a state-dependent measurement invalidation.
+        let expand_icon = atlas.get_icon_size(style.icons.expand);
+        let collapse_icon = atlas.get_icon_size(style.icons.collapse);
+        let icon = Dimensioni::new(expand_icon.width.max(collapse_icon.width), expand_icon.height.max(collapse_icon.height));
         let text_width = if self.label.is_empty() {
             0
         } else {
@@ -419,6 +424,51 @@ impl Disclosure {
 mod tests {
     use super::*;
 
+    /// Constructs one valid theme atlas whose expanded-state icon is larger than the collapsed one.
+    fn asymmetric_disclosure_atlas() -> AtlasHandle {
+        // Every texel is opaque white so overlapping semantic rectangles remain valid; only the
+        // declared dimensions matter to this measurement regression.
+        let pixels = vec![0xFF; 10 * 5 * 4];
+        let icons = [
+            ("white", Recti::new(0, 0, 1, 1)),
+            ("close", Recti::new(0, 0, 1, 1)),
+            ("expand", Recti::new(0, 0, 1, 1)),
+            ("collapse", Recti::new(0, 0, 10, 5)),
+            ("check", Recti::new(0, 0, 1, 1)),
+            ("expand_down", Recti::new(0, 0, 1, 1)),
+            ("open_folder", Recti::new(0, 0, 1, 1)),
+            ("closed_folder", Recti::new(0, 0, 1, 1)),
+            ("file", Recti::new(0, 0, 1, 1)),
+        ];
+        let glyphs = [(
+            '_',
+            crate::CharEntry {
+                offset: crate::Vec2i::new(0, 0),
+                advance: crate::Vec2i::new(1, 0),
+                rect: Recti::new(0, 0, 1, 1),
+            },
+        )];
+        let fonts = [(
+            "body",
+            crate::FontEntry {
+                line_size: 1,
+                baseline: 1,
+                font_size: 1,
+                entries: &glyphs,
+            },
+        )];
+        let source = crate::AtlasSource {
+            width: 10,
+            height: 5,
+            pixels: &pixels,
+            icons: &icons,
+            fonts: &fonts,
+            format: crate::SourceFormat::Raw,
+        };
+
+        AtlasHandle::try_from(&source).expect("asymmetric disclosure fixture must satisfy the atlas contract")
+    }
+
     #[test]
     fn header_and_tree_preserve_state_and_fixed_structural_children() {
         let (header_state, header) = create_container(DisclosureParameters::header("Header", false, std::iter::empty::<LinearItem>()));
@@ -431,5 +481,21 @@ mod tests {
         let (tree_state, tree) = create_container(DisclosureParameters::tree("Tree", true, std::iter::empty::<LinearItem>()).with_options(custom_opt));
         assert_eq!(tree_state.try_read(Disclosure::is_expanded), Some(true));
         assert_eq!(Node::container(tree).debug_node_count(), 3);
+    }
+
+    /// Verifies either expansion state fits the one state-independent header allocation.
+    #[test]
+    fn header_measurement_reserves_the_larger_expand_or_collapse_icon() {
+        let atlas = asymmetric_disclosure_atlas();
+        let style = Style { padding: 0, ..Style::from_atlas(&atlas) };
+        let (_, container) = create_container(DisclosureParameters::tree("", false, std::iter::empty::<LinearItem>()));
+        let mut root = Node::container(container);
+        let mut runtime = crate::ui_node::UiRuntime::new();
+
+        let preferred = runtime.measure_tree_root(&mut root, &style, &atlas, crate::Constraints::unbounded());
+
+        // The 10x5 collapse icon plus one vertical pixel on each side determines 10x7. Measuring
+        // only the 1x1 expand icon would incorrectly return 3x3 and clip after expansion.
+        assert_eq!((preferred.width, preferred.height), (10, 7));
     }
 }

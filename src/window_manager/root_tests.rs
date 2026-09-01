@@ -187,6 +187,38 @@ impl crate::LeafWidget for DesiredSize {
     }
 }
 
+/// Measurement probe whose preferred width observes a style field omitted by the old cache key.
+struct CompleteStyleMeasureProbe {
+    /// Shared counter used after the uniquely owned probe moves into the retained tree.
+    measures: Rc<Cell<usize>>,
+    /// Stable noninteractive policy returned by reference through [`Widget::widget_opt`].
+    opt: WidgetOption,
+}
+
+impl Widget for CompleteStyleMeasureProbe {
+    /// Returns the probe's fixed interaction policy.
+    fn widget_opt(&self) -> &WidgetOption {
+        &self.opt
+    }
+
+    /// The probe has no eventless or routed semantic work.
+    fn update(&mut self, _ctx: &mut WidgetUpdateCtx<'_>, _event: Option<&UiInputEvent>) {}
+
+    /// Rendering is irrelevant to the measurement-cache contract under test.
+    fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
+}
+
+impl crate::LeafWidget for CompleteStyleMeasureProbe {
+    /// Derives preferred width from the complete public Style passed to custom leaf measurement.
+    fn measure(&self, style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+        // `menu_background` was intentionally absent from MeasurementStyleKey. Observing it here
+        // proves global replacement invalidates custom measurements rather than merely the fields
+        // currently used for sizing by built-in widgets.
+        self.measures.set(self.measures.get() + 1);
+        Dimensioni::new(i32::from(style.menu_background.r).max(1), 10)
+    }
+}
+
 fn desired_size_node(width: i32, height: i32) -> Node {
     Node::widget(DesiredSize(Dimensioni::new(width, height)))
 }
@@ -875,6 +907,37 @@ fn tab_focused_disclosure_uses_focus_fill_in_addition_to_the_shared_outline() {
         5,
         "the disclosure row fill plus the four-rectangle retained outline must use one focus color"
     );
+}
+
+#[test]
+fn global_style_replacement_invalidates_measurements_in_hidden_surfaces() {
+    let measures = Rc::new(Cell::new(0));
+    let probe = Node::widget(CompleteStyleMeasureProbe {
+        measures: measures.clone(),
+        opt: WidgetOption::NO_INTERACT,
+    });
+    let mut ctx = context();
+    let window = ctx.ui().create_window(Window::new("style probe", rect(10, 10, 120, 90), probe));
+    let dimensions = Dimensioni::new(320, 240);
+
+    // Warm the retained entry and prove an unchanged synchronization reuses it.
+    ctx.update_ui(dimensions);
+    let warmed = measures.get();
+    ctx.update_ui(dimensions);
+    assert_eq!(measures.get(), warmed, "unchanged style and constraints must retain the cached preference");
+
+    // Replace only a value that the former partial style key omitted while the tree is hidden.
+    // Revealing it later must not revive the entry measured under the previous complete Style.
+    ctx.ui().set_window_visible(&window, false).unwrap();
+    let mut replacement = *ctx.style();
+    replacement.menu_background.r = replacement.menu_background.r.wrapping_add(1);
+    ctx.set_style(replacement);
+    ctx.update_ui(dimensions);
+    assert_eq!(measures.get(), warmed, "hidden widget trees must not be traversed during the style commit");
+
+    ctx.ui().set_window_visible(&window, true).unwrap();
+    ctx.update_ui(dimensions);
+    assert!(measures.get() > warmed, "revealed content must measure against the replacement Style");
 }
 
 #[test]

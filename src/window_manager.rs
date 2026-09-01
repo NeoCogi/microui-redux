@@ -294,8 +294,11 @@ impl WindowManager {
 
     /// Replaces the resolved style and invalidates geometry measured with the old value.
     pub(crate) fn set_style(&mut self, style: Style) {
-        // Install the style before invalidation so the next update observes one coherent value.
+        // LeafWidget::measure receives the complete Style, including values that built-in widgets
+        // use only while painting. Clear every retained cache rather than maintaining a partial
+        // style fingerprint that cannot represent the public measurement contract.
         self.style = style;
+        self.surfaces.invalidate_widget_measurements();
         self.invalidate_ui_commit();
     }
 

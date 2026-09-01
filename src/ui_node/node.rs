@@ -404,6 +404,23 @@ impl Node {
         measurement_dirty
     }
 
+    /// Invalidates preferred-size entries for this complete retained subtree.
+    ///
+    /// Global style replacement uses this downward traversal because every field of [`Style`] is
+    /// observable by the public [`LeafWidget::measure`] contract. A parent-first style change must
+    /// therefore discard descendant entries even when the changed value is purely visual to the
+    /// built-in widgets or the subtree is currently hidden.
+    pub(crate) fn invalidate_measurement_subtree(&mut self) {
+        // Clear the local bounded cache before descending. The traversal owns every child mutably,
+        // so no parallel generation counter or incomplete projection of Style is needed.
+        self.state.invalidate_measurement();
+        self.with_children_mut(|children| {
+            for child in children.iter_mut() {
+                child.invalidate_measurement_subtree();
+            }
+        });
+    }
+
     /// Reports whether this node or any descendant has uncommitted widget measurement state.
     pub(crate) fn has_measurement_dirty(&self) -> bool {
         self.data.is_measurement_dirty() || self.with_children(|children| children.iter().any(Self::has_measurement_dirty))
