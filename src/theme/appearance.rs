@@ -151,7 +151,6 @@ impl AppearanceRole {
     }
 
     /// Complete role list in catalog index order.
-    #[cfg(feature = "theme-json")]
     pub(crate) const ALL: [Self; Self::COUNT] = [
         Self::GenericFrame,
         Self::Panel,
@@ -336,6 +335,18 @@ impl AppearanceCatalog {
         self.entries.iter().copied().flat_map(StatefulAppearance::patches)
     }
 
+    /// Returns every role's normalized destination insets for retained measurement keys.
+    pub(crate) fn measurement_insets(&self) -> [[i32; 4]; AppearanceRole::COUNT] {
+        // A container measurement can observe any descendant role, so cache identity must include
+        // all structural patch geometry rather than only the generic frame. Flat colors and image
+        // payloads remain paint-only and deliberately do not invalidate preferred dimensions.
+        std::array::from_fn(|index| {
+            let role = AppearanceRole::ALL[index];
+            let insets = self.resolve(role, VisualState::Normal).insets.normalized();
+            [insets.left, insets.top, insets.right, insets.bottom]
+        })
+    }
+
     /// Builds the default catalog whose flat patches preserve the original Style presentation.
     pub(crate) fn from_flat_palette(frame_insets: SliceInsets, colors: [Color; 12], focus: Color, window_focus: Color, menu_background: Color) -> Self {
         // Resolve named palette entries once, then assemble role tables from concrete NinePatch
@@ -384,7 +395,7 @@ impl AppearanceCatalog {
 
         let mut catalog = Self::new(StatefulAppearance::all(NinePatch::solid(transparent)));
         catalog.set(AppearanceRole::GenericFrame, StatefulAppearance::all(hollow));
-        catalog.set(AppearanceRole::Panel, StatefulAppearance::all(solid(colors[ControlColor::PanelBG as usize])));
+        catalog.set(AppearanceRole::Panel, StatefulAppearance::all(framed(colors[ControlColor::PanelBG as usize])));
         catalog.set(AppearanceRole::Button, button);
         catalog.set(AppearanceRole::Checkbox, input);
         catalog.set(AppearanceRole::CheckboxChecked, input);

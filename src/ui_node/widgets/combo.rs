@@ -335,9 +335,6 @@ impl Combo {
     /// Paints the combo header from already-committed retained state.
     fn paint_widget(&self, ctx: &mut WidgetPaintCtx<'_>) {
         let header = ctx.local_rect();
-        // Painting records visuals only; semantic and placement state was finalized during update.
-        ctx.draw_widget_fill(header, ControlColor::Button);
-
         let indicator_size = ctx.atlas().get_icon_size(ctx.style().icons.expand_down);
         let indicator_x = header.x + header.width - indicator_size.width;
         let indicator_y = header.y + ((header.height - indicator_size.height) / 2).max(0);
@@ -349,7 +346,7 @@ impl Combo {
         let font = ctx.style().resolve_font_choice(self.font);
         ctx.draw_control_text_with_font(font, self.label.as_str(), text_rect, ControlColor::Text, self.opt);
 
-        let indicator_content = ctx.draw_widget_internal_frame(indicator, ControlColor::Button);
+        let indicator_content = ctx.draw_appearance(AppearanceRole::Button, indicator);
         let icon_color = ctx.style().colors[ControlColor::Text as usize];
         if let Some(indicator_content) = indicator_content {
             ctx.draw_icon(ctx.style().icons.expand_down, indicator_content, icon_color);
@@ -372,6 +369,11 @@ impl crate::TypedWidget<ComboSubmitted> for Combo {
 impl Widget for Combo {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
+    }
+
+    fn frame_appearance_role(&self) -> AppearanceRole {
+        // Combo headers use a distinct role so themes can separate them from command buttons.
+        AppearanceRole::Combo
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {

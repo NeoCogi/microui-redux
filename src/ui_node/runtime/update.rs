@@ -41,11 +41,11 @@ impl UiRuntime {
         let style = &style;
         // Reconstruct exactly the frame/content coordinate spaces committed during layout. Widgets
         // see content-local geometry even though allocations and inherited clips use other spaces.
-        let framed = node_is_framed(node);
+        let frame_role = node_frame_role(node);
         let screen_rect = parent_transform.resolve(node.state.layout.allocation);
         let screen_origin = Vec2i::new(screen_rect.x, screen_rect.y);
         let local_rect = Recti::new(0, 0, screen_rect.width, screen_rect.height);
-        let frame_geometry = crate::ui_node::frame::frame_geometry(local_rect, framed, style);
+        let frame_geometry = crate::ui_node::frame::frame_geometry(local_rect, frame_role, style);
         let content_rect = frame_geometry.content_or_empty();
         let screen_clip = parent_transform.clip.positive_intersection(screen_rect).unwrap_or_default();
         let child_transform = parent_transform.push(node.state.layout);

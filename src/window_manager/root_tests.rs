@@ -32,12 +32,12 @@ use super::*;
 
 use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, test_atlas, test_style};
 use crate::{
-    color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Combo, ComboParameters, ComboSubmitted, Custom, Color,
-    CustomParameters, Constraints, Context, DecimalPrecision, Dimensioni, Disclosure, DisclosureParameters, Ui, Grid, GridParameters, Key, KeyEvent,
-    KeyboardBehavior, Linear, LinearItem, LinearParameters, Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted, MouseButton, Node,
-    ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Slider, SliderParameters, Style, TextArea, TextAreaParameters, Textbox,
-    TextboxChanged, TextBlock, TextBlockParameters, TextboxParameters, TrackSize, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx,
-    WidgetUpdateCtx, Modifiers,
+    color, rect, AppearanceRole, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Combo, ComboParameters, ComboSubmitted,
+    ControlColor, Custom, Color, CustomParameters, Constraints, Context, DecimalPrecision, Dimensioni, Disclosure, DisclosureParameters, Ui, Grid,
+    GridParameters, Key, KeyEvent, KeyboardBehavior, Linear, LinearItem, LinearParameters, Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters,
+    MenuItemSubmitted, MouseButton, Node, NinePatch, ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Slider,
+    SliderParameters, StatefulAppearance, Style, TextArea, TextAreaParameters, Textbox, TextboxChanged, TextBlock, TextBlockParameters, TextboxParameters,
+    TrackSize, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, VisualState, WidgetUpdateCtx, Modifiers,
 };
 use crate::render::{FrameInfo, RenderError};
 use std::{
@@ -817,11 +817,21 @@ fn active_window_and_only_its_remembered_widget_use_style_focus_accents() {
     // Preserve one atlas identity across backend construction and the customized Style so the
     // focus-color assertions cannot accidentally rely on globally meaningful resource slots.
     let atlas = test_atlas();
-    let style = Style {
+    let mut style = Style {
         focus_color: color(7, 17, 29, 255),
         window_focus_color: color(31, 47, 61, 255),
         ..test_style(&atlas)
     };
+    let active_frame = NinePatch::framed(
+        style.appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets,
+        style.window_focus_color,
+        Some(style.colors[ControlColor::WindowBG as usize]),
+    );
+    style.appearances.set(AppearanceRole::WindowFrameActive, StatefulAppearance::all(active_frame));
+    style.appearances.set(
+        AppearanceRole::WindowTitleActive,
+        StatefulAppearance::all(NinePatch::solid(style.window_focus_color)),
+    );
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
     ctx.set_style(style.clone());
@@ -883,11 +893,15 @@ fn active_window_and_only_its_remembered_widget_use_style_focus_accents() {
 fn tab_focused_disclosure_uses_focus_fill_in_addition_to_the_shared_outline() {
     // Resolve the customized palette from the exact atlas moved into the recording backend.
     let atlas = test_atlas();
-    let style = Style {
+    let mut style = Style {
         focus_color: color(67, 83, 101, 255),
         window_focus_color: color(109, 127, 149, 255),
         ..test_style(&atlas)
     };
+    let row = style.appearances.get(AppearanceRole::DisclosureHeader);
+    let mut focused_row = row;
+    focused_row.set(VisualState::Focused, NinePatch::solid(style.focus_color));
+    style.appearances.set(AppearanceRole::DisclosureHeader, focused_row);
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
     ctx.set_style(style.clone());

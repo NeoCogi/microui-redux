@@ -31,8 +31,8 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    AtlasHandle, ChildParticipation, Container, ContainerWidget, ControlColor, Dimensioni, MeasureCtx, Recti, Style, TypedWidgetHandle, UiInputEvent, Widget,
-    WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
+    AppearanceRole, AtlasHandle, ChildParticipation, Container, ContainerWidget, ControlColor, Dimensioni, MeasureCtx, Recti, Style, TypedWidgetHandle,
+    UiInputEvent, VisualState, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
 use super::{Children, ContainerLayoutCtx, LinearItem, Node};
@@ -223,7 +223,7 @@ impl DisclosureHeader {
         let content = Dimensioni::new(content_width, content_height);
         // A header frame is internal to this child, so preferred size must include its inset here.
         let frame = if self.opt.intersects(WidgetOption::FRAME) {
-            style.frame_insets()
+            style.appearance(AppearanceRole::Button, VisualState::Normal).insets.normalized()
         } else {
             crate::SliceInsets::ZERO
         };
@@ -261,30 +261,15 @@ impl Widget for DisclosureHeader {
         let mut row = ctx.local_rect();
         match self.variant {
             DisclosureVariant::Header => {
-                // Keyboard focus wins over simultaneous pointer hover, matching ordinary controls
-                // and making the retained header's Tab selection unambiguous.
-                let fill = if ctx.focused() {
-                    ctx.style().focus_color
-                } else {
-                    let mut color = ControlColor::Button;
-                    if ctx.hovered() {
-                        color.hover();
-                    }
-                    ctx.style().colors[color as usize]
-                };
                 if self.opt.intersects(WidgetOption::FRAME) {
-                    row = ctx.draw_internal_frame_color(row, fill).unwrap_or_default();
+                    // The header owns this internal frame, so it resolves the complete button patch
+                    // rather than asking retained traversal to inset the disclosure container.
+                    row = ctx.draw_appearance(AppearanceRole::Button, row).unwrap_or_default();
                 } else {
-                    ctx.draw_rect(row, fill);
+                    ctx.draw_appearance_center(AppearanceRole::DisclosureHeader, row);
                 }
             }
-            DisclosureVariant::Tree if ctx.focused() => {
-                ctx.draw_rect(row, ctx.style().focus_color);
-            }
-            DisclosureVariant::Tree if ctx.hovered() => {
-                ctx.draw_rect(row, ctx.style().colors[ControlColor::ButtonHover as usize]);
-            }
-            DisclosureVariant::Tree => {}
+            DisclosureVariant::Tree => ctx.draw_appearance_center(AppearanceRole::DisclosureHeader, row),
         }
 
         // Reserve a square icon cell from row height, then paint text in the remaining rectangle.

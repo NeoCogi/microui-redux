@@ -184,16 +184,8 @@ impl ListItem {
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let bounds = ctx.local_rect();
 
-        if ctx.focused() || ctx.hovered() {
-            let fill = if ctx.focused() {
-                ctx.style().focus_color
-            } else {
-                let mut color = ControlColor::Button;
-                color.hover();
-                ctx.style().colors[color as usize]
-            };
-            ctx.draw_rect(bounds, fill);
-        }
+        // The default normal role is transparent; image themes may still provide ordinary row art.
+        ctx.draw_appearance_center(AppearanceRole::ListItem, bounds);
 
         let mut text_rect = bounds;
         if let Some(icon) = self.icon {
@@ -304,7 +296,7 @@ mod tests {
         let mut item = ListItemBuilder::create_widget(ListItemParameters::with_icon("item", icon));
         let bounds = rect(0, 0, 20, 20);
         let mut display_list = DisplayList::new();
-        let mut ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut display_list, bounds, &style, &atlas, true, false, false, false);
+        let mut ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut display_list, bounds, &style, &atlas, true, true, false, false, false);
 
         item.paint(&mut ctx);
 

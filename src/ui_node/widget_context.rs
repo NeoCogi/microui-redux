@@ -59,7 +59,7 @@ use crate::math::RectExt;
 use crate::render::{DisplayList, Painter, TextureId};
 use crate::input::{Modifiers, MouseButton};
 use crate::{KeyboardAction, KeyboardBehavior, WidgetOption};
-use crate::theme::{Color, ControlColor, Style};
+use crate::theme::{AppearanceRole, Color, ControlColor, Style, VisualState};
 use crate::ui_node::text_layout::control_text_position_with_font;
 
 use super::UiInputEvent;
@@ -312,6 +312,8 @@ impl<'a> WidgetUpdateCtx<'a> {
 pub struct WidgetPaintCtx<'a> {
     /// Common read-only data, intentionally separated from phase capabilities.
     common: WidgetContextData<'a>,
+    /// Whether this widget and every visible ancestor accept interaction.
+    enabled: bool,
     /// Display list receiving this widget's paint operations.
     display_list: &'a mut DisplayList,
 }
@@ -325,6 +327,7 @@ impl<'a> WidgetPaintCtx<'a> {
         screen_clip: Recti,
         style: &'a Style,
         atlas: &'a AtlasHandle,
+        enabled: bool,
         hovered: bool,
         focused: bool,
         clicked: bool,
@@ -332,6 +335,7 @@ impl<'a> WidgetPaintCtx<'a> {
     ) -> Self {
         Self {
             common: WidgetContextData::new(content_rect, screen_clip, style, atlas, hovered, focused, clicked, active),
+            enabled,
             display_list,
         }
     }
@@ -376,6 +380,20 @@ impl<'a> WidgetPaintCtx<'a> {
         self.common.active
     }
 
+    /// Returns whether this widget and its visible ancestor chain accept interaction.
+    pub fn enabled(&self) -> bool {
+        // Participation is inherited during paint so a disabled container gives every descendant
+        // the disabled theme state without rewriting each concrete widget's options.
+        self.enabled
+    }
+
+    /// Resolves the exact semantic appearance state for this paint snapshot.
+    pub fn visual_state(&self) -> VisualState {
+        // Capture counts as a visible press only while the pointer remains over the widget. A drag
+        // outside retains capture for correct release delivery but returns to the non-pressed art.
+        VisualState::from_interaction(self.enabled, self.hovered(), self.focused(), self.active() && self.hovered())
+    }
+
     /// Returns a widget-local painter that records directly into the current frame display list.
     ///
     /// The painter receives the widget origin, local bounds, and traversal-derived effective clip.
@@ -412,41 +430,31 @@ impl<'a> WidgetPaintCtx<'a> {
         self.painter().image(image, rect, color);
     }
 
-    /// Draws an explicit widget-owned internal frame.
-    pub(crate) fn draw_internal_frame(&mut self, rect: Recti, colorid: ControlColor) -> Option<Recti> {
-        let color = self.common.style.colors[colorid as usize];
-        self.draw_internal_frame_color(rect, color)
+    /// Draws one semantic role using this widget's resolved interaction state.
+    pub(crate) fn draw_appearance(&mut self, role: AppearanceRole, rect: Recti) -> Option<Recti> {
+        // Resolve state before borrowing the display list through Painter so immutable and mutable
+        // context borrows do not overlap.
+        let state = self.visual_state();
+        self.draw_appearance_state(role, state, rect)
     }
 
-    /// Draws an explicit widget-owned internal frame with a concrete fill color.
-    ///
-    /// Interaction-wide colors such as [`Style::focus_color`] do not belong to one base palette
-    /// family. This helper keeps their geometry on the same authoritative frame path.
-    pub(crate) fn draw_internal_frame_color(&mut self, rect: Recti, color: Color) -> Option<Recti> {
-        let patch = self.common.style.frame_nine_patch(Some(color));
+    /// Draws one semantic role using an explicit state selected by a composite control.
+    pub(crate) fn draw_appearance_state(&mut self, role: AppearanceRole, state: VisualState, rect: Recti) -> Option<Recti> {
+        // Menu rows and selected list items own semantic state beyond the widget-wide interaction
+        // snapshot. They still resolve the same typed catalog and checked nine-patch geometry.
+        let patch = self.common.style.appearance(role, state);
         let mut painter = self.painter();
         crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch)
     }
 
-    /// Draws an explicit widget-owned internal frame with interaction fill coloring.
-    pub(crate) fn draw_widget_internal_frame(&mut self, rect: Recti, mut colorid: ControlColor) -> Option<Recti> {
-        if self.common.focused {
-            return self.draw_internal_frame_color(rect, self.common.style.focus_color);
-        } else if self.common.hovered {
-            colorid.hover();
-        }
-        self.draw_internal_frame(rect, colorid)
-    }
-
-    /// Fills derived outer-frame content with interaction coloring.
-    pub(crate) fn draw_widget_fill(&mut self, rect: Recti, mut colorid: ControlColor) {
-        if self.common.focused {
-            self.draw_rect(rect, self.common.style.focus_color);
-            return;
-        } else if self.common.hovered {
-            colorid.hover();
-        }
-        self.draw_rect(rect, self.common.style.colors[colorid as usize]);
+    /// Draws only the stretchable center of one semantic role over an unframed rectangle.
+    pub(crate) fn draw_appearance_center(&mut self, role: AppearanceRole, rect: Recti) {
+        // Zero destination insets collapse all eight outer cells. Flat patches retain their center
+        // cell and image patches sample only their center source, preserving the old unframed fill
+        // contract without introducing a second theme asset vocabulary.
+        let patch = self.common.style.appearance(role, self.visual_state()).with_insets(crate::SliceInsets::ZERO);
+        let mut painter = self.painter();
+        let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch);
     }
 
     /// Draws aligned control text with an explicit font.
@@ -493,5 +501,29 @@ mod tests {
 
         let clip = localize_clip(Recti::new(i32::MAX, i32::MIN, 1, 1), Recti::new(i32::MIN, i32::MAX, 1, 1));
         assert_eq!((clip.x, clip.y, clip.width, clip.height), (i32::MIN, i32::MAX, 1, 1));
+    }
+
+    /// Verifies paint state distinguishes visible presses, capture outside, and disabled ancestry.
+    #[test]
+    fn paint_visual_state_uses_enabled_hover_focus_and_visible_capture() {
+        let atlas = crate::test_support::test_atlas();
+        let style = crate::test_support::test_style(&atlas);
+        let bounds = Recti::new(0, 0, 20, 10);
+        let mut list = DisplayList::new();
+
+        {
+            let ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut list, bounds, &style, &atlas, true, true, true, false, true);
+            assert_eq!(ctx.visual_state(), VisualState::PressedFocused);
+        }
+        {
+            // Capture remains active outside for release routing, but theme art is no longer pressed.
+            let ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut list, bounds, &style, &atlas, true, false, true, false, true);
+            assert_eq!(ctx.visual_state(), VisualState::Focused);
+        }
+        {
+            // Disabled ancestry wins over stale retained interaction snapshots.
+            let ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut list, bounds, &style, &atlas, false, true, true, true, true);
+            assert_eq!(ctx.visual_state(), VisualState::Disabled);
+        }
     }
 }

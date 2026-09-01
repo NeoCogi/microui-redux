@@ -2659,7 +2659,7 @@ impl WindowManager {
             // child calls borrow arbitrary later forest entries without unsafe aliasing or mirrors.
             let node_index = self.surfaces.node_index(SurfaceKey::Root(root)).expect("visible root must remain retained");
             let node = &mut self.surfaces.nodes[node_index];
-            record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, node.surface.options, style);
+            record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, style, active_window == Some(root));
             node.surface
                 .body
                 .paint(&mut self.display_list, style, atlas, focus_surface == Some(SurfaceKey::Root(root)));
@@ -2720,7 +2720,7 @@ impl WindowManager {
             }
             let node_index = self.surfaces.node_index(key).expect("active popup must remain retained");
             let node = &mut self.surfaces.nodes[node_index];
-            record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, node.surface.options, style);
+            record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, style, false);
             node.surface.body.paint(&mut self.display_list, style, atlas, focus_surface == Some(key));
         }
     }

@@ -40,8 +40,8 @@ use std::{cell::RefCell, fmt, rc::Rc};
 use crate::ui_node::widgets::content_height;
 use crate::math::RectExt;
 use crate::{
-    AtlasHandle, Color, ControlColor, Dimensioni, FontChoice, FontRole, MouseButton, Recti, Style, UiInputEvent, Vec2i, WidgetEventPortHandle, WidgetOption,
-    WidgetPaintCtx,
+    AppearanceRole, AtlasHandle, Color, Dimensioni, FontChoice, FontRole, MouseButton, Recti, Style, UiInputEvent, Vec2i, VisualState, WidgetEventPortHandle,
+    WidgetOption, WidgetPaintCtx,
 };
 
 #[cfg(test)]
@@ -663,23 +663,31 @@ impl MenuSurface {
             self.clip,
             style,
             atlas,
+            true,
             self.hovered_slot.is_some(),
             false,
             false,
             self.captured,
         );
-        // One uninterrupted fill and one slot loop replace container, row, and cell paint passes.
+        // One uninterrupted semantic panel and one slot loop replace container, row, and cell
+        // paint passes while allowing every row state to select its own PNG.
         let style = ctx.style().clone();
-        ctx.draw_rect(ctx.local_rect(), style.menu_background);
+        let panel_role = if self.popup { AppearanceRole::MenuPopup } else { AppearanceRole::MenuBar };
+        let _ = ctx.draw_appearance_state(panel_role, VisualState::Normal, ctx.local_rect());
         for (slot, entry) in self.rows.iter().enumerate() {
             let row = self.geometry.slots[slot];
             match entry {
                 MenuSlot::Item(item) => {
-                    if item.parameters.enabled && self.keyboard_slot == Some(slot) {
-                        ctx.draw_rect(row, style.focus_color);
-                    } else if item.parameters.enabled && self.hovered_slot == Some(slot) {
-                        ctx.draw_rect(row, style.colors[ControlColor::ButtonHover as usize]);
-                    }
+                    let hovered = self.hovered_slot == Some(slot);
+                    let focused = self.keyboard_slot == Some(slot);
+                    let state = VisualState::from_interaction(item.parameters.enabled, hovered, focused, self.captured && hovered);
+                    let selected = matches!(item.parameters.mark, MenuItemMark::Checked(true) | MenuItemMark::Radio(true));
+                    let role = if selected {
+                        AppearanceRole::MenuItemSelected
+                    } else {
+                        AppearanceRole::MenuItem
+                    };
+                    let _ = ctx.draw_appearance_state(role, state, row);
                     let marker = Recti::new(row.x, row.y, self.geometry.marker_width.max(0), row.height);
                     let text = text_region(row, self.geometry.marker_width);
                     // Preserve the theme hue while subduing disabled rows through opacity alone.
@@ -697,11 +705,17 @@ impl MenuSurface {
                 }
                 MenuSlot::Separator => paint_separator(&mut ctx, row),
                 MenuSlot::Branch { label } => {
-                    if self.open_slot == Some(slot) || self.keyboard_slot == Some(slot) {
-                        ctx.draw_rect(row, style.focus_color);
-                    } else if self.hovered_slot == Some(slot) {
-                        ctx.draw_rect(row, style.colors[ControlColor::ButtonHover as usize]);
-                    }
+                    let hovered = self.hovered_slot == Some(slot);
+                    let focused = self.keyboard_slot == Some(slot);
+                    let state = VisualState::from_interaction(true, hovered, focused, self.captured && hovered);
+                    let role = if self.popup {
+                        AppearanceRole::MenuItem
+                    } else if self.open_slot == Some(slot) {
+                        AppearanceRole::MenuTitleOpen
+                    } else {
+                        AppearanceRole::MenuTitle
+                    };
+                    let _ = ctx.draw_appearance_state(role, state, row);
                     // Bar headings use their full slot; popup branches reserve the marker gutter.
                     let text = if self.popup { text_region(row, self.geometry.marker_width) } else { row };
                     let font = style.resolve_font_choice(FontChoice::Role(FontRole::Body));

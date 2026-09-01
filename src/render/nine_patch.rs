@@ -302,6 +302,21 @@ impl NinePatchCells {
             || self.bottom.is_visible()
             || self.bottom_right.is_visible()
     }
+
+    /// Reports whether one of the eight cells surrounding the center can produce pixels.
+    pub(crate) const fn has_visible_border(self) -> bool {
+        // Border-only window overlays must not be recorded when a flat patch contains only a center
+        // fill. Keeping this fixed expression adjacent to `has_visible_cell` makes the omission of
+        // the center deliberate and reviewable.
+        self.top_left.is_visible()
+            || self.top.is_visible()
+            || self.top_right.is_visible()
+            || self.left.is_visible()
+            || self.right.is_visible()
+            || self.bottom_left.is_visible()
+            || self.bottom.is_visible()
+            || self.bottom_right.is_visible()
+    }
 }
 
 /// Backend-neutral visual patch divided into three rows and three columns.
@@ -315,6 +330,8 @@ pub struct NinePatch {
     pub insets: SliceInsets,
     /// Concrete flat or image content associated with the complete grid.
     pub content: NinePatchContent,
+    /// Whether expansion includes the stretchable center cell.
+    pub center_visible: bool,
 }
 
 impl NinePatch {
@@ -325,6 +342,7 @@ impl NinePatch {
         Self {
             insets,
             content: NinePatchContent::Flat { cells },
+            center_visible: true,
         }
     }
 
@@ -335,6 +353,7 @@ impl NinePatch {
         Self {
             insets,
             content: NinePatchContent::Image { image },
+            center_visible: true,
         }
     }
 
@@ -377,13 +396,33 @@ impl NinePatch {
         self
     }
 
+    /// Omits the center cell while retaining all eight border cells.
+    pub const fn without_center(mut self) -> Self {
+        // Window frames are initially recorded below their client content, then repeat only their
+        // edges above descendants. A typed visibility bit applies identically to flat and image
+        // patches and avoids manufacturing a second border-only image representation.
+        self.center_visible = false;
+        self
+    }
+
     /// Reports whether recording this patch can produce visible renderer work.
-    pub(crate) const fn is_visible(self) -> bool {
+    pub(crate) fn is_visible(self) -> bool {
         // Destination area is checked by Painter because it owns coordinates. Flat patches inspect
         // their cells, while an image needs positive source geometry and non-zero modulation alpha.
         match self.content {
-            NinePatchContent::Flat { cells } => cells.has_visible_cell(),
-            NinePatchContent::Image { image } => image.source.width > 0 && image.source.height > 0 && image.tint.a != 0,
+            NinePatchContent::Flat { cells } => {
+                if self.center_visible {
+                    cells.has_visible_cell()
+                } else {
+                    cells.has_visible_border()
+                }
+            }
+            NinePatchContent::Image { image } => {
+                // A border-only image also requires at least one positive destination inset. With
+                // four zero insets all eight border destinations collapse to empty rectangles.
+                let has_destination = self.center_visible || self.insets.maximum_component() > 0;
+                has_destination && image.source.width > 0 && image.source.height > 0 && image.tint.a != 0
+            }
         }
     }
 
@@ -514,6 +553,17 @@ mod tests {
 
         assert!(!transparent.is_visible());
         assert!(opaque.is_visible());
+    }
+
+    /// Verifies border-only overlays omit a visible center without losing their edge cells.
+    #[test]
+    fn border_only_patch_visibility_ignores_the_center_cell() {
+        let center_only = NinePatch::solid(color(1, 2, 3, 255)).without_center();
+        let framed = NinePatch::framed(SliceInsets::uniform(1), color(4, 5, 6, 255), Some(color(7, 8, 9, 255))).without_center();
+
+        assert!(!center_only.is_visible());
+        assert!(framed.is_visible());
+        assert!(!framed.center_visible);
     }
 
     /// Verifies replacing the flat center never destroys a complete image-backed patch.

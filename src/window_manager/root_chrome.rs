@@ -39,7 +39,7 @@ use std::fmt;
 
 use crate::math::RectExt;
 use crate::render::Painter;
-use crate::{AtlasHandle, ControlColor, Dimensioni, NinePatch, Recti, Style, WidgetEventPortHandle, WindowOption};
+use crate::{AppearanceRole, AtlasHandle, ControlColor, Dimensioni, Recti, Style, VisualState, WidgetEventPortHandle, WindowOption};
 
 /// Active pointer gesture owned by manager-rendered window chrome.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -184,7 +184,7 @@ pub(super) fn root_chrome_geometry(
     };
     let title_height = root_titlebar_height(style, atlas);
     let frame = if options.intersects(WindowOption::FRAME) {
-        style.frame_insets()
+        style.appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets.normalized()
     } else {
         crate::SliceInsets::ZERO
     };
@@ -233,7 +233,8 @@ pub(super) fn root_chrome_geometry(
     );
 
     // Shared frame geometry supplies the client rectangle used by both paint and layout.
-    let client = crate::ui_node::frame::frame_geometry(outer, options.intersects(WindowOption::FRAME), style).content_or_empty();
+    let frame_role = options.intersects(WindowOption::FRAME).then_some(crate::AppearanceRole::WindowFrame);
+    let client = crate::ui_node::frame::frame_geometry(outer, frame_role, style).content_or_empty();
     let title =
         (!options.intersects(WindowOption::NO_TITLE)).then(|| Recti::new(client.x, client.y, client.width.max(0), title_height.min(client.height.max(0))));
     let close = title.and_then(|title| {
@@ -281,14 +282,19 @@ fn root_titlebar_height(style: &Style, atlas: &AtlasHandle) -> i32 {
 }
 
 /// Records the frame or plain background that must appear behind application content.
-pub(super) fn record_root_background(display_list: &mut crate::render::DisplayList, viewport: Recti, rect: Recti, options: WindowOption, style: &Style) {
+pub(super) fn record_root_background(display_list: &mut crate::render::DisplayList, viewport: Recti, rect: Recti, style: &Style, active: bool) {
     // Chrome uses a screen-space painter because it is outside the retained application tree.
     let mut painter = Painter::screen_space(display_list, viewport);
-    if options.intersects(WindowOption::FRAME) {
-        crate::ui_node::frame::paint_internal_frame(&mut painter, rect, style.frame_nine_patch(Some(style.colors[ControlColor::WindowBG as usize])));
+    let role = if active {
+        AppearanceRole::WindowFrameActive
     } else {
-        painter.fill_rect(rect, style.colors[ControlColor::WindowBG as usize]);
-    }
+        AppearanceRole::WindowFrame
+    };
+    // Record only the stretchable center below application content. Framed roots repeat their
+    // eight edge cells in the overlay pass, avoiding duplicate border work while still protecting
+    // chrome from overflowing descendants. Unframed roots use this same center-only body path.
+    let patch = style.appearance(role, VisualState::Normal).with_insets(crate::SliceInsets::ZERO);
+    let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch);
 }
 
 /// Records the frame border, title, and resize visuals that must appear above child content.
@@ -309,22 +315,20 @@ pub(super) fn record_root_overlay(
         // Background recording already filled the framed interior before application content. Draw
         // only the border again in the overlay pass so an unclipped child may extend beyond the
         // parent body without covering parent-owned frame chrome.
-        let patch = if active {
-            // An active framed window keeps the same layout geometry while its inside-aligned
-            // outline remains visible even when the ordinary theme border width is zero.
-            NinePatch::framed(style.frame_insets().at_least(1), style.window_focus_color, None)
+        let role = if active {
+            AppearanceRole::WindowFrameActive
         } else {
-            style.frame_nine_patch(None)
+            AppearanceRole::WindowFrame
         };
-        painter.nine_patch(outer, patch);
+        painter.nine_patch(outer, style.appearance(role, VisualState::Normal).without_center());
     }
     if let Some(title) = geometry.title {
-        let title_color = if active {
-            style.window_focus_color
+        let role = if active {
+            AppearanceRole::WindowTitleActive
         } else {
-            style.colors[ControlColor::TitleBG as usize]
+            AppearanceRole::WindowTitle
         };
-        painter.fill_rect(title, title_color);
+        let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, title, style.appearance(role, VisualState::Normal));
         let mut text = title;
         if let Some(close) = geometry.close {
             // Reserve the trailing square so title text cannot paint beneath the close icon.
@@ -336,8 +340,13 @@ pub(super) fn record_root_overlay(
             painter.with_clip(text, |painter| painter.text(style.title_font, name, position, color));
         }
         if let Some(close) = geometry.close {
-            // The close glyph uses the same foreground role as the title text.
-            painter.icon(style.icons.close, close, style.colors[ControlColor::TitleText as usize]);
+            // Caption-button state becomes pointer-aware with the manager interaction logic; normal
+            // already uses the same semantic role and nine-patch path as every other control.
+            let content =
+                crate::ui_node::frame::paint_internal_frame(&mut painter, close, style.appearance(AppearanceRole::WindowCloseButton, VisualState::Normal));
+            if let Some(content) = content {
+                painter.icon(style.icons.close, content, style.colors[ControlColor::TitleText as usize]);
+            }
         }
     }
     if let Some(visual) = geometry
@@ -345,11 +354,7 @@ pub(super) fn record_root_overlay(
         .filter(|resize| resize.width > 0 && resize.height > 0)
         .and_then(|resize| resize.positive_intersection(geometry.client))
     {
-        // The raised frame treatment keeps the grip visible over application content.
-        crate::ui_node::frame::paint_internal_frame(
-            &mut painter,
-            visual,
-            style.frame_nine_patch(Some(style.colors[ControlColor::WindowBG as usize])),
-        );
+        // The grip has an independent role so classic themes can supply dedicated corner artwork.
+        let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, visual, style.appearance(AppearanceRole::WindowResizeGrip, VisualState::Normal));
     }
 }

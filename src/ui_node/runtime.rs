@@ -357,10 +357,16 @@ fn node_accepts_input(node: &Node) -> bool {
     node.state.participation.accepts_input()
 }
 
-/// Resolves whether the node's current widget options request shared frame geometry.
-fn node_is_framed(node: &Node) -> bool {
-    // Dynamic widget options are authoritative because surfaces can enable/disable behavior.
-    node.data.with_widget(|widget| widget.effective_widget_opt().intersects(WidgetOption::FRAME))
+/// Resolves the semantic role used by a node's optional shared frame geometry.
+fn node_frame_role(node: &Node) -> Option<crate::AppearanceRole> {
+    // Read dynamic options and the concrete role under one widget borrow. Returning `None` keeps
+    // unframed nodes on the same zero-inset geometry path in layout, routing, update, and paint.
+    node.data.with_widget(|widget| {
+        widget
+            .effective_widget_opt()
+            .intersects(WidgetOption::FRAME)
+            .then(|| widget.frame_appearance_role())
+    })
 }
 
 /// Resolves effective pointer options and keyboard behavior for the current update pass.

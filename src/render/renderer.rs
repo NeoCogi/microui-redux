@@ -381,6 +381,9 @@ impl<B: RendererBackend> DisplayListExecutor<'_, '_, B> {
                 let cells = cells.rows();
                 for row in 0..3 {
                     for column in 0..3 {
+                        if row == 1 && column == 1 && !patch.center_visible {
+                            continue;
+                        }
                         let crate::render::NinePatchCell::Color { color } = cells[row][column] else {
                             continue;
                         };
@@ -395,6 +398,9 @@ impl<B: RendererBackend> DisplayListExecutor<'_, '_, B> {
                 let sources = crate::render::nine_patch::geometry_with_insets(image.source, image.source_insets);
                 for row in 0..3 {
                     for column in 0..3 {
+                        if row == 1 && column == 1 && !patch.center_visible {
+                            continue;
+                        }
                         let Some(vertices) = clipped_textured_quad(destinations[row][column], sources[row][column], image.texture.size(), image.tint, clip)
                         else {
                             continue;

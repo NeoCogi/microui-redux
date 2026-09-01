@@ -275,7 +275,10 @@ impl Slider {
         }
 
         let base = ctx.local_rect();
-        ctx.draw_widget_fill(base, ControlColor::Base);
+        if !self.opt.intersects(WidgetOption::FRAME) {
+            // Unframed sliders still retain the semantic track center without adding border space.
+            ctx.draw_appearance_center(AppearanceRole::SliderTrack, base);
+        }
         // Measurement already treats negative theme thumb sizes as zero. Paint applies the same
         // normalization and uses saturated extent arithmetic so either public style or layout
         // input may span the i32 domain without panicking.
@@ -291,7 +294,7 @@ impl Slider {
             0
         };
         let thumb = rect(base.x.saturating_add(x), base.y, width, base.height.max(0));
-        ctx.draw_widget_internal_frame(thumb, ControlColor::Button);
+        let _ = ctx.draw_appearance(AppearanceRole::SliderThumb, thumb);
         let label = number_label(self.value, self.precision);
         ctx.draw_control_text_with_font(font, label.as_str(), base, ControlColor::Text, self.opt);
     }
@@ -384,6 +387,11 @@ fn clamp_slider_value(value: Real, low: Real, high: Real) -> Real {
 impl Widget for Slider {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
+    }
+
+    fn frame_appearance_role(&self) -> AppearanceRole {
+        // Retained traversal paints the complete track before the slider paints its thumb and text.
+        AppearanceRole::SliderTrack
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
@@ -783,16 +791,14 @@ mod tests {
         // A borderless ten-pixel thumb records one unambiguous fill rectangle at the computed x.
         style.thumb_size = 10;
         let frame = style
-            .appearance(crate::AppearanceRole::GenericFrame, crate::VisualState::Normal)
+            .appearance(crate::AppearanceRole::SliderThumb, crate::VisualState::Normal)
             .with_insets(crate::SliceInsets::ZERO);
-        style
-            .appearances
-            .set(crate::AppearanceRole::GenericFrame, crate::StatefulAppearance::all(frame));
+        style.appearances.set(crate::AppearanceRole::SliderThumb, crate::StatefulAppearance::all(frame));
         let mut slider =
             SliderBuilder::create_widget(SliderParameters::new(Real::MAX / 2.0, 0.0, Real::MAX).expect("a maximum finite range span must remain usable"));
         let bounds = rect(0, 0, 100, 20);
         let mut display_list = crate::render::DisplayList::new();
-        let mut ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut display_list, bounds, &style, &atlas, false, false, false, false);
+        let mut ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut display_list, bounds, &style, &atlas, true, false, false, false, false);
 
         slider.paint(&mut ctx);
 
@@ -915,7 +921,7 @@ mod tests {
         let mut slider = SliderBuilder::create_widget(SliderParameters::new(0.5, 0.0, 1.0).expect("finite ascending slider parameters must validate"));
         let bounds = rect(0, 0, 100, 20);
         let mut display_list = crate::render::DisplayList::new();
-        let mut ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut display_list, bounds, &style, &atlas, false, false, false, false);
+        let mut ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut display_list, bounds, &style, &atlas, true, false, false, false, false);
 
         slider.paint(&mut ctx);
 

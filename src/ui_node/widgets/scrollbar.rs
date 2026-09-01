@@ -58,7 +58,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::math::{clamp_i64_to_i32, RectExt};
 use crate::{
-    ControlColor, Dimensioni, MouseButton, Node, Recti, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters,
+    AppearanceRole, Dimensioni, MouseButton, Node, Recti, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters,
     WidgetUpdateCtx,
 };
 
@@ -455,8 +455,8 @@ impl Widget for Scrollbar {
         // Hidden composite children never reach this phase, while mounted zero-range bars display a
         // full-length thumb that communicates the absence of overflow.
         let geometry = self.geometry(ctx.local_rect(), ctx.style().thumb_size.max(0));
-        ctx.draw_rect(geometry.track(), ctx.style().colors[ControlColor::ScrollBase as usize]);
-        ctx.draw_rect(geometry.thumb(), ctx.style().colors[ControlColor::ScrollThumb as usize]);
+        let _ = ctx.draw_appearance(AppearanceRole::ScrollbarTrack, geometry.track());
+        let _ = ctx.draw_appearance(AppearanceRole::ScrollbarThumb, geometry.thumb());
     }
 }
 

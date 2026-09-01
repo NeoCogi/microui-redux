@@ -402,8 +402,10 @@ fn textbox_text_x(bounds: Recti, padding: i32, text_width: i32) -> i32 {
 /// Shared single-line textbox painting used by textbox and numeric inline editors.
 pub(crate) fn textbox_paint(ctx: &mut WidgetPaintCtx<'_>, buf: &str, cursor: usize, opt: WidgetOption, font: FontId) {
     let r = ctx.local_rect();
-    let _ = opt;
-    ctx.draw_widget_fill(r, ControlColor::Base);
+    if !opt.intersects(WidgetOption::FRAME) {
+        // Runtime-owned framed editors already painted the complete input patch below this content.
+        ctx.draw_appearance_center(AppearanceRole::TextInput, r);
+    }
 
     let metrics = font_line_metrics(font, ctx.atlas());
     let texty = centered_line_top(r, metrics.line_height);
@@ -436,6 +438,11 @@ pub(crate) fn textbox_paint(ctx: &mut WidgetPaintCtx<'_>, buf: &str, cursor: usi
 impl Widget for Textbox {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
+    }
+
+    fn frame_appearance_role(&self) -> AppearanceRole {
+        // Single-line textboxes use the semantic input frame for every interaction state.
+        AppearanceRole::TextInput
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {

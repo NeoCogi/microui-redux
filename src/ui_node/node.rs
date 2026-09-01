@@ -54,17 +54,14 @@ pub(crate) struct MeasurementStyleKey {
     title_height: i32,
     scrollbar_size: i32,
     thumb_size: i32,
-    frame_left: i32,
-    frame_top: i32,
-    frame_right: i32,
-    frame_bottom: i32,
+    /// Normal-state destination insets for every semantic appearance role.
+    appearance_insets: [[i32; 4]; crate::AppearanceRole::COUNT],
 }
 
 impl MeasurementStyleKey {
     pub(crate) fn new(style: &Style) -> Self {
-        // Cache only measurement-observable style values. Surface colors and cell payloads affect
-        // paint, while the four normalized frame insets affect the constraints seen by a widget.
-        let frame = style.frame_insets();
+        // Cache only measurement-observable style values. Colors and cell payloads affect paint,
+        // while every role's normalized insets can affect a framed descendant's constraints.
         Self {
             font: style.font,
             small_font: style.small_font,
@@ -81,10 +78,7 @@ impl MeasurementStyleKey {
             title_height: style.title_height,
             scrollbar_size: style.scrollbar_size,
             thumb_size: style.thumb_size,
-            frame_left: frame.left,
-            frame_top: frame.top,
-            frame_right: frame.right,
-            frame_bottom: frame.bottom,
+            appearance_insets: style.appearances.measurement_insets(),
         }
     }
 }
@@ -377,8 +371,14 @@ impl Node {
         let (frame_insets, measured_content) = match &mut self.data {
             NodeKind::Widget(node) => {
                 let widget = node.widget.try_borrow().unwrap_or_else(|_| widget_borrow_conflict());
-                let framed = widget.widget.effective_widget_opt().intersects(crate::WidgetOption::FRAME);
-                let frame_insets = if framed { style.frame_insets() } else { SliceInsets::ZERO };
+                let frame_insets = if widget.widget.effective_widget_opt().intersects(crate::WidgetOption::FRAME) {
+                    style
+                        .appearance(widget.widget.frame_appearance_role(), crate::VisualState::Normal)
+                        .insets
+                        .normalized()
+                } else {
+                    SliceInsets::ZERO
+                };
                 let measured_content = widget
                     .widget
                     .measure(style, atlas, crate::ui_node::frame::content_constraints(constraints, frame_insets));

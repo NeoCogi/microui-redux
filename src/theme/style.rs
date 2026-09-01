@@ -173,13 +173,6 @@ impl Style {
             && self.icons.belongs_to(atlas)
     }
 
-    /// Resolves a framed patch with an optional role-specific center fill.
-    pub(crate) fn frame_nine_patch(&self, fill: Option<Color>) -> NinePatch {
-        // Generic framing is the compatibility point used while concrete controls migrate to their
-        // semantic roles. Flat content accepts the requested fill; image content remains complete.
-        self.appearance(AppearanceRole::GenericFrame, VisualState::Normal).with_center(fill)
-    }
-
     /// Returns normalized structural frame insets shared by measurement and placement.
     pub(crate) fn frame_insets(&self) -> SliceInsets {
         // NinePatch owns normalization so layout and renderer geometry cannot disagree on negative

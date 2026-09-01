@@ -51,14 +51,14 @@ impl UiRuntime {
 
     /// Assigns one exact parent-owned rectangle through direct widget/container dispatch.
     pub(in crate::ui_node) fn layout_node_ref(&mut self, node: &mut Node, style: &Style, atlas: &crate::AtlasHandle, rect: Recti) -> Dimensioni {
-        let framed = node_is_framed(node);
+        let frame_role = node_frame_role(node);
         // Preserve the measure/layout phase contract while keeping the parent's rectangle
         // authoritative. Sizing relationships live in the parent container, never on Node.
         let (preferred, measurement_cached) = self.measure_node_for_layout(node, style, atlas, Constraints::bounded(Dimensioni::new(rect.width, rect.height)));
         let style = node.resolve_style(style);
         let style = &style;
         let outer = Recti::new(rect.x, rect.y, rect.width.max(0), rect.height.max(0));
-        self.layout_node_outer_ref(node, style, atlas, framed, outer, preferred, measurement_cached)
+        self.layout_node_outer_ref(node, style, atlas, frame_role, outer, preferred, measurement_cached)
     }
 
     /// Applies frame/content geometry and delegates layout for one resolved outer allocation.
@@ -67,7 +67,7 @@ impl UiRuntime {
         node: &mut Node,
         style: &Style,
         atlas: &crate::AtlasHandle,
-        framed: bool,
+        frame_role: Option<crate::AppearanceRole>,
         outer: Recti,
         preferred: Dimensioni,
         measurement_cached: bool,
@@ -82,7 +82,7 @@ impl UiRuntime {
         // Store every rectangle in node-local coordinates except the outer allocation, which stays
         // parent-local. Transform traversal later composes those two coordinate spaces once.
         let local_outer = Recti::new(0, 0, outer.width, outer.height);
-        let frame_geometry = crate::ui_node::frame::frame_geometry(local_outer, framed, style);
+        let frame_geometry = crate::ui_node::frame::frame_geometry(local_outer, frame_role, style);
         let content = frame_geometry.content_or_empty();
         let is_branch = node.is_container();
         node.set_layout(NodeLayout::from_parts(outer, content, Dimensioni::new(outer.width.max(0), outer.height.max(0))));

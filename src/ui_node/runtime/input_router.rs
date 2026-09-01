@@ -632,11 +632,11 @@ impl InputRouter {
         }
         // Resolve the same frame/content geometry used by update and paint before localizing the
         // selected event for the concrete widget or container handler.
-        let framed = node_is_framed(node);
+        let frame_role = node_frame_role(node);
         let screen_rect = parent_transform.resolve(node.state.layout.allocation);
         let screen_origin = Vec2i::new(screen_rect.x, screen_rect.y);
         let local_rect = Recti::new(0, 0, screen_rect.width, screen_rect.height);
-        let content_rect = crate::ui_node::frame::frame_geometry(local_rect, framed, style).content_or_empty();
+        let content_rect = crate::ui_node::frame::frame_geometry(local_rect, frame_role, style).content_or_empty();
         let screen_clip = parent_transform.clip.positive_intersection(screen_rect).unwrap_or_default();
         let local_clip = screen_clip.relative_to(screen_origin);
         let content_clip = local_clip

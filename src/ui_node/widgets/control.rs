@@ -178,20 +178,16 @@ pub(super) fn place_scaled_visual_content(bounds: Recti, visual_size: Option<Dim
     InlineContentPlacement { visual: Some(visual), text: bounds }
 }
 
-/// Selects which control color should be painted for a widget's fill policy and state.
-pub(super) fn widget_fill_color(ctx: &WidgetPaintCtx<'_>, base: ControlColor, fill: WidgetFillOption) -> Option<Color> {
-    if ctx.focused() && fill.intersects(WidgetFillOption::CLICK) {
-        // Focus is one cross-control interaction scope, so it uses the named Style accent rather
-        // than selecting a second base-family palette entry.
-        Some(ctx.style().focus_color)
-    } else if ctx.hovered() && fill.intersects(WidgetFillOption::HOVER) {
-        let mut color = base;
-        color.hover();
-        Some(ctx.style().colors[color as usize])
-    } else if fill.intersects(WidgetFillOption::NORMAL) {
-        Some(ctx.style().colors[base as usize])
-    } else {
-        None
+/// Reports whether a button-like control's fill policy enables its current semantic state.
+pub(super) fn widget_fill_visible(ctx: &WidgetPaintCtx<'_>, fill: WidgetFillOption) -> bool {
+    // Preserve the public visibility policy while delegating actual pixels to the typed appearance
+    // catalog. Combined focus states accept either relevant policy bit; a pressed state remains a
+    // click visual even when pointer capture outlives the one-update clicked transition.
+    match ctx.visual_state() {
+        VisualState::Normal | VisualState::Disabled => fill.intersects(WidgetFillOption::NORMAL),
+        VisualState::Hovered => fill.intersects(WidgetFillOption::HOVER),
+        VisualState::Pressed | VisualState::Focused | VisualState::PressedFocused => fill.intersects(WidgetFillOption::CLICK),
+        VisualState::HoveredFocused => fill.intersects(WidgetFillOption::HOVER | WidgetFillOption::CLICK),
     }
 }
 

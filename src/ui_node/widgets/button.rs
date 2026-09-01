@@ -197,8 +197,10 @@ impl Button {
     /// Paints the button frame, text, and optional visual payload.
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let rect = ctx.local_rect();
-        if let Some(color) = widget_fill_color(ctx, ControlColor::Button, self.fill) {
-            ctx.draw_rect(rect, color);
+        if !self.opt.intersects(WidgetOption::FRAME) && widget_fill_visible(ctx, self.fill) {
+            // Framed buttons are painted once by retained traversal across their complete outer
+            // allocation. An unframed button asks for only the role's stretchable center payload.
+            ctx.draw_appearance_center(AppearanceRole::Button, rect);
         }
         let font = ctx.style().resolve_font_choice(self.font);
         match &self.content {
@@ -254,6 +256,11 @@ impl crate::TypedWidgetHandle<Button> {
 impl Widget for Button {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
+    }
+
+    fn frame_appearance_role(&self) -> AppearanceRole {
+        // Buttons use one stateful role for their complete runtime-owned outer frame.
+        AppearanceRole::Button
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {

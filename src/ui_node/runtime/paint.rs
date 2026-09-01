@@ -66,7 +66,7 @@ impl UiRuntime {
         // Every runtime remembers focus independently, but only the manager-selected keyboard
         // surface may present it. This prevents inactive windows and menu-suspended widgets from
         // showing simultaneous carets, fills, or outlines.
-        if let Some(indicator) = self.paint_node_ref(root, self.root_transform, display_list, style, atlas, focus_visible) {
+        if let Some(indicator) = self.paint_node_ref(root, self.root_transform, display_list, style, atlas, focus_visible, true) {
             indicator.record(display_list);
         }
     }
@@ -80,23 +80,27 @@ impl UiRuntime {
         style: &Style,
         atlas: crate::AtlasHandle,
         focus_visible: bool,
+        ancestors_enabled: bool,
     ) -> Option<FocusIndicator> {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.paints += 1);
         let style = node.resolve_style(style);
         let style = &style;
         // Resolve the same outer/content geometry used for input and update before recording paint.
-        let framed = node_is_framed(node);
+        let frame_role = node_frame_role(node);
         let screen_rect = parent_transform.resolve(node.state.layout.allocation);
         let screen_origin = Vec2i::new(screen_rect.x, screen_rect.y);
         let local_rect = Recti::new(0, 0, screen_rect.width, screen_rect.height);
-        let frame_geometry = crate::ui_node::frame::frame_geometry(local_rect, framed, style);
+        let frame_geometry = crate::ui_node::frame::frame_geometry(local_rect, frame_role, style);
         let content_rect = frame_geometry.content_or_empty();
         let screen_clip = parent_transform.clip.positive_intersection(screen_rect).unwrap_or_default();
-        if framed {
-            // Generic framing belongs beneath the widget's own paint and descendant paint.
+        let enabled = ancestors_enabled && node.state.participation.accepts_input();
+        let focused = focus_visible && node.state.focused;
+        let visual_state = crate::VisualState::from_interaction(enabled, node.state.hovered, focused, node.state.active && node.state.hovered);
+        if let Some(role) = frame_role {
+            // Semantic framing belongs beneath the widget's own paint and descendant paint.
             let mut painter = crate::render::Painter::screen_space(display_list, screen_clip);
-            crate::ui_node::frame::paint_internal_frame(&mut painter, screen_rect, style.frame_nine_patch(None));
+            crate::ui_node::frame::paint_internal_frame(&mut painter, screen_rect, style.appearance(role, visual_state));
         }
         let child_transform = parent_transform.push(node.state.layout);
         let local_clip = screen_clip.relative_to(screen_origin);
@@ -105,12 +109,14 @@ impl UiRuntime {
             .unwrap_or_else(|| Recti::new(content_rect.x, content_rect.y, 0, 0));
         let screen_content_rect = content_rect.translated(screen_origin);
         let screen_content_clip = content_clip.translated(screen_origin);
-        let focused = focus_visible && node.state.focused;
         let mut focus_indicator = focused.then_some(FocusIndicator {
             rect: screen_rect,
             clip: screen_clip,
             color: style.focus_color,
-            width: style.frame_insets().maximum_component().max(1),
+            width: frame_role
+                .map(|role| style.appearance(role, crate::VisualState::Normal).insets.maximum_component())
+                .unwrap_or(1)
+                .max(1),
         });
         {
             // Limit the mutable display-list borrow to this widget call before custom/child output.
@@ -120,6 +126,7 @@ impl UiRuntime {
                 screen_content_clip,
                 style,
                 &atlas,
+                enabled,
                 node.state.hovered,
                 focused,
                 node.state.clicked,
@@ -143,7 +150,7 @@ impl UiRuntime {
                     .iter_mut()
                     .filter(|child| node_is_visible(child) && child.intersects_clip(child_transform))
                 {
-                    if let Some(child_focus) = self.paint_node_ref(child, child_transform, display_list, style, atlas.clone(), focus_visible) {
+                    if let Some(child_focus) = self.paint_node_ref(child, child_transform, display_list, style, atlas.clone(), focus_visible, enabled) {
                         // Focus identity is singular by invariant. Prefer a descendant defensively
                         // if externally mutated state ever exposes both an ancestor and child.
                         focus_indicator = Some(child_focus);

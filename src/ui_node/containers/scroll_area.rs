@@ -34,8 +34,8 @@ use bitflags::bitflags;
 
 use crate::ui_node::widgets::{Scrollbar, ScrollbarAxis, ScrollbarParameters};
 use crate::{
-    ChildParticipation, Container, ContainerWidget, ControlColor, Dimensioni, MeasureCtx, Recti, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption,
-    WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
+    AppearanceRole, ChildParticipation, Container, ContainerWidget, Dimensioni, MeasureCtx, Recti, TypedWidgetHandle, UiInputEvent, Vec2i, Widget,
+    WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
 use super::{Children, ContainerLayoutCtx, Node};
@@ -319,6 +319,11 @@ impl Widget for ScrollArea {
         &self.opt
     }
 
+    fn frame_appearance_role(&self) -> AppearanceRole {
+        // A framed scroll area uses the same panel patch whose center fills its viewport.
+        AppearanceRole::Panel
+    }
+
     fn effective_widget_opt(&self) -> WidgetOption {
         if self.scrolling_enabled {
             self.opt | WidgetOption::GRAB_SCROLL
@@ -341,9 +346,9 @@ impl Widget for ScrollArea {
         // Before first placement the summary is empty; the update/layout contract normally commits
         // geometry before paint, while the fallback keeps direct widget tests well-defined.
         let surface = if surface.width > 0 || surface.height > 0 { surface } else { fallback };
-        ctx.draw_rect(surface, ctx.style().colors[ControlColor::PanelBG as usize]);
+        ctx.draw_appearance_center(AppearanceRole::Panel, surface);
         if let Some(corner) = corner {
-            ctx.draw_rect(corner, ctx.style().colors[ControlColor::PanelBG as usize]);
+            ctx.draw_appearance_center(AppearanceRole::Panel, corner);
         }
     }
 }
@@ -1040,8 +1045,12 @@ mod tests {
         };
         let frame_insets = crate::SliceInsets::uniform(3);
         style.appearances.set(
-            crate::AppearanceRole::GenericFrame,
-            crate::StatefulAppearance::all(crate::NinePatch::framed(frame_insets, crate::color(1, 2, 3, 255), None)),
+            crate::AppearanceRole::Panel,
+            crate::StatefulAppearance::all(crate::NinePatch::framed(
+                frame_insets,
+                crate::color(1, 2, 3, 255),
+                Some(crate::color(4, 5, 6, 255)),
+            )),
         );
         let outer = Recti::new(10, 20, 100, 80);
 

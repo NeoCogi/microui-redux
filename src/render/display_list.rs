@@ -219,6 +219,9 @@ impl DisplayList {
             let cells = cells.rows();
             for row in 0..3 {
                 for column in 0..3 {
+                    if row == 1 && column == 1 && !patch.center_visible {
+                        continue;
+                    }
                     let crate::render::NinePatchCell::Color { color } = cells[row][column] else {
                         continue;
                     };

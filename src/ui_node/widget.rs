@@ -61,7 +61,7 @@ use rs_math3d::Dimensioni;
 
 use crate::atlas::AtlasHandle;
 use crate::input::{Key, Modifiers};
-use crate::theme::Style;
+use crate::theme::{AppearanceRole, Style};
 use crate::Constraints;
 use super::UiInputEvent;
 pub use super::widget_context::{WidgetPaintCtx, WidgetUpdateCtx};
@@ -420,6 +420,16 @@ pub trait Widget {
     /// Widgets can override this to apply dynamic option adjustments.
     fn effective_widget_opt(&self) -> WidgetOption {
         *self.widget_opt()
+    }
+    /// Returns the semantic appearance used when [`WidgetOption::FRAME`] is effective.
+    ///
+    /// The runtime uses this one role for measurement, layout, input localization, and paint. A
+    /// custom widget therefore changes themed border geometry without duplicating or bypassing the
+    /// retained outer/content-box contract.
+    fn frame_appearance_role(&self) -> AppearanceRole {
+        // Generic framing remains the neutral default for application widgets that request FRAME
+        // without opting into one of the built-in control meanings.
+        AppearanceRole::GenericFrame
     }
     /// Returns declarative keyboard routing capabilities for this widget surface.
     ///

@@ -157,7 +157,8 @@ impl Checkbox {
     fn paint_widget(&self, checked: bool, ctx: &mut WidgetPaintCtx<'_>) {
         let bounds = ctx.local_rect();
         let box_rect = rect(bounds.x, bounds.y, bounds.height, bounds.height);
-        let box_content = ctx.draw_widget_internal_frame(box_rect, ControlColor::Base);
+        let role = if checked { AppearanceRole::CheckboxChecked } else { AppearanceRole::Checkbox };
+        let box_content = ctx.draw_appearance(role, box_rect);
         if checked {
             let color = ctx.style().colors[ControlColor::Text as usize];
             if let Some(box_content) = box_content {
