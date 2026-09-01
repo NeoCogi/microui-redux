@@ -52,11 +52,11 @@
 //
 //! Atlas-bound UI style values used across the crate.
 
+use super::{AppearanceCatalog, AppearanceRole, Color, FontChoice, FontRole, ThemeIcons, VisualState};
 use crate::atlas::{AtlasHandle, FontId};
-use crate::render::{SliceInsets, NinePatch};
-use super::{Color, FontChoice, FontRole, ThemeIcons};
+use crate::render::{NinePatch, SliceInsets};
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 /// Collection of visual constants that drive widget appearance.
 pub struct Style {
     /// Default body font used for general text rendering.
@@ -85,11 +85,8 @@ pub struct Style {
     pub scrollbar_size: i32,
     /// Minimum length of scrollbar thumbs and width of slider thumbs.
     pub thumb_size: i32,
-    /// Three-by-three flat patch used by framed widgets, containers, popups, and window chrome.
-    ///
-    /// The center is replaced with a role-specific fill when a concrete control paints a framed
-    /// patch. Its insets remain authoritative for layout even when every border cell is empty.
-    pub frame: NinePatch,
+    /// Typed state tables used by built-in widgets, containers, menus, and window chrome.
+    pub appearances: AppearanceCatalog,
     /// Accent used for focused widget fills, menu selection, and the universal focus outline.
     ///
     /// Focus is an interaction scope rather than a control-family color, so this named value
@@ -121,6 +118,26 @@ impl Style {
         // Resolve the required body capability first so every optional role has one valid,
         // owner-matched fallback instead of an ownerless default identifier.
         let font = atlas.font_id(FontRole::Body.atlas_name()).expect("atlas does not contain required font `body`");
+        let colors = [
+            Color { r: 230, g: 230, b: 230, a: 255 },
+            Color { r: 25, g: 25, b: 25, a: 255 },
+            Color { r: 50, g: 50, b: 50, a: 255 },
+            Color { r: 25, g: 25, b: 25, a: 255 },
+            Color { r: 240, g: 240, b: 240, a: 255 },
+            Color { r: 0, g: 0, b: 0, a: 0 },
+            Color { r: 75, g: 75, b: 75, a: 255 },
+            Color { r: 95, g: 95, b: 95, a: 255 },
+            Color { r: 30, g: 30, b: 30, a: 255 },
+            Color { r: 35, g: 35, b: 35, a: 255 },
+            Color { r: 43, g: 43, b: 43, a: 255 },
+            Color { r: 30, g: 30, b: 30, a: 255 },
+        ];
+        let focus_color = Color { r: 0, g: 120, b: 215, a: 255 };
+        let window_focus_color = Color { r: 0, g: 120, b: 215, a: 255 };
+        let menu_background = Color { r: 50, g: 50, b: 50, a: 255 };
+        // Build the catalog from the same concrete flat values stored below. JSON theme loading
+        // follows this identical fallback constructor before replacing explicitly supplied PNGs.
+        let appearances = AppearanceCatalog::from_flat_palette(SliceInsets::uniform(1), colors, focus_color, window_focus_color, menu_background);
         Self {
             font,
             small_font: atlas.font_id(FontRole::Small.atlas_name()).unwrap_or(font),
@@ -135,25 +152,12 @@ impl Style {
             title_height: 24,
             scrollbar_size: 12,
             thumb_size: 8,
-            frame: NinePatch::framed(SliceInsets::uniform(1), Color { r: 25, g: 25, b: 25, a: 255 }, None),
-            focus_color: Color { r: 0, g: 120, b: 215, a: 255 },
-            window_focus_color: Color { r: 0, g: 120, b: 215, a: 255 },
+            appearances,
+            focus_color,
+            window_focus_color,
             menu_foreground: Color { r: 230, g: 230, b: 230, a: 255 },
-            menu_background: Color { r: 50, g: 50, b: 50, a: 255 },
-            colors: [
-                Color { r: 230, g: 230, b: 230, a: 255 },
-                Color { r: 25, g: 25, b: 25, a: 255 },
-                Color { r: 50, g: 50, b: 50, a: 255 },
-                Color { r: 25, g: 25, b: 25, a: 255 },
-                Color { r: 240, g: 240, b: 240, a: 255 },
-                Color { r: 0, g: 0, b: 0, a: 0 },
-                Color { r: 75, g: 75, b: 75, a: 255 },
-                Color { r: 95, g: 95, b: 95, a: 255 },
-                Color { r: 30, g: 30, b: 30, a: 255 },
-                Color { r: 35, g: 35, b: 35, a: 255 },
-                Color { r: 43, g: 43, b: 43, a: 255 },
-                Color { r: 30, g: 30, b: 30, a: 255 },
-            ],
+            menu_background,
+            colors,
         }
     }
 
@@ -171,16 +175,22 @@ impl Style {
 
     /// Resolves a framed patch with an optional role-specific center fill.
     pub(crate) fn frame_nine_patch(&self, fill: Option<Color>) -> NinePatch {
-        // Copy the small concrete grid and replace only its center. This preserves independently
-        // styled corners and edges while avoiding a second border representation in widget code.
-        self.frame.with_center(fill)
+        // Generic framing is the compatibility point used while concrete controls migrate to their
+        // semantic roles. Flat content accepts the requested fill; image content remains complete.
+        self.appearance(AppearanceRole::GenericFrame, VisualState::Normal).with_center(fill)
     }
 
     /// Returns normalized structural frame insets shared by measurement and placement.
     pub(crate) fn frame_insets(&self) -> SliceInsets {
         // NinePatch owns normalization so layout and renderer geometry cannot disagree on negative
         // application-provided style components.
-        self.frame.insets.normalized()
+        self.appearance(AppearanceRole::GenericFrame, VisualState::Normal).insets.normalized()
+    }
+
+    /// Returns the exact patch assigned to one semantic role and visual state.
+    pub fn appearance(&self, role: AppearanceRole, state: VisualState) -> NinePatch {
+        // AppearanceCatalog guarantees both enum-indexed tables are complete.
+        self.appearances.resolve(role, state)
     }
 
     /// Returns the concrete font ID for the provided semantic role.
@@ -249,7 +259,7 @@ mod tests {
         // Each candidate differs from the valid local style in exactly one capability. Keeping the
         // cases explicit makes a newly added field fail this regression until belongs_to validates
         // it, without introducing erased reflection or `Any`-based field traversal.
-        let mut candidates = [local; 13];
+        let mut candidates: [Style; 13] = std::array::from_fn(|_| local.clone());
         candidates[0].font = foreign.font;
         candidates[1].small_font = foreign.small_font;
         candidates[2].title_font = foreign.title_font;
@@ -284,7 +294,14 @@ mod tests {
     fn frame_insets_normalize_each_component_without_changing_cells() {
         let atlas = make_test_atlas(&[(FontRole::Body.atlas_name(), 12)]);
         let style = Style {
-            frame: NinePatch::framed(SliceInsets::new(-4, 2, -3, 5), Color { r: 10, g: 20, b: 30, a: 255 }, None),
+            appearances: {
+                let mut appearances = Style::from_atlas(&atlas).appearances;
+                appearances.set(
+                    AppearanceRole::GenericFrame,
+                    crate::StatefulAppearance::all(NinePatch::framed(SliceInsets::new(-4, 2, -3, 5), Color { r: 10, g: 20, b: 30, a: 255 }, None)),
+                );
+                appearances
+            },
             ..Style::from_atlas(&atlas)
         };
         let insets = style.frame_insets();

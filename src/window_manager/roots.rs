@@ -2383,7 +2383,7 @@ impl WindowManager {
     fn update_eligible_widget_trees(&mut self, atlas: &crate::AtlasHandle, input: crate::input::InputSnapshot) {
         // Copy the resolved style once, matching event-driven traversal, then use the forest's
         // shared visible order so modal scope and popup ownership have one eligibility policy.
-        let style = self.style;
+        let style = self.style.clone();
         let modal = self.surfaces.active_modal_root();
         for index in 0..self.surfaces.visible_order.len() {
             let key = self.surfaces.visible_order[index];
@@ -2443,7 +2443,7 @@ impl WindowManager {
     fn layout(&mut self, viewport: Recti, atlas: &crate::AtlasHandle) {
         self.sync_menu_presentation();
         self.surfaces.rebuild_visible_order();
-        let style = self.style;
+        let style = self.style.clone();
         for index in 0..self.surfaces.nodes.len() {
             let key = self.surfaces.nodes[index].key;
             if !self.surfaces.visible_order.contains(&key) {
@@ -2475,7 +2475,7 @@ impl WindowManager {
     fn update_for_event(&mut self, atlas: &crate::AtlasHandle, event: &UiInputEvent, input: crate::input::InputSnapshot) {
         // Resolve event-wide dismissal and menu-toggle context before selecting a recipient. An
         // outside press may change the visible forest and must do so before hit testing below.
-        let style = self.style;
+        let style = self.style.clone();
         let popup_keyboard_handled = self.route_application_popup_keyboard(event);
         let menu_keyboard_handled = !popup_keyboard_handled && self.route_menu_keyboard(event);
         let window_keyboard_handled = !popup_keyboard_handled && !menu_keyboard_handled && self.route_window_keyboard(event);
@@ -2732,7 +2732,7 @@ impl WindowManager {
         // widen a structurally clipped child back to the full drawable viewport.
         self.display_list.clear();
         self.surfaces.rebuild_visible_order();
-        let style = self.style;
+        let style = self.style.clone();
         let active_mode = self.active_popup_owner().and_then(|owner| self.surfaces.stacking_mode(owner));
         // A menu owns keyboard presentation without discarding application focus. Otherwise the
         // same surface selected by routing is the only runtime allowed to paint remembered focus.

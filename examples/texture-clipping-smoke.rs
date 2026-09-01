@@ -260,7 +260,7 @@ fn main() -> Result<(), String> {
 
     // Keep the window background out of the recording log so the assertions isolate the widget's
     // atlas/texture ordering while still exercising the retained public rendering path.
-    let mut style = *ctx.style();
+    let mut style = ctx.style().clone();
     style.colors[ControlColor::WindowBG as usize] = color(0, 0, 0, 0);
     ctx.set_style(style);
 

@@ -15,9 +15,11 @@ exclude = ["atlas.png", ".codex", ".codex/**"]
 name = "microui_redux"
 
 [features]
-default = ["builder", "save-to-rust"]
+default = ["builder", "save-to-rust", "theme-json"]
 builder = ["dep:fontdue", "dep:png"]
 png_source = ["dep:png"]
+# Versioned JSON definitions and relative PNG state assets.
+theme-json = ["dep:serde", "dep:serde_json", "png_source"]
 save-to-rust = ["dep:tempfile"]
 prebuilt-atlas = ["png_source"]
 external-atlas = ["png_source"]
@@ -45,6 +47,8 @@ fontdue = { version = "0.9.2", optional = true }
 bitflags = "2.4.1"
 rs-math3d = "0.12"
 png = { version = "0.18", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
 sdl2 = { version = "0.38", features = ["raw-window-handle"], optional = true }
 glow = { version = "0.17", optional = true }
 ash = { version = "0.38", default-features = false, features = [

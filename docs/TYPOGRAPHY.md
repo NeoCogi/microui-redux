@@ -1,7 +1,7 @@
 # Fonts and typography
 
 - Atlas building supports multiple baked fonts and sizes through `atlas::builder::FontAsset`, and the same config can drive both runtime atlas construction and offline/prebuilt atlas export.
-- `Context::new(...)` constructs its `Style` directly from the conventional atlas font keys `body`, `small`, `title`, `heading`, and `mono`, plus the built-in semantic icon keys. To customize it, copy `*context.style()`, change scalar fields, and pass the complete value to `Context::set_style(...)`; no placeholder IDs or rebinding pass exists.
+- `Context::new(...)` constructs its `Style` directly from the conventional atlas font keys `body`, `small`, `title`, `heading`, and `mono`, plus the built-in semantic icon keys. To customize it, clone `context.style()`, change scalar fields, and pass the complete value to `Context::set_style(...)`; no placeholder IDs or rebinding pass exists.
 - Text-bearing widget Parameters expose `.font(FontChoice)`, so you can either select a semantic role (`FontRole::Heading.into()`) or a concrete baked font ID (`atlas.font_id("caption").unwrap().into()`).
 - Font sizes are selected by choosing another baked font variant, not by scaling one bitmap font at runtime.
 - `examples/demo-full` uses this directly: `NORMAL.ttf` for control/body text, `BOLD.ttf` for window titles, and `CONSOLE.ttf` for the log window’s input/output text.

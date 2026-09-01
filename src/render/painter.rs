@@ -296,7 +296,10 @@ mod tests {
             panic!("expected a semantic nine-patch");
         };
         assert_eq!(rect_tuple(*rect), (11, 22, 10, 12));
-        let NinePatchCell::Color { color } = patch.cells.center else {
+        let crate::NinePatchContent::Flat { cells } = patch.content else {
+            panic!("expected flat nine-patch content");
+        };
+        let NinePatchCell::Color { color } = cells.center else {
             panic!("expected a colored center cell");
         };
         assert_eq!((color.r, color.g, color.b, color.a), (1, 2, 3, 255));

@@ -231,6 +231,15 @@ impl<B: RendererBackend> Renderer<B> {
                 DrawKind::Icon { id, .. } if !self.atlas.contains_icon(*id) => {
                     return Err(RenderError::UnknownIcon { id: *id, operation_index });
                 }
+                DrawKind::NinePatch { patch, .. } => {
+                    // Flat patches carry no external resource. Image patches use the same ownership
+                    // preflight as ordinary image operations before a backend frame is acquired.
+                    if let Some(image) = patch.image_content()
+                        && !self.textures.contains(&image.texture)
+                    {
+                        return Err(RenderError::UnknownTexture { id: image.texture, operation_index });
+                    }
+                }
                 DrawKind::Image { id, .. } if !self.textures.contains(id) => {
                     return Err(RenderError::UnknownTexture { id: *id, operation_index });
                 }
@@ -247,6 +256,13 @@ impl<B: RendererBackend> Renderer<B> {
     pub(crate) fn atlas(&self) -> AtlasHandle {
         // Return the cheap immutable capability rather than exposing the executor's backend owner.
         self.atlas.clone()
+    }
+
+    /// Reports whether one external texture handle is live in this renderer.
+    pub(crate) fn contains_texture(&self, id: TextureId) -> bool {
+        // Texture identity includes renderer provenance, so one set lookup checks both ownership and
+        // whether the application has explicitly freed the handle.
+        self.textures.contains(&id)
     }
 
     /// Registers one persistent custom renderer specialized for this backend.
@@ -355,18 +371,37 @@ impl<B: RendererBackend> DisplayListExecutor<'_, '_, B> {
         });
     }
 
-    /// Expands one semantic patch and submits each visible color cell through the atlas batch.
+    /// Expands one semantic patch and submits each visible flat or image cell.
     fn draw_nine_patch(&mut self, rect: Recti, patch: crate::render::NinePatch, clip: Recti) {
         // NinePatch geometry and named cell ordering are resolved together here, making the renderer
         // the only production boundary that turns one compact three-by-three operation into quads.
-        let geometry = patch.geometry(rect);
-        let cells = patch.cells.rows();
-        for row in 0..3 {
-            for column in 0..3 {
-                let crate::render::NinePatchCell::Color { color } = cells[row][column] else {
-                    continue;
-                };
-                submit_atlas_rect(&mut self.frame, self.atlas_dim, geometry[row][column], self.white_icon_rect, color, clip);
+        let destinations = patch.geometry(rect);
+        match patch.content {
+            crate::render::NinePatchContent::Flat { cells } => {
+                let cells = cells.rows();
+                for row in 0..3 {
+                    for column in 0..3 {
+                        let crate::render::NinePatchCell::Color { color } = cells[row][column] else {
+                            continue;
+                        };
+                        submit_atlas_rect(&mut self.frame, self.atlas_dim, destinations[row][column], self.white_icon_rect, color, clip);
+                    }
+                }
+            }
+            crate::render::NinePatchContent::Image { image } => {
+                // Close pending atlas work once before the complete image patch. Consecutive cells
+                // then retain their order without manufacturing nine independent semantic ops.
+                self.frame.flush();
+                let sources = crate::render::nine_patch::geometry_with_insets(image.source, image.source_insets);
+                for row in 0..3 {
+                    for column in 0..3 {
+                        let Some(vertices) = clipped_textured_quad(destinations[row][column], sources[row][column], image.texture.size(), image.tint, clip)
+                        else {
+                            continue;
+                        };
+                        self.frame.draw_texture(image.texture, vertices);
+                    }
+                }
             }
         }
     }

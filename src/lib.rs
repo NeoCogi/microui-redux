@@ -268,7 +268,8 @@ pub mod prelude {
     pub use crate::image::{ImageError, ImageSource, ImageStorageError, MAX_DECODED_RGBA_BYTES, load_image_bytes};
     pub use crate::input::{Key, KeyEvent, KeyState, Modifiers, MouseButton};
     pub use crate::render::{
-        FrameError, FrameInfo, FrameInfoError, NinePatch, NinePatchCell, NinePatchCells, RendererBackend, RendererFrame, SliceInsets, TextureError, TextureId,
+        FrameError, FrameInfo, FrameInfoError, NinePatch, NinePatchCell, NinePatchCells, NinePatchContent, NinePatchImage, RendererBackend, RendererFrame,
+        SliceInsets, TextureError, TextureId,
     };
     pub use crate::retained::{
         ChildParticipation, ChildWindowClip, Children, Container, ContainerLayoutCtx, ContainerWidget, Context, ContextFrame, Ui, CustomRenderArgs,
@@ -279,7 +280,11 @@ pub mod prelude {
         TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx, Window, WindowOption,
     };
     pub use crate::math::{expand_rect, rect, vec2};
-    pub use crate::theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, color};
+    pub use crate::theme::{
+        AppearanceCatalog, AppearanceRole, Color, ControlColor, FontChoice, FontRole, StatefulAppearance, Style, ThemeIcons, VisualState, color,
+    };
+    #[cfg(feature = "theme-json")]
+    pub use crate::theme::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};
     pub use crate::widgets::{
         Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters, ColorSwatch,
         ColorSwatchBuilder, ColorSwatchParameters, Combo, ComboBuilder, ComboChanged, ComboParameters, ComboSubmitted, Custom, CustomBuilder, CustomParameters,
@@ -306,8 +311,10 @@ pub use menu::{Menu, MenuBar, MenuItem, MenuItemAccessError, MenuItemHandle, Men
 pub use image::{ImageError, ImageSource, ImageStorageError, MAX_DECODED_RGBA_BYTES, load_image_bytes};
 pub use input::{Key, KeyEvent, KeyState, Modifiers, MouseButton};
 pub use math::{expand_rect, rect, vec2};
-pub use render::{NinePatch, NinePatchCell, NinePatchCells, SliceInsets, TextureError, TextureId};
-pub use theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, color};
+pub use render::{NinePatch, NinePatchCell, NinePatchCells, NinePatchContent, NinePatchImage, SliceInsets, TextureError, TextureId};
+pub use theme::{AppearanceCatalog, AppearanceRole, Color, ControlColor, FontChoice, FontRole, StatefulAppearance, Style, ThemeIcons, VisualState, color};
+#[cfg(feature = "theme-json")]
+pub use theme::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};
 pub use ui_node::{
     AvailableSpace, ChildParticipation, Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, Disclosure, DisclosureParameters, Grid,
     GridItem, GridParameters, GridSpan, KeyboardAction, KeyboardBehavior, LeafWidget, Linear, LinearCrossSize, LinearDirection, LinearItem, LinearParameters,

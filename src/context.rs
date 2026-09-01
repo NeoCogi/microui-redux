@@ -41,6 +41,10 @@ use crate::window_manager::{LayerBinding, PopupHandle, SurfaceCreationError, Sur
 use crate::window_manager::RootId;
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, FrameInfo, RenderError, Renderer, RendererBackend};
 use crate::{AtlasHandle, Dimensioni, ImageSource, KeyEvent, MouseButton, Node, Recti, Style, TextureError, TextureId};
+#[cfg(feature = "theme-json")]
+use crate::{LoadedTheme, ThemeLoadError};
+#[cfg(feature = "theme-json")]
+use std::path::Path;
 
 /// Short-lived access to retained UI state owned by a [`Context`].
 ///
@@ -566,16 +570,25 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// Replaces the current UI style.
     ///
     /// Every font and icon capability must originate from this Context's atlas. Start from
-    /// `*context.style()` when changing scalar values, or use [`Style::from_atlas`] with the handle
+    /// `context.style().clone()` when changing scalar values, or use [`Style::from_atlas`] with the handle
     /// returned by [`Context::atlas`].
     ///
     /// # Panics
     ///
-    /// Panics when any font or icon capability belongs to another atlas allocation.
+    /// Panics when any font or icon capability belongs to another atlas allocation, or when an
+    /// image-backed appearance references a foreign or already-freed texture.
     pub fn set_style(&mut self, style: Style) {
         // Reject a mixed-atlas style at the mutation boundary instead of allowing layout or paint
         // to select a same-slot resource from the wrong atlas.
         assert!(style.belongs_to(&self.renderer.atlas()), "style contains font or icon IDs from another atlas");
+        assert!(
+            style
+                .appearances
+                .patches()
+                .filter_map(crate::NinePatch::image_content)
+                .all(|image| self.renderer.contains_texture(image.texture)),
+            "style contains theme texture IDs not owned by this Context"
+        );
         self.window_manager.set_style(style);
     }
 
@@ -652,6 +665,40 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
                 self.try_load_image_rgba(width, height, rgba.as_slice())
             }
         }
+    }
+
+    /// Loads a versioned JSON theme and every PNG it explicitly assigns to an appearance state.
+    ///
+    /// Relative image paths are resolved against the JSON file's directory. Missing PNG entries
+    /// remain concrete flat-color patches derived from the document's palette. Successfully
+    /// uploaded textures are owned by this Context for its remaining lifetime, allowing callers to
+    /// retain several [`LoadedTheme`] values and switch between their cloned styles safely.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ThemeLoadError`] for definition I/O, strict JSON schema errors, invalid role or
+    /// slice data, PNG decoding, or backend upload failure. If any image fails, every texture
+    /// uploaded earlier in the same call is destroyed before the error is returned.
+    #[cfg(feature = "theme-json")]
+    pub fn load_theme_file(&mut self, path: impl AsRef<Path>) -> Result<LoadedTheme, ThemeLoadError> {
+        // Always resolve file themes from a fresh atlas-bound default Style. Loading while another
+        // theme is active must not accidentally inherit that theme's image handles or omitted values.
+        let definition = crate::theme::loader::ThemeDefinition::read(path.as_ref())?;
+        let base = Style::from_atlas(&self.renderer.atlas());
+        let mut uploaded = Vec::new();
+        let result = definition.install(base, |_, width, height, pixels| {
+            let id = self.renderer.try_load_texture_rgba(width, height, pixels)?;
+            uploaded.push(id);
+            Ok(id)
+        });
+        if result.is_err() {
+            // Installation never publishes a partial Style. Releasing the exact successful prefix
+            // restores renderer state before returning the classified failing asset.
+            for id in uploaded {
+                self.renderer.free_texture(id);
+            }
+        }
+        result
     }
 }
 
@@ -851,5 +898,81 @@ impl<B: RendererBackend, State: 'static> Drop for ContextFrame<'_, B, State> {
         if !self.completed {
             self.context.window_manager.cancel_frame();
         }
+    }
+}
+
+#[cfg(all(test, feature = "theme-json", feature = "save-to-rust"))]
+mod theme_tests {
+    //! Context-level theme upload transaction tests.
+
+    use super::*;
+    use crate::test_support::{RenderEvent, recording_backend, test_atlas};
+    use std::fs;
+
+    /// Encodes one small opaque RGBA PNG for a temporary theme fixture.
+    fn fixture_png(width: u32, height: u32) -> Vec<u8> {
+        // Use the same png crate version as the production decoder while keeping the fixture fully
+        // generated and independent of repository assets.
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, width, height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().expect("fixture PNG header must encode");
+            let pixels = vec![0xFF; width as usize * height as usize * 4];
+            writer.write_image_data(pixels.as_slice()).expect("fixture PNG pixels must encode");
+        }
+        bytes
+    }
+
+    /// Verifies an error after one successful upload destroys that exact partial texture prefix.
+    #[test]
+    fn failed_theme_install_rolls_back_uploaded_pngs() {
+        let directory = tempfile::tempdir().expect("temporary theme directory must be available");
+        fs::write(directory.path().join("button.png"), fixture_png(3, 3)).expect("fixture PNG must be writable");
+        fs::write(
+            directory.path().join("theme.json"),
+            r#"{
+                "schema_version": 1,
+                "name": "Rollback",
+                "appearances": {
+                    "button": {
+                        "insets": { "left": 1, "top": 1, "right": 1, "bottom": 1 },
+                        "normal": { "png": "button.png" }
+                    },
+                    "checkbox": {
+                        "normal": { "png": "missing.png" }
+                    }
+                }
+            }"#,
+        )
+        .expect("fixture JSON must be writable");
+        let (backend, log) = recording_backend(test_atlas());
+        let mut context = Context::<_>::new(backend);
+        log.clear();
+
+        let error = match context.load_theme_file(directory.path().join("theme.json")) {
+            Ok(_) => panic!("missing second PNG must fail installation"),
+            Err(error) => error,
+        };
+
+        assert!(matches!(error, ThemeLoadError::ImageRead { path, .. } if path.ends_with("missing.png")));
+        let events = log.snapshot();
+        let created: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                RenderEvent::CreateTexture { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
+        let destroyed: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                RenderEvent::DestroyTexture(id) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(created.len(), 1);
+        assert_eq!(destroyed, created);
     }
 }

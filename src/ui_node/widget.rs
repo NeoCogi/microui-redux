@@ -88,7 +88,7 @@ impl<W> WidgetStorage<W> {
 
 impl<W: ?Sized> WidgetStorage<W> {
     pub(crate) fn style_override(&self) -> Option<Style> {
-        self.style_override
+        self.style_override.clone()
     }
 
     pub(crate) fn set_style_override(&mut self, style_override: Option<Style>) {
@@ -97,7 +97,7 @@ impl<W: ?Sized> WidgetStorage<W> {
     }
 
     pub(crate) fn resolve_style(&self, inherited: &Style) -> Style {
-        self.style_override.unwrap_or(*inherited)
+        self.style_override.clone().unwrap_or_else(|| inherited.clone())
     }
 
     pub(crate) fn mark_measurement_dirty(&mut self) {

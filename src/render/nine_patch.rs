@@ -33,7 +33,7 @@
 //! therefore describe a background with nine typed cells, the display list can retain that exact
 //! description, and the renderer can expand it without consulting a widget or theme registry.
 
-use crate::{Color, Recti};
+use crate::{Color, Recti, TextureId};
 
 /// Insets separating the fixed outer rows and columns from a stretchable center cell.
 ///
@@ -126,10 +126,11 @@ impl SliceInsets {
     }
 }
 
-/// Concrete content drawn in one cell of a [`NinePatch`].
+/// Concrete flat content drawn in one cell of a [`NinePatch`].
 ///
-/// The enum is intentionally closed and typed. Image-backed cells will become another explicit
-/// variant in the theme commit; no dynamic payload or `std::any::Any` downcast is involved.
+/// The enum is intentionally closed and typed. A complete image-backed patch uses the separate
+/// [`NinePatchImage`] representation, so neither rendering mode needs a dynamic payload or a
+/// `std::any::Any` downcast.
 #[derive(Copy, Clone)]
 pub enum NinePatchCell {
     /// Leaves the cell transparent and records no renderer work.
@@ -182,6 +183,46 @@ pub struct NinePatchCells {
     pub bottom: NinePatchCell,
     /// Fixed bottom-right corner.
     pub bottom_right: NinePatchCell,
+}
+
+/// One texture and source rectangle divided into a three-by-three image grid.
+///
+/// Source insets are measured in texture pixels and may differ from destination [`SliceInsets`].
+/// This lets a theme retain crisp one-pixel artwork while requesting a thicker interactive border.
+#[derive(Copy, Clone)]
+pub struct NinePatchImage {
+    /// Context-owned texture containing all nine source cells.
+    pub texture: TextureId,
+    /// Complete source rectangle inside `texture`.
+    pub source: Recti,
+    /// Fixed source rows and columns measured inside `source`.
+    pub source_insets: SliceInsets,
+    /// RGBA modulation applied uniformly to all nine sampled cells.
+    pub tint: Color,
+}
+
+impl NinePatchImage {
+    /// Creates one explicitly sliced image description.
+    pub const fn new(texture: TextureId, source: Recti, source_insets: SliceInsets, tint: Color) -> Self {
+        // Retain exact source input so the renderer and validation layer can apply their respective
+        // clipping and ownership policies without a second image-description type.
+        Self { texture, source, source_insets, tint }
+    }
+}
+
+/// Closed content vocabulary for a complete three-by-three patch.
+#[derive(Copy, Clone)]
+pub enum NinePatchContent {
+    /// Nine independently visible flat-color cells.
+    Flat {
+        /// Named cells traversed in geometric order by the renderer.
+        cells: NinePatchCells,
+    },
+    /// One texture source divided by its own source-space slice insets.
+    Image {
+        /// Complete typed image description.
+        image: NinePatchImage,
+    },
 }
 
 impl NinePatchCells {
@@ -272,16 +313,29 @@ impl NinePatchCells {
 pub struct NinePatch {
     /// Destination-space sizes of the outer columns and rows.
     pub insets: SliceInsets,
-    /// Concrete content associated with each named cell.
-    pub cells: NinePatchCells,
+    /// Concrete flat or image content associated with the complete grid.
+    pub content: NinePatchContent,
 }
 
 impl NinePatch {
-    /// Creates a patch from explicit destination insets and named cells.
+    /// Creates a flat patch from explicit destination insets and named cells.
     pub const fn new(insets: SliceInsets, cells: NinePatchCells) -> Self {
         // Preserve exact author input. All geometry consumers normalize through [`Self::geometry`]
         // so style construction does not need a second validation representation.
-        Self { insets, cells }
+        Self {
+            insets,
+            content: NinePatchContent::Flat { cells },
+        }
+    }
+
+    /// Creates an image patch with independent destination and source slice geometry.
+    pub const fn image(insets: SliceInsets, image: NinePatchImage) -> Self {
+        // Store the complete source description in one explicit enum variant. Image patches never
+        // masquerade as nine unrelated external images and therefore remain easy to validate.
+        Self {
+            insets,
+            content: NinePatchContent::Image { image },
+        }
     }
 
     /// Creates the three-by-three equivalent of one solid filled rectangle.
@@ -304,51 +358,81 @@ impl NinePatch {
 
     /// Replaces only the center cell while retaining every edge and corner.
     pub const fn with_center(mut self, fill: Option<Color>) -> Self {
-        // Frame geometry and colors remain immutable; callers can cheaply derive a filled or hollow
-        // patch for one paint without rebuilding all nine named fields.
-        self.cells.center = match fill {
-            Some(color) => NinePatchCell::color(color),
-            None => NinePatchCell::Empty,
-        };
+        // Only flat content has an independently replaceable center. A theme image already owns
+        // its complete center artwork, so deriving a role-specific flat fill leaves it unchanged.
+        if let NinePatchContent::Flat { cells } = &mut self.content {
+            cells.center = match fill {
+                Some(color) => NinePatchCell::color(color),
+                None => NinePatchCell::Empty,
+            };
+        }
+        self
+    }
+
+    /// Replaces destination insets while retaining the complete flat or image payload.
+    pub const fn with_insets(mut self, insets: SliceInsets) -> Self {
+        // Theme documents use this when a role supplies structural insets but omits one or more PNG
+        // states. Those states keep their flat content while matching the role's requested layout.
+        self.insets = insets;
         self
     }
 
     /// Reports whether recording this patch can produce visible renderer work.
     pub(crate) const fn is_visible(self) -> bool {
-        // Destination area is checked by Painter because it owns coordinates. This query is solely
-        // responsible for the patch's typed cell contents.
-        self.cells.has_visible_cell()
+        // Destination area is checked by Painter because it owns coordinates. Flat patches inspect
+        // their cells, while an image needs positive source geometry and non-zero modulation alpha.
+        match self.content {
+            NinePatchContent::Flat { cells } => cells.has_visible_cell(),
+            NinePatchContent::Image { image } => image.source.width > 0 && image.source.height > 0 && image.tint.a != 0,
+        }
+    }
+
+    /// Returns the image payload when this patch references an external texture.
+    pub(crate) const fn image_content(self) -> Option<NinePatchImage> {
+        // The exhaustive match gives renderer preflight a typed ownership query without inspecting
+        // private enum layout or maintaining a parallel list of theme textures.
+        match self.content {
+            NinePatchContent::Flat { .. } => None,
+            NinePatchContent::Image { image } => Some(image),
+        }
     }
 
     /// Resolves the nine destination rectangles for one authoritative outer allocation.
     pub(crate) fn geometry(self, outer: Recti) -> [[Recti; 3]; 3] {
         // Resolve each axis independently. The returned partitions exactly consume the positive
         // destination extent and remain zero-sized for a non-positive axis.
-        let insets = self.insets.normalized();
-        let widths = partition_axis(outer.width, insets.left, insets.right);
-        let heights = partition_axis(outer.height, insets.top, insets.bottom);
-        let xs = partition_origins(outer.x, widths);
-        let ys = partition_origins(outer.y, heights);
-
-        // Construct the fixed grid explicitly so callers cannot confuse row and column ordering.
-        [
-            [
-                Recti::new(xs[0], ys[0], widths[0], heights[0]),
-                Recti::new(xs[1], ys[0], widths[1], heights[0]),
-                Recti::new(xs[2], ys[0], widths[2], heights[0]),
-            ],
-            [
-                Recti::new(xs[0], ys[1], widths[0], heights[1]),
-                Recti::new(xs[1], ys[1], widths[1], heights[1]),
-                Recti::new(xs[2], ys[1], widths[2], heights[1]),
-            ],
-            [
-                Recti::new(xs[0], ys[2], widths[0], heights[2]),
-                Recti::new(xs[1], ys[2], widths[1], heights[2]),
-                Recti::new(xs[2], ys[2], widths[2], heights[2]),
-            ],
-        ]
+        geometry_with_insets(outer, self.insets)
     }
+}
+
+/// Resolves one rectangle into nine exact cells using the supplied slice insets.
+pub(crate) fn geometry_with_insets(outer: Recti, insets: SliceInsets) -> [[Recti; 3]; 3] {
+    // Source and destination grids share this partition policy. Source documents are validated
+    // to fit, while tiny destinations may proportionally collapse their fixed outer cells.
+    let insets = insets.normalized();
+    let widths = partition_axis(outer.width, insets.left, insets.right);
+    let heights = partition_axis(outer.height, insets.top, insets.bottom);
+    let xs = partition_origins(outer.x, widths);
+    let ys = partition_origins(outer.y, heights);
+
+    // Construct the fixed grid explicitly so callers cannot confuse row and column ordering.
+    [
+        [
+            Recti::new(xs[0], ys[0], widths[0], heights[0]),
+            Recti::new(xs[1], ys[0], widths[1], heights[0]),
+            Recti::new(xs[2], ys[0], widths[2], heights[0]),
+        ],
+        [
+            Recti::new(xs[0], ys[1], widths[0], heights[1]),
+            Recti::new(xs[1], ys[1], widths[1], heights[1]),
+            Recti::new(xs[2], ys[1], widths[2], heights[1]),
+        ],
+        [
+            Recti::new(xs[0], ys[2], widths[0], heights[2]),
+            Recti::new(xs[1], ys[2], widths[1], heights[2]),
+            Recti::new(xs[2], ys[2], widths[2], heights[2]),
+        ],
+    ]
 }
 
 /// Divides one non-negative destination extent into leading, center, and trailing lengths.
@@ -430,6 +514,21 @@ mod tests {
 
         assert!(!transparent.is_visible());
         assert!(opaque.is_visible());
+    }
+
+    /// Verifies replacing the flat center never destroys a complete image-backed patch.
+    #[test]
+    fn image_patch_ignores_flat_center_replacement() {
+        let texture = TextureId::new_test(7, 9, 11);
+        let image = NinePatchImage::new(texture, Recti::new(0, 0, 9, 11), SliceInsets::uniform(2), color(255, 255, 255, 255));
+        let patch = NinePatch::image(SliceInsets::uniform(3), image).with_center(Some(color(1, 2, 3, 255)));
+
+        let Some(resolved) = patch.image_content() else {
+            panic!("image content was replaced by a flat center");
+        };
+        assert_eq!(resolved.texture, texture);
+        assert_eq!(resolved.source.width, 9);
+        assert_eq!(resolved.source_insets.left, 2);
     }
 
     /// Converts an external rectangle into an equality-friendly tuple for focused assertions.

@@ -47,7 +47,7 @@ Local styles can be installed while building a node or changed later through its
 handle:
 
 ```rust
-let mut section_style = *ctx.style();
+let mut section_style = ctx.style().clone();
 section_style.spacing = 8;
 section_style.padding = 6;
 

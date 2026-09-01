@@ -48,5 +48,5 @@ pub(crate) use display_list::DisplayList;
 pub use painter::Painter;
 pub use renderer::RenderError;
 pub(crate) use renderer::Renderer;
-pub use nine_patch::{NinePatch, NinePatchCell, NinePatchCells, SliceInsets};
+pub use nine_patch::{NinePatch, NinePatchCell, NinePatchCells, NinePatchContent, NinePatchImage, SliceInsets};
 pub use texture::{TextureError, TextureId};

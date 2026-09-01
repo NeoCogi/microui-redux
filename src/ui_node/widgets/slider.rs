@@ -782,7 +782,12 @@ mod tests {
         let mut style = test_style(&atlas);
         // A borderless ten-pixel thumb records one unambiguous fill rectangle at the computed x.
         style.thumb_size = 10;
-        style.frame.insets = crate::SliceInsets::ZERO;
+        let frame = style
+            .appearance(crate::AppearanceRole::GenericFrame, crate::VisualState::Normal)
+            .with_insets(crate::SliceInsets::ZERO);
+        style
+            .appearances
+            .set(crate::AppearanceRole::GenericFrame, crate::StatefulAppearance::all(frame));
         let mut slider =
             SliderBuilder::create_widget(SliderParameters::new(Real::MAX / 2.0, 0.0, Real::MAX).expect("a maximum finite range span must remain usable"));
         let bounds = rect(0, 0, 100, 20);

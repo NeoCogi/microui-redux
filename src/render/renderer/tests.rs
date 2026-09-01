@@ -635,6 +635,45 @@ fn external_texture_clipping_preserves_uv_mapping_and_stream_order() {
     assert!(matches!(events[4], RenderEvent::AtlasQuad(_)));
 }
 
+/// Verifies one image-backed patch expands matching destination and source grids in painter order.
+#[test]
+fn image_nine_patch_submits_nine_sliced_texture_quads() {
+    let (backend, log) = recording_backend(make_atlas());
+    let mut renderer = Renderer::new(backend);
+    let texture = renderer.try_load_texture_rgba(6, 6, &[0xFF; 6 * 6 * 4]).unwrap();
+    log.clear();
+    let image = crate::NinePatchImage::new(texture, Recti::new(0, 0, 6, 6), crate::SliceInsets::new(2, 1, 2, 2), color(255, 255, 255, 255));
+    let patch = crate::NinePatch::image(crate::SliceInsets::new(4, 3, 5, 4), image);
+    let mut list = DisplayList::new();
+    painter(&mut list, viewport()).nine_patch(Recti::new(0, 0, 30, 24), patch);
+
+    renderer.render(frame_info(64, 64), &mut list).unwrap();
+
+    let events = log.snapshot();
+    assert!(matches!(events[0], RenderEvent::Begin { .. }));
+    assert_eq!(events[1], RenderEvent::Flush, "pending atlas work is closed once before the image grid");
+    let cells: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            RenderEvent::ExternalTexture { id, vertices } if *id == texture => Some(vertices),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(cells.len(), 9);
+    assert_position(cells[0][0], [0.0, 0.0]);
+    assert_position(cells[0][2], [4.0, 3.0]);
+    assert_uv(cells[0][0], [0.0, 0.0]);
+    assert_uv(cells[0][2], [2.0 / 6.0, 1.0 / 6.0]);
+    assert_position(cells[4][0], [4.0, 3.0]);
+    assert_position(cells[4][2], [25.0, 20.0]);
+    assert_uv(cells[4][0], [2.0 / 6.0, 1.0 / 6.0]);
+    assert_uv(cells[4][2], [4.0 / 6.0, 4.0 / 6.0]);
+    assert_position(cells[8][0], [25.0, 20.0]);
+    assert_position(cells[8][2], [30.0, 24.0]);
+    assert_uv(cells[8][0], [4.0 / 6.0, 4.0 / 6.0]);
+    assert_uv(cells[8][2], [1.0, 1.0]);
+}
+
 #[test]
 fn solid_triangles_are_clipped_only_during_execution_and_interpolate_color() {
     let (backend, log) = recording_backend(make_atlas());
@@ -861,7 +900,13 @@ fn foreign_same_slot_texture_cannot_render_or_destroy_the_local_texture() {
 
     right_log.clear();
     let mut foreign_list = DisplayList::new();
-    painter(&mut foreign_list, viewport()).image(foreign, Recti::new(0, 0, 1, 1), color(255, 255, 255, 255));
+    painter(&mut foreign_list, viewport()).nine_patch(
+        Recti::new(0, 0, 3, 3),
+        crate::NinePatch::image(
+            crate::SliceInsets::uniform(1),
+            crate::NinePatchImage::new(foreign, Recti::new(0, 0, 1, 1), crate::SliceInsets::ZERO, color(255, 255, 255, 255)),
+        ),
+    );
     let error = right.render(frame_info(32, 32), &mut foreign_list).unwrap_err();
     assert!(matches!(error, RenderError::UnknownTexture { id, operation_index: 0 } if id == foreign));
     assert!(right_log.snapshot().is_empty(), "foreign texture preflight must run before backend acquisition");

@@ -160,7 +160,7 @@ fn downstream_style_and_theme_are_constructed_from_atlas_capabilities() {
     // A style from separately reconstructed identical metadata carries a different AtlasId and is
     // rejected at the Context mutation boundary rather than aliasing same-slot resources.
     let foreign_context = context_with_state::<()>();
-    let foreign_style = *foreign_context.style();
+    let foreign_style = foreign_context.style().clone();
     let foreign_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| context.set_style(foreign_style)));
     assert!(foreign_result.is_err());
 }

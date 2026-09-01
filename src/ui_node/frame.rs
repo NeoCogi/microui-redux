@@ -147,13 +147,19 @@ mod tests {
     use crate::render::DisplayList;
     use crate::test_support::{test_atlas, test_style};
 
+    /// Replaces the generic frame role used by the frame geometry under test.
+    fn with_frame(mut style: Style, patch: NinePatch) -> Style {
+        // Tests mutate the same concrete catalog entry that production generic framing resolves.
+        style
+            .appearances
+            .set(crate::AppearanceRole::GenericFrame, crate::StatefulAppearance::all(patch));
+        style
+    }
+
     #[test]
     fn frame_geometry_derives_inside_content() {
         let atlas = test_atlas();
-        let style = Style {
-            frame: NinePatch::framed(SliceInsets::uniform(2), color(1, 2, 3, 255), None),
-            ..test_style(&atlas)
-        };
+        let style = with_frame(test_style(&atlas), NinePatch::framed(SliceInsets::uniform(2), color(1, 2, 3, 255), None));
         let geometry = frame_geometry(Recti::new(10, 20, 30, 40), true, &style);
         assert_eq!(rect_tuple(geometry.outer), (10, 20, 30, 40));
         assert_eq!(geometry.content.map(rect_tuple), Some((12, 22, 26, 36)));
@@ -162,10 +168,7 @@ mod tests {
     #[test]
     fn zero_width_frame_keeps_the_complete_content_rect() {
         let atlas = test_atlas();
-        let style = Style {
-            frame: NinePatch::framed(SliceInsets::ZERO, color(1, 2, 3, 255), None),
-            ..test_style(&atlas)
-        };
+        let style = with_frame(test_style(&atlas), NinePatch::framed(SliceInsets::ZERO, color(1, 2, 3, 255), None));
         let outer = Recti::new(10, 20, 30, 40);
         let geometry = frame_geometry(outer, true, &style);
         assert_eq!(geometry.content.map(rect_tuple), Some(rect_tuple(outer)));
@@ -174,10 +177,7 @@ mod tests {
     #[test]
     fn transparent_border_keeps_structural_inset() {
         let atlas = test_atlas();
-        let style = Style {
-            frame: NinePatch::framed(SliceInsets::uniform(1), color(0, 0, 0, 0), None),
-            ..test_style(&atlas)
-        };
+        let style = with_frame(test_style(&atlas), NinePatch::framed(SliceInsets::uniform(1), color(0, 0, 0, 0), None));
         assert_eq!(frame_geometry(Recti::new(4, 5, 8, 7), true, &style).content.map(rect_tuple), Some((5, 6, 6, 5)));
     }
 

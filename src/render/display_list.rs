@@ -212,8 +212,11 @@ impl DisplayList {
             let DrawKind::NinePatch { rect, patch } = operation.kind else {
                 continue;
             };
+            let crate::render::NinePatchContent::Flat { cells } = patch.content else {
+                continue;
+            };
             let geometry = patch.geometry(rect);
-            let cells = patch.cells.rows();
+            let cells = cells.rows();
             for row in 0..3 {
                 for column in 0..3 {
                     let crate::render::NinePatchCell::Color { color } = cells[row][column] else {

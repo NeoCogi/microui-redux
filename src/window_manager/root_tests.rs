@@ -824,7 +824,7 @@ fn active_window_and_only_its_remembered_widget_use_style_focus_accents() {
     };
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
-    ctx.set_style(style);
+    ctx.set_style(style.clone());
 
     let (_, first_node) = OrderedProbe::create(WidgetOption::NONE);
     let first_id = first_node.id();
@@ -890,7 +890,7 @@ fn tab_focused_disclosure_uses_focus_fill_in_addition_to_the_shared_outline() {
     };
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
-    ctx.set_style(style);
+    ctx.set_style(style.clone());
 
     let (_, disclosure) = Disclosure::create(DisclosureParameters::tree("focused tree row", false, std::iter::empty::<LinearItem>()));
     let root = ctx.ui().create_window(Window::new("disclosure", rect(20, 20, 180, 100), disclosure));
@@ -922,7 +922,7 @@ fn empty_public_update_consumes_programmatic_text_area_caret_reveal() {
     let style = Style {
         padding: 0,
         scrollbar_size: 10,
-        ..*ctx.style()
+        ..ctx.style().clone()
     };
     ctx.set_style(style);
     let root = ctx.ui().create_window(Window::new("text area", rect(10, 10, 100, 60), content));
@@ -964,7 +964,7 @@ fn global_style_replacement_invalidates_measurements_in_hidden_surfaces() {
     // Replace only a value that the former partial style key omitted while the tree is hidden.
     // Revealing it later must not revive the entry measured under the previous complete Style.
     ctx.ui().set_window_visible(&window, false).unwrap();
-    let mut replacement = *ctx.style();
+    let mut replacement = ctx.style().clone();
     replacement.menu_background.r = replacement.menu_background.r.wrapping_add(1);
     ctx.set_style(replacement);
     ctx.update_ui(dimensions);

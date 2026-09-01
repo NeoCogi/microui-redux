@@ -895,7 +895,11 @@ mod tests {
         let fits = laid_out_geometry(
             Dimensioni::new(80, 80),
             surface,
-            Style { padding: 10, scrollbar_size: 10, ..style },
+            Style {
+                padding: 10,
+                scrollbar_size: 10,
+                ..style.clone()
+            },
             &atlas,
             Vec2i::default(),
         );
@@ -1029,12 +1033,16 @@ mod tests {
         let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, child));
         let mut runtime = UiRuntime::new();
         let atlas = test_atlas();
-        let style = Style {
-            frame: crate::NinePatch::framed(crate::SliceInsets::uniform(3), crate::color(1, 2, 3, 255), None),
+        let mut style = Style {
             padding: 5,
             scrollbar_size: 10,
             ..crate::test_support::test_style(&atlas)
         };
+        let frame_insets = crate::SliceInsets::uniform(3);
+        style.appearances.set(
+            crate::AppearanceRole::GenericFrame,
+            crate::StatefulAppearance::all(crate::NinePatch::framed(frame_insets, crate::color(1, 2, 3, 255), None)),
+        );
         let outer = Recti::new(10, 20, 100, 80);
 
         runtime.begin_update();
@@ -1044,10 +1052,7 @@ mod tests {
         assert_eq!((allocation_before.x, allocation_before.y), (0, 0));
         assert_eq!(
             (screen_before.x, screen_before.y),
-            (
-                outer.x + style.frame.insets.left + style.padding,
-                outer.y + style.frame.insets.top + style.padding
-            )
+            (outer.x + frame_insets.left + style.padding, outer.y + frame_insets.top + style.padding)
         );
 
         scroll.try_update(|state| state.set_offset(Vec2i::new(0, 12))).unwrap();
