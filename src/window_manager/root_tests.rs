@@ -2118,40 +2118,54 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
     assert_eq!(context.debug_active_popup_names(), ["combo choices"]);
 }
 
-/// Verifies ordinary pointer hover reaches a combo's semantic frame state.
+/// Verifies a combo-style application popup combines its focused and hovered list-row state.
 #[test]
-fn combo_hover_routes_to_its_distinct_hovered_appearance() {
+fn combo_popup_choice_hover_resolves_the_list_item_hovered_focused_appearance() {
     let atlas = test_atlas();
     let mut style = test_style(&atlas);
     let normal_color = color(17, 29, 43, 255);
     let hovered_color = color(71, 83, 97, 255);
-    let mut combo_appearance = StatefulAppearance::all(NinePatch::solid(normal_color));
-    combo_appearance.set(VisualState::Hovered, NinePatch::solid(hovered_color));
-    style.appearances.set(AppearanceRole::Combo, combo_appearance);
-    let (combo, combo_node) = Combo::create(ComboParameters::new());
-    let combo_id = combo_node.id();
-    combo.update_items(&["Apple", "Pear"]);
+    let focused_color = color(109, 127, 149, 255);
+    let hovered_focused_color = color(173, 191, 211, 255);
+    let mut item_appearance = StatefulAppearance::all(NinePatch::solid(normal_color));
+    item_appearance.set(VisualState::Hovered, NinePatch::solid(hovered_color));
+    item_appearance.set(VisualState::Focused, NinePatch::solid(focused_color));
+    item_appearance.set(VisualState::HoveredFocused, NinePatch::solid(hovered_focused_color));
+    style.appearances.set(AppearanceRole::ListItem, item_appearance);
+    let (_, item_node) = ListItem::create(ListItemParameters::new("Apple"));
+    let item_id = item_node.id();
+    let (_, popup_body) = Linear::create(LinearParameters::vertical([item_node]));
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
     ctx.set_style(style);
-    let root = ctx.ui().create_window(Window::new("combo hover", rect(20, 20, 140, 60), combo_node));
+    let owner = ctx.ui().create_window(Window::new("combo owner", rect(20, 20, 140, 60), empty_content()));
+    let popup = ctx.ui().create_popup(&owner, "combo choices", popup_body).unwrap();
     ctx.ui()
-        .set_window_options(&root, WindowOption::NO_TITLE | WindowOption::NO_RESIZE | WindowOption::NO_PADDING)
+        .set_popup_options(
+            &popup,
+            WindowOption::FRAME | WindowOption::AUTO_HEIGHT | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
+        )
         .unwrap();
     let dimensions = Dimensioni::new(320, 240);
     ctx.update_ui(dimensions);
-    let combo_rect = ctx.debug_root_node_rect(root.id(), combo_id).expect("combo must receive committed geometry");
+    ctx.ui().show_popup_at(&popup, rect(40, 70, 160, 1)).unwrap();
+    ctx.update_ui(dimensions);
+    let item_rect = ctx
+        .debug_popup_node_rect(&popup, item_id)
+        .expect("open combo choice must receive committed geometry");
 
-    // A plain move is sufficient to refresh retained hover; no click or keyboard focus should be
-    // required before the semantic Combo role selects its Hovered state.
-    ctx.mousemove(combo_rect.x + combo_rect.width / 2, combo_rect.y + combo_rect.height / 2);
+    // Opening an application popup focuses its first Tab stop. Moving onto that same choice must
+    // select ListItem's combined state rather than Combo header art or the global focus fallback.
+    ctx.mousemove(item_rect.x + item_rect.width / 2, item_rect.y + item_rect.height / 2);
     ctx.update_ui(dimensions);
     log.clear();
     ctx.frame(frame_info(dimensions)).render_ui().unwrap();
 
     let events = log.snapshot();
-    assert!(!atlas_quads_with_color(&events, hovered_color).is_empty());
+    assert!(!atlas_quads_with_color(&events, hovered_focused_color).is_empty());
     assert!(atlas_quads_with_color(&events, normal_color).is_empty());
+    assert!(atlas_quads_with_color(&events, hovered_color).is_empty());
+    assert!(atlas_quads_with_color(&events, focused_color).is_empty());
 }
 
 #[test]
