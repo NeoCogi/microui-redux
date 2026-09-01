@@ -212,6 +212,8 @@ pub(super) struct RootChromeGeometry {
     pub(super) client: Recti,
     /// Optional title allocation in screen coordinates.
     pub(super) title: Option<Recti>,
+    /// Optional root-owned menu bar directly below the title and across the complete client width.
+    pub(super) menu_bar: Option<Recti>,
     /// Optional close-button allocation overlaying the title.
     pub(super) close: Option<Recti>,
     /// Optional minimize-button allocation overlaying the title.
@@ -306,6 +308,7 @@ impl RootChromeGeometry {
 pub(super) fn root_chrome_geometry(
     outer: Recti,
     child_intrinsic: Dimensioni,
+    menu_intrinsic: Option<Dimensioni>,
     name: &str,
     options: WindowOption,
     style: &Style,
@@ -327,10 +330,13 @@ pub(super) fn root_chrome_geometry(
     let horizontal_frame_extent = frame.horizontal_extent();
     let vertical_frame_extent = frame.vertical_extent();
     let padding_extent = padding.saturating_mul(2);
+    let menu_width = menu_intrinsic.map(|size| size.width.max(0)).unwrap_or(0);
+    let menu_height = menu_intrinsic.map(|size| size.height.max(0)).unwrap_or(0);
     let auto_width = options.intersects(WindowOption::AUTO_WIDTH);
     let auto_height = options.intersects(WindowOption::AUTO_HEIGHT);
-    let mut minimum_width = if auto_width { 1 } else { 96 };
+    let mut minimum_width = if auto_width { 1 } else { 96 }.max(menu_width);
     let mut minimum_height = if auto_height { 1 } else { 64 };
+    let title_extent = if options.intersects(WindowOption::NO_TITLE) { 0 } else { title_height };
     if !options.intersects(WindowOption::NO_TITLE) {
         // The title minimum retains enough room for text, padding, and every enabled caption button.
         let close_count = i32::from(!options.intersects(WindowOption::NO_CLOSE));
@@ -352,29 +358,29 @@ pub(super) fn root_chrome_geometry(
             .saturating_add(caption_width)
             .saturating_add(padding_extent);
         minimum_width = minimum_width.max(title_minimum_width);
-        minimum_height = minimum_height.max(if auto_height {
-            title_height
-        } else {
-            title_height.saturating_add(padding_extent)
-        });
     }
+    // Title and menu are chrome siblings outside application padding. Retain enough client height
+    // for both plus the body's two padding edges even when the application child measures empty.
+    minimum_height = minimum_height.max(title_extent.saturating_add(menu_height).saturating_add(padding_extent));
     // The frame contributes one border on every outer edge.
     let minimum_outer = Dimensioni::new(
         minimum_width.saturating_add(horizontal_frame_extent),
         minimum_height.saturating_add(vertical_frame_extent),
     );
-    let title_extent = if options.intersects(WindowOption::NO_TITLE) { 0 } else { title_height };
-    // Intrinsic geometry adds the surface-owned frame, title, and padding to child measurement.
+    // Intrinsic width compares full-width menu chrome with the independently padded application
+    // child. Intrinsic height stacks title, menu, and body before the structural frame is added.
     let intrinsic_outer = Dimensioni::new(
         child_intrinsic
             .width
             .saturating_add(padding_extent)
+            .max(menu_width)
             .saturating_add(horizontal_frame_extent)
             .max(minimum_outer.width),
         child_intrinsic
             .height
             .saturating_add(padding_extent)
             .saturating_add(title_extent)
+            .saturating_add(menu_height)
             .saturating_add(vertical_frame_extent)
             .max(minimum_outer.height),
     );
@@ -420,10 +426,19 @@ pub(super) fn root_chrome_geometry(
     };
     let mut body = client;
     if let Some(title) = title {
-        // Application content begins immediately below the title allocation.
+        // Remaining chrome and application content begin immediately below the title allocation.
         body.y = body.y.saturating_add(title.height);
         body.height = body.height.saturating_sub(title.height).max(0);
     }
+    let menu_bar = menu_intrinsic.map(|_| {
+        // Menus are chrome, not application content: span the unpadded client and consume their
+        // measured height before any body inset is applied.
+        let height = menu_height.min(body.height.max(0));
+        let rect = Recti::new(body.x, body.y, body.width.max(0), height);
+        body.y = body.y.saturating_add(height);
+        body.height = body.height.saturating_sub(height).max(0);
+        rect
+    });
     body = crate::expand_rect(body, -padding);
     body.width = body.width.max(0);
     body.height = body.height.max(0);
@@ -462,6 +477,7 @@ pub(super) fn root_chrome_geometry(
     RootChromeGeometry {
         client,
         title,
+        menu_bar,
         close,
         minimize,
         maximize,

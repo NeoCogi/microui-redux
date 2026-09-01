@@ -5,6 +5,11 @@ body, compact [`MenuBar`](../src/menu.rs) data, and the private surfaces that pr
 Applications describe the hierarchy once and keep only the `MenuItemHandle`s needed for later state
 changes.
 
+The persistent bar is root chrome rather than application content. Root geometry allocates the
+frame, title, and full-client-width menu bar before applying the independent content inset to the
+application body. The same committed menu rectangle drives heading layout, painting, hit testing,
+popup anchors, intrinsic sizing, and child-window clipping.
+
 The public composition types are deliberately small:
 
 | Type | Role |

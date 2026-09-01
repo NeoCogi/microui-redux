@@ -264,12 +264,13 @@ let tool = context.ui().create_child_window(
 ```
 
 `ChildWindowClip::Content` intersects each direct child's inherited clip with the committed
-application-body rectangle, after frame, title, padding, and intrinsic menu-bar space have been
-removed. Descendants accumulate clipping ancestors, but their authoritative rectangles stay in
-screen coordinates. `ChildWindowClip::None`, the default, preserves the inherited viewport clip
-while keeping the same content/children/overlay order. `NO_PADDING` removes only the window-owned
-content inset; descendant widgets still use the complete `Style`, including ordinary control and
-container padding.
+application-body rectangle. Root chrome removes the frame, title, and intrinsic menu bar in that
+order, then applies the window-owned content inset only to the remaining application body.
+Descendants accumulate clipping ancestors, but their authoritative rectangles stay in screen
+coordinates. `ChildWindowClip::None`, the default, preserves the inherited viewport clip while
+keeping the same content/children/overlay order. `NO_PADDING` removes only the window-owned content
+inset; descendant widgets still use the complete `Style`, including ordinary control and container
+padding.
 
 `demo-full` applies this exact recipe to a menu-bearing perspective X-Y grid family root with
 left-drag arcball rotation, wheel zoom, and homogeneous line clipping. The original Demo Window and

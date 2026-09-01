@@ -4121,16 +4121,47 @@ fn auto_sized_window_includes_menu_bar_and_exposes_application_body_below_it() {
     ctx.update_and_render_ui();
 
     let outer = ctx.debug_root_rect(root.id()).unwrap();
+    let client = ctx.debug_root_client(root.id()).unwrap();
     let bar = ctx.debug_menu_bar_rect(root.id()).unwrap();
     let body = ctx.debug_root_body(root.id()).unwrap();
     assert!(bar.height > 0, "a non-empty menu must contribute intrinsic height");
-    assert_eq!((bar.x, bar.width), (body.x, body.width), "the bar must fill the complete client width");
-    assert_eq!(bar.y + bar.height, body.y, "application content must begin immediately below the bar");
+    assert_eq!(
+        (bar.x, bar.y, bar.width),
+        (client.x, client.y, client.width),
+        "the bar must begin at and fill the complete client width"
+    );
+    assert!(
+        body.y >= bar.y + bar.height && body.x >= bar.x,
+        "application padding may inset only the body after menu chrome is allocated"
+    );
     assert_eq!(body.height, 24, "auto height must retain the application's intrinsic extent below the bar");
     assert!(
         outer.height >= bar.height + body.height,
         "outer auto-size must include menu and application content"
     );
+}
+
+/// Verifies a titled window allocates its menu as full-width chrome before body padding.
+#[test]
+fn titled_window_stacks_title_menu_and_padded_application_body_in_chrome_order() {
+    let (_, action) = MenuItem::create(MenuItemParameters::new("Action"));
+    let menu_bar = MenuBar::new([Menu::new("File").item(action)]);
+    let mut ctx = context();
+    let root = ctx
+        .ui()
+        .create_window(Window::new("menu chrome", rect(30, 40, 240, 160), desired_size_node(80, 30)).menu_bar(menu_bar));
+    ctx.ui().set_window_options(&root, WindowOption::FRAME | WindowOption::NO_RESIZE).unwrap();
+
+    ctx.update_and_render_ui();
+
+    let client = ctx.debug_root_client(root.id()).unwrap();
+    let title = ctx.debug_root_chrome(root.id()).unwrap().0.unwrap();
+    let bar = ctx.debug_menu_bar_rect(root.id()).unwrap();
+    let body = ctx.debug_root_body(root.id()).unwrap();
+    assert_eq!((title.x, title.y, title.width), (client.x, client.y, client.width));
+    assert_eq!((bar.x, bar.y, bar.width), (client.x, title.y + title.height, client.width));
+    assert!(body.x > bar.x && body.width < bar.width, "ordinary content padding must not inset menu chrome");
+    assert!(body.y > bar.y + bar.height, "ordinary content padding must begin only below menu chrome");
 }
 
 /// Verifies an unmounted item is never manager-addressable and its ID is not later reused.

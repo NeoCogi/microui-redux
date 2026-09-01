@@ -827,8 +827,14 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
 
     /// Returns the committed application-body rectangle for internal chrome tests.
     pub(crate) fn debug_root_body(&self, root: RootId) -> Option<Recti> {
-        // Resolve font-dependent title geometry with the Context renderer's atlas.
+        // The manager retains the exact body snapshot consumed by application layout.
         self.window_manager.debug_root_body(root, &self.renderer.atlas())
+    }
+
+    /// Returns the committed framed client rectangle for internal chrome tests.
+    pub(crate) fn debug_root_client(&self, root: RootId) -> Option<Recti> {
+        // Client geometry lets tests distinguish full-width chrome from padded application content.
+        self.window_manager.debug_root_client(root)
     }
 
     /// Returns retained traversal counters for one window or dialog in internal tests.

@@ -297,11 +297,11 @@ impl Surface {
         let auto_width = self.options.intersects(WindowOption::AUTO_WIDTH);
         let auto_height = self.options.intersects(WindowOption::AUTO_HEIGHT);
         let mut menu_bar = menu_bar;
-        let menu_size = menu_bar.as_deref_mut().map(|bar| bar.measure(style, atlas)).unwrap_or_default();
+        let menu_intrinsic = menu_bar.as_deref_mut().map(|bar| bar.measure(style, atlas));
         if self.options.intersects(WindowOption::AUTO_SIZE) {
             // Convert retained outer bounds to application-body bounds before asking the content
             // tree for intrinsic size. Fixed axes retain their programmed outer extent.
-            let shell = root_chrome_geometry(self.rect, Dimensioni::default(), &self.name, self.options, style, atlas);
+            let shell = root_chrome_geometry(self.rect, Dimensioni::default(), menu_intrinsic, &self.name, self.options, style, atlas);
             let horizontal_chrome = self.rect.width.saturating_sub(shell.body.width);
             let vertical_chrome = self.rect.height.saturating_sub(shell.body.height);
             let constraints = crate::Constraints::new(
@@ -316,10 +316,8 @@ impl Surface {
                     crate::AvailableSpace::bounded(self.rect.height).shrink(vertical_chrome)
                 },
             );
-            let body_constraints = crate::Constraints::new(constraints.width, constraints.height.shrink(menu_size.height));
-            let child = self.body.measure(style, atlas, body_constraints);
-            let combined = Dimensioni::new(child.width.max(menu_size.width), child.height.saturating_add(menu_size.height));
-            let intrinsic = root_chrome_geometry(Recti::default(), combined, &self.name, self.options, style, atlas).intrinsic_outer;
+            let child = self.body.measure(style, atlas, constraints);
+            let intrinsic = root_chrome_geometry(Recti::default(), child, menu_intrinsic, &self.name, self.options, style, atlas).intrinsic_outer;
             if auto_width {
                 self.rect.width = intrinsic.width;
             }
@@ -329,23 +327,13 @@ impl Surface {
         }
 
         // Store one geometry snapshot shared by application layout, chrome hit testing, and paint.
-        self.geometry = root_chrome_geometry(self.rect, Dimensioni::default(), &self.name, self.options, style, atlas);
-        let bar_height = menu_size.height.min(self.geometry.body.height.max(0));
-        if let Some(bar) = menu_bar {
-            bar.layout(
-                Recti::new(self.geometry.body.x, self.geometry.body.y, self.geometry.body.width, bar_height),
-                clip,
-            );
+        self.geometry = root_chrome_geometry(self.rect, Dimensioni::default(), menu_intrinsic, &self.name, self.options, style, atlas);
+        if let (Some(bar), Some(rect)) = (menu_bar, self.geometry.menu_bar) {
+            // The menu consumes the exact chrome rectangle derived above. Popup anchors, overlay
+            // paint, and hit testing subsequently read the MenuSurface's matching committed rect.
+            bar.layout(rect, clip);
         }
-        let body = Recti::new(
-            self.geometry.body.x,
-            self.geometry.body.y.saturating_add(bar_height),
-            self.geometry.body.width,
-            self.geometry.body.height.saturating_sub(bar_height).max(0),
-        );
-        // Public/debug body geometry denotes application content, excluding the intrinsic menu bar.
-        self.geometry.body = body;
-        self.body.layout(style, atlas, body, clip);
+        self.body.layout(style, atlas, self.geometry.body, clip);
     }
 
     /// Returns whether the outer surface contains one screen-space point.
@@ -3307,6 +3295,14 @@ impl WindowManager {
         Some(node.surface.geometry.body)
     }
 
+    /// Returns the framed client rectangle before title, menu, or body-padding allocation.
+    #[cfg(test)]
+    pub(crate) fn debug_root_client(&self, root: RootId) -> Option<Recti> {
+        // Tests use this immutable snapshot to distinguish full-width chrome from the independently
+        // inset application body without reproducing private frame arithmetic.
+        Some(self.surfaces.root_node(root)?.surface.geometry.client)
+    }
+
     /// Returns window runtime metrics for tests.
     #[cfg(test)]
     pub(crate) fn debug_root_runtime_metrics(&self, root: RootId) -> Option<crate::ui_node::RuntimeMetrics> {
@@ -3333,16 +3329,11 @@ impl WindowManager {
 
     /// Returns title, close, and resize geometry for one window.
     #[cfg(test)]
-    pub(crate) fn debug_root_chrome(&self, root: RootId, atlas: &crate::AtlasHandle) -> Option<(Option<Recti>, Option<Recti>, Option<Recti>)> {
+    pub(crate) fn debug_root_chrome(&self, root: RootId, _atlas: &crate::AtlasHandle) -> Option<(Option<Recti>, Option<Recti>, Option<Recti>)> {
         let node = self.surfaces.root_node(root)?;
-        let mut geometry = root_chrome_geometry(
-            node.surface.rect,
-            Dimensioni::default(),
-            &node.surface.name,
-            node.surface.options,
-            &self.style,
-            atlas,
-        );
+        // The committed snapshot already includes the measured menu contribution and matches the
+        // exact geometry consumed by layout, hit testing, and paint in the current UI commit.
+        let mut geometry = node.surface.geometry;
         if node.root().is_some_and(|state| state.restore_rect.is_some()) {
             geometry = geometry.without_resize();
         }
@@ -3351,16 +3342,11 @@ impl WindowManager {
 
     /// Returns optional minimize, maximize, right-edge, bottom-edge, and corner geometry for tests.
     #[cfg(test)]
-    pub(crate) fn debug_root_chrome_controls(&self, root: RootId, atlas: &crate::AtlasHandle) -> Option<super::DebugRootChromeControls> {
+    pub(crate) fn debug_root_chrome_controls(&self, root: RootId, _atlas: &crate::AtlasHandle) -> Option<super::DebugRootChromeControls> {
         let node = self.surfaces.root_node(root)?;
-        let mut geometry = root_chrome_geometry(
-            node.surface.rect,
-            Dimensioni::default(),
-            &node.surface.name,
-            node.surface.options,
-            &self.style,
-            atlas,
-        );
+        // Return the same committed geometry as ordinary interaction instead of reconstructing a
+        // shell without access to the root-owned menu's measured size.
+        let mut geometry = node.surface.geometry;
         if node.root().is_some_and(|state| state.restore_rect.is_some()) {
             // Match committed maximized geometry rather than returning raw policy candidates.
             geometry = geometry.without_resize();
