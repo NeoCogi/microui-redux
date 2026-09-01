@@ -335,6 +335,7 @@ pub(crate) fn textbox_update(
         Some(UiInputEvent::Text { text }) => text.as_str(),
         _ => "",
     };
+    let home_pressed = key_event.is_some_and(|event| event.is_pressed() && event.key == Key::Home);
     let end_pressed = key_event.is_some_and(|event| event.is_pressed() && event.key == Key::End);
     let edit = if ctx.focused() {
         apply_text_input(buf, cursor_pos, text_input, key_event, ReturnBehavior::Submit)
@@ -355,7 +356,11 @@ pub(crate) fn textbox_update(
         if edit.submit {
             outcome.submitted = true;
         }
-        if end_pressed {
+        if home_pressed {
+            // A single-line editor has one visual start, so Home always selects byte zero.
+            cursor_pos = 0;
+        } else if end_pressed {
+            // End is the symmetric single-line boundary and selects the complete buffer length.
             cursor_pos = buf.len();
         }
     }
@@ -551,6 +556,31 @@ mod tests {
         textbox.move_cursor_to_end();
         textbox.clear();
         assert!(!dispatcher.dispatch(&mut Vec::new()));
+    }
+
+    /// Verifies the public Home and End keys select the two single-line cursor boundaries.
+    #[test]
+    fn home_and_end_keys_select_single_line_boundaries() {
+        let mut textbox = TextboxBuilder::create_widget(TextboxParameters::new("abcd"));
+        textbox.set_cursor(2);
+
+        update_textbox(
+            &mut textbox,
+            true,
+            vec![UiInputEvent::Key {
+                event: KeyEvent::pressed(Key::Home, Modifiers::NONE),
+            }],
+        );
+        assert_eq!(textbox.cursor(), 0);
+
+        update_textbox(
+            &mut textbox,
+            true,
+            vec![UiInputEvent::Key {
+                event: KeyEvent::pressed(Key::End, Modifiers::NONE),
+            }],
+        );
+        assert_eq!(textbox.cursor(), textbox.text().len());
     }
 
     /// Verifies construction, programmatic replacement, and pasted input all remain single-line.

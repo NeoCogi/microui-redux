@@ -515,7 +515,15 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>, 
         if edit.moved {
             ensure_visible = true;
             reset_preferred = true;
-            caret_affinity = CaretAffinity::Upstream;
+            // Horizontal movement can land on the byte shared by two wrapped lines. Left arrives
+            // from inside the continuation and must keep that downstream visual side; Right
+            // arrives from the preceding line and keeps the upstream side. At unshared positions
+            // the affinity is inert but retaining the same rule makes the next layout deterministic.
+            caret_affinity = if key_event.is_some_and(|event| event.is_pressed() && event.key == Key::ArrowLeft) {
+                CaretAffinity::Downstream
+            } else {
+                CaretAffinity::Upstream
+            };
         }
         outcome.submitted = edit.submit;
     }
@@ -527,7 +535,15 @@ fn textarea_update(ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>, 
     let mut caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
 
     if ctx.focused() {
-        if key_event.is_some_and(|event| event.is_pressed() && event.key == Key::End) {
+        if key_event.is_some_and(|event| event.is_pressed() && event.key == Key::Home) {
+            // Home targets the current visual line. On a wrapped continuation its start shares a
+            // byte with the previous line's end, so preserve the selected downstream side.
+            cursor_pos = layout.lines[cursor_line].start;
+            caret_affinity = affinity_for_line(&layout.lines, cursor_line, cursor_pos);
+            caret_x = cursor_x_in_line(&layout.lines[cursor_line], state.buf.as_str(), cursor_pos, font, ctx.atlas());
+            ensure_visible = true;
+            reset_preferred = true;
+        } else if key_event.is_some_and(|event| event.is_pressed() && event.key == Key::End) {
             // End targets the current visual line, including wrapped segments.
             cursor_pos = layout.lines[cursor_line].end;
             caret_affinity = affinity_for_line(&layout.lines, cursor_line, cursor_pos);
@@ -734,13 +750,13 @@ mod tests {
         dispatcher
     }
 
-    /// Runs direct focused editor updates without constructing the surrounding scroll area.
-    fn update_text_area(text_area: &mut TextArea, input: Vec<UiInputEvent>) {
+    /// Runs direct focused editor updates at one explicit content allocation.
+    fn update_text_area_in_bounds(text_area: &mut TextArea, bounds: Recti, input: Vec<UiInputEvent>) {
         // Reproduce held key state across the supplied FIFO events while keeping one stable content
-        // allocation and focused interaction snapshot.
+        // allocation and focused interaction snapshot. Supplying bounds lets wrapping regressions
+        // exercise the same update path without mounting the surrounding scroll area.
         let atlas = test_atlas();
         let style = test_style(&atlas);
-        let bounds = Recti::new(0, 0, 160, 80);
         let mut modifiers = Modifiers::NONE;
         for event in &input {
             if let UiInputEvent::Key { event } = event {
@@ -749,6 +765,11 @@ mod tests {
             let mut ctx = WidgetUpdateCtx::new_with_interaction(bounds, bounds, &style, &atlas, true, true, true, false, false, MouseButton::NONE, modifiers);
             text_area.update(&mut ctx, Some(event));
         }
+    }
+
+    /// Runs direct focused editor updates at the ordinary non-wrapping test allocation.
+    fn update_text_area(text_area: &mut TextArea, input: Vec<UiInputEvent>) {
+        update_text_area_in_bounds(text_area, Recti::new(0, 0, 160, 80), input);
     }
 
     /// Verifies independent changed and submitted snapshots from the editable content leaf.
@@ -872,6 +893,67 @@ mod tests {
         );
         text_area.update(&mut ctx, Some(&end));
         assert_eq!(text_area.cursor(), 3);
+    }
+
+    /// Verifies horizontal arrows retain the visual side from which they enter a wrap boundary.
+    #[test]
+    fn wrapped_horizontal_navigation_selects_the_arrival_side_of_a_shared_boundary() {
+        // With the test font's eight-pixel advances, this allocation produces ranges 0..2 and
+        // 2..4. Byte 2 therefore has distinct upstream and downstream visual positions.
+        let bounds = Recti::new(0, 0, 16, 30);
+        let parameters = || TextAreaParameters::new("_ __").wrap(TextWrap::Word);
+
+        let mut from_continuation = TextArea::new_editor(parameters());
+        from_continuation.set_cursor(3);
+        update_text_area_in_bounds(
+            &mut from_continuation,
+            bounds,
+            vec![UiInputEvent::Key {
+                event: KeyEvent::pressed(Key::ArrowLeft, Modifiers::NONE),
+            }],
+        );
+        assert_eq!(from_continuation.cursor(), 2);
+        assert_eq!(from_continuation.interaction.caret_affinity, CaretAffinity::Downstream);
+
+        let mut from_first_line = TextArea::new_editor(parameters());
+        from_first_line.set_cursor(1);
+        update_text_area_in_bounds(
+            &mut from_first_line,
+            bounds,
+            vec![UiInputEvent::Key {
+                event: KeyEvent::pressed(Key::ArrowRight, Modifiers::NONE),
+            }],
+        );
+        assert_eq!(from_first_line.cursor(), 2);
+        assert_eq!(from_first_line.interaction.caret_affinity, CaretAffinity::Upstream);
+
+        // Resolve both stored affinities against the actual wrapped layout, proving that equal
+        // public byte cursors paint and reveal on the two intended visual lines.
+        let atlas = test_atlas();
+        let style = test_style(&atlas);
+        let font = style.resolve_font_choice(from_continuation.font);
+        let layout = textarea_layout(bounds, &atlas, &from_continuation, font);
+        assert_eq!(line_index_for_cursor(&layout.lines, 2, from_continuation.interaction.caret_affinity), 1);
+        assert_eq!(line_index_for_cursor(&layout.lines, 2, from_first_line.interaction.caret_affinity), 0);
+    }
+
+    /// Verifies Home selects the start of the current wrapped visual line, not the whole buffer.
+    #[test]
+    fn wrapped_home_selects_the_continuation_start() {
+        let bounds = Recti::new(0, 0, 16, 30);
+        let mut text_area = TextArea::new_editor(TextAreaParameters::new("_ __").wrap(TextWrap::Word));
+        text_area.set_cursor(3);
+
+        update_text_area_in_bounds(
+            &mut text_area,
+            bounds,
+            vec![UiInputEvent::Key {
+                event: KeyEvent::pressed(Key::Home, Modifiers::NONE),
+            }],
+        );
+
+        assert_eq!(text_area.cursor(), 2);
+        assert_eq!(text_area.interaction.caret_affinity, CaretAffinity::Downstream);
     }
 
     /// Verifies multiline backspace at byte zero cannot delete the following newline.
