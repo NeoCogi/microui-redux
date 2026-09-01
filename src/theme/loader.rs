@@ -913,6 +913,25 @@ mod tests {
             loaded.style().appearance(AppearanceRole::WindowMinimizeGlyph, VisualState::Normal).content,
             crate::NinePatchContent::Image { image } if image.source.width == 9 && image.source.height == 9
         ));
+        // Deactivation must preserve the raised caption face authored by the theme. Letting these
+        // roles fall back to their flat palette appearance would combine a one-pixel black frame
+        // with the role's three-pixel visual insets and produce an incorrect heavy black square.
+        for role in [
+            AppearanceRole::WindowCloseButton,
+            AppearanceRole::WindowMinimizeButton,
+            AppearanceRole::WindowMaximizeButton,
+            AppearanceRole::WindowRestoreButton,
+        ] {
+            let normal = loaded.style().appearance(role, VisualState::Normal);
+            let inactive = loaded.style().appearance(role, VisualState::Inactive);
+            assert!(matches!(
+                (normal.content, inactive.content),
+                (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: inactive })
+                    if normal.texture == inactive.texture
+                        && (normal.source.x, normal.source.y, normal.source.width, normal.source.height)
+                            == (inactive.source.x, inactive.source.y, inactive.source.width, inactive.source.height)
+            ));
+        }
         let selected_text = loaded.style().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
         assert_eq!((selected_text.r, selected_text.g, selected_text.b, selected_text.a), (255, 255, 255, 255));
     }
