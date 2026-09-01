@@ -19,7 +19,9 @@ The four-pixel window edge follows the period's black-gray-gray-black outline. I
 23-pixel corner cells form the long mirrored L pieces visible in the reference while remaining
 independent from the four-pixel client inset and resize hit thickness. The bottom-right L is the
 visible two-axis affordance; the larger semantic grip image is intentionally transparent, so no
-filled rectangle appears over the client.
+filled rectangle appears over the client. Those L-shaped roles belong only to ordinary windows.
+Modal dialogs instead use a uniform four-pixel outer frame: black while inactive and the period
+`#0000AA` focus blue while active.
 
 Menu bars and popup interiors are white, popup shells use a solid two-pixel black frame instead of
 window bevels, and highlighted rows pair the `#0000AA` selection with white state-specific foregrounds.

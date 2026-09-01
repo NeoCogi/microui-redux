@@ -149,6 +149,19 @@
       "hovered": { "png": "window-frame-active.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
       "pressed": { "png": "window-frame-active.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
     },
+    "dialog_frame": {
+      "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
+      "normal": { "png": "window-frame.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+      "hovered": { "png": "window-frame.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+      "pressed": { "png": "window-frame.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+      "inactive": { "png": "window-frame.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "tint": [245, 245, 245, 255] }
+    },
+    "dialog_frame_active": {
+      "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
+      "normal": { "png": "window-frame-active.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+      "hovered": { "png": "window-frame-active.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+      "pressed": { "png": "window-frame-active.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+    },
     "window_title": {
       "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
       "normal": { "png": "title-inactive.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 } },

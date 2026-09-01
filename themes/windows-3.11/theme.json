@@ -206,6 +206,12 @@
       "hovered": { "png": "window-frame-active.png", "source_insets": { "left": 23, "top": 23, "right": 23, "bottom": 23 } },
       "pressed": { "png": "window-frame-active.png", "source_insets": { "left": 23, "top": 23, "right": 23, "bottom": 23 } }
     },
+    "dialog_frame": {
+      "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }
+    },
+    "dialog_frame_active": {
+      "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }
+    },
     "window_title": {
       "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
       "normal": { "png": "title-inactive.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 } },

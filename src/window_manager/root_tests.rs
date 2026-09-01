@@ -889,6 +889,53 @@ fn active_window_and_only_its_remembered_widget_use_style_focus_accents() {
     );
 }
 
+/// Verifies modal presentation selects dialog frame roles without restyling ordinary windows.
+#[test]
+fn modal_dialog_uses_its_own_active_frame_role() {
+    // Use unique solid body colors so the background pass proves the selected semantic role even
+    // when a frame has no visible edge cells. The title and retained content use unrelated colors.
+    let atlas = test_atlas();
+    let window_frame_color = color(11, 37, 71, 255);
+    let dialog_frame_color = color(83, 109, 149, 255);
+    let mut style = test_style(&atlas);
+    style
+        .appearances
+        .set(AppearanceRole::WindowFrameActive, StatefulAppearance::all(NinePatch::solid(window_frame_color)));
+    style
+        .appearances
+        .set(AppearanceRole::DialogFrameActive, StatefulAppearance::all(NinePatch::solid(dialog_frame_color)));
+
+    let (backend, log) = recording_backend(atlas);
+    let mut ctx = Context::<_>::new(backend);
+    ctx.set_style(style);
+    let owner = ctx.ui().create_window(Window::new("ordinary window", rect(20, 20, 180, 130), empty_content()));
+    let dialog = ctx
+        .ui()
+        .create_dialog(&owner, Window::new("modal dialog", rect(70, 60, 120, 90), empty_content()))
+        .expect("an ordinary window may own one modal dialog");
+    let dimensions = Dimensioni::new(320, 240);
+    ctx.update_ui(dimensions);
+
+    // Before the hidden dialog opens, the ordinary root must continue using the existing active
+    // window role. Merely retaining a dialog definition cannot affect its owner's presentation.
+    log.clear();
+    ctx.frame(frame_info(dimensions)).render_ui().unwrap();
+    let events = log.snapshot();
+    assert!(!atlas_quads_with_color(&events, window_frame_color).is_empty());
+    assert!(atlas_quads_with_color(&events, dialog_frame_color).is_empty());
+
+    // Opening the modal transfers activation and selects only the dialog-specific active frame.
+    // The inactive owner uses its passive ordinary-window role rather than either active color.
+    ctx.ui().set_window_visible(&dialog, true).unwrap();
+    ctx.update_ui(dimensions);
+    assert_eq!(ctx.debug_active_root(), Some(dialog.id()));
+    log.clear();
+    ctx.frame(frame_info(dimensions)).render_ui().unwrap();
+    let events = log.snapshot();
+    assert!(atlas_quads_with_color(&events, window_frame_color).is_empty());
+    assert!(!atlas_quads_with_color(&events, dialog_frame_color).is_empty());
+}
+
 /// Verifies top-level deactivation selects its own chrome, client, control, and foreground state.
 #[test]
 fn inactive_window_state_propagates_through_chrome_and_child_widgets() {

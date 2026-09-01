@@ -2799,11 +2799,13 @@ impl WindowManager {
             let node_index = self.surfaces.node_index(SurfaceKey::Root(root)).expect("visible root must remain retained");
             let node = &mut self.surfaces.nodes[node_index];
             let window_active = active_window == Some(root);
+            let dialog = node.root().is_some_and(|state| state.mode == RootMode::Modal);
             record_root_background(
                 &mut self.display_list,
                 node.surface.clip,
                 node.surface.rect,
                 style,
+                dialog,
                 window_active,
                 !window_active,
             );
@@ -2846,7 +2848,9 @@ impl WindowManager {
             {
                 bar.paint(&mut self.display_list, style, atlas, active_window == Some(root));
             }
-            let visual = node.root().expect("root overlay must retain root policy").chrome_visual_state();
+            let root_state = node.root().expect("root overlay must retain root policy");
+            let dialog = root_state.mode == RootMode::Modal;
+            let visual = root_state.chrome_visual_state();
             record_root_overlay(
                 &mut self.display_list,
                 node.surface.clip,
@@ -2856,6 +2860,7 @@ impl WindowManager {
                 node.surface.geometry,
                 style,
                 atlas,
+                dialog,
                 active_window == Some(root),
                 visual,
             );
@@ -2875,7 +2880,7 @@ impl WindowManager {
             let node = &mut self.surfaces.nodes[node_index];
             // Popup shells retain the ordinary inactive-frame role used before window activation
             // existed, while their transient contents remain visually active.
-            record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, style, false, false);
+            record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, style, false, false, false);
             node.surface.body.paint(&mut self.display_list, style, atlas, focus_surface == Some(key), true);
         }
     }

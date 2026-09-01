@@ -85,6 +85,10 @@ pub enum AppearanceRole {
     WindowFrame,
     /// Active window outer frame and body.
     WindowFrameActive,
+    /// Inactive modal-dialog outer frame and body.
+    DialogFrame,
+    /// Active modal-dialog outer frame and body.
+    DialogFrameActive,
     /// Inactive window title background.
     WindowTitle,
     /// Active window title background.
@@ -140,6 +144,8 @@ impl AppearanceRole {
             Self::MenuItemSelected => "menu_item_selected",
             Self::WindowFrame => "window_frame",
             Self::WindowFrameActive => "window_frame_active",
+            Self::DialogFrame => "dialog_frame",
+            Self::DialogFrameActive => "dialog_frame_active",
             Self::WindowTitle => "window_title",
             Self::WindowTitleActive => "window_title_active",
             Self::WindowCloseButton => "window_close_button",
@@ -186,6 +192,8 @@ impl AppearanceRole {
         Self::MenuItemSelected,
         Self::WindowFrame,
         Self::WindowFrameActive,
+        Self::DialogFrame,
+        Self::DialogFrameActive,
         Self::WindowTitle,
         Self::WindowTitleActive,
         Self::WindowCloseButton,
@@ -624,15 +632,18 @@ impl AppearanceCatalog {
         );
         catalog.set(AppearanceRole::MenuItem, highlight);
         catalog.set(AppearanceRole::MenuItemSelected, selected);
+        let active_window = StatefulAppearance::all(NinePatch::framed(
+            frame_insets.at_least(1),
+            window_focus,
+            Some(colors[ControlColor::WindowBG as usize]),
+        ));
+        // Windows and modal dialogs share sensible flat fallbacks but retain independent typed
+        // roles. A theme can consequently give dialogs a solid focus frame without changing the
+        // ordinary window edge or requiring paint-time knowledge of theme-specific conventions.
         catalog.set(AppearanceRole::WindowFrame, window);
-        catalog.set(
-            AppearanceRole::WindowFrameActive,
-            StatefulAppearance::all(NinePatch::framed(
-                frame_insets.at_least(1),
-                window_focus,
-                Some(colors[ControlColor::WindowBG as usize]),
-            )),
-        );
+        catalog.set(AppearanceRole::WindowFrameActive, active_window);
+        catalog.set(AppearanceRole::DialogFrame, window);
+        catalog.set(AppearanceRole::DialogFrameActive, active_window);
         catalog.set(
             AppearanceRole::WindowTitle,
             StatefulAppearance::all(solid(colors[ControlColor::TitleBG as usize])),

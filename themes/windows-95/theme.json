@@ -149,6 +149,19 @@
       "hovered": { "png": "window-frame-active.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
       "pressed": { "png": "window-frame-active.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } }
     },
+    "dialog_frame": {
+      "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 },
+      "normal": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
+      "hovered": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
+      "pressed": { "png": "window-frame-active.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
+      "inactive": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [240, 240, 240, 255] }
+    },
+    "dialog_frame_active": {
+      "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 },
+      "normal": { "png": "window-frame-active.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
+      "hovered": { "png": "window-frame-active.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
+      "pressed": { "png": "window-frame-active.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } }
+    },
     "window_close_button": {
       "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
       "normal": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },

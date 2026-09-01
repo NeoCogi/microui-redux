@@ -456,18 +456,21 @@ fn root_titlebar_height(style: &Style, atlas: &AtlasHandle) -> i32 {
     style.title_height.max(text_height)
 }
 
-/// Resolves frame artwork while preserving the inactive frame's structural border thickness.
-fn root_frame_patch(style: &Style, active: bool, state: VisualState) -> crate::NinePatch {
-    // Passive frame artwork is the visual corner-span authority for both activation variants.
+/// Resolves ordinary-window or dialog artwork while preserving its passive corner geometry.
+fn root_frame_patch(style: &Style, dialog: bool, active: bool, state: VisualState) -> crate::NinePatch {
+    // Each root kind's passive frame artwork is the visual corner-span authority for both of its
+    // activation variants. Keeping the ordinary and dialog pairs independent allows a classic
+    // theme to use long L-shaped window corners and a uniformly thick dialog outline.
     // Structural client and resize thickness lives in Style::window_border, so long transparent L
     // corners do not enlarge the client inset. Matching active visual insets still prevents focus
     // changes from moving or scaling the corner art itself.
-    let visual_insets = style.appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
-    let role = if active {
-        AppearanceRole::WindowFrameActive
+    let (passive_role, active_role) = if dialog {
+        (AppearanceRole::DialogFrame, AppearanceRole::DialogFrameActive)
     } else {
-        AppearanceRole::WindowFrame
+        (AppearanceRole::WindowFrame, AppearanceRole::WindowFrameActive)
     };
+    let visual_insets = style.appearance(passive_role, VisualState::Normal).insets;
+    let role = if active { active_role } else { passive_role };
     style.appearance(role, state).with_insets(visual_insets)
 }
 
@@ -477,6 +480,7 @@ pub(super) fn record_root_background(
     viewport: Recti,
     rect: Recti,
     style: &Style,
+    dialog: bool,
     active_frame: bool,
     deactivated: bool,
 ) {
@@ -490,7 +494,7 @@ pub(super) fn record_root_background(
     // window interior. Deactivation is an independent state rather than an inference from the
     // frame role: popup shells intentionally keep the passive frame role while remaining active.
     let state = if deactivated { VisualState::Inactive } else { VisualState::Normal };
-    let patch = root_frame_patch(style, active_frame, state).with_insets(crate::SliceInsets::ZERO);
+    let patch = root_frame_patch(style, dialog, active_frame, state).with_insets(crate::SliceInsets::ZERO);
     let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch);
 }
 
@@ -504,6 +508,7 @@ pub(super) fn record_root_overlay(
     geometry: RootChromeGeometry,
     style: &Style,
     atlas: &AtlasHandle,
+    dialog: bool,
     active: bool,
     visual: RootChromeVisualState,
 ) {
@@ -516,7 +521,10 @@ pub(super) fn record_root_overlay(
         // Background recording already filled the framed interior before application content. Draw
         // only the border again in the overlay pass so an unclipped child may extend beyond the
         // parent body without covering parent-owned frame chrome.
-        painter.nine_patch(outer, root_frame_patch(style, active, chrome_state(visual.frame_state())).without_center());
+        painter.nine_patch(
+            outer,
+            root_frame_patch(style, dialog, active, chrome_state(visual.frame_state())).without_center(),
+        );
     }
     if let Some(title) = geometry.title {
         let role = if active {

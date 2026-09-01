@@ -874,6 +874,10 @@ mod tests {
             loaded.style().appearance(AppearanceRole::Button, VisualState::Inactive).content,
             crate::NinePatchContent::Image { .. }
         ));
+        assert!(matches!(
+            loaded.style().appearance(AppearanceRole::DialogFrameActive, VisualState::Normal).content,
+            crate::NinePatchContent::Image { .. }
+        ));
     }
 
     /// Verifies the earlier Windows theme remains a distinct definition with period title artwork.
@@ -886,6 +890,28 @@ mod tests {
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (23, 23, 23, 23));
         let border = loaded.style().window_border;
         assert_eq!((border.left, border.top, border.right, border.bottom), (4, 4, 4, 4));
+        // Ordinary windows retain their long L-corner bitmap. Only modal dialogs use the uniform
+        // four-pixel blue focus frame visible around period Windows 3.11 dialog boxes.
+        assert!(matches!(
+            loaded.style().appearance(AppearanceRole::WindowFrameActive, VisualState::Normal).content,
+            crate::NinePatchContent::Image { .. }
+        ));
+        let dialog_frame = loaded.style().appearance(AppearanceRole::DialogFrameActive, VisualState::Normal);
+        assert_eq!(
+            (
+                dialog_frame.insets.left,
+                dialog_frame.insets.top,
+                dialog_frame.insets.right,
+                dialog_frame.insets.bottom,
+            ),
+            (4, 4, 4, 4)
+        );
+        assert!(matches!(
+            dialog_frame.content,
+            crate::NinePatchContent::Flat { cells }
+                if matches!(cells.top, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (0, 0, 170, 255))
+                    && matches!(cells.center, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (195, 199, 203, 255))
+        ));
         let menu_popup = loaded.style().appearance(AppearanceRole::MenuPopup, VisualState::Normal);
         assert_eq!(
             (menu_popup.insets.left, menu_popup.insets.top, menu_popup.insets.right, menu_popup.insets.bottom),
@@ -948,6 +974,10 @@ mod tests {
         assert!(matches!(active_title.content, crate::NinePatchContent::Image { image } if image.source.height == 16));
         assert!(matches!(
             loaded.style().appearance(AppearanceRole::Button, VisualState::Inactive).content,
+            crate::NinePatchContent::Image { .. }
+        ));
+        assert!(matches!(
+            loaded.style().appearance(AppearanceRole::DialogFrameActive, VisualState::Normal).content,
             crate::NinePatchContent::Image { .. }
         ));
 

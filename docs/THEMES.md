@@ -146,7 +146,8 @@ The `appearances` object accepts the following exact keys:
 - `scrollbar_track`, `scrollbar_thumb`, `disclosure_header`
 - `menu_bar`, `menu_title`, `menu_title_open`, `menu_popup`, `menu_item`,
   `menu_item_selected`
-- `window_frame`, `window_frame_active`, `window_title`, `window_title_active`
+- `window_frame`, `window_frame_active`, `dialog_frame`, `dialog_frame_active`
+- `window_title`, `window_title_active`
 - `window_close_button`, `window_minimize_button`, `window_maximize_button`,
   `window_restore_button`, `window_resize_grip`
 - `window_close_glyph`, `window_minimize_glyph`, `window_maximize_glyph`,
@@ -160,20 +161,22 @@ normal appearance while the pointer moves across them. When a top-level window d
 chrome and complete retained widget hierarchy resolve the separate `inactive` state instead;
 deactivation does not erase remembered focus or masquerade as hover, ordinary focus, or disabled.
 The inactive foreground colors apply to built-in text and semantic icons, and the inactive
-background supplies flat fallbacks for roles without an `inactive` PNG. Likewise, `window_frame` and
-`window_frame_active` use normal center artwork for the application body even when a resize edge is
-hovered or captured. Interactive descendants, resize borders, caption controls, and the title
-remain free to resolve their own hover and pressed states.
+background supplies flat fallbacks for roles without an `inactive` PNG. Likewise, the ordinary
+`window_frame` pair and modal `dialog_frame` pair use normal center artwork for the application body
+even when a resize edge is hovered or captured. Interactive descendants, resize borders, caption
+controls, and the title remain free to resolve their own hover and pressed states.
 
 ## Window borders and caption controls
 
 `style.window_border` is the window's structural border thickness. Its four values drive client
-layout and the right/bottom one-axis resize hit regions. `window_frame.insets` instead controls the
-fixed visual corner span of the three-by-three artwork; active frame art is normalized to that
-visual authority. Keeping the values separate permits a four-pixel Windows 3.11 edge to carry a
-23-pixel L-shaped corner without reserving 23 pixels around the client. The bottom-right two-axis
-region remains larger for easy input, but themes may leave `window_resize_grip` transparent when
-the frame corner itself is the complete visible affordance.
+layout and the right/bottom one-axis resize hit regions. `window_frame.insets` and
+`dialog_frame.insets` instead control the fixed visual corner span for their respective
+three-by-three artwork; each active role is normalized to its corresponding passive role's visual
+authority. Keeping the values separate permits a four-pixel Windows 3.11 edge to carry a 23-pixel
+L-shaped ordinary-window corner while a modal dialog uses a uniform four-pixel outline, without
+reserving 23 pixels around either client. The bottom-right two-axis region remains larger for easy
+input, but themes may leave `window_resize_grip` transparent when the frame corner itself is the
+complete visible affordance.
 
 Window caption controls are enabled explicitly through `WindowOption::MINIMIZE_BUTTON` and
 `WindowOption::MAXIMIZE_BUTTON`. The close button remains enabled unless `WindowOption::NO_CLOSE`
