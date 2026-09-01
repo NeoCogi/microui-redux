@@ -167,7 +167,7 @@
       "inactive": { "foreground": [125, 125, 125, 255] }
     },
     "menu_popup": {
-      "insets": { "left": 1, "top": 1, "right": 1, "bottom": 1 },
+      "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
       "normal": { "foreground": [0, 0, 0, 255] },
       "inactive": { "foreground": [125, 125, 125, 255] }
     },

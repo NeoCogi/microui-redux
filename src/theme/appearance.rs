@@ -617,7 +617,10 @@ impl AppearanceCatalog {
         catalog.set(AppearanceRole::MenuTitleOpen, selected);
         catalog.set(
             AppearanceRole::MenuPopup,
-            with_inactive(StatefulAppearance::all(solid(menu_background)), solid(inactive_background)),
+            // Popup insets are structural shell space, not transparent padding. Give every flat
+            // theme an explicit border and independently filled center so JSON can enlarge the
+            // frame without exposing whatever window happens to lie beneath the menu edges.
+            with_inactive(StatefulAppearance::all(framed(menu_background)), framed(inactive_background)),
         );
         catalog.set(AppearanceRole::MenuItem, highlight);
         catalog.set(AppearanceRole::MenuItemSelected, selected);

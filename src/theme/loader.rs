@@ -886,6 +886,17 @@ mod tests {
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (23, 23, 23, 23));
         let border = loaded.style().window_border;
         assert_eq!((border.left, border.top, border.right, border.bottom), (4, 4, 4, 4));
+        let menu_popup = loaded.style().appearance(AppearanceRole::MenuPopup, VisualState::Normal);
+        assert_eq!(
+            (menu_popup.insets.left, menu_popup.insets.top, menu_popup.insets.right, menu_popup.insets.bottom),
+            (2, 2, 2, 2)
+        );
+        assert!(matches!(
+            menu_popup.content,
+            crate::NinePatchContent::Flat { cells }
+                if matches!(cells.top, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (0, 0, 0, 255))
+                    && matches!(cells.center, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (255, 255, 255, 255))
+        ));
         assert!(matches!(
             loaded.style().appearance(AppearanceRole::WindowTitle, VisualState::Pressed).content,
             crate::NinePatchContent::Image { .. }

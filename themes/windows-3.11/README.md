@@ -21,7 +21,7 @@ independent from the four-pixel client inset and resize hit thickness. The botto
 visible two-axis affordance; the larger semantic grip image is intentionally transparent, so no
 filled rectangle appears over the client.
 
-Menu bars and popup interiors are white, popup shells use a single black line instead of window
-bevels, and highlighted rows pair the `#0000AA` selection with white state-specific foregrounds.
+Menu bars and popup interiors are white, popup shells use a solid two-pixel black frame instead of
+window bevels, and highlighted rows pair the `#0000AA` selection with white state-specific foregrounds.
 Caption controls use original deterministic down-triangle, up-triangle, paired restore-triangle,
 and close glyphs with separately shifted pressed PNGs. No reference asset was copied or transformed.
