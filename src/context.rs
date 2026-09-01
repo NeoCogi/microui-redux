@@ -36,7 +36,7 @@
 //! context-owned dispatcher only drains semantic [`crate::WidgetEvent`] ports into application
 //! state.
 
-use crate::window_manager::{LayerBinding, PopupHandle, SurfaceMutationError, Window, WindowHandle, WindowManager, WindowOption};
+use crate::window_manager::{LayerBinding, PopupHandle, SurfaceCreationError, SurfaceMutationError, Window, WindowHandle, WindowManager, WindowOption};
 #[cfg(test)]
 use crate::window_manager::RootId;
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, FrameInfo, RenderError, Renderer, RendererBackend};
@@ -86,11 +86,15 @@ impl<'a> Ui<'a> {
     ///
     /// # Errors
     ///
-    /// Returns [`SurfaceMutationError::UnknownWindow`] for a stale or foreign parent and
-    /// [`SurfaceMutationError::InvalidChildWindowParent`] when the authenticated parent is modal.
-    pub fn create_child_window(&mut self, parent: &WindowHandle, window: Window) -> Result<WindowHandle, SurfaceMutationError> {
-        // WindowManager validates the authenticated root role before consuming the unique Window;
-        // failed ownership validation therefore leaves no partially mounted child surface.
+    /// Returns an owner-preserving [`SurfaceCreationError`] for a stale, foreign, or modal parent.
+    /// [`SurfaceCreationError::reason`] distinguishes
+    /// [`SurfaceMutationError::UnknownWindow`] from
+    /// [`SurfaceMutationError::InvalidChildWindowParent`], and
+    /// [`SurfaceCreationError::into_input`] recovers the unchanged `window` for retry or reuse.
+    #[allow(clippy::result_large_err)] // Failure deliberately returns the complete unique Window without allocation or erasure.
+    pub fn create_child_window(&mut self, parent: &WindowHandle, window: Window) -> Result<WindowHandle, SurfaceCreationError<Window>> {
+        // WindowManager validates the complete parent contract before transferring the Window into
+        // its forest, so every failure returns the exact retained tree supplied by the caller.
         self.window_manager.create_child_window(parent, window)
     }
 
@@ -99,8 +103,15 @@ impl<'a> Ui<'a> {
     /// `parent` must be a live independent or structural child window from this Context. Show the
     /// returned dialog with [`Self::set_window_visible`]; it becomes the front modal group before
     /// the layout immediately following this UI transaction.
-    pub fn create_dialog(&mut self, parent: &WindowHandle, window: Window) -> Result<WindowHandle, SurfaceMutationError> {
-        // WindowManager authenticates the complete capability before consuming the dialog value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an owner-preserving [`SurfaceCreationError`] when `parent` is stale, foreign, or
+    /// modal. Inspect [`SurfaceCreationError::reason`] and reclaim the original `window` with
+    /// [`SurfaceCreationError::into_input`].
+    #[allow(clippy::result_large_err)] // Failure deliberately returns the complete unique Window without allocation or erasure.
+    pub fn create_dialog(&mut self, parent: &WindowHandle, window: Window) -> Result<WindowHandle, SurfaceCreationError<Window>> {
+        // Authenticate and classify the parent before the manager consumes the dialog definition.
         self.window_manager.create_dialog(parent, window)
     }
 
@@ -108,7 +119,13 @@ impl<'a> Ui<'a> {
     ///
     /// The popup definition and retained content tree become a concrete child in the same forest.
     /// The distinct handle prevents popup identity from entering window-only operations.
-    pub fn create_popup(&mut self, parent: &WindowHandle, name: &str, content: Node) -> Result<PopupHandle, SurfaceMutationError> {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SurfaceCreationError<Node>`] when `parent` is stale or belongs to another
+    /// Context. [`SurfaceCreationError::into_input`] recovers the unchanged content node.
+    #[allow(clippy::result_large_err)] // Failure deliberately returns the complete unique Node without allocation or erasure.
+    pub fn create_popup(&mut self, parent: &WindowHandle, name: &str, content: Node) -> Result<PopupHandle, SurfaceCreationError<Node>> {
         // Authenticate the owner capability before transferring the popup content into the forest.
         self.window_manager.create_popup(parent, name, content)
     }

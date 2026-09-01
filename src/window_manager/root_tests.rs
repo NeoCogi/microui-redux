@@ -2148,7 +2148,7 @@ fn child_windows_inherit_the_family_layer_and_front_only_among_siblings() {
 }
 
 #[test]
-fn modal_dialogs_cannot_own_structural_child_windows() {
+fn failed_child_and_dialog_creation_preserves_each_window_for_retry() {
     let mut ctx = context();
     let parent = ctx.ui().create_window(Window::new("parent", rect(0, 0, 220, 180), empty_content()));
     let dialog = ctx
@@ -2156,11 +2156,52 @@ fn modal_dialogs_cannot_own_structural_child_windows() {
         .create_dialog(&parent, Window::new("dialog", rect(20, 20, 120, 90), empty_content()))
         .unwrap();
 
-    assert!(matches!(
-        ctx.ui()
-            .create_child_window(&dialog, Window::new("invalid child", rect(0, 0, 20, 20), empty_content())),
-        Err(SurfaceMutationError::InvalidChildWindowParent)
-    ));
+    // A modal parent is invalid for both kinds of owned root. Each error must retain the exact
+    // unique Window, including its live typed body, so the caller can retry under `parent`.
+    let (child_body, child_content) = TextBlock::create(TextBlockParameters::new("child body"));
+    let child_error = ctx
+        .ui()
+        .create_child_window(&dialog, Window::new("invalid child", rect(0, 0, 20, 20), child_content))
+        .expect_err("a modal dialog cannot own a structural child window");
+    assert_eq!(child_error.reason(), SurfaceMutationError::InvalidChildWindowParent);
+    assert!(child_body.is_alive(), "the rejected child Window must still own its body");
+    ctx.ui().create_child_window(&parent, child_error.into_input()).unwrap();
+    assert!(child_body.is_alive(), "retry must transfer the same body into the child surface");
+
+    let (dialog_body, dialog_content) = TextBlock::create(TextBlockParameters::new("nested dialog body"));
+    let dialog_error = ctx
+        .ui()
+        .create_dialog(&dialog, Window::new("invalid dialog", rect(5, 5, 30, 30), dialog_content))
+        .expect_err("a modal dialog cannot own another modal dialog");
+    assert_eq!(dialog_error.reason(), SurfaceMutationError::InvalidDialogOwner);
+    assert!(dialog_body.is_alive(), "the rejected dialog Window must still own its body");
+    ctx.ui().create_dialog(&parent, dialog_error.into_input()).unwrap();
+    assert!(dialog_body.is_alive(), "retry must transfer the same body into the dialog surface");
+}
+
+#[test]
+fn failed_popup_creation_preserves_its_node_for_retry() {
+    let mut ctx = context();
+    let owner = ctx.ui().create_window(Window::new("owner", rect(0, 0, 220, 180), empty_content()));
+    let mut foreign = context();
+    let foreign_owner = foreign.ui().create_window(Window::new("foreign", rect(0, 0, 20, 20), empty_content()));
+    let (popup_body, popup_content) = TextBlock::create(TextBlockParameters::new("popup body"));
+
+    // Authentication must fail before the Node moves into the receiving forest. Standard error
+    // chaining exposes the concrete reason, while the typed recovery method returns only a Node.
+    let popup_error = ctx
+        .ui()
+        .create_popup(&foreign_owner, "invalid popup", popup_content)
+        .expect_err("a foreign window cannot own a popup in this Context");
+    assert_eq!(popup_error.reason(), SurfaceMutationError::UnknownWindow);
+    assert_eq!(
+        std::error::Error::source(&popup_error).map(ToString::to_string),
+        Some(SurfaceMutationError::UnknownWindow.to_string())
+    );
+    assert!(popup_body.is_alive(), "the rejected popup error must retain its unique Node");
+
+    ctx.ui().create_popup(&owner, "retried popup", popup_error.into_input()).unwrap();
+    assert!(popup_body.is_alive(), "retry must transfer the same Node into the popup surface");
 }
 
 #[test]

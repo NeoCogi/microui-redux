@@ -54,7 +54,10 @@ dialog operations take a complete `WindowHandle`; popup operations take a distin
 Each non-owning handle contains private process-unique identity and separately projects its weak
 typed event endpoint. Surface lookup never uses an event-port pointer, so freeing and reusing an
 allocation cannot retarget a stale handle. There is no public numeric window ID, and a stale or
-foreign handle returns a concrete `SurfaceMutationError`.
+foreign handle passed to a borrowed operation returns a concrete `SurfaceMutationError`. Fallible
+child-window, dialog, and popup creation returns `SurfaceCreationError<Window>` or
+`SurfaceCreationError<Node>`; inspect `reason()` and call `into_input()` to recover the unchanged
+unique value for retry.
 
 ```rust,ignore
 let main = context.ui().create_window(

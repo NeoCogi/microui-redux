@@ -68,8 +68,8 @@ mod roots;
 
 pub use root_chrome::{WindowEvent, WindowHandle};
 // Popup identity/events and checked surface failures describe forest policy rather than chrome.
-// Re-export them from this boundary with the rest of the public window API.
-pub use roots::{PopupEvent, PopupHandle, SurfaceMutationError};
+// Re-export both borrowed-mutation and owner-preserving creation errors with the public window API.
+pub use roots::{PopupEvent, PopupHandle, SurfaceCreationError, SurfaceMutationError};
 
 bitflags! {
     #[derive(Copy, Clone)]

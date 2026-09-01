@@ -251,8 +251,8 @@ pub mod retained {
     };
     pub use crate::context::{Context, ContextFrame, Ui};
     pub use crate::window_manager::{
-        ChildWindowClip, DEFAULT_LAYER, LayerBinding, MAX_LAYER, MIN_LAYER, PopupEvent, PopupHandle, SurfaceMutationError, Window, WindowEvent, WindowHandle,
-        WindowOption,
+        ChildWindowClip, DEFAULT_LAYER, LayerBinding, MAX_LAYER, MIN_LAYER, PopupEvent, PopupHandle, SurfaceCreationError, SurfaceMutationError, Window,
+        WindowEvent, WindowHandle, WindowOption,
     };
 }
 
@@ -272,9 +272,9 @@ pub mod prelude {
         ChildParticipation, ChildWindowClip, Children, Container, ContainerLayoutCtx, ContainerWidget, Context, ContextFrame, Ui, CustomRenderArgs,
         AvailableSpace, Constraints, CustomRenderHandle, Disclosure, DisclosureParameters, Grid, GridItem, GridParameters, GridSpan, KeyboardAction,
         KeyboardBehavior, Linear, LinearCrossSize, LinearDirection, LinearItem, LinearParameters, Node, PopupEvent, PopupHandle, MeasureCtx,
-        SurfaceMutationError, WindowEvent, WindowHandle, LayerBinding, DEFAULT_LAYER, MAX_LAYER, MIN_LAYER, ScrollArea, ScrollAreaOption, ScrollAreaParameters,
-        Scrollbar, ScrollbarAxis, ScrollbarChanged, ScrollbarParameters, TrackSize, LeafWidget, TextWrap, UiInputEvent, TypedWidgetHandle, Widget,
-        WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx, Window, WindowOption,
+        SurfaceCreationError, SurfaceMutationError, WindowEvent, WindowHandle, LayerBinding, DEFAULT_LAYER, MAX_LAYER, MIN_LAYER, ScrollArea, ScrollAreaOption,
+        ScrollAreaParameters, Scrollbar, ScrollbarAxis, ScrollbarChanged, ScrollbarParameters, TrackSize, LeafWidget, TextWrap, UiInputEvent,
+        TypedWidgetHandle, Widget, WidgetBuilder, WidgetFillOption, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx, Window, WindowOption,
     };
     pub use crate::math::{expand_rect, rect, vec2};
     pub use crate::theme::{Color, ControlColor, FontChoice, FontRole, Style, ThemeIcons, color};
@@ -295,8 +295,8 @@ pub mod prelude {
 pub use atlas::{AtlasError, AtlasHandle, AtlasSource, CharEntry, FontEntry, FontId, IconId, SourceFormat};
 pub use context::{Context, ContextFrame, Ui};
 pub use window_manager::{
-    ChildWindowClip, DEFAULT_LAYER, LayerBinding, MAX_LAYER, MIN_LAYER, PopupEvent, PopupHandle, SurfaceMutationError, Window, WindowEvent, WindowHandle,
-    WindowOption,
+    ChildWindowClip, DEFAULT_LAYER, LayerBinding, MAX_LAYER, MIN_LAYER, PopupEvent, PopupHandle, SurfaceCreationError, SurfaceMutationError, Window,
+    WindowEvent, WindowHandle, WindowOption,
 };
 pub use event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventPortHandle};
 pub use file_dialog::{FileDialog, FileDialogCompleted, FileDialogRequest, FileDialogResult, FileDialogStatus};

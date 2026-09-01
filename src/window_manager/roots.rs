@@ -39,11 +39,12 @@ use crate::{MouseButton, Node, UiInputEvent, Vec2i, rect};
 
 use super::root_chrome::{RootChromeGeometry, RootChromePart, RootInteraction, record_root_background, record_root_overlay, root_chrome_geometry};
 
-/// Failure reported by a checked window or popup mutation.
+/// Failure reason reported by a checked window or popup operation.
 ///
-/// Window chrome and popup definitions are owned directly by the window manager, so failures describe
-/// only stale identity or explicit ownership and layer policy. No application borrow can make one of
-/// these mutations partially succeed.
+/// Window chrome and popup definitions are owned directly by the window manager, so failures
+/// describe only stale identity or explicit ownership and layer policy. Operations that borrow
+/// their target return this value directly. Fallible creation wraps it in
+/// [`SurfaceCreationError`] so the uniquely owned [`Window`] or [`Node`] is not lost.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum SurfaceMutationError {
     /// The supplied [`WindowHandle`] is stale or belongs to another Context.
@@ -54,12 +55,92 @@ pub enum SurfaceMutationError {
     InvalidDialogOwner,
     /// An authenticated child-window parent is modal or otherwise unable to own ordinary children.
     InvalidChildWindowParent,
-    /// The requested fixed layer is outside the supported inclusive range `0..=15`.
+    /// The requested fixed layer is outside [`MIN_LAYER`] through [`MAX_LAYER`], inclusive.
     InvalidLayer(u8),
     /// The requested window occupies a manager-controlled child or modal layer.
     ManagedLayer,
     /// A popup owner is hidden, blocked by a modal, or missing from the active parent path.
     InvalidPopupParent,
+}
+
+impl fmt::Display for SurfaceMutationError {
+    /// Describes the rejected capability or surface policy without exposing private identities.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Keep every public variant independently meaningful so this reason can be displayed both
+        // on its own and as the source of an owner-preserving creation error.
+        match self {
+            Self::UnknownWindow => f.write_str("the window handle is stale or belongs to another Context"),
+            Self::UnknownPopup => f.write_str("the popup handle is stale or belongs to another Context"),
+            Self::InvalidDialogOwner => f.write_str("the selected window cannot own or show this dialog"),
+            Self::InvalidChildWindowParent => f.write_str("the selected window cannot own a structural child window"),
+            Self::InvalidLayer(layer) => {
+                write!(f, "window layer {layer} is outside the supported range {MIN_LAYER}..={MAX_LAYER}")
+            }
+            Self::ManagedLayer => f.write_str("this surface's layer is controlled by its structural owner"),
+            Self::InvalidPopupParent => f.write_str("the popup owner is not in the active visible surface path"),
+        }
+    }
+}
+
+impl std::error::Error for SurfaceMutationError {}
+
+/// Failed surface creation together with the unchanged value offered for registration.
+///
+/// `T` is [`Window`] for child-window and dialog creation and [`Node`] for popup creation. The
+/// concrete type parameter prevents a caller from recovering the wrong kind of owner and avoids
+/// type erasure. Read [`Self::reason`] before consuming the error with [`Self::into_input`] to retry,
+/// revise, or otherwise retain the original value.
+pub struct SurfaceCreationError<T> {
+    /// Concrete validation failure that prevented any forest mutation.
+    reason: SurfaceMutationError,
+    /// Unmodified unique owner supplied by the caller.
+    input: T,
+}
+
+impl<T> SurfaceCreationError<T> {
+    /// Pairs a failed pre-registration validation with the still-unconsumed input value.
+    fn new(reason: SurfaceMutationError, input: T) -> Self {
+        // Construction stays beside the manager's validation boundary so no error can claim to
+        // preserve a value after registration has partially transferred it into the forest.
+        Self { reason, input }
+    }
+
+    /// Returns the concrete capability or ownership-policy failure.
+    pub const fn reason(&self) -> SurfaceMutationError {
+        // The reason is Copy, so callers may retain it before reclaiming the unique input.
+        self.reason
+    }
+
+    /// Recovers the exact [`Window`] or [`Node`] passed to the failed creation call.
+    pub fn into_input(self) -> T {
+        // Consume the error so unique ownership has one explicit destination.
+        self.input
+    }
+}
+
+impl<T> fmt::Debug for SurfaceCreationError<T> {
+    /// Reports the validation reason while retaining support for non-Debug unique owners.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Window and Node intentionally expose no structural Debug view. Mark the omitted owner as
+        // non-exhaustive instead of adding an erased/debug-only inspection path.
+        f.debug_struct("SurfaceCreationError").field("reason", &self.reason).finish_non_exhaustive()
+    }
+}
+
+impl<T> fmt::Display for SurfaceCreationError<T> {
+    /// Describes why registration failed while leaving owner recovery to the typed API.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Prefix the reusable policy reason with the operation boundary represented by this type.
+        write!(f, "surface creation failed: {}", self.reason)
+    }
+}
+
+impl<T> std::error::Error for SurfaceCreationError<T> {
+    /// Exposes the concrete policy reason for standard error-chain inspection.
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        // SurfaceMutationError has no further source; this one link preserves useful categorization.
+        Some(&self.reason)
+    }
 }
 
 /// Observable lifecycle event emitted by one application-authored popup.
@@ -1104,34 +1185,15 @@ impl WindowManager {
         unreachable!("a validated menu item must remain mounted during one exclusive manager borrow")
     }
 
-    /// Registers one concrete root after validating the parent contract implied by its role.
-    fn register_window(
-        &mut self,
-        mode: RootMode,
-        parent: Option<RootId>,
-        window: Window,
-        options: WindowOption,
-        visible: bool,
-    ) -> Result<WindowHandle, SurfaceMutationError> {
-        match mode {
-            RootMode::Normal { .. } => {
-                debug_assert!(parent.is_none(), "independent roots cannot have a structural parent");
-            }
-            RootMode::Child => {
-                let owner = parent.ok_or(SurfaceMutationError::InvalidChildWindowParent)?;
-                let owner = self.root_node(owner)?.root().expect("root lookup must return root policy");
-                if !matches!(owner.mode, RootMode::Normal { .. } | RootMode::Child) {
-                    return Err(SurfaceMutationError::InvalidChildWindowParent);
-                }
-            }
-            RootMode::Modal => {
-                let owner = parent.ok_or(SurfaceMutationError::InvalidDialogOwner)?;
-                let owner = self.root_node(owner)?.root().expect("root lookup must return root policy");
-                if !matches!(owner.mode, RootMode::Normal { .. } | RootMode::Child) {
-                    return Err(SurfaceMutationError::InvalidDialogOwner);
-                }
-            }
-        }
+    /// Registers one concrete root after its optional structural owner has been validated.
+    fn register_window(&mut self, mode: RootMode, parent: Option<RootId>, window: Window, options: WindowOption, visible: bool) -> WindowHandle {
+        // Public child/dialog entry points authenticate and classify the owner before moving the
+        // Window here. Keep registration infallible after that transfer: this is the boundary that
+        // guarantees every returned creation error can still contain the untouched Window.
+        debug_assert!(
+            matches!((mode, parent), (RootMode::Normal { .. }, None) | (RootMode::Child | RootMode::Modal, Some(_))),
+            "root mode and structural owner must agree before registration"
+        );
 
         let (name, rect, content, menu_bar, child_window_clip) = window.into_parts();
         // Move top-level labels into the bar while retaining only their row vectors until the root
@@ -1175,36 +1237,49 @@ impl WindowManager {
         }
         self.surfaces.rebuild_visible_order();
         self.invalidate_ui_commit();
-        Ok(WindowHandle::new(id, event_handle))
+        WindowHandle::new(id, event_handle)
     }
 
     /// Creates an open independent window from one complete retained definition.
     pub fn create_window(&mut self, window: Window) -> WindowHandle {
         // Independent construction has no fallible owner edge.
         self.register_window(RootMode::Normal { layer: DEFAULT_LAYER }, None, window, WindowOption::FRAME, true)
-            .expect("ordinary window registration cannot fail")
     }
 
     /// Creates one visible ordinary window structurally owned by `parent`.
-    pub fn create_child_window(&mut self, parent: &WindowHandle, window: Window) -> Result<WindowHandle, SurfaceMutationError> {
-        // Authenticate and classify the parent before consuming the uniquely owned Window. Child
-        // registration then adds one backward edge, which makes cycles unrepresentable without a
-        // later reparenting operation (none is exposed).
-        let parent = self.window_id(parent)?;
-        self.register_window(RootMode::Child, Some(parent), window, WindowOption::FRAME, true)
+    #[allow(clippy::result_large_err)] // Preserve the complete Window directly, matching container insertion semantics.
+    pub fn create_child_window(&mut self, parent: &WindowHandle, window: Window) -> Result<WindowHandle, SurfaceCreationError<Window>> {
+        // Authenticate and classify the parent while `window` remains local. On either validation
+        // failure, move that exact value into the concrete error instead of dropping its unique
+        // retained tree. Registration then adds one backward edge and cannot fail.
+        let parent = match self.creation_owner_id(parent, SurfaceMutationError::InvalidChildWindowParent) {
+            Ok(parent) => parent,
+            Err(reason) => return Err(SurfaceCreationError::new(reason, window)),
+        };
+        Ok(self.register_window(RootMode::Child, Some(parent), window, WindowOption::FRAME, true))
     }
 
     /// Creates a hidden modal dialog directly owned by an independent or structural child window.
-    pub fn create_dialog(&mut self, owner: &WindowHandle, window: Window) -> Result<WindowHandle, SurfaceMutationError> {
-        // Authenticate before consuming or mounting the supplied dialog definition.
-        let owner = self.window_id(owner)?;
-        self.register_window(RootMode::Modal, Some(owner), window, WindowOption::FRAME, false)
+    #[allow(clippy::result_large_err)] // Preserve the complete Window directly, matching container insertion semantics.
+    pub fn create_dialog(&mut self, owner: &WindowHandle, window: Window) -> Result<WindowHandle, SurfaceCreationError<Window>> {
+        // A dialog accepts the same ordinary owner roles as a structural child but reports its own
+        // policy reason. Keep the Window untouched until both capability and role checks pass.
+        let owner = match self.creation_owner_id(owner, SurfaceMutationError::InvalidDialogOwner) {
+            Ok(owner) => owner,
+            Err(reason) => return Err(SurfaceCreationError::new(reason, window)),
+        };
+        Ok(self.register_window(RootMode::Modal, Some(owner), window, WindowOption::FRAME, false))
     }
 
     /// Creates a hidden top-level popup definition inside one window or dialog.
-    pub fn create_popup(&mut self, owner: &WindowHandle, name: &str, content: Node) -> Result<PopupHandle, SurfaceMutationError> {
-        // Resolve the authenticated window capability before transferring the content node.
-        let owner = self.window_id(owner)?;
+    #[allow(clippy::result_large_err)] // Preserve the complete Node directly, matching container insertion semantics.
+    pub fn create_popup(&mut self, owner: &WindowHandle, name: &str, content: Node) -> Result<PopupHandle, SurfaceCreationError<Node>> {
+        // Resolve the authenticated window capability while the Node is still owned locally. Once
+        // validation succeeds, application-popup registration is an infallible ownership transfer.
+        let owner = match self.window_id(owner) {
+            Ok(owner) => owner,
+            Err(reason) => return Err(SurfaceCreationError::new(reason, content)),
+        };
         // A top-level popup's sole parent edge points directly to its owning root.
         Ok(self.register_application_popup(SurfaceKey::Root(owner), name, content))
     }
@@ -1553,6 +1628,20 @@ impl WindowManager {
             .and_then(SurfaceNode::root)
             .map(|_| window.id())
             .ok_or(SurfaceMutationError::UnknownWindow)
+    }
+
+    /// Authenticates a creation owner and requires an ordinary window role.
+    fn creation_owner_id(&self, owner: &WindowHandle, invalid_role: SurfaceMutationError) -> Result<RootId, SurfaceMutationError> {
+        // Authenticate first so stale and foreign handles retain the precise UnknownWindow reason.
+        // Both child windows and dialogs accept independent or structural-child owners, while a
+        // modal root is rejected with the operation-specific reason supplied by its caller.
+        let owner = self.window_id(owner)?;
+        let state = self.root_node(owner)?.root().expect("root lookup must return root policy");
+        if matches!(state.mode, RootMode::Normal { .. } | RootMode::Child) {
+            Ok(owner)
+        } else {
+            Err(invalid_role)
+        }
     }
 
     /// Resolves one application-facing popup handle to its process-unique concrete identity.

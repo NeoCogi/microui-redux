@@ -72,12 +72,15 @@ value through `MeasureCtx::style`, `ContainerLayoutCtx::style`, `WidgetUpdateCtx
 
 Window and dialog creation consume one complete `Window` and return a non-owning `WindowHandle`;
 popup creation consumes one persistent application `Node` and returns the distinct non-owning
-`PopupHandle`. There is no public numeric window or popup identifier. Every checked `Ui` surface
-operation accepts the complete handle, whose private process-unique ID must belong to the receiving
-forest. Event endpoints remain separate weak subscription capabilities and are never used as
-object keys. A stale or foreign window handle returns
-`SurfaceMutationError::UnknownWindow`; popup-only operations analogously return
-`SurfaceMutationError::UnknownPopup`. The same concrete error type reports ownership and policy
+`PopupHandle`. Creation validates the parent before transferring those unique values. A rejected
+child window or dialog therefore returns `SurfaceCreationError<Window>`, while a rejected popup
+returns `SurfaceCreationError<Node>`; `reason()` identifies the policy failure and `into_input()`
+returns the unchanged owner for retry. There is no public numeric window or popup identifier. Every
+checked `Ui` operation accepts the complete handle, whose private process-unique ID must belong to
+the receiving forest. Event endpoints remain separate weak subscription capabilities and are never
+used as object keys. Borrowed operations report a stale or foreign window as
+`SurfaceMutationError::UnknownWindow`; popup-only mutations analogously return
+`SurfaceMutationError::UnknownPopup`. The same concrete reason type reports ownership and policy
 failures as `InvalidDialogOwner`, `InvalidChildWindowParent`, `InvalidPopupParent`, `InvalidLayer`,
 or `ManagedLayer`.
 

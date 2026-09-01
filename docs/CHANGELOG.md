@@ -24,7 +24,7 @@ superseded alpha APIs and their compatibility layers are not retained.
 - [x] Unified all retained surfaces in one concrete ownership forest.
     - [x] `SurfaceForest` owns windows, structural child windows, dialogs, application popups, and menu popups exactly once; sole parent edges encode ownership and one deepest-popup key derives the visible transient branch.
     - [x] Forest storage is the chronological window order. One reusable visible traversal applies fixed layers, the modal band, child families, and the active popup path consistently to layout, input, paint, and diagnostics.
-    - [x] Authenticated `WindowHandle` and `PopupHandle` capabilities use non-reused process identities; checked mutations reject stale, destroyed, or foreign handles through `SurfaceMutationError`.
+    - [x] Authenticated `WindowHandle` and `PopupHandle` capabilities use non-reused process identities; checked mutations reject stale, destroyed, or foreign handles through `SurfaceMutationError`, while failed child-window, dialog, and popup creation returns the unchanged unique input through `SurfaceCreationError<T>`.
     - [x] `WindowEvent` reports geometry and close requests, while `PopupEvent::Dismissed` remains a popup-specific lifecycle stream.
 - [x] Added structural child-window composition without a general overlay graph.
     - [x] `Ui::create_child_window` accepts independent or child parents, keeps geometry in screen coordinates, inherits the family fixed layer, and preserves sibling-local raising.
