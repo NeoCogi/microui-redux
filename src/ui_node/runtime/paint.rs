@@ -99,8 +99,11 @@ impl UiRuntime {
         let visual_state = crate::VisualState::from_interaction(enabled, node.state.hovered, focused, node.state.active && node.state.hovered);
         if let Some(role) = frame_role {
             // Semantic framing belongs beneath the widget's own paint and descendant paint.
+            // A container frame describes passive structure rather than a selectable control, so
+            // pointer hover and capture must not replace its background or border artwork.
+            let frame_state = if node.is_container() { crate::VisualState::Normal } else { visual_state };
             let mut painter = crate::render::Painter::screen_space(display_list, screen_clip);
-            crate::ui_node::frame::paint_internal_frame(&mut painter, screen_rect, style.appearance(role, visual_state));
+            crate::ui_node::frame::paint_internal_frame(&mut painter, screen_rect, style.appearance(role, frame_state));
         }
         let child_transform = parent_transform.push(node.state.layout);
         let local_clip = screen_clip.relative_to(screen_origin);

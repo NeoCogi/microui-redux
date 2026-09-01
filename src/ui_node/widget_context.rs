@@ -449,10 +449,17 @@ impl<'a> WidgetPaintCtx<'a> {
 
     /// Draws only the stretchable center of one semantic role over an unframed rectangle.
     pub(crate) fn draw_appearance_center(&mut self, role: AppearanceRole, rect: Recti) {
+        // Interactive controls resolve their ordinary pointer/focus state before sharing the same
+        // center-only recording path used by passive containers with an explicit state.
+        self.draw_appearance_center_state(role, self.visual_state(), rect);
+    }
+
+    /// Draws only the stretchable center of one semantic role using an explicit state.
+    pub(crate) fn draw_appearance_center_state(&mut self, role: AppearanceRole, state: VisualState, rect: Recti) {
         // Zero destination insets collapse all eight outer cells. Flat patches retain their center
         // cell and image patches sample only their center source, preserving the old unframed fill
         // contract without introducing a second theme asset vocabulary.
-        let patch = self.common.style.appearance(role, self.visual_state()).with_insets(crate::SliceInsets::ZERO);
+        let patch = self.common.style.appearance(role, state).with_insets(crate::SliceInsets::ZERO);
         let mut painter = self.painter();
         let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch);
     }

@@ -346,9 +346,11 @@ impl Widget for ScrollArea {
         // Before first placement the summary is empty; the update/layout contract normally commits
         // geometry before paint, while the fallback keeps direct widget tests well-defined.
         let surface = if surface.width > 0 || surface.height > 0 { surface } else { fallback };
-        ctx.draw_appearance_center(AppearanceRole::Panel, surface);
+        // Panel fill is passive container structure. Scrollbars remain independently interactive,
+        // but hovering or dragging anywhere inside the viewport must not recolor its background.
+        ctx.draw_appearance_center_state(AppearanceRole::Panel, crate::VisualState::Normal, surface);
         if let Some(corner) = corner {
-            ctx.draw_appearance_center(AppearanceRole::Panel, corner);
+            ctx.draw_appearance_center_state(AppearanceRole::Panel, crate::VisualState::Normal, corner);
         }
     }
 }

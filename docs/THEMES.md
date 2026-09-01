@@ -109,6 +109,12 @@ The `appearances` object accepts the following exact keys:
 Unknown fields and role names are errors. This prevents a misspelled state or control name from
 silently falling back to a flat appearance.
 
+`panel` and container-owned generic frames are passive structure: their body and border resolve the
+normal appearance while the pointer moves across them. Likewise, `window_frame` and
+`window_frame_active` use normal center artwork for the application body even when a resize edge is
+hovered or captured. Interactive descendants, resize borders, caption controls, and the title
+remain free to resolve their own hover and pressed states.
+
 ## Window borders and caption controls
 
 `window_frame.insets` is the window's sole structural border thickness. Its left, top, right, and

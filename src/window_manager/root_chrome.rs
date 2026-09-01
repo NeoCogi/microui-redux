@@ -180,16 +180,6 @@ pub(super) struct RootChromeVisualState {
 }
 
 impl RootChromeVisualState {
-    /// Creates an interaction-free snapshot for popup shells that have no root chrome state.
-    pub(super) const fn idle() -> Self {
-        // Popup surfaces reuse frame/background recording but never own caption or resize capture.
-        Self {
-            hovered: None,
-            interaction: RootInteraction::None,
-            maximized: false,
-        }
-    }
-
     /// Resolves one part's hover and pressed facts into a complete theme state.
     fn part_state(self, part: RootChromePart) -> VisualState {
         let hovered = self.hovered == Some(part);
@@ -479,20 +469,16 @@ fn root_frame_patch(style: &Style, active: bool, state: VisualState) -> crate::N
 }
 
 /// Records the frame or plain background that must appear behind application content.
-pub(super) fn record_root_background(
-    display_list: &mut crate::render::DisplayList,
-    viewport: Recti,
-    rect: Recti,
-    style: &Style,
-    active: bool,
-    visual: RootChromeVisualState,
-) {
+pub(super) fn record_root_background(display_list: &mut crate::render::DisplayList, viewport: Recti, rect: Recti, style: &Style, active: bool) {
     // Chrome uses a screen-space painter because it is outside the retained application tree.
     let mut painter = Painter::screen_space(display_list, viewport);
     // Record only the stretchable center below application content. Framed roots repeat their
     // eight edge cells in the overlay pass, avoiding duplicate border work while still protecting
     // chrome from overflowing descendants. Unframed roots use this same center-only body path.
-    let patch = root_frame_patch(style, active, visual.frame_state()).with_insets(crate::SliceInsets::ZERO);
+    // Pointer interaction belongs to the frame edge and title controls, not the application body.
+    // Resolve the body from Normal so merely crossing a resize edge cannot recolor the complete
+    // window interior. Active versus inactive presentation remains selected by the role itself.
+    let patch = root_frame_patch(style, active, VisualState::Normal).with_insets(crate::SliceInsets::ZERO);
     let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch);
 }
 

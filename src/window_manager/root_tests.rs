@@ -889,6 +889,70 @@ fn active_window_and_only_its_remembered_widget_use_style_focus_accents() {
     );
 }
 
+/// Verifies pointer location cannot recolor passive window and container backgrounds.
+#[test]
+fn window_and_container_backgrounds_ignore_hover_state_artwork() {
+    // Give each forbidden hover center a unique tint while retaining identical border cells. Any
+    // recorded hover tint therefore proves a body or passive container resolved interactive art;
+    // legitimate resize-edge overlay painting continues to use the shared border tint.
+    let atlas = test_atlas();
+    let mut style = test_style(&atlas);
+    let insets = crate::SliceInsets::uniform(2);
+    let border = color(17, 19, 23, 255);
+    let window_normal = color(31, 37, 41, 255);
+    let window_hover = color(43, 47, 53, 255);
+    let panel_normal = color(59, 61, 67, 255);
+    let panel_hover = color(71, 73, 79, 255);
+
+    let mut window = StatefulAppearance::all(NinePatch::framed(insets, border, Some(window_normal)));
+    window.set(VisualState::Hovered, NinePatch::framed(insets, border, Some(window_hover)));
+    window.set(VisualState::Pressed, NinePatch::framed(insets, border, Some(window_hover)));
+    style.appearances.set(AppearanceRole::WindowFrame, window);
+    style.appearances.set(AppearanceRole::WindowFrameActive, window);
+
+    let mut panel = StatefulAppearance::all(NinePatch::framed(insets, border, Some(panel_normal)));
+    panel.set(VisualState::Hovered, NinePatch::framed(insets, border, Some(panel_hover)));
+    panel.set(VisualState::Pressed, NinePatch::framed(insets, border, Some(panel_hover)));
+    style.appearances.set(AppearanceRole::Panel, panel);
+
+    let (_, content) = ScrollArea::create(ScrollAreaParameters::new(
+        ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL,
+        empty_content(),
+    ));
+    let (backend, log) = recording_backend(atlas);
+    let mut ctx = Context::<_>::new(backend);
+    ctx.set_style(style);
+    let root = ctx.ui().create_window(Window::new("passive backgrounds", rect(30, 30, 160, 120), content));
+    ctx.ui().set_window_options(&root, WindowOption::FRAME | WindowOption::NO_TITLE).unwrap();
+    let dimensions = Dimensioni::new(320, 240);
+    ctx.update_ui(dimensions);
+
+    // Hover the scroll container itself and verify both its retained frame and its center keep the
+    // Normal panel appearance instead of selecting the deliberately distinct Hovered patch.
+    let body = ctx.debug_root_body(root.id()).expect("framed test window must expose its body");
+    ctx.mousemove(body.x + body.width / 2, body.y + body.height / 2);
+    ctx.update_ui(dimensions);
+    log.clear();
+    ctx.frame(frame_info(dimensions)).render_ui().unwrap();
+    let events = log.snapshot();
+    assert!(!atlas_quads_with_color(&events, panel_normal).is_empty());
+    assert!(atlas_quads_with_color(&events, panel_hover).is_empty());
+
+    // Hovering a resize edge may change its border state, but the complete application body still
+    // resolves Normal and therefore cannot contribute the hover-only center tint.
+    let right = ctx
+        .debug_root_chrome_controls(root.id())
+        .and_then(|controls| controls.resize_right)
+        .expect("resizable framed window must expose its right edge");
+    ctx.mousemove(right.x, right.y + right.height / 2);
+    ctx.update_ui(dimensions);
+    log.clear();
+    ctx.frame(frame_info(dimensions)).render_ui().unwrap();
+    let events = log.snapshot();
+    assert!(!atlas_quads_with_color(&events, window_normal).is_empty());
+    assert!(atlas_quads_with_color(&events, window_hover).is_empty());
+}
+
 #[test]
 fn tab_focused_disclosure_uses_focus_fill_in_addition_to_the_shared_outline() {
     // Resolve the customized palette from the exact atlas moved into the recording backend.
