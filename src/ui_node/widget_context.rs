@@ -437,9 +437,13 @@ impl<'a> WidgetPaintCtx<'a> {
         self.painter().icon(id, rect, color);
     }
 
-    /// Draws an external texture through a widget-local painter.
-    pub(crate) fn push_image(&mut self, image: TextureId, rect: Recti, color: Color) {
-        self.painter().image(image, rect, color);
+    /// Draws an external image through a widget-local painter without recoloring its source pixels.
+    pub(crate) fn draw_image(&mut self, image: TextureId, rect: Recti) {
+        // External images are already complete RGBA artwork. A theme foreground is appropriate for
+        // monochrome atlas glyphs, but multiplying a photograph or colored texture by black turns
+        // every nontransparent pixel black. Opaque white is the multiplicative identity and keeps
+        // image presentation independent from the selected theme's text color.
+        self.painter().image(image, rect, crate::color(255, 255, 255, 255));
     }
 
     /// Draws one semantic role using this widget's resolved interaction state.

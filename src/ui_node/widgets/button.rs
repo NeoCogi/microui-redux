@@ -223,8 +223,9 @@ impl Button {
                     ctx.draw_control_text_with_font(font, label, placement.text, AppearanceRole::Button, self.opt);
                 }
                 if let (Some(image), Some(visual)) = (*image, placement.visual) {
-                    let color = ctx.foreground(AppearanceRole::Button);
-                    ctx.push_image(image, visual, color);
+                    // External image pixels carry their own color; the adjacent label alone uses
+                    // the stateful Button foreground selected by the active theme.
+                    ctx.draw_image(image, visual);
                 }
             }
             ButtonContent::ScaledImage { label, image } => {
@@ -238,8 +239,9 @@ impl Button {
                     ctx.draw_control_text_with_font(font, label, placement.text, AppearanceRole::Button, self.opt);
                 }
                 if let (Some(image), Some(visual)) = (*image, placement.visual) {
-                    let color = ctx.foreground(AppearanceRole::Button);
-                    ctx.push_image(image, visual, color);
+                    // Scaling changes only destination geometry; it must not introduce a theme
+                    // foreground tint that destroys the source image's RGB channels.
+                    ctx.draw_image(image, visual);
                 }
             }
         }

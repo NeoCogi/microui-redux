@@ -132,8 +132,9 @@ impl ListBox {
             ctx.draw_control_text_with_font(font, &self.label, placement.text, AppearanceRole::Button, self.opt);
         }
         if let (Some(image), Some(visual)) = (self.image, placement.visual) {
-            let color = ctx.foreground(AppearanceRole::Button);
-            ctx.push_image(image, visual, color);
+            // List-box labels remain theme-colored while external image content preserves the
+            // exact source RGBA values supplied to the renderer.
+            ctx.draw_image(image, visual);
         }
     }
 }

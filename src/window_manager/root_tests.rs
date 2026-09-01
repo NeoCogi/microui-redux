@@ -38,6 +38,7 @@ use crate::{
     MenuItemSubmitted, MouseButton, Node, NinePatch, ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Slider,
     SliderParameters, StatefulAppearance, StatefulColor, Style, TextArea, TextAreaParameters, Textbox, TextboxChanged, TextBlock, TextBlockParameters,
     TextboxParameters, TrackSize, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, VisualState, WidgetUpdateCtx, Modifiers,
+    WidgetFillOption,
 };
 use crate::render::{FrameInfo, RenderError};
 use std::{
@@ -1007,6 +1008,44 @@ fn deactivated_window_keeps_enabled_child_widget_appearance() {
     }
     assert!(atlas_quads_with_color(&events, disabled_control_color).is_empty());
     assert!(atlas_quads_with_color(&events, disabled_text_color).is_empty());
+}
+
+/// Verifies theme foreground colors cannot recolor complete external image artwork.
+#[test]
+fn external_widget_images_use_color_preserving_white_tint() {
+    let atlas = test_atlas();
+    let (backend, log) = recording_backend(atlas);
+    let mut ctx = Context::<_>::new(backend);
+    let mut style = ctx.style().clone();
+    // Reproduce the classic themes' black control text. This formerly multiplied every external
+    // image channel by zero even though the same texture was correct under the light default text.
+    style.foregrounds.set(AppearanceRole::Button, StatefulColor::all(color(0, 0, 0, 255)));
+    ctx.set_style(style);
+    let texture = ctx.load_image_rgba(2, 2, &[255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255]);
+    let (_, image_button) = Button::create(ButtonParameters::with_image(
+        "colored image",
+        Some(texture),
+        WidgetOption::FRAME,
+        WidgetFillOption::ALL,
+    ));
+    ctx.ui().create_window(Window::new("image tint", rect(10, 10, 160, 90), image_button));
+    let dimensions = Dimensioni::new(220, 140);
+    ctx.update_ui(dimensions);
+
+    log.clear();
+    ctx.frame(frame_info(dimensions)).render_ui().unwrap();
+    let events = log.snapshot();
+    let image = events
+        .iter()
+        .find_map(|event| match event {
+            RenderEvent::ExternalTexture { id, vertices } if *id == texture => Some(vertices),
+            _ => None,
+        })
+        .expect("image button must submit its external texture");
+    assert!(
+        image.iter().all(|vertex| vertex.color == [255, 255, 255, 255]),
+        "external images must use the multiplicative identity tint regardless of theme foreground"
+    );
 }
 
 /// Verifies explicit window disabling owns presentation and input without hiding retained state.
