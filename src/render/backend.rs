@@ -232,6 +232,51 @@ impl From<&str> for FrameError {
     }
 }
 
+/// Failure to upload and publish a replacement UI atlas in one renderer backend.
+///
+/// Theme switching uses a separate error from ordinary Context textures because the atlas is a
+/// renderer-wide resource: a failed replacement must leave the previous atlas fully usable. The
+/// backend-specific diagnostic is captured as owned text at this concrete public boundary, so
+/// callers never need type erasure or backend-dependent generic error plumbing.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AtlasUploadError {
+    /// Stable display representation of the backend allocation, upload, or binding failure.
+    message: String,
+}
+
+impl AtlasUploadError {
+    /// Creates an atlas-upload error from one displayable backend diagnostic.
+    pub fn new(message: impl Into<String>) -> Self {
+        // The originating driver value is often temporary, so retain the complete diagnostic as
+        // an owned string while preserving a dedicated, matchable atlas error type.
+        Self { message: message.into() }
+    }
+}
+
+impl fmt::Display for AtlasUploadError {
+    /// Writes the backend diagnostic without adding an unrelated texture classification.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The type itself identifies the operation; the retained message preserves backend detail.
+        self.message.fmt(formatter)
+    }
+}
+
+impl Error for AtlasUploadError {}
+
+impl From<String> for AtlasUploadError {
+    /// Preserves an owned backend diagnostic without another formatting allocation.
+    fn from(message: String) -> Self {
+        Self::new(message)
+    }
+}
+
+impl From<&str> for AtlasUploadError {
+    /// Copies a static or borrowed diagnostic into the independently owned public error.
+    fn from(message: &str) -> Self {
+        Self::new(message)
+    }
+}
+
 /// Active-frame geometry submission interface implemented by every backend frame.
 pub trait RendererFrame {
     /// Appends one atlas-backed quad.
@@ -278,6 +323,11 @@ pub trait RendererFrame {
 ///         self.atlas.clone()
 ///     }
 ///
+///     fn replace_atlas(&mut self, atlas: AtlasHandle) -> Result<(), microui_redux::render::AtlasUploadError> {
+///         self.atlas = atlas;
+///         Ok(())
+///     }
+///
 ///     fn frame(&mut self, _info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {
 ///         Ok(BackendFrame(self))
 ///     }
@@ -311,6 +361,12 @@ pub trait RendererBackend: 'static {
     /// [`crate::Context`] must additionally return a handle containing the `body` font and every
     /// lowercase semantic icon required by [`crate::ThemeIcons::from_atlas`].
     fn get_atlas(&self) -> AtlasHandle;
+    /// Uploads and publishes one replacement UI atlas transactionally.
+    ///
+    /// Implementations must create and populate every replacement GPU resource before discarding
+    /// the currently active atlas. Returning an error promises that [`Self::get_atlas`] and later
+    /// frames still use the previous atlas. This operation is called only between frames.
+    fn replace_atlas(&mut self, atlas: AtlasHandle) -> Result<(), AtlasUploadError>;
     /// Acquires and initializes one backend frame.
     fn frame(&mut self, info: FrameInfo) -> Result<Self::Frame<'_>, FrameError>;
     /// Creates a texture owned by the backend.

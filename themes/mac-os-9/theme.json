@@ -1,6 +1,15 @@
 {
   "schema_version": 1,
   "name": "Mac OS 9",
+  "fonts": {
+    "texture_width": 512,
+    "texture_height": 256,
+    "body": { "path": "../../assets/NORMAL.ttf", "size": 12 },
+    "small": { "path": "../../assets/NORMAL.ttf", "size": 10 },
+    "title": { "path": "../../assets/BOLD.ttf", "size": 12 },
+    "heading": { "path": "../../assets/NORMAL.ttf", "size": 18 },
+    "mono": { "path": "../../assets/CONSOLE.ttf", "size": 14 }
+  },
   "style": {
     "default_cell_width": 96,
     "padding": 5,

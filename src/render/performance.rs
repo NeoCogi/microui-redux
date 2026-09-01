@@ -35,7 +35,7 @@
 //! `cargo test --release render_performance_baseline -- --ignored --nocapture --test-threads=1`
 
 use super::{CustomRenderHandle, DisplayList, FrameError, FrameInfo, Painter, Renderer, RendererBackend, RendererFrame, TextureError, Vertex};
-use crate::{test_support::AllocationMeasurement, AtlasSource, CharEntry, FontEntry, FontId, SourceFormat, TextureId, color};
+use crate::{test_support::AllocationMeasurement, AtlasSource, AtlasUploadError, CharEntry, FontEntry, FontId, SourceFormat, TextureId, color};
 use rs_math3d::{Dimensioni, Recti, Vec2f, Vec2i};
 use std::{cell::Cell, hint::black_box, rc::Rc, time::Instant};
 
@@ -114,6 +114,12 @@ impl RendererBackend for MeasurementBackend {
 
     fn get_atlas(&self) -> crate::AtlasHandle {
         self.atlas.clone()
+    }
+
+    fn replace_atlas(&mut self, atlas: crate::AtlasHandle) -> Result<(), AtlasUploadError> {
+        // Performance fixtures have no native texture, so one assignment is the complete commit.
+        self.atlas = atlas;
+        Ok(())
     }
 
     fn frame(&mut self, _info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {

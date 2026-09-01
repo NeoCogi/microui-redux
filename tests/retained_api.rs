@@ -37,9 +37,9 @@ use microui_redux::prelude::{
     MenuItemSubmitted, Recti, TextBlock, TextBlockParameters, TypedWidgetHandle, Vec2i, Window,
 };
 use microui_redux::{
-    color, rect, AtlasHandle, AtlasSource, CharEntry, Constraints, Context, Disclosure, DisclosureParameters, FontChoice, FontEntry, Grid, GridParameters,
-    ImageError, Linear, LinearParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SourceFormat, Style, SurfaceMutationError, TextureError,
-    TextureId, ThemeIcons,
+    color, rect, AtlasHandle, AtlasSource, AtlasUploadError, CharEntry, Constraints, Context, Disclosure, DisclosureParameters, FontChoice, FontEntry, Grid,
+    GridParameters, ImageError, Linear, LinearParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SourceFormat, Style, SurfaceMutationError,
+    TextureError, TextureId, ThemeIcons,
 };
 
 struct TestBackend {
@@ -60,6 +60,13 @@ impl RendererBackend for TestBackend {
 
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
+    }
+
+    fn replace_atlas(&mut self, atlas: AtlasHandle) -> Result<(), AtlasUploadError> {
+        // This public-API fixture has no native renderer resource; the handle assignment is its
+        // complete successful atlas transaction.
+        self.atlas = atlas;
+        Ok(())
     }
 
     fn frame(&mut self, _info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {

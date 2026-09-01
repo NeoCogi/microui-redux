@@ -37,8 +37,10 @@ trait RendererBackend {
     where
         Self: 'a;
 
+    fn get_atlas(&self) -> AtlasHandle;
+    fn replace_atlas(&mut self, atlas: AtlasHandle) -> Result<(), AtlasUploadError>;
     fn frame(&mut self, info: FrameInfo) -> Result<Self::Frame<'_>, FrameError>;
-    // atlas and persistent-texture methods omitted
+    // persistent Context-texture methods omitted
 }
 ```
 

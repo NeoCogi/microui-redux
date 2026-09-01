@@ -50,7 +50,7 @@ use super::mesh::{CustomRenderArea, MeshSubmission};
 // - UI/custom draws are described as `RenderCommand`s while building the frame.
 // - `end` packs all vertex payloads into one upload buffer, then replays the commands in a single
 //   render pass while switching bind groups/scissor state between draws.
-// - The swapchain surface is reconfigured on resize; the immutable atlas is uploaded once.
+// - The swapchain surface is reconfigured on resize; theme selection replaces the immutable atlas.
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -914,6 +914,26 @@ impl RendererBackend for WgpuRenderer {
 
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
+    }
+
+    fn replace_atlas(&mut self, atlas: AtlasHandle) -> Result<(), AtlasUploadError> {
+        // Construct the complete sampled texture and bind group before publishing either field.
+        // Dropping the old GpuTexture after assignment releases it only once the candidate exists.
+        let pixels = atlas.pixels_clone();
+        let texture = Self::create_gpu_texture(
+            &self.device,
+            &self.queue,
+            &self.bind_group_layout,
+            &self.sampler,
+            &self.uniform_buffer,
+            atlas.width() as u32,
+            atlas.height() as u32,
+            Some(Self::slice_as_bytes(&pixels)),
+        )
+        .map_err(AtlasUploadError::new)?;
+        self.atlas_texture = texture;
+        self.atlas = atlas;
+        Ok(())
     }
 
     fn frame(&mut self, info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {

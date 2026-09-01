@@ -211,6 +211,59 @@ impl Builder {
         Ok(builder)
     }
 
+    /// Creates an empty-font builder by copying every named icon from an existing atlas.
+    ///
+    /// Theme font recipes use this constructor to rebuild typography without requiring the theme
+    /// to repeat application icon paths. Icons are inserted in their existing table order, which
+    /// preserves deterministic packing for atlases originally built with this builder and keeps
+    /// semantic icon lookup independent from numeric slots.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the source dimensions cannot initialize a candidate or an extracted
+    /// icon cannot be represented or packed. A successful result contains no fonts; callers add
+    /// the complete desired font set before [`Builder::build`].
+    pub fn from_atlas_icons(atlas: &AtlasHandle) -> Result<Builder, BuilderError> {
+        Self::from_atlas_icons_with_size(atlas, atlas.width(), atlas.height())
+    }
+
+    /// Creates an empty-font builder of an explicit size by copying an existing atlas's icons.
+    ///
+    /// This form lets a theme select enough texture capacity for its declared font sizes even when
+    /// the source atlas is a compact or prebuilt allocation. The requested dimensions still pass
+    /// the common atlas image limits before icon pixels are extracted or allocated.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the requested dimensions are invalid or cannot contain every copied
+    /// icon. A failure leaves the immutable source atlas untouched.
+    pub fn from_atlas_icons_with_size(atlas: &AtlasHandle, width: usize, height: usize) -> Result<Builder, BuilderError> {
+        let mut builder = Builder {
+            candidate: AtlasCandidate::blank(width, height)?,
+            // Reconstruct packing state solely from concrete icon rectangles; font glyphs from the
+            // source are intentionally not retained.
+            packer: Packer::new(width as i32, height as i32),
+        };
+        let source_pixels = atlas.pixels_clone();
+        let source_width = atlas.width();
+        for (name, icon) in atlas.clone_icon_table() {
+            let rectangle = atlas.get_icon_rect(icon);
+            let left = usize::try_from(rectangle.x).expect("validated atlas icon x must be nonnegative");
+            let top = usize::try_from(rectangle.y).expect("validated atlas icon y must be nonnegative");
+            let width = usize::try_from(rectangle.width).expect("validated atlas icon width must be positive");
+            let height = usize::try_from(rectangle.height).expect("validated atlas icon height must be positive");
+            let mut pixels = Vec::with_capacity(width * height);
+            for row in 0..height {
+                // Atlas validation proves each exact row is in bounds; copy only the icon tile so
+                // old font pixels and unused padding cannot leak into the rebuilt candidate.
+                let start = (top + row) * source_width + left;
+                pixels.extend_from_slice(&source_pixels[start..start + width]);
+            }
+            builder.add_icon_pixels_named(name.as_str(), width, height, pixels.as_slice())?;
+        }
+        Ok(builder)
+    }
+
     /// Adds an icon from the given image path and returns its [`IconId`].
     ///
     /// # Errors
@@ -233,12 +286,25 @@ impl Builder {
     /// dimensions cannot be packed, or its normalized pixels are inconsistent.
     pub fn add_icon_named(&mut self, name: &str, path: &str) -> Result<IconId, BuilderError> {
         if self.candidate.icons.iter().any(|(existing, _)| existing == name) {
-            // Name lookup would make one of two equal entries unreachable. Detect the conflict
-            // before asset I/O or packing so a failed insertion has no side effects.
+            // Preserve the documented file-I/O boundary: a duplicate name is known entirely from
+            // candidate metadata and must not attempt to open an irrelevant path.
             return Err(AtlasError::DuplicateIconName { name: name.to_string() }.into());
         }
         let (width, height, pixels) = Self::load_icon(path)?;
-        let rect = self.add_tile(width, height, pixels.as_slice())?;
+        self.add_icon_pixels_named(name, width, height, pixels.as_slice())
+    }
+
+    /// Adds one already-decoded icon tile under a stable name.
+    ///
+    /// File-backed and atlas-copy insertion share this boundary so duplicate checks, transactional
+    /// packing, candidate metadata, and capability provenance cannot diverge.
+    fn add_icon_pixels_named(&mut self, name: &str, width: usize, height: usize, pixels: &[Color4b]) -> Result<IconId, BuilderError> {
+        if self.candidate.icons.iter().any(|(existing, _)| existing == name) {
+            // Name lookup would make one of two equal entries unreachable. Detect the conflict
+            // before packing so a failed insertion has no side effects.
+            return Err(AtlasError::DuplicateIconName { name: name.to_string() }.into());
+        }
+        let rect = self.add_tile(width, height, pixels)?;
         let slot = self.candidate.icons.len();
         self.candidate.icons.push((name.to_string(), Icon { rect }));
         // The returned capability already belongs to the candidate moved through build.
@@ -661,6 +727,55 @@ mod tests {
         assert!(atlas.contains_font(font));
         assert_eq!(atlas.icon_id("extra"), Some(icon));
         assert_eq!(atlas.font_id("extra"), Some(font));
+    }
+
+    /// Verifies a theme-style rebuild retains exact icon names and pixels while replacing all
+    /// source fonts with the caller's explicitly added set.
+    #[test]
+    fn atlas_icon_copy_rebuilds_fonts_without_losing_semantic_images() {
+        let fonts = [FontAsset { name: "body", path: FONT_PATH, size: 10 }];
+        let icons = [IconAsset { name: "file", path: FILE_ICON_PATH }];
+        let config = Config {
+            texture_width: 512,
+            texture_height: 256,
+            white_icon: String::from(WHITE_PATH),
+            icons: &icons,
+            fonts: &fonts,
+        };
+        let source = Builder::from_config(&config)
+            .expect("source atlas assets must pack")
+            .build()
+            .expect("source atlas must validate");
+        let source_file = source.icon_id("file").expect("source file icon must exist");
+        let source_file_rectangle = source.get_icon_rect(source_file);
+
+        let mut replacement = Builder::from_atlas_icons(&source).expect("validated source icons must copy");
+        replacement
+            .add_font_named("body", FONT_PATH, 14)
+            .expect("replacement body font must fit beside copied icons");
+        let replacement = replacement.build().expect("replacement atlas must validate");
+
+        assert_eq!(
+            replacement.clone_icon_table().iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(),
+            ["white", "file"]
+        );
+        let replacement_file_rectangle = replacement.get_icon_rect(replacement.icon_id("file").unwrap());
+        assert_eq!(
+            (
+                replacement_file_rectangle.x,
+                replacement_file_rectangle.y,
+                replacement_file_rectangle.width,
+                replacement_file_rectangle.height,
+            ),
+            (
+                source_file_rectangle.x,
+                source_file_rectangle.y,
+                source_file_rectangle.width,
+                source_file_rectangle.height
+            )
+        );
+        assert_eq!(replacement.get_font_size(replacement.font_id("body").unwrap()), 14);
+        assert_eq!(replacement.clone_font_table().len(), 1);
     }
 
     /// Verifies duplicate resource keys are structural errors detected before opening the supplied

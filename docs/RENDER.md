@@ -416,7 +416,7 @@ A backend implements `RendererBackend` and consumes `render::Vertex`:
 ```rust
 use microui_redux::{
     prelude::{AtlasHandle, Context, TextureId},
-    render::{FrameError, FrameInfo, RendererBackend, RendererFrame, TextureError, Vertex},
+    render::{AtlasUploadError, FrameError, FrameInfo, RendererBackend, RendererFrame, TextureError, Vertex},
 };
 
 struct Backend {
@@ -438,6 +438,12 @@ impl RendererBackend for Backend {
 
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
+    }
+
+    fn replace_atlas(&mut self, atlas: AtlasHandle) -> Result<(), AtlasUploadError> {
+        // A real backend uploads a candidate GPU texture before publishing this handle.
+        self.atlas = atlas;
+        Ok(())
     }
 
     fn frame(&mut self, _info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {

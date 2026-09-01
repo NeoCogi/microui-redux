@@ -2,8 +2,10 @@
 
 The `theme-json` feature is enabled by default. It adds `Context::load_theme_file`, which reads one
 strict, versioned JSON definition and uploads each referenced PNG through that Context's renderer.
-The returned `LoadedTheme` contains a complete `Style`; install it with
-`context.set_style(theme.style().clone())`.
+The returned `LoadedTheme` contains a rebuilt font atlas and its complete matching `Style`; install
+both with `context.set_theme(&theme)`. Loading does not change the active renderer, so several
+themes can be prepared before the user selects one. Selection uploads the replacement atlas first
+and publishes the Style only after that backend transaction succeeds.
 
 All PNG paths are relative to the JSON file. Theme textures remain owned by the loading Context, so
 a loaded style cannot be installed in another Context. A failed load destroys every image uploaded
@@ -31,6 +33,15 @@ the theme directories must remain available beside the repository sources at run
 {
   "schema_version": 1,
   "name": "Example",
+  "fonts": {
+    "texture_width": 512,
+    "texture_height": 256,
+    "body": { "path": "body.ttf", "size": 12 },
+    "small": { "path": "body.ttf", "size": 10 },
+    "title": { "path": "title.ttf", "size": 12 },
+    "heading": { "path": "body.ttf", "size": 18 },
+    "mono": { "path": "mono.ttf", "size": 14 }
+  },
   "style": {
     "padding": 4,
     "spacing": 4,
@@ -62,6 +73,17 @@ the theme directories must remain available beside the repository sources at run
   }
 }
 ```
+
+The optional `fonts` object is all-or-nothing. When present, it declares atlas texture dimensions
+and exact file/size recipes for the five semantic roles: `body`, `small`, `title`, `heading`, and
+`mono`. Paths are relative to the JSON file. Loading copies the current atlas's named icons into a
+fresh atlas of the requested size, rasterizes only these declared fonts, and binds the resulting
+font IDs into the theme Style. The bundled classic themes all use this path.
+
+Atlas-scoped IDs are intentionally concrete capabilities. A widget configured with
+`FontChoice::Id` from the preceding atlas cannot survive a theme switch; use a semantic `FontRole`
+for theme-controlled text. Custom rendering code that caches raw atlas UV coordinates must refresh
+those coordinates when installing a different atlas.
 
 An appearance or state may be omitted. Every omitted state keeps its own flat-color fallback; it
 does not borrow another state's PNG. A state may set `foreground` without a PNG to recolor its text
@@ -100,6 +122,20 @@ These colors construct the complete flat appearance and foreground fallback cata
 per-state PNG or `foreground` override is installed. `Style::foreground(role, state)` and the
 public `ForegroundCatalog` provide the same concrete enum-indexed lookup and mutation model as
 background appearances; no erased or string-keyed payload participates at paint time.
+
+## Loading and selecting
+
+```rust,no_run
+# use microui_redux::{Context, LoadedTheme};
+# use microui_redux::render::RendererBackend;
+fn select<B: RendererBackend, State: 'static>(context: &mut Context<B, State>, theme: &LoadedTheme) {
+    context.set_theme(theme).expect("backend must upload the selected theme atlas");
+}
+```
+
+`LoadedTheme::from_style` can capture the initial flat atlas/style pair so a selector can return to
+the default appearance after choosing a file theme. Ordinary Style Editor changes continue to use
+`Context::set_style`; they are valid while they retain IDs from the currently installed atlas.
 
 ## Appearance roles
 

@@ -19,7 +19,7 @@ default = ["builder", "save-to-rust", "theme-json"]
 builder = ["dep:fontdue", "dep:png"]
 png_source = ["dep:png"]
 # Versioned JSON definitions and relative PNG state assets.
-theme-json = ["dep:serde", "dep:serde_json", "png_source"]
+theme-json = ["builder", "dep:serde", "dep:serde_json", "png_source"]
 save-to-rust = ["dep:tempfile"]
 prebuilt-atlas = ["png_source"]
 external-atlas = ["png_source"]

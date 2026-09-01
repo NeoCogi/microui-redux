@@ -1189,12 +1189,14 @@ impl DemoTheme {
     }
 }
 
-/// Context-bound theme styles retained for instant demo switching.
+/// Context-bound atlas/style bundles retained for instant demo switching.
 struct DemoThemes {
-    /// Complete atlas- and renderer-compatible styles indexed by [`DemoTheme`].
-    styles: [Style; DemoTheme::ALL.len()],
+    /// Complete installable themes indexed by [`DemoTheme`].
+    themes: [LoadedTheme; DemoTheme::ALL.len()],
     /// Current base selection before any live Style Editor changes.
     selected: DemoTheme,
+    /// Theme whose atlas is currently published by the renderer backend.
+    installed: DemoTheme,
 }
 
 impl DemoThemes {
@@ -1202,7 +1204,7 @@ impl DemoThemes {
     fn load(context: &mut Context<SelectedBackend, State>) -> Self {
         // Theme loading uploads each unique PNG once and leaves the installed Context style alone.
         // Retaining every concrete style therefore permits switching without file I/O later.
-        let default = context.style().clone();
+        let default = LoadedTheme::from_style("Default Style", context.atlas(), context.style().clone());
         let windows_311_path = demo_asset_path("themes/windows-3.11/theme.json");
         let windows_311 = context
             .load_theme_file(windows_311_path.as_path())
@@ -1216,22 +1218,35 @@ impl DemoThemes {
             .load_theme_file(mac_path.as_path())
             .unwrap_or_else(|error| panic!("failed to load bundled Mac OS 9 theme {}: {error}", mac_path.display()));
         Self {
-            styles: [default, windows_311.into_style(), windows_95.into_style(), mac.into_style()],
+            themes: [default, windows_311, windows_95, mac],
             selected: DemoTheme::Default,
+            installed: DemoTheme::Default,
         }
     }
 
     /// Borrows the style associated with the current typed selection.
     fn selected_style(&self) -> &Style {
         // Index conversion remains centralized on the enum rather than leaking numeric slots.
-        &self.styles[self.selected.index()]
+        self.themes[self.selected.index()].style()
     }
 
     /// Changes the base selection and returns an editable copy for application state.
     fn select(&mut self, selection: DemoTheme) -> Style {
         // State's Style Editor intentionally mutates a clone; pristine bundled choices stay reusable.
         self.selected = selection;
-        self.styles[selection.index()].clone()
+        self.themes[selection.index()].style().clone()
+    }
+
+    /// Installs a newly selected atlas/style bundle before the editable Style copy is published.
+    fn install_selected(&mut self, context: &mut Context<SelectedBackend, State>) {
+        if self.installed == self.selected {
+            // Style Editor changes do not require a GPU atlas upload while the base theme is stable.
+            return;
+        }
+        context
+            .set_theme(&self.themes[self.selected.index()])
+            .unwrap_or_else(|error| panic!("failed to install {} atlas: {error}", self.selected.label()));
+        self.installed = self.selected;
     }
 }
 
@@ -1447,7 +1462,7 @@ struct State {
     window_info_value_states: [TypedWidgetHandle<ListItem>; 3],
     /// Editable copy of the currently selected base theme.
     style: Style,
-    /// Pristine Context-bound styles used by the demo theme selector.
+    /// Pristine Context-bound atlas/style bundles used by the demo theme selector.
     themes: DemoThemes,
     /// Concrete radio items updated whenever the selected base theme changes.
     theme_menu_items: [MenuItemHandle; DemoTheme::ALL.len()],
@@ -2867,6 +2882,9 @@ impl State {
         for (swatch, color) in self.style_color_swatch_states.iter().zip(colors) {
             swatch.try_update(|swatch| swatch.set_fill(color)).expect("style swatch state unavailable");
         }
+        // A changed base theme swaps its font atlas first; live scalar/color edits then publish a
+        // clone whose font and icon capabilities are guaranteed to belong to that active atlas.
+        self.themes.install_selected(ctx);
         ctx.set_style(self.style.clone());
     }
 

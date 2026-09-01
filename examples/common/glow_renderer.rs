@@ -54,7 +54,7 @@ use super::{
 // - Special-case draws (external textures, solid custom vertices, mesh demos) flush the UI batch
 //   first, then issue immediate GL commands so ordering stays correct without a larger command
 //   graph.
-// - The immutable atlas texture is uploaded once while constructing the renderer.
+// - Each immutable atlas texture is uploaded transactionally at construction or theme selection.
 
 pub(crate) trait GLCustomRenderer {
     /// Records backend-specific GL commands inside the supplied logical/clip area.
@@ -120,6 +120,51 @@ trait GlFrameOps {
 }
 
 impl GLRenderer {
+    /// Creates and fully uploads one atlas texture without changing the renderer's active atlas.
+    ///
+    /// Keeping allocation behind this helper gives atlas replacement a transaction boundary: the
+    /// existing texture remains bound to future frames unless all GL setup and upload work for the
+    /// candidate succeeds.
+    fn create_atlas_texture(&self, atlas: &AtlasHandle) -> Result<NativeTexture, AtlasUploadError> {
+        unsafe {
+            let texture_gl = self.gl.clone();
+            let texture = ResourceGuard::new(
+                self.gl
+                    .create_texture()
+                    .map_err(|error| AtlasUploadError::new(format!("failed to create replacement atlas texture: {error}")))?,
+                move |texture| texture_gl.delete_texture(texture),
+            );
+            self.gl.bind_texture(glow::TEXTURE_2D, Some(*texture.get()));
+            self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+            self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+            self.gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+            self.gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
+            atlas.apply_pixels(|width, height, pixels| {
+                let bytes = slice::from_raw_parts(pixels.as_ptr().cast::<u8>(), pixels.len() * 4);
+                self.gl.tex_image_2d(
+                    glow::TEXTURE_2D,
+                    0,
+                    glow::RGBA as i32,
+                    width as i32,
+                    height as i32,
+                    0,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    PixelUnpackData::Slice(Some(bytes)),
+                );
+            });
+            let error = self.gl.get_error();
+            self.gl.bind_texture(glow::TEXTURE_2D, None);
+            if error != glow::NO_ERROR {
+                // The guard deletes the failed candidate while the renderer retains its old atlas.
+                return Err(AtlasUploadError::new(format!(
+                    "failed to upload replacement atlas texture: GL error 0x{error:04X}"
+                )));
+            }
+            Ok(texture.into_inner())
+        }
+    }
+
     /// Returns the atlas UV used as a "white texel" when drawing solid-colored primitives.
     fn white_uv_center(&self) -> Vec2f {
         let atlas = self.get_atlas();
@@ -561,6 +606,18 @@ impl RendererBackend for GLRenderer {
 
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
+    }
+
+    fn replace_atlas(&mut self, atlas: AtlasHandle) -> Result<(), AtlasUploadError> {
+        // Upload into a separate texture first. Only a complete candidate may displace the live GL
+        // object and matching CPU atlas capability.
+        let texture = self.create_atlas_texture(&atlas)?;
+        let previous = std::mem::replace(&mut self.tex_o, texture);
+        self.atlas = atlas;
+        unsafe {
+            self.gl.delete_texture(previous);
+        }
+        Ok(())
     }
 
     fn frame(&mut self, info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {

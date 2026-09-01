@@ -592,6 +592,41 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         self.window_manager.set_style(style);
     }
 
+    /// Replaces the renderer atlas and installs the matching loaded theme as one transaction.
+    ///
+    /// The backend uploads the theme atlas before this Context publishes its new Style. If upload
+    /// fails, both the previous renderer atlas and previous Style remain active. File-theme image
+    /// textures must still belong to this Context, just as they do for [`Context::set_style`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::AtlasUploadError`] when the backend cannot allocate, upload, or bind the
+    /// replacement atlas. The current theme remains unchanged.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the bundle's Style does not belong to its own atlas or references a foreign or
+    /// already-freed Context texture.
+    #[cfg(feature = "theme-json")]
+    pub fn set_theme(&mut self, theme: &LoadedTheme) -> Result<(), crate::AtlasUploadError> {
+        let atlas = theme.atlas();
+        assert!(theme.style().belongs_to(&atlas), "theme style contains font or icon IDs from another atlas");
+        assert!(
+            theme
+                .style()
+                .appearances
+                .patches()
+                .filter_map(crate::NinePatch::image_content)
+                .all(|image| self.renderer.contains_texture(image.texture)),
+            "theme style contains texture IDs not owned by this Context"
+        );
+        // Renderer commits the backend texture and its CPU lookup cache first. Publishing the
+        // cloned Style last makes a returned error a complete no-op at Context level.
+        self.renderer.replace_atlas(atlas)?;
+        self.window_manager.set_style(theme.style().clone());
+        Ok(())
+    }
+
     /// Returns the resolved UI style currently used by this context.
     pub fn style(&self) -> &Style {
         self.window_manager.style()
@@ -672,21 +707,23 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// Relative image paths are resolved against the JSON file's directory. Missing PNG entries
     /// remain concrete flat-color patches derived from the document's palette. Successfully
     /// uploaded textures are owned by this Context for its remaining lifetime, allowing callers to
-    /// retain several [`LoadedTheme`] values and switch between their cloned styles safely.
+    /// retain several [`LoadedTheme`] values and switch their matching atlases and styles safely.
     ///
     /// # Errors
     ///
     /// Returns [`ThemeLoadError`] for definition I/O, strict JSON schema errors, invalid role or
-    /// slice data, PNG decoding, or backend upload failure. If any image fails, every texture
-    /// uploaded earlier in the same call is destroyed before the error is returned.
+    /// slice data, font atlas construction, PNG decoding, or backend upload failure. If any image
+    /// fails, every texture uploaded earlier in the same call is destroyed before the error is
+    /// returned. Atlas construction occurs before image upload and never mutates the live backend.
     #[cfg(feature = "theme-json")]
     pub fn load_theme_file(&mut self, path: impl AsRef<Path>) -> Result<LoadedTheme, ThemeLoadError> {
-        // Always resolve file themes from a fresh atlas-bound default Style. Loading while another
-        // theme is active must not accidentally inherit that theme's image handles or omitted values.
+        // Build theme typography without mutating the live renderer. This permits applications to
+        // preload several installable bundles and choose one later without repeated file I/O.
         let definition = crate::theme::loader::ThemeDefinition::read(path.as_ref())?;
-        let base = Style::from_atlas(&self.renderer.atlas());
+        let atlas = definition.build_atlas(&self.renderer.atlas())?;
+        let base = Style::from_atlas(&atlas);
         let mut uploaded = Vec::new();
-        let result = definition.install(base, |_, width, height, pixels| {
+        let result = definition.install(atlas, base, |_, width, height, pixels| {
             let id = self.renderer.try_load_texture_rgba(width, height, pixels)?;
             uploaded.push(id);
             Ok(id)
@@ -912,8 +949,66 @@ mod theme_tests {
     //! Context-level theme upload transaction tests.
 
     use super::*;
+    use crate::render::{AtlasUploadError, FrameError, RendererFrame, TextureError, Vertex};
     use crate::test_support::{RenderEvent, recording_backend, test_atlas};
     use std::fs;
+
+    /// Minimal backend that can deterministically accept or reject atlas publication.
+    struct ThemeAtlasBackend {
+        /// Atlas returned to a newly constructed Context and replaced after successful uploads.
+        atlas: AtlasHandle,
+        /// Whether the next replacement should fail without changing `atlas`.
+        reject_replacement: bool,
+    }
+
+    /// Empty frame used because these tests exercise resource mutation between frames only.
+    #[must_use]
+    struct ThemeAtlasFrame;
+
+    impl RendererFrame for ThemeAtlasFrame {
+        /// Ignores atlas-backed quads because no test frame is rendered.
+        fn push_quad(&mut self, _vertices: [Vertex; 4]) {}
+
+        /// Ignores atlas-backed triangles because no test frame is rendered.
+        fn push_triangle(&mut self, _vertices: [Vertex; 3]) {}
+
+        /// Has no buffered work to flush.
+        fn flush(&mut self) {}
+
+        /// Ignores external textures because no test frame is rendered.
+        fn draw_texture(&mut self, _id: TextureId, _vertices: [Vertex; 4]) {}
+    }
+
+    impl RendererBackend for ThemeAtlasBackend {
+        type Frame<'a> = ThemeAtlasFrame;
+
+        /// Returns the currently published atlas capability.
+        fn get_atlas(&self) -> AtlasHandle {
+            self.atlas.clone()
+        }
+
+        /// Models the required all-or-nothing backend replacement contract.
+        fn replace_atlas(&mut self, atlas: AtlasHandle) -> Result<(), AtlasUploadError> {
+            if self.reject_replacement {
+                return Err(AtlasUploadError::new("fixture rejected atlas"));
+            }
+            self.atlas = atlas;
+            Ok(())
+        }
+
+        /// Provides an inert frame for completeness of the backend contract.
+        fn frame(&mut self, _info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {
+            Ok(ThemeAtlasFrame)
+        }
+
+        /// Accepts validated theme PNGs without retaining native resources.
+        fn create_texture(&mut self, _id: TextureId, _pixels: &[u8]) -> Result<(), TextureError> {
+            Ok(())
+        }
+
+        /// Has no native texture allocation to release.
+        fn destroy_texture(&mut self, _id: TextureId) {}
+    }
 
     /// Encodes one small opaque RGBA PNG for a temporary theme fixture.
     fn fixture_png(width: u32, height: u32) -> Vec<u8> {
@@ -980,5 +1075,44 @@ mod theme_tests {
             .collect();
         assert_eq!(created.len(), 1);
         assert_eq!(destroyed, created);
+    }
+
+    /// Verifies a successful selection publishes one matching atlas/style pair to the Context.
+    #[test]
+    fn set_theme_replaces_atlas_and_style_together() {
+        let initial = test_atlas();
+        let replacement = test_atlas();
+        let replacement_style = Style::from_atlas(&replacement);
+        let replacement_font = replacement_style.font;
+        let theme = LoadedTheme::from_style("Replacement", replacement.clone(), replacement_style);
+        let mut context = Context::<ThemeAtlasBackend>::new(ThemeAtlasBackend {
+            atlas: initial.clone(),
+            reject_replacement: false,
+        });
+
+        context.set_theme(&theme).expect("fixture backend must accept replacement atlas");
+
+        assert!(context.atlas().ptr_eq(&replacement));
+        assert!(!context.atlas().ptr_eq(&initial));
+        assert_eq!(context.style().font, replacement_font);
+    }
+
+    /// Verifies an atlas upload error leaves both sides of the active theme pair unchanged.
+    #[test]
+    fn set_theme_failure_preserves_previous_atlas_and_style() {
+        let initial = test_atlas();
+        let initial_font = Style::from_atlas(&initial).font;
+        let replacement = test_atlas();
+        let theme = LoadedTheme::from_style("Rejected", replacement.clone(), Style::from_atlas(&replacement));
+        let mut context = Context::<ThemeAtlasBackend>::new(ThemeAtlasBackend {
+            atlas: initial.clone(),
+            reject_replacement: true,
+        });
+
+        let error = context.set_theme(&theme).expect_err("fixture backend must reject replacement atlas");
+
+        assert_eq!(error, AtlasUploadError::new("fixture rejected atlas"));
+        assert!(context.atlas().ptr_eq(&initial));
+        assert_eq!(context.style().font, initial_font);
     }
 }

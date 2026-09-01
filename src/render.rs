@@ -41,7 +41,10 @@ mod performance;
 mod renderer;
 mod texture;
 
-pub use backend::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame, Vertex};
+pub use backend::{
+    AtlasUploadError, CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, FrameError, FrameInfo, FrameInfoError, RendererBackend, RendererFrame,
+    Vertex,
+};
 pub(crate) use backend::CustomRenderKey;
 pub use color::{Color, color};
 pub(crate) use display_list::DisplayList;

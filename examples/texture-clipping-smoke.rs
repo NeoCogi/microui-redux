@@ -125,6 +125,12 @@ impl RendererBackend for SmokeRenderer {
         self.atlas.clone()
     }
 
+    fn replace_atlas(&mut self, atlas: AtlasHandle) -> Result<(), AtlasUploadError> {
+        // This CPU smoke backend stores no GPU atlas object, so publishing the handle is atomic.
+        self.atlas = atlas;
+        Ok(())
+    }
+
     fn frame(&mut self, _info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {
         self.pending_quads = 0;
         self.events.borrow_mut().clear();

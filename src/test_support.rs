@@ -31,7 +31,7 @@
 //! Shared fixtures, renderer recordings, and no-op helpers used by unit tests.
 
 use crate::render::{FrameError, FrameInfo, RendererBackend, RendererFrame, TextureError, Vertex};
-use crate::{AtlasHandle, AtlasSource, CharEntry, FontEntry, Recti, SourceFormat, Style, TextureId, Vec2i};
+use crate::{AtlasHandle, AtlasSource, AtlasUploadError, CharEntry, FontEntry, Recti, SourceFormat, Style, TextureId, Vec2i};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -227,6 +227,13 @@ impl RendererBackend for NoopRenderer {
         self.atlas.clone()
     }
 
+    fn replace_atlas(&mut self, atlas: AtlasHandle) -> Result<(), AtlasUploadError> {
+        // The no-op backend has no GPU allocation; publishing the validated capability completes
+        // its entire replacement transaction.
+        self.atlas = atlas;
+        Ok(())
+    }
+
     fn frame(&mut self, _info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {
         Ok(NoopFrame)
     }
@@ -407,6 +414,12 @@ impl RendererBackend for RecordingRenderer {
 
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
+    }
+
+    fn replace_atlas(&mut self, atlas: AtlasHandle) -> Result<(), AtlasUploadError> {
+        // Recording tests model a successful backend upload by changing the authoritative handle.
+        self.atlas = atlas;
+        Ok(())
     }
 
     fn frame(&mut self, info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {

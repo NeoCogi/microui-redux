@@ -626,6 +626,14 @@ impl RendererBackend for VulkanRenderer {
         self.atlas.clone()
     }
 
+    fn replace_atlas(&mut self, atlas: AtlasHandle) -> std::result::Result<(), AtlasUploadError> {
+        // VulkanContext's atlas upload retains the old image until the candidate image, transfer,
+        // and descriptor update all succeed. Mirror that commit by replacing the CPU handle last.
+        self.context.upload_atlas(&atlas).map_err(AtlasUploadError::new)?;
+        self.atlas = atlas;
+        Ok(())
+    }
+
     fn frame(&mut self, info: FrameInfo) -> std::result::Result<Self::Frame<'_>, FrameError> {
         let dimensions = info.dimensions();
         VulkanFrameOps::begin(self, dimensions.width, dimensions.height, info.clear()).map_err(FrameError::new)?;

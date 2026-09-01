@@ -258,6 +258,34 @@ impl<B: RendererBackend> Renderer<B> {
         self.atlas.clone()
     }
 
+    /// Replaces the backend atlas and every renderer-side metric derived from it.
+    ///
+    /// The backend commits first so an upload failure cannot expose CPU metadata for pixels that
+    /// were never published. Once that transaction succeeds, resolving the required white icon and
+    /// its normalized UV is infallible under the validated [`AtlasHandle`] contract.
+    #[cfg(feature = "theme-json")]
+    pub(crate) fn replace_atlas(&mut self, atlas: AtlasHandle) -> Result<(), super::backend::AtlasUploadError> {
+        // Do not re-upload a bundle that is already active. The pointer comparison is exact atlas
+        // identity rather than structural equality, matching FontId and IconId provenance.
+        if self.atlas.ptr_eq(&atlas) {
+            return Ok(());
+        }
+        self.backend.replace_atlas(atlas.clone())?;
+        let atlas_dim = atlas.get_texture_dimension();
+        let white_icon_rect = atlas.get_icon_rect(atlas.white_icon());
+        let white_icon_min = Vec2f::new(white_icon_rect.x as f32, white_icon_rect.y as f32);
+        let white_icon_extent = Vec2f::new(white_icon_rect.width as f32, white_icon_rect.height as f32);
+        let atlas_extent = Vec2f::new(atlas_dim.width.max(1) as f32, atlas_dim.height.max(1) as f32);
+
+        // Publish all CPU-side atlas state together only after the backend owns the matching
+        // texture. Later layout, validation, and rendering therefore observe one coherent atlas.
+        self.atlas = atlas;
+        self.atlas_dim = atlas_dim;
+        self.white_icon_rect = white_icon_rect;
+        self.white_uv = (white_icon_min + white_icon_extent * 0.5) / atlas_extent;
+        Ok(())
+    }
+
     /// Reports whether one external texture handle is live in this renderer.
     pub(crate) fn contains_texture(&self, id: TextureId) -> bool {
         // Texture identity includes renderer provenance, so one set lookup checks both ownership and

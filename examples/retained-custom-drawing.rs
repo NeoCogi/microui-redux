@@ -67,6 +67,12 @@ impl RendererBackend for NoopRenderer {
         self.atlas.clone()
     }
 
+    fn replace_atlas(&mut self, atlas: AtlasHandle) -> Result<(), AtlasUploadError> {
+        // The no-op example backend needs only swap its retained atlas capability.
+        self.atlas = atlas;
+        Ok(())
+    }
+
     fn frame(&mut self, _info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {
         Ok(NoopFrame)
     }

@@ -38,29 +38,55 @@ use std::{
 
 use serde::Deserialize;
 
-use super::{AppearanceCatalog, AppearanceRole, ForegroundCatalog, Style, VisualState};
-use crate::{Color, ControlColor, ImageError, ImageSource, NinePatch, NinePatchImage, SliceInsets, TextureError, TextureId};
+use super::{AppearanceCatalog, AppearanceRole, FontRole, ForegroundCatalog, Style, VisualState};
+use crate::{
+    atlas::{
+        AtlasHandle,
+        builder::{Builder, BuilderError},
+    },
+    Color, ControlColor, ImageError, ImageSource, NinePatch, NinePatchImage, SliceInsets, TextureError, TextureId,
+};
 
 /// Theme-file schema version understood by this crate release.
 pub const THEME_SCHEMA_VERSION: u32 = 1;
 
-/// A context-installed theme with its display name and complete resolved style.
+/// A loaded theme with its display name, rebuilt font atlas, and complete resolved style.
 ///
-/// PNG textures are owned by the Context that loaded the theme and remain alive until that Context
-/// is dropped. The value therefore stays cheap to clone and contains no backend or dynamic owner.
+/// PNG textures in the style are owned by the Context that loaded the file, while the immutable
+/// atlas is shared by handle. Install this complete bundle through [`crate::Context::set_theme`]
+/// so renderer pixels and atlas-scoped font/icon capabilities change together.
 #[derive(Clone)]
 pub struct LoadedTheme {
     /// Human-readable name supplied by the JSON definition.
     name: String,
+    /// Immutable atlas containing copied semantic icons and theme-declared font rasterizations.
+    atlas: AtlasHandle,
     /// Atlas- and Context-bound style containing resolved image texture handles.
     style: Style,
 }
 
 impl LoadedTheme {
     /// Creates a loaded theme after schema resolution and texture upload have succeeded.
-    pub(crate) fn new(name: String, style: Style) -> Self {
-        // Both values are complete at this boundary; partially installed themes never become public.
-        Self { name, style }
+    pub(crate) fn new(name: String, atlas: AtlasHandle, style: Style) -> Self {
+        // The loader constructs Style from this exact atlas, making the ownership assertion an
+        // internal invariant rather than a runtime condition deferred until rendering.
+        debug_assert!(style.belongs_to(&atlas));
+        Self { name, atlas, style }
+    }
+
+    /// Captures an already resolved atlas/style pair as one installable named theme.
+    ///
+    /// This is primarily useful for retaining an application's initial flat style beside loaded
+    /// file themes. Image-backed appearances, if any, remain valid only in their owning Context.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `name` is empty or the style contains a font or icon from another atlas.
+    pub fn from_style(name: impl Into<String>, atlas: AtlasHandle, style: Style) -> Self {
+        let name = name.into();
+        assert!(!name.trim().is_empty(), "theme name must not be empty");
+        assert!(style.belongs_to(&atlas), "theme style contains font or icon IDs from another atlas");
+        Self { name, atlas, style }
     }
 
     /// Returns the human-readable theme name from the JSON file.
@@ -73,9 +99,10 @@ impl LoadedTheme {
         &self.style
     }
 
-    /// Consumes this wrapper and returns its complete resolved style.
-    pub fn into_style(self) -> Style {
-        self.style
+    /// Returns the immutable atlas containing this theme's fonts and semantic icons.
+    pub fn atlas(&self) -> AtlasHandle {
+        // AtlasHandle is a cheap shared capability; callers cannot mutate its pixels or tables.
+        self.atlas.clone()
     }
 }
 
@@ -142,6 +169,16 @@ pub enum ThemeLoadError {
         /// Concrete texture-layer diagnostic.
         source: TextureError,
     },
+    /// The theme's font files could not be read, rasterized, packed, or structurally finalized.
+    AtlasBuild {
+        /// Concrete atlas-builder failure retaining its font path or validation classification.
+        source: BuilderError,
+    },
+    /// A resolved font asset path cannot be represented by the string-based atlas builder API.
+    FontPathNotUtf8 {
+        /// Fully resolved path containing non-UTF-8 platform bytes.
+        path: PathBuf,
+    },
 }
 
 impl fmt::Display for ThemeLoadError {
@@ -170,6 +207,8 @@ impl fmt::Display for ThemeLoadError {
             Self::ImageRead { path, source } => write!(formatter, "failed to read theme PNG {}: {source}", path.display()),
             Self::ImageDecode { path, source } => write!(formatter, "failed to decode theme PNG {}: {source}", path.display()),
             Self::ImageUpload { path, source } => write!(formatter, "failed to upload theme PNG {}: {source}", path.display()),
+            Self::AtlasBuild { source } => write!(formatter, "failed to build theme font atlas: {source}"),
+            Self::FontPathNotUtf8 { path } => write!(formatter, "theme font path is not valid UTF-8: {}", path.display()),
         }
     }
 }
@@ -183,7 +222,10 @@ impl Error for ThemeLoadError {
             Self::DefinitionJson { source, .. } => Some(source),
             Self::ImageDecode { source, .. } => Some(source),
             Self::ImageUpload { source, .. } => Some(source),
-            Self::UnsupportedSchema { .. } | Self::EmptyName | Self::UnknownAppearance { .. } | Self::InvalidInsets { .. } => None,
+            Self::AtlasBuild { source } => Some(source),
+            Self::UnsupportedSchema { .. } | Self::EmptyName | Self::UnknownAppearance { .. } | Self::InvalidInsets { .. } | Self::FontPathNotUtf8 { .. } => {
+                None
+            }
         }
     }
 }
@@ -196,6 +238,8 @@ pub(crate) struct ThemeDefinition {
     schema_version: u32,
     /// Human-readable selector label.
     name: String,
+    /// Optional complete semantic font recipe used to build this theme's own atlas.
+    fonts: Option<FontCatalogDocument>,
     /// Optional scalar and flat-color overrides.
     #[serde(default)]
     style: StyleDocument,
@@ -227,12 +271,37 @@ impl ThemeDefinition {
         Ok(definition)
     }
 
+    /// Builds the atlas selected by this definition while preserving the base semantic icons.
+    ///
+    /// A document without a `fonts` object deliberately reuses the exact base allocation. A
+    /// document that declares fonts starts with copied icons, then rasterizes all five semantic
+    /// roles so no style role can silently retain a foreign FontId.
+    pub(crate) fn build_atlas(&self, base: &AtlasHandle) -> Result<AtlasHandle, ThemeLoadError> {
+        let Some(fonts) = &self.fonts else {
+            return Ok(base.clone());
+        };
+        let mut builder =
+            Builder::from_atlas_icons_with_size(base, fonts.texture_width, fonts.texture_height).map_err(|source| ThemeLoadError::AtlasBuild { source })?;
+        for (role, font) in fonts.entries() {
+            let path = self.directory.join(font.path.as_path());
+            let path_text = path.to_str().ok_or_else(|| ThemeLoadError::FontPathNotUtf8 { path: path.clone() })?;
+            builder
+                .add_font_named(role.atlas_name(), path_text, font.size)
+                .map_err(|source| ThemeLoadError::AtlasBuild { source })?;
+        }
+        builder.build().map_err(|source| ThemeLoadError::AtlasBuild { source })
+    }
+
     /// Resolves flat fallbacks and uploads every explicitly supplied PNG through `upload`.
     pub(crate) fn install(
         self,
+        atlas: AtlasHandle,
         mut style: Style,
         mut upload: impl FnMut(&Path, i32, i32, &[u8]) -> Result<TextureId, TextureError>,
     ) -> Result<LoadedTheme, ThemeLoadError> {
+        // Installation may only bind appearance textures onto a Style created for this exact
+        // atlas; enforcing that here prevents a LoadedTheme from ever containing mixed resources.
+        assert!(style.belongs_to(&atlas), "theme base style contains font or icon IDs from another atlas");
         // Apply palette and metric overrides before constructing fallbacks, so every omitted PNG
         // state reflects the JSON theme's own flat colors rather than the built-in default palette.
         self.style.apply(&mut style);
@@ -312,8 +381,54 @@ impl ThemeDefinition {
             style.foregrounds.set(role, foregrounds);
         }
 
-        Ok(LoadedTheme::new(self.name, style))
+        // Retain atlas and style as the only public unit that can be safely selected later.
+        Ok(LoadedTheme::new(self.name, atlas, style))
     }
+}
+
+/// Complete semantic font recipe for one rebuilt theme atlas.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FontCatalogDocument {
+    /// Width in pixels of the rebuilt atlas texture.
+    texture_width: usize,
+    /// Height in pixels of the rebuilt atlas texture.
+    texture_height: usize,
+    /// Default font used by controls and ordinary text.
+    body: FontDocument,
+    /// Compact font used by supporting text.
+    small: FontDocument,
+    /// Font used by window titles and chrome.
+    title: FontDocument,
+    /// Larger font used by headings and typography demonstrations.
+    heading: FontDocument,
+    /// Fixed-width font used by console-oriented text.
+    mono: FontDocument,
+}
+
+impl FontCatalogDocument {
+    /// Returns all semantic recipes in stable atlas insertion order.
+    fn entries(&self) -> [(FontRole, &FontDocument); 5] {
+        // The explicit table keeps JSON keys, public FontRole values, and atlas names aligned
+        // without reflection or string-driven role dispatch.
+        [
+            (FontRole::Body, &self.body),
+            (FontRole::Small, &self.small),
+            (FontRole::Title, &self.title),
+            (FontRole::Heading, &self.heading),
+            (FontRole::Mono, &self.mono),
+        ]
+    }
+}
+
+/// One font file and raster size declared by a theme.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FontDocument {
+    /// Font file path resolved relative to the theme JSON directory.
+    path: PathBuf,
+    /// Pixel size rasterized into printable-ASCII atlas glyphs.
+    size: usize,
 }
 
 /// Optional style metrics and colors applied before appearance fallback construction.
@@ -613,9 +728,10 @@ mod tests {
         // Resolve from the Cargo manifest so tests remain independent of the process working dir.
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative_path);
         let definition = ThemeDefinition::read(path.as_path()).expect("bundled theme JSON must remain valid");
+        let atlas = definition.build_atlas(&test_atlas()).expect("bundled theme font atlas must build");
         let mut uploads = 0_u32;
         let loaded = definition
-            .install(Style::from_atlas(&test_atlas()), |_, width, height, pixels| {
+            .install(atlas.clone(), Style::from_atlas(&atlas), |_, width, height, pixels| {
                 // The loader must present one complete validated RGBA payload for each unique path.
                 uploads += 1;
                 assert_eq!(pixels.len(), width as usize * height as usize * 4);
@@ -645,9 +761,10 @@ mod tests {
             }"#,
         )
         .expect("test definition must match the strict schema");
-        let style = Style::from_atlas(&test_atlas());
+        let atlas = test_atlas();
+        let style = Style::from_atlas(&atlas);
         let loaded = document
-            .install(style, |_, _, _, _| panic!("flat theme must not upload a texture"))
+            .install(atlas, style, |_, _, _, _| panic!("flat theme must not upload a texture"))
             .expect("flat-only theme must install");
 
         let normal = loaded.style().appearance(AppearanceRole::Button, VisualState::Normal);
@@ -688,8 +805,9 @@ mod tests {
             }"#,
         )
         .expect("foreground-only states must match the strict schema");
+        let atlas = test_atlas();
         let loaded = document
-            .install(Style::from_atlas(&test_atlas()), |_, _, _, _| {
+            .install(atlas.clone(), Style::from_atlas(&atlas), |_, _, _, _| {
                 panic!("foreground-only theme must not upload a texture")
             })
             .expect("foreground-only theme must install");
@@ -712,12 +830,44 @@ mod tests {
         assert!(error.to_string().contains("unknown field `appearences`"));
     }
 
+    /// Verifies a declared font catalog is complete rather than silently borrowing a missing role
+    /// from whichever atlas happened to be active while the theme was loaded.
+    #[test]
+    fn font_catalog_requires_every_semantic_role() {
+        let error = match serde_json::from_str::<ThemeDefinition>(
+            r#"{
+                "schema_version": 1,
+                "name": "Incomplete fonts",
+                "fonts": {
+                    "texture_width": 512,
+                    "texture_height": 256,
+                    "body": { "path": "body.ttf", "size": 12 },
+                    "small": { "path": "body.ttf", "size": 10 },
+                    "title": { "path": "title.ttf", "size": 12 },
+                    "heading": { "path": "body.ttf", "size": 18 }
+                }
+            }"#,
+        ) {
+            Ok(_) => panic!("missing mono role must violate the strict font schema"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("missing field `mono`"));
+    }
+
     /// Verifies the bundled Windows theme and every original PNG install through the public schema.
     #[test]
     fn bundled_windows_95_theme_reuses_shared_png_uploads() {
         let (loaded, uploads) = install_bundled_theme("themes/windows-95/theme.json");
         assert_eq!(loaded.name(), "Windows 95");
         assert_eq!(uploads, 11, "each shared PNG path must be uploaded exactly once");
+        let atlas = loaded.atlas();
+        assert_eq!((atlas.width(), atlas.height()), (512, 256));
+        assert_eq!(
+            atlas.clone_font_table().len(),
+            5,
+            "the theme atlas must contain exactly its five semantic font roles"
+        );
+        assert_eq!(atlas.get_font_size(atlas.font_id("heading").unwrap()), 18);
         let insets = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (4, 4, 4, 4));
         assert!(matches!(

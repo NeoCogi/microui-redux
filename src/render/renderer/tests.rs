@@ -36,7 +36,7 @@ use crate::render::{
     geometry::{SolidTriangle, SolidVertex},
 };
 use crate::test_support::{RecordedVertex, RenderEvent, recording_backend};
-use crate::{AtlasSource, CharEntry, FontEntry, SourceFormat, color, color4b};
+use crate::{AtlasSource, AtlasUploadError, CharEntry, FontEntry, SourceFormat, color, color4b};
 use std::{
     cell::{Cell, RefCell},
     collections::HashSet,
@@ -90,6 +90,13 @@ impl RendererBackend for CountingRenderer {
         self.atlas.clone()
     }
 
+    fn replace_atlas(&mut self, atlas: AtlasHandle) -> Result<(), AtlasUploadError> {
+        // This backend records frame behavior only; replacing the capability models a successful
+        // native upload without adding unrelated counters to existing characterization tests.
+        self.atlas = atlas;
+        Ok(())
+    }
+
     fn frame(&mut self, _info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {
         self.stats.frames.set(self.stats.frames.get() + 1);
         Ok(CountingFrame { backend: self })
@@ -124,6 +131,12 @@ impl RendererBackend for TextureUploadRenderer {
 
     fn get_atlas(&self) -> AtlasHandle {
         self.atlas.clone()
+    }
+
+    fn replace_atlas(&mut self, atlas: AtlasHandle) -> Result<(), AtlasUploadError> {
+        // Texture-upload tests do not exercise atlas failures, so publish the candidate directly.
+        self.atlas = atlas;
+        Ok(())
     }
 
     fn frame(&mut self, _info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {
@@ -1022,6 +1035,13 @@ fn frame_acquisition_failure_discards_the_list_without_finalization() {
 
         fn get_atlas(&self) -> AtlasHandle {
             self.atlas.clone()
+        }
+
+        fn replace_atlas(&mut self, atlas: AtlasHandle) -> Result<(), AtlasUploadError> {
+            // Frame acquisition is the sole failure under test; atlas replacement remains a plain
+            // successful transaction so it cannot obscure that behavior.
+            self.atlas = atlas;
+            Ok(())
         }
 
         fn frame(&mut self, _info: FrameInfo) -> Result<Self::Frame<'_>, FrameError> {
