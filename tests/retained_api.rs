@@ -38,7 +38,8 @@ use microui_redux::prelude::{
 };
 use microui_redux::{
     color, rect, AtlasHandle, AtlasSource, CharEntry, Constraints, Context, Disclosure, DisclosureParameters, FontChoice, FontEntry, Grid, GridParameters,
-    Linear, LinearParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SourceFormat, Style, SurfaceMutationError, TextureId, ThemeIcons,
+    ImageError, Linear, LinearParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SourceFormat, Style, SurfaceMutationError, TextureError,
+    TextureId, ThemeIcons,
 };
 
 struct TestBackend {
@@ -65,7 +66,7 @@ impl RendererBackend for TestBackend {
         Ok(TestFrame)
     }
 
-    fn create_texture(&mut self, _id: TextureId, _pixels: &[u8]) -> Result<(), String> {
+    fn create_texture(&mut self, _id: TextureId, _pixels: &[u8]) -> Result<(), TextureError> {
         Ok(())
     }
 
@@ -115,6 +116,21 @@ fn context_with_state<State: 'static>() -> Context<TestBackend, State> {
     // application uses for embedded atlas metadata.
     let atlas = AtlasHandle::try_from(&source).expect("downstream retained-API atlas must satisfy the complete atlas contract");
     Context::new(TestBackend { atlas })
+}
+
+/// Verifies downstream applications receive the shared structured image error through Context.
+#[test]
+fn invalid_public_texture_upload_preserves_image_error_classification() {
+    let mut context = context_with_state::<()>();
+
+    let error = context.try_load_image_rgba(2, 2, &[0xFF; 4]).unwrap_err();
+
+    assert!(matches!(
+        error,
+        TextureError::Image {
+            source: ImageError::RawPixelLengthMismatch { expected: 16, actual: 4 },
+        }
+    ));
 }
 
 fn context() -> Context<TestBackend> {

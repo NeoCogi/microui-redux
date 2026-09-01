@@ -52,7 +52,7 @@
 //
 //! Public renderer integration types.
 
-use super::texture::RendererId;
+use super::texture::{RendererId, TextureError};
 use crate::atlas::AtlasHandle;
 use crate::render::{Color, TextureId};
 use rs_math3d::{Color4b, Dimensioni, Rect, Vec2f, color4b};
@@ -254,7 +254,7 @@ pub trait RendererFrame {
 /// ```
 /// use microui_redux::{
 ///     prelude::{AtlasHandle, Color, TextureId},
-///     render::{FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex},
+///     render::{FrameError, FrameInfo, RendererBackend, RendererFrame, TextureError, Vertex},
 /// };
 ///
 /// struct Backend {
@@ -286,7 +286,7 @@ pub trait RendererFrame {
 ///         &mut self,
 ///         _id: TextureId,
 ///         _pixels: &[u8],
-///     ) -> Result<(), String> {
+///     ) -> Result<(), TextureError> {
 ///         Ok(())
 ///     }
 ///
@@ -324,10 +324,12 @@ pub trait RendererBackend: 'static {
     /// Creates a texture owned by the backend.
     ///
     /// The caller validates [`TextureId::size`] and RGBA byte length before calling this method.
-    /// Backends should return an error without retaining `id` when GPU creation or upload fails.
+    /// Backends should return [`TextureError::backend`] without retaining `id` when GPU creation
+    /// or upload fails. Image validation and identifier allocation are owned by the Context, so a
+    /// backend does not manufacture those higher-level error classifications.
     /// Dimensions are carried only by `id`, preventing a backend from observing contradictory
     /// handle and argument sizes.
-    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), String>;
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), TextureError>;
     /// Destroys a previously created texture.
     fn destroy_texture(&mut self, id: TextureId);
 }

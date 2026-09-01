@@ -50,4 +50,4 @@ pub(crate) use display_list::DisplayList;
 pub use painter::Painter;
 pub use renderer::RenderError;
 pub(crate) use renderer::Renderer;
-pub use texture::TextureId;
+pub use texture::{TextureError, TextureId};

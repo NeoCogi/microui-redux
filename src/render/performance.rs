@@ -34,7 +34,7 @@
 //!
 //! `cargo test --release render_performance_baseline -- --ignored --nocapture --test-threads=1`
 
-use super::{CustomRenderHandle, DisplayList, FrameError, FrameInfo, Painter, Renderer, RendererBackend, RendererFrame, Vertex};
+use super::{CustomRenderHandle, DisplayList, FrameError, FrameInfo, Painter, Renderer, RendererBackend, RendererFrame, TextureError, Vertex};
 use crate::{test_support::AllocationMeasurement, AtlasSource, CharEntry, FontEntry, FontId, SourceFormat, TextureId, color};
 use rs_math3d::{Dimensioni, Recti, Vec2f, Vec2i};
 use std::{cell::Cell, hint::black_box, rc::Rc, time::Instant};
@@ -123,7 +123,7 @@ impl RendererBackend for MeasurementBackend {
         Ok(MeasurementFrame { backend: self })
     }
 
-    fn create_texture(&mut self, _id: TextureId, _pixels: &[u8]) -> Result<(), String> {
+    fn create_texture(&mut self, _id: TextureId, _pixels: &[u8]) -> Result<(), TextureError> {
         Ok(())
     }
 

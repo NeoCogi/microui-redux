@@ -36,7 +36,10 @@
 use core::slice;
 use std::{collections::HashMap, io, sync::Arc};
 
-use microui_redux::{prelude::*, render::Vertex};
+use microui_redux::{
+    prelude::*,
+    render::{TextureError, Vertex},
+};
 use glow::*;
 use rs_math3d::{Vec3f, Vec4f};
 
@@ -111,7 +114,7 @@ trait GlFrameOps {
     fn flush(&mut self);
     fn end(&mut self);
     /// Uploads pixels using the immutable dimensions carried by the renderer-issued ID.
-    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), String>;
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), TextureError>;
     fn destroy_texture(&mut self, id: TextureId);
     fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]);
 }
@@ -367,19 +370,26 @@ impl GlFrameOps for GLRenderer {
     }
 
     /// Creates a GL texture for a backend-owned external image.
-    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), String> {
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), TextureError> {
         // The opaque capability is the sole dimension source validated by the Context executor.
         let dimensions = id.size();
+
+        // Reserving the map entry can fail before any GL resource exists. Preserve that allocation
+        // failure as backend context so callers receive the renderer's structured texture error.
         self.textures
             .try_reserve(1)
-            .map_err(|err| format!("failed to reserve texture ownership entry: {err}"))?;
+            .map_err(|err| TextureError::backend(format!("failed to reserve texture ownership entry: {err}")))?;
         let gl = &self.gl;
         unsafe {
-            // User textures share the same nearest-neighbor setup as the atlas.
+            // User textures share the same nearest-neighbor setup as the atlas. Wrap allocation
+            // failures immediately, before installing the resource guard, because no native
+            // handle exists for the guard to own in that case.
             let texture_gl = gl.clone();
-            let texture = ResourceGuard::new(gl.create_texture().map_err(|err| format!("failed to create texture: {err}"))?, move |texture| {
-                texture_gl.delete_texture(texture)
-            });
+            let texture = ResourceGuard::new(
+                gl.create_texture()
+                    .map_err(|err| TextureError::backend(format!("failed to create texture: {err}")))?,
+                move |texture| texture_gl.delete_texture(texture),
+            );
             gl.bind_texture(glow::TEXTURE_2D, Some(*texture.get()));
             gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
             gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
@@ -398,8 +408,11 @@ impl GlFrameOps for GLRenderer {
             );
             let err = gl.get_error();
             if err != 0 {
+                // Restore the binding before returning. `texture` remains guarded here, so the
+                // failed native object is deleted while the driver code is surfaced as backend
+                // error detail rather than being collapsed into an untyped string.
                 gl.bind_texture(glow::TEXTURE_2D, None);
-                return Err(format!("OpenGL texture upload failed with error 0x{err:04x}"));
+                return Err(TextureError::backend(format!("OpenGL texture upload failed with error 0x{err:04x}")));
             }
             gl.bind_texture(glow::TEXTURE_2D, None);
             // IDs are normally unique, but replacing defensively keeps the ownership map sound if
@@ -556,7 +569,9 @@ impl RendererBackend for GLRenderer {
         Ok(GlFrame { backend: self })
     }
 
-    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), String> {
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), TextureError> {
+        // Keep the public backend boundary typed; the frame-op layer has already translated each
+        // allocation or driver failure into the appropriate backend texture error.
         GlFrameOps::create_texture(self, id, pixels)
     }
 

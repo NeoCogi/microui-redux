@@ -369,26 +369,23 @@ fn resolve_dimensions(expected: Option<CheckedImageDimensions>, actual_width: us
     CheckedImageDimensions::try_new(actual_width, actual_height).map_err(ImageError::from)
 }
 
-/// Returns the byte length required for an RGBA buffer with positive dimensions.
-pub(crate) fn checked_rgba_byte_len(width: i32, height: i32) -> std::result::Result<usize, String> {
+/// Validates raw RGBA dimensions and exact byte length without allocating normalized pixels.
+pub(crate) fn validate_rgba_buffer(width: i32, height: i32, len: usize) -> Result<(), ImageError> {
     if width <= 0 || height <= 0 {
-        return Err(String::from("Image dimensions must be positive"));
+        // Preserve both signed inputs because converting them first would lose which invalid value
+        // entered the public raw-image API.
+        return Err(ImageError::RawDimensionsOutOfRange { width, height });
     }
-    let pixel_count = (width as usize)
-        .checked_mul(height as usize)
-        .ok_or_else(|| String::from("Image dimensions overflow RGBA byte count"))?;
-    pixel_count
-        .checked_mul(4)
-        .ok_or_else(|| String::from("Image dimensions overflow RGBA byte count"))
-}
-
-/// Validates that `len` exactly matches the expected RGBA byte count.
-pub(crate) fn validate_rgba_buffer(width: i32, height: i32, len: usize) -> std::result::Result<usize, String> {
-    let expected = checked_rgba_byte_len(width, height)?;
-    if len != expected {
-        return Err(format!("Expected {} RGBA bytes, received {}", expected, len));
+    // The shared checked token owns coordinate representation, arithmetic, and allocation-budget
+    // policy for raw images, decoded images, atlases, and external textures alike.
+    let dimensions = CheckedImageDimensions::try_new(width as usize, height as usize).map_err(ImageError::from)?;
+    if len != dimensions.rgba_byte_count {
+        return Err(ImageError::RawPixelLengthMismatch {
+            expected: dimensions.rgba_byte_count,
+            actual: len,
+        });
     }
-    Ok(expected)
+    Ok(())
 }
 
 #[cfg(any(feature = "builder", feature = "png_source"))]

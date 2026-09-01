@@ -35,7 +35,10 @@
 
 use std::{collections::HashMap, mem, slice};
 
-use microui_redux::{prelude::*, render::Vertex};
+use microui_redux::{
+    prelude::*,
+    render::{TextureError, Vertex},
+};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use rs_math3d::{Vec3f, Vec4f};
 use sdl2::video::Window;
@@ -134,7 +137,7 @@ trait WgpuFrameOps {
     fn flush(&mut self);
     fn finish(&mut self, frame: wgpu::SurfaceTexture);
     /// Uploads pixels using the immutable dimensions carried by the renderer-issued ID.
-    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), String>;
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), TextureError>;
     fn destroy_texture(&mut self, id: TextureId);
     fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]);
 }
@@ -816,9 +819,11 @@ impl WgpuFrameOps for WgpuRenderer {
     }
 
     /// Creates a backend-owned sampled texture and its bind group.
-    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), String> {
-        // The opaque capability is the sole dimension source validated by the core renderer.
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), TextureError> {
+        // The opaque capability is the sole dimension source validated by the Context executor.
         let dimensions = id.size();
+        // Keep the WGPU helper's useful string diagnostics local, then translate them at the
+        // backend boundary so callers receive the crate-wide typed texture error.
         let texture = Self::create_gpu_texture(
             &self.device,
             &self.queue,
@@ -828,7 +833,8 @@ impl WgpuFrameOps for WgpuRenderer {
             dimensions.width as u32,
             dimensions.height as u32,
             Some(pixels),
-        )?;
+        )
+        .map_err(TextureError::backend)?;
         self.textures.insert(id, texture);
         Ok(())
     }
@@ -917,7 +923,8 @@ impl RendererBackend for WgpuRenderer {
         })
     }
 
-    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), String> {
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), TextureError> {
+        // The frame-ops layer already classified helper failures as backend texture errors.
         WgpuFrameOps::create_texture(self, id, pixels)
     }
 

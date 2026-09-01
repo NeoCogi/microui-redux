@@ -131,7 +131,7 @@ impl RendererBackend for SmokeRenderer {
         Ok(SmokeFrame { backend: self })
     }
 
-    fn create_texture(&mut self, id: TextureId, _pixels: &[u8]) -> Result<(), String> {
+    fn create_texture(&mut self, id: TextureId, _pixels: &[u8]) -> Result<(), TextureError> {
         self.textures.push(id);
         Ok(())
     }
@@ -243,7 +243,9 @@ fn main() -> Result<(), String> {
     let white_icon = atlas.white_icon();
     let backend = SmokeRenderer::new(atlas, events.clone());
     let mut ctx = Context::<_>::new(backend);
-    let texture = ctx.try_load_image_rgba(16, 12, &[0xFF; 16 * 12 * 4])?;
+    // This executable already normalizes its independent frame and render errors to text at the
+    // process boundary; retain the typed texture failure until that same final boundary.
+    let texture = ctx.try_load_image_rgba(16, 12, &[0xFF; 16 * 12 * 4]).map_err(|error| error.to_string())?;
     let screen_content = Rc::new(RefCell::new(None));
     let probe = TextureClippingBuilder::create_widget(TextureClippingParameters {
         texture,

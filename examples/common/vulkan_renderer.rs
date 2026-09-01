@@ -49,7 +49,10 @@
 use std::{collections::HashMap, convert::TryFrom, io::Cursor, mem, ptr};
 
 use ash::{khr, util::read_spv, vk, Entry};
-use microui_redux::{prelude::*, render::Vertex};
+use microui_redux::{
+    prelude::*,
+    render::{TextureError, Vertex},
+};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use sdl2::video::Window;
 
@@ -222,7 +225,7 @@ trait VulkanFrameOps {
     fn flush(&mut self);
     fn finish(&mut self, acquired: AcquiredVulkanFrame);
     /// Uploads pixels using the immutable dimensions carried by the renderer-issued ID.
-    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<()>;
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> std::result::Result<(), TextureError>;
     fn destroy_texture(&mut self, id: TextureId);
     fn draw_texture(&mut self, id: TextureId, vertices: [Vertex; 4]);
 }
@@ -405,16 +408,22 @@ impl VulkanFrameOps for VulkanRenderer {
     }
 
     /// Creates a backend-owned sampled texture and tracks it by `TextureId`.
-    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<()> {
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> std::result::Result<(), TextureError> {
+        // Texture creation is the public backend boundary, so convert Vulkan's string-based
+        // operational failures into the renderer's typed texture error without changing the
+        // file-wide `Result<T>` used by unrelated swapchain and resource internals.
         if self.device_lost {
-            return Err(String::from("Vulkan device is lost"));
+            return Err(TextureError::backend("Vulkan device is lost"));
         }
         self.textures
             .try_reserve(1)
-            .map_err(|err| format!("failed to reserve texture ownership entry: {err}"))?;
+            .map_err(|err| TextureError::backend(format!("failed to reserve texture ownership entry: {err}")))?;
         // The opaque capability is the sole dimension source validated by the Context executor.
         let dimensions = id.size();
-        let texture = self.context.create_texture_resource(dimensions.width, dimensions.height, pixels)?;
+        let texture = self
+            .context
+            .create_texture_resource(dimensions.width, dimensions.height, pixels)
+            .map_err(TextureError::backend)?;
         // A replacement is committed only after the new image is complete. Destroying the old
         // image after insertion also keeps the map leak-free if an ID is retried unexpectedly.
         if let Some(mut previous) = self.textures.insert(id, texture) {
@@ -550,7 +559,8 @@ impl RendererBackend for VulkanRenderer {
         Ok(VulkanFrame { backend: self, acquired: Some(acquired) })
     }
 
-    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<()> {
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> std::result::Result<(), TextureError> {
+        // Preserve the typed texture failure exposed by the frame-ops boundary verbatim.
         VulkanFrameOps::create_texture(self, id, pixels)
     }
 

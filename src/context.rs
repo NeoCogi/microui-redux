@@ -40,7 +40,7 @@ use crate::window_manager::{LayerBinding, PopupHandle, SurfaceCreationError, Sur
 #[cfg(test)]
 use crate::window_manager::RootId;
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, FrameInfo, RenderError, Renderer, RendererBackend};
-use crate::{AtlasHandle, Dimensioni, ImageSource, KeyEvent, MouseButton, Node, Recti, Style, TextureId};
+use crate::{AtlasHandle, Dimensioni, ImageSource, KeyEvent, MouseButton, Node, Recti, Style, TextureError, TextureId};
 
 /// Short-lived access to retained UI state owned by a [`Context`].
 ///
@@ -612,18 +612,27 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         self.renderer.atlas()
     }
 
-    /// Attempts to upload an RGBA image to the renderer and returns its [`TextureId`].
+    /// Attempts to load an RGBA image into this Context and returns its [`TextureId`].
     ///
-    /// Dimensions and byte length are validated before an id is allocated. Backend upload errors
-    /// are returned without recording texture state in the renderer.
-    pub fn try_load_image_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> Result<TextureId, String> {
+    /// Dimensions and byte length are validated before an id is allocated; no failed operation
+    /// records texture state in the Context.
+    ///
+    /// # Errors
+    ///
+    /// Returns a concrete [`TextureError`] that distinguishes invalid image data, identifier
+    /// exhaustion, and backend creation or upload failure.
+    pub fn try_load_image_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> Result<TextureId, TextureError> {
         self.renderer.try_load_texture_rgba(width, height, pixels)
     }
 
-    /// Uploads an RGBA image to the renderer and returns its [`TextureId`].
+    /// Loads an RGBA image into this Context and returns its [`TextureId`].
     ///
-    /// Panics if the RGBA dimensions/byte length are invalid or the backend rejects the upload.
     /// Prefer [`Context::try_load_image_rgba`] when callers can handle upload failure.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the RGBA dimensions or byte length are invalid, the Context has exhausted its
+    /// texture identifier space, or the backend rejects texture creation or upload.
     #[track_caller]
     pub fn load_image_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> TextureId {
         self.try_load_image_rgba(width, height, pixels).expect("failed to upload RGBA image")
@@ -639,14 +648,23 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
 
     /// Uploads texture data described by `source`. PNG decoding is only available when the
     /// `png_source` (or `builder`) feature is enabled.
-    pub fn load_image_from(&mut self, source: ImageSource) -> Result<TextureId, String> {
+    ///
+    /// # Errors
+    ///
+    /// Image decoding and validation failures remain available as [`TextureError::Image`],
+    /// exhausted Context identifiers use [`TextureError::IdentifierSpaceExhausted`], and backend
+    /// creation or upload failures use [`TextureError::Backend`]. A failure never records a
+    /// partially created texture in the Context.
+    pub fn load_image_from(&mut self, source: ImageSource) -> Result<TextureId, TextureError> {
         match source {
             ImageSource::Raw { width, height, pixels } => self.try_load_image_rgba(width, height, pixels),
             #[cfg(any(feature = "builder", feature = "png_source"))]
             ImageSource::Png { bytes } => {
-                let (width, height, colors) = crate::image::load_image_bytes(ImageSource::Png { bytes }).map_err(|error| error.to_string())?;
-                let width = i32::try_from(width).map_err(|_| String::from("PNG width exceeds supported range"))?;
-                let height = i32::try_from(height).map_err(|_| String::from("PNG height exceeds supported range"))?;
+                let (width, height, colors) = crate::image::load_image_bytes(ImageSource::Png { bytes })?;
+                // Image loading has already proved each dimension fits the runtime's i32
+                // coordinate domain, so these casts preserve the validated values exactly.
+                let width = width as i32;
+                let height = height as i32;
                 let rgba: Vec<u8> = colors.into_iter().flat_map(|color| [color.x, color.y, color.z, color.w]).collect();
                 self.try_load_image_rgba(width, height, rgba.as_slice())
             }

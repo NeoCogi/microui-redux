@@ -30,7 +30,7 @@
 
 //! Shared fixtures, renderer recordings, and no-op helpers used by unit tests.
 
-use crate::render::{FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex};
+use crate::render::{FrameError, FrameInfo, RendererBackend, RendererFrame, TextureError, Vertex};
 use crate::{AtlasHandle, AtlasSource, CharEntry, FontEntry, Recti, SourceFormat, Style, TextureId, Vec2i};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -231,7 +231,7 @@ impl RendererBackend for NoopRenderer {
         Ok(NoopFrame)
     }
 
-    fn create_texture(&mut self, _id: TextureId, _pixels: &[u8]) -> Result<(), String> {
+    fn create_texture(&mut self, _id: TextureId, _pixels: &[u8]) -> Result<(), TextureError> {
         Ok(())
     }
 
@@ -420,7 +420,7 @@ impl RendererBackend for RecordingRenderer {
         Ok(RecordingFrame { backend: self })
     }
 
-    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), String> {
+    fn create_texture(&mut self, id: TextureId, pixels: &[u8]) -> Result<(), TextureError> {
         // Record dimensions from the same opaque capability a real backend receives.
         let dimensions = id.size();
         self.log.push(RenderEvent::CreateTexture {
@@ -430,7 +430,7 @@ impl RendererBackend for RecordingRenderer {
             byte_len: pixels.len(),
         });
         if self.fail_texture_upload {
-            Err(String::from("backend rejected texture"))
+            Err(TextureError::backend("backend rejected texture"))
         } else {
             Ok(())
         }

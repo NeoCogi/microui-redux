@@ -95,7 +95,7 @@ impl RendererBackend for CountingRenderer {
         Ok(CountingFrame { backend: self })
     }
 
-    fn create_texture(&mut self, _id: TextureId, _pixels: &[u8]) -> Result<(), String> {
+    fn create_texture(&mut self, _id: TextureId, _pixels: &[u8]) -> Result<(), TextureError> {
         Ok(())
     }
 
@@ -130,10 +130,10 @@ impl RendererBackend for TextureUploadRenderer {
         Ok(EmptyFrame)
     }
 
-    fn create_texture(&mut self, _id: TextureId, _pixels: &[u8]) -> Result<(), String> {
+    fn create_texture(&mut self, _id: TextureId, _pixels: &[u8]) -> Result<(), TextureError> {
         self.create_calls.set(self.create_calls.get() + 1);
         if self.fail_upload.get() {
-            Err(String::from("backend rejected texture"))
+            Err(TextureError::backend("backend rejected texture"))
         } else {
             Ok(())
         }
@@ -728,17 +728,46 @@ fn texture_upload_validation_and_backend_failure_do_not_consume_ids() {
     };
     let mut renderer = Renderer::new(backend);
     let error = renderer.try_load_texture_rgba(2, 2, &[0xFF; 4]).unwrap_err();
-    assert_eq!(error, "Expected 16 RGBA bytes, received 4");
+    assert!(matches!(
+        error,
+        TextureError::Image {
+            source: crate::ImageError::RawPixelLengthMismatch { expected: 16, actual: 4 },
+        }
+    ));
     assert_eq!(renderer.last_texture_slot, 0);
     assert!(renderer.textures.is_empty());
     assert_eq!(create_calls.get(), 0);
 
     fail_upload.set(true);
     let error = renderer.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap_err();
-    assert_eq!(error, "backend rejected texture");
+    assert!(matches!(error, TextureError::Backend { message } if message == "backend rejected texture"));
     assert_eq!(renderer.last_texture_slot, 0);
     assert!(renderer.textures.is_empty());
     assert_eq!(create_calls.get(), 1);
+}
+
+/// Verifies identifier exhaustion is classified before calling or mutating the backend.
+#[test]
+fn texture_identifier_exhaustion_preserves_backend_and_tracking_state() {
+    let create_calls = Rc::new(Cell::new(0));
+    let destroy_calls = Rc::new(Cell::new(0));
+    let backend = TextureUploadRenderer {
+        atlas: make_atlas(),
+        create_calls: create_calls.clone(),
+        destroy_calls,
+        fail_upload: Rc::new(Cell::new(false)),
+    };
+    let mut renderer = Renderer::new(backend);
+    // Simulate a Context that has successfully consumed the complete private u32 identifier
+    // space. The next upload must stop before constructing an ID or lending bytes to the backend.
+    renderer.last_texture_slot = u32::MAX;
+
+    let error = renderer.try_load_texture_rgba(1, 1, &[0xFF; 4]).unwrap_err();
+
+    assert!(matches!(error, TextureError::IdentifierSpaceExhausted));
+    assert_eq!(renderer.last_texture_slot, u32::MAX);
+    assert!(renderer.textures.is_empty());
+    assert_eq!(create_calls.get(), 0);
 }
 
 /// Verifies atlas provenance prevents equal local font and icon slots from aliasing across
@@ -955,7 +984,7 @@ fn frame_acquisition_failure_discards_the_list_without_finalization() {
             Err(FrameError::new("acquire failed"))
         }
 
-        fn create_texture(&mut self, _id: TextureId, _pixels: &[u8]) -> Result<(), String> {
+        fn create_texture(&mut self, _id: TextureId, _pixels: &[u8]) -> Result<(), TextureError> {
             Ok(())
         }
 

@@ -41,7 +41,7 @@ use super::{
     },
     display_list::{DisplayList, DrawKind, DrawOp},
     geometry::{ClipRect, SolidTriangle, textured_quad_from_uv},
-    texture::RendererId,
+    texture::{RendererId, TextureError},
 };
 use crate::{
     atlas::{AtlasHandle, FontId, IconId},
@@ -251,14 +251,11 @@ impl<B: RendererBackend> Renderer<B> {
     }
 
     /// Uploads one validated RGBA buffer through the context's sole public image API.
-    pub(crate) fn try_load_texture_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> Result<TextureId, String> {
+    pub(crate) fn try_load_texture_rgba(&mut self, width: i32, height: i32, pixels: &[u8]) -> Result<TextureId, TextureError> {
         crate::image::validate_rgba_buffer(width, height, pixels.len())?;
         // Compute the next slot without committing it, so exhaustion and failed backend uploads
         // leave allocator state unchanged. The zero initial value keeps every usable u32 slot.
-        let slot = self
-            .last_texture_slot
-            .checked_add(1)
-            .ok_or_else(|| String::from("Texture slot space exhausted"))?;
+        let slot = self.last_texture_slot.checked_add(1).ok_or(TextureError::IdentifierSpaceExhausted)?;
         let id = TextureId::new(self.id, slot, width, height);
         // TextureId is the sole dimension source at the backend boundary; pixels were validated
         // against those same immutable values immediately above.

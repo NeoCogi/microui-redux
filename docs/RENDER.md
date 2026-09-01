@@ -331,7 +331,7 @@ Normal applications should manage texture lifetime through `Context`:
 
 ```rust
 use microui_redux::{
-    prelude::{Context, RendererBackend, TextureId},
+    prelude::{Context, RendererBackend, TextureError, TextureId},
 };
 
 fn upload_image<B: RendererBackend>(
@@ -339,7 +339,7 @@ fn upload_image<B: RendererBackend>(
     width: i32,
     height: i32,
     rgba: &[u8],
-) -> Result<TextureId, String> {
+) -> Result<TextureId, TextureError> {
     context.try_load_image_rgba(width, height, rgba)
 }
 ```
@@ -348,14 +348,18 @@ Use `Context::free_image` when the texture is no longer needed.
 `Context::load_image_from` accepts `ImageSource`, while
 `Context::load_image_rgba` is the panicking convenience form: it validates the
 RGBA data and panics on invalid dimensions, invalid byte length, or backend
-upload failure.
+upload failure, as well as if the Context has exhausted its texture identifiers.
 
 Texture dimensions and RGBA byte length are validated before a texture ID is
 consumed. Failed backend creation does not leave a tracked texture behind.
-`TextureId` carries its renderer identity, renderer-local allocation slot, and
-immutable dimensions. Equality and hashing cover all three, so matching local
-slots from separate contexts remain distinct capabilities. The private executor
-tracks complete live handles without storing a second copy of their dimensions.
+`TextureError` keeps invalid `ImageError` input, identifier exhaustion, and
+backend creation diagnostics as distinct variants; callers do not need to parse
+an unclassified error string.
+`TextureId` carries its Context's private executor identity, executor-local
+allocation slot, and immutable dimensions. Equality and hashing cover all three,
+so matching local slots from separate contexts remain distinct capabilities. The
+private executor tracks complete live handles without storing a second copy of
+their dimensions.
 `RendererBackend::create_texture` receives only the ID and pixel bytes; it uses
 `TextureId::size` rather than accepting contradictory dimension arguments.
 Repeated `free_image` calls for the same handle are debug-asserted
@@ -412,7 +416,7 @@ A backend implements `RendererBackend` and consumes `render::Vertex`:
 ```rust
 use microui_redux::{
     prelude::{AtlasHandle, Context, TextureId},
-    render::{FrameError, FrameInfo, RendererBackend, RendererFrame, Vertex},
+    render::{FrameError, FrameInfo, RendererBackend, RendererFrame, TextureError, Vertex},
 };
 
 struct Backend {
@@ -444,7 +448,7 @@ impl RendererBackend for Backend {
         &mut self,
         _id: TextureId,
         _pixels: &[u8],
-    ) -> Result<(), String> {
+    ) -> Result<(), TextureError> {
         Ok(())
     }
 
