@@ -33,9 +33,9 @@ use super::*;
 use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, test_atlas, test_style};
 use crate::{
     color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Combo, ComboParameters, ComboSubmitted, Custom, Color,
-    CustomParameters, Constraints, Context, Dimensioni, Disclosure, DisclosureParameters, Ui, Grid, GridParameters, Key, KeyEvent, KeyboardBehavior, Linear,
-    LinearItem, LinearParameters, Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted, MouseButton, Node, ScrollArea,
-    ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Slider, SliderParameters, Style, Textbox, TextboxChanged, TextBlock,
+    CustomParameters, Constraints, Context, DecimalPrecision, Dimensioni, Disclosure, DisclosureParameters, Ui, Grid, GridParameters, Key, KeyEvent,
+    KeyboardBehavior, Linear, LinearItem, LinearParameters, Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted, MouseButton, Node,
+    ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Slider, SliderParameters, Style, Textbox, TextboxChanged, TextBlock,
     TextBlockParameters, TextboxParameters, TrackSize, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, WidgetUpdateCtx,
     Modifiers,
 };
@@ -747,7 +747,9 @@ fn ctrl_f6_dismisses_application_popups_but_cannot_escape_a_modal_dialog() {
 fn tab_focused_builtins_share_windows_activation_and_arrow_adjustment() {
     let (button, button_node) = Button::create(ButtonParameters::new("submit"));
     let (checkbox, checkbox_node) = Checkbox::create(CheckboxParameters::new("enabled", false));
-    let (slider, slider_node) = Slider::create(SliderParameters::with_opt(5.0, 0.0, 10.0, 1.0, 0, WidgetOption::FRAME));
+    let (slider, slider_node) = Slider::create(
+        SliderParameters::with_opt(5.0, 0.0, 10.0, 1.0, DecimalPrecision::ZERO, WidgetOption::FRAME).expect("finite ascending slider parameters must validate"),
+    );
     let (_, content) = Linear::create(LinearParameters::vertical([button_node, checkbox_node, slider_node]));
     let mut ctx = context();
     let root = ctx.ui().create_window(Window::new("window", rect(10, 10, 140, 100), content));

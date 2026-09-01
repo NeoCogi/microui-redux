@@ -185,8 +185,10 @@ fn convenience_constructors_store_explicit_outer_frame_policy() {
     let (combo, _combo_node) = Combo::create(ComboParameters::new());
     let (textbox, _textbox_node) = crate::Textbox::create(crate::TextboxParameters::new(""));
     let (text_area, _text_area_node) = crate::TextArea::create(crate::TextAreaParameters::new(""));
-    let (slider, _slider_node) = crate::Slider::create(crate::SliderParameters::new(0.0, 0.0, 1.0));
-    let (number, _number_node) = crate::Number::create(crate::NumberParameters::new(0.0, 1.0, 0));
+    let (slider, _slider_node) = crate::Slider::create(crate::SliderParameters::new(0.0, 0.0, 1.0).expect("finite ascending slider parameters must validate"));
+    let (number, _number_node) = crate::Number::create(
+        crate::NumberParameters::new(0.0, 1.0, crate::DecimalPrecision::ZERO).expect("finite non-negative number parameters must validate"),
+    );
     let (swatch, _swatch_node) = crate::ColorSwatch::create(crate::ColorSwatchParameters::new(color(0, 0, 0, 255)));
     assert!(has_option(&button, WidgetOption::FRAME));
     assert!(has_option(&combo, WidgetOption::FRAME));

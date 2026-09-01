@@ -1500,14 +1500,10 @@ impl State {
             ))
         });
         let style_color_slider_pairs = std::array::from_fn(|_| {
-            stateful_leaf::<SliderBuilder>(SliderParameters::with_opt(
-                0.0,
-                0.0,
-                255.0,
-                0.0,
-                0,
-                WidgetOption::FRAME | WidgetOption::ALIGN_CENTER,
-            ))
+            stateful_leaf::<SliderBuilder>(
+                SliderParameters::with_opt(0.0, 0.0, 255.0, 0.0, DecimalPrecision::ZERO, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)
+                    .expect("hard-coded color slider parameters must be valid"),
+            )
         });
         let style_color_slider_states = style_color_slider_pairs.each_ref().map(|(state, _)| state.clone());
         let style_color_slider_changed = style_color_slider_pairs.each_ref().map(|(handle, _)| handle.changed());
@@ -1516,59 +1512,35 @@ impl State {
         let style_color_swatch_states = style_color_swatch_pairs.each_ref().map(|(state, _)| state.clone());
         let style_color_swatches = style_color_swatch_pairs.map(|(_, runtime)| runtime);
         let style_value_slider_pairs = [
-            stateful_leaf::<SliderBuilder>(SliderParameters::with_opt(
-                0.0,
-                0.0,
-                16.0,
-                0.0,
-                0,
-                WidgetOption::FRAME | WidgetOption::ALIGN_CENTER,
-            )),
-            stateful_leaf::<SliderBuilder>(SliderParameters::with_opt(
-                0.0,
-                0.0,
-                16.0,
-                0.0,
-                0,
-                WidgetOption::FRAME | WidgetOption::ALIGN_CENTER,
-            )),
-            stateful_leaf::<SliderBuilder>(SliderParameters::with_opt(
-                0.0,
-                0.0,
-                128.0,
-                0.0,
-                0,
-                WidgetOption::FRAME | WidgetOption::ALIGN_CENTER,
-            )),
-            stateful_leaf::<SliderBuilder>(SliderParameters::with_opt(
-                0.0,
-                0.0,
-                128.0,
-                0.0,
-                0,
-                WidgetOption::FRAME | WidgetOption::ALIGN_CENTER,
-            )),
-            stateful_leaf::<SliderBuilder>(SliderParameters::with_opt(
-                0.0,
-                0.0,
-                128.0,
-                0.0,
-                0,
-                WidgetOption::FRAME | WidgetOption::ALIGN_CENTER,
-            )),
+            stateful_leaf::<SliderBuilder>(
+                SliderParameters::with_opt(0.0, 0.0, 16.0, 0.0, DecimalPrecision::ZERO, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)
+                    .expect("hard-coded style slider parameters must be valid"),
+            ),
+            stateful_leaf::<SliderBuilder>(
+                SliderParameters::with_opt(0.0, 0.0, 16.0, 0.0, DecimalPrecision::ZERO, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)
+                    .expect("hard-coded style slider parameters must be valid"),
+            ),
+            stateful_leaf::<SliderBuilder>(
+                SliderParameters::with_opt(0.0, 0.0, 128.0, 0.0, DecimalPrecision::ZERO, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)
+                    .expect("hard-coded style slider parameters must be valid"),
+            ),
+            stateful_leaf::<SliderBuilder>(
+                SliderParameters::with_opt(0.0, 0.0, 128.0, 0.0, DecimalPrecision::ZERO, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)
+                    .expect("hard-coded style slider parameters must be valid"),
+            ),
+            stateful_leaf::<SliderBuilder>(
+                SliderParameters::with_opt(0.0, 0.0, 128.0, 0.0, DecimalPrecision::ZERO, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)
+                    .expect("hard-coded style slider parameters must be valid"),
+            ),
         ];
         let style_value_slider_states = style_value_slider_pairs.each_ref().map(|(state, _)| state.clone());
         let style_value_slider_changed = style_value_slider_pairs.each_ref().map(|(handle, _)| handle.changed());
         let style_value_sliders = style_value_slider_pairs.map(|(_, runtime)| runtime);
         let bg_slider_pairs = std::array::from_fn(|_| {
-            stateful_leaf::<SliderBuilder>(SliderParameters::with_opt(
-                0.0,
-                0.0,
-                255.0,
-                0.0,
-                0,
-                WidgetOption::FRAME | WidgetOption::ALIGN_CENTER,
-            ))
+            stateful_leaf::<SliderBuilder>(
+                SliderParameters::with_opt(0.0, 0.0, 255.0, 0.0, DecimalPrecision::ZERO, WidgetOption::FRAME | WidgetOption::ALIGN_CENTER)
+                    .expect("hard-coded background slider parameters must be valid"),
+            )
         });
         let bg_slider_states = bg_slider_pairs.each_ref().map(|(state, _)| state.clone());
         let bg_slider_changed = bg_slider_pairs.each_ref().map(|(handle, _)| handle.changed());

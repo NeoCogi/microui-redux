@@ -60,20 +60,20 @@ use super::numeric_edit::*;
 
 /// One-shot construction input for a [`Slider`].
 pub struct SliderParameters {
-    /// Initial slider value.
-    pub value: Real,
-    /// Lower bound of the slider range.
-    pub low: Real,
-    /// Upper bound of the slider range.
-    pub high: Real,
-    /// Step size used for snapping (0 for continuous).
-    pub step: Real,
-    /// Number of digits after the decimal point when rendering.
-    pub precision: usize,
+    /// Validated finite initial slider value.
+    value: Real,
+    /// Validated finite lower bound of the ascending slider range.
+    low: Real,
+    /// Validated finite upper bound of the ascending slider range.
+    high: Real,
+    /// Validated finite non-negative step used for snapping (zero for continuous).
+    step: Real,
+    /// Bounded number of digits after the decimal point when rendering.
+    precision: DecimalPrecision,
     /// Font used for the numeric label and editor.
-    pub font: FontChoice,
+    font: FontChoice,
     /// Base widget options.
-    pub opt: WidgetOption,
+    opt: WidgetOption,
 }
 
 impl crate::LeafWidget for Slider {
@@ -86,21 +86,28 @@ impl WidgetParameters for SliderParameters {}
 
 impl SliderParameters {
     /// Creates slider parameters with default widget options.
-    pub fn new(value: Real, low: Real, high: Real) -> Self {
-        Self {
-            value,
-            low,
-            high,
-            step: 0.0,
-            precision: 0,
-            font: FontChoice::Role(FontRole::Body),
-            opt: WidgetOption::FRAME | WidgetOption::GRAB_SCROLL,
-        }
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NumericParameterError`] unless `value` and both range bounds are finite, the
+    /// bounds satisfy `low <= high`, and their represented span remains finite.
+    pub fn new(value: Real, low: Real, high: Real) -> Result<Self, NumericParameterError> {
+        Self::with_opt(value, low, high, 0.0, DecimalPrecision::ZERO, WidgetOption::FRAME)
     }
 
     /// Creates slider parameters with explicit widget options.
-    pub fn with_opt(value: Real, low: Real, high: Real, step: Real, precision: usize, opt: WidgetOption) -> Self {
-        Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NumericParameterError`] unless `value`, `low`, `high`, and `step` are finite,
+    /// `low <= high`, the range span is representable, and `step` is non-negative. Precision is
+    /// already bounded by construction through [`DecimalPrecision`].
+    pub fn with_opt(value: Real, low: Real, high: Real, step: Real, precision: DecimalPrecision, opt: WidgetOption) -> Result<Self, NumericParameterError> {
+        // Validate every arithmetic input before publishing the parameter value. Private fields
+        // then make ascending orientation and finite percentage math builder invariants.
+        validate_slider_range(low, high)?;
+        validate_numeric_value_and_step(value, step)?;
+        Ok(Self {
             value,
             low,
             high,
@@ -108,7 +115,7 @@ impl SliderParameters {
             precision,
             font: FontChoice::Role(FontRole::Body),
             opt: opt | WidgetOption::GRAB_SCROLL,
-        }
+        })
     }
 
     /// Replaces the font used for the numeric label and editor.
@@ -129,19 +136,19 @@ impl crate::WidgetEvent for SliderChanged {}
 
 /// Concrete retained slider, including its semantic and editing state.
 pub struct Slider {
-    /// Initialization-only step size.
+    /// Initialization-only validated non-negative step size.
     step: Real,
-    /// Initialization-only display precision.
-    precision: usize,
+    /// Initialization-only bounded display precision.
+    precision: DecimalPrecision,
     /// Initialization-only font.
     font: FontChoice,
     /// Base widget options.
     opt: WidgetOption,
     /// Current slider value.
     value: Real,
-    /// Lower bound retained for immediate setter clamping.
+    /// Finite lower bound retained for immediate setter clamping.
     low: Real,
-    /// Upper bound retained for immediate setter clamping.
+    /// Finite upper bound retained for immediate setter clamping.
     high: Real,
     /// Inline numeric editing state.
     edit: NumberEditState,
@@ -189,10 +196,10 @@ impl Slider {
         let last = self.value;
         let mut value = last;
         if !self.edit.editing {
-            // Arrow adjustment shares wheel stepping and snapping: continuous sliders use one
-            // percent of their range, while stepped sliders move exactly one positive step.
+            // The validated ascending range gives all inputs one direction: Right increases and
+            // Left decreases. Continuous sliders use one percent; stepped sliders use one step.
             let range = self.high - self.low;
-            let amount = if self.step != 0.0 { self.step.abs() } else { range.abs() / 100.0 };
+            let amount = if self.step != 0.0 { self.step } else { range / 100.0 };
             match ctx.action(input, self.keyboard_behavior()) {
                 Some(KeyboardAction::Decrease) => value -= amount,
                 Some(KeyboardAction::Increase) => value += amount,
@@ -210,7 +217,8 @@ impl Slider {
             if range != 0.0 {
                 let wheel = if delta.y != 0 { delta.y.signum() } else { delta.x.signum() };
                 if wheel != 0 {
-                    let step_amount = if self.step != 0. { self.step.abs() } else { range / 100.0 };
+                    // Positive wheel direction follows Right Arrow and increasing pointer x.
+                    let step_amount = if self.step != 0. { self.step } else { range / 100.0 };
                     value += wheel as Real * step_amount;
                     if self.step != 0. {
                         value = snap_slider_value(value, self.low, self.step);
@@ -307,18 +315,19 @@ impl crate::TypedWidget<SliderChanged> for Slider {
 
 /// Snaps a value to the nearest step relative to the lower bound.
 fn snap_slider_value(value: Real, low: Real, step: Real) -> Real {
-    let step = step.abs();
+    // SliderParameters guarantees a finite non-negative step, so snapping never has to invent an
+    // orientation by taking an absolute value.
     if step == 0.0 { value } else { low + ((value - low) / step).round() * step }
 }
 
-/// Clamps a slider value even when the range was provided high-to-low.
+/// Clamps a slider value to its validated ascending range.
 fn clamp_slider_value(value: Real, low: Real, high: Real) -> Real {
-    let min = low.min(high);
-    let max = low.max(high);
-    if !value.is_finite() || value < min {
-        min
-    } else if value > max {
-        max
+    // NaN has no direction and selects the lower bound. Signed infinities and finite overflow from
+    // one interaction retain their direction through the ordinary endpoint comparisons.
+    if value.is_nan() || value <= low {
+        low
+    } else if value >= high {
+        high
     } else {
         value
     }
@@ -350,6 +359,8 @@ impl WidgetBuilder for SliderBuilder {
     type W = Slider;
 
     fn create_widget(parameters: Self::Parameters) -> Self::W {
+        // SliderParameters' private fields arrive finite, ordered, and directionally coherent;
+        // only the initial value may need ordinary endpoint clamping.
         Slider {
             step: parameters.step,
             precision: parameters.precision,
@@ -416,6 +427,28 @@ mod tests {
         assert!((actual - expected).abs() < 1.0e-5, "expected {expected}, got {actual}");
     }
 
+    /// Converts a small test literal through the same public precision validation as applications.
+    fn precision(digits: usize) -> DecimalPrecision {
+        DecimalPrecision::try_from(digits).expect("test precision must stay within Real's meaningful bound")
+    }
+
+    /// Extracts a Number construction failure without requiring the intentionally opaque
+    /// `NumberParameters` success type to implement Debug.
+    fn number_parameter_error(result: Result<NumberParameters, NumericParameterError>) -> NumericParameterError {
+        match result {
+            Err(error) => error,
+            Ok(_) => panic!("invalid Number parameters unexpectedly validated"),
+        }
+    }
+
+    /// Extracts a Slider construction failure without exposing its private parameter fields.
+    fn slider_parameter_error(result: Result<SliderParameters, NumericParameterError>) -> NumericParameterError {
+        match result {
+            Err(error) => error,
+            Ok(_) => panic!("invalid Slider parameters unexpectedly validated"),
+        }
+    }
+
     fn record_slider_change(values: &mut Vec<Real>, event: &SliderChanged) {
         values.push(event.value);
     }
@@ -436,12 +469,147 @@ mod tests {
         dispatcher
     }
 
+    /// Verifies formatting precision is a small validated value rather than an allocation-sized
+    /// application integer.
+    #[test]
+    fn decimal_precision_rejects_huge_format_requests() {
+        assert_eq!(DecimalPrecision::MAX.digits(), Real::DIGITS as usize);
+        assert_eq!(DecimalPrecision::try_from(DecimalPrecision::MAX.digits()), Ok(DecimalPrecision::MAX));
+
+        let error = DecimalPrecision::try_from(usize::MAX).expect_err("usize::MAX precision must be rejected before formatting");
+        assert_eq!(error.requested(), usize::MAX);
+        assert_eq!(error.maximum(), DecimalPrecision::MAX.digits());
+
+        // The accepted maximum remains a fixed small allocation even for the longest permitted
+        // fractional suffix.
+        let label = number_label(1.0, DecimalPrecision::MAX);
+        assert_eq!(label, format!("1.{:0<width$}", "", width = DecimalPrecision::MAX.digits()));
+    }
+
+    /// Verifies Number construction rejects every non-finite scalar and does not reinterpret a
+    /// negative step as an opposite interaction direction.
+    #[test]
+    fn number_parameters_reject_non_finite_values_and_invalid_steps() {
+        for value in [Real::NAN, Real::INFINITY, Real::NEG_INFINITY] {
+            let error = number_parameter_error(NumberParameters::new(value, 1.0, DecimalPrecision::ZERO));
+            assert!(matches!(error, NumericParameterError::NonFiniteValue { value: rejected } if rejected.to_bits() == value.to_bits()));
+        }
+
+        for step in [Real::NAN, Real::INFINITY, Real::NEG_INFINITY] {
+            let error = number_parameter_error(NumberParameters::new(0.0, step, DecimalPrecision::ZERO));
+            assert!(matches!(error, NumericParameterError::NonFiniteStep { step: rejected } if rejected.to_bits() == step.to_bits()));
+        }
+
+        let error = number_parameter_error(NumberParameters::new(0.0, -1.0, DecimalPrecision::ZERO));
+        assert!(matches!(error, NumericParameterError::NegativeStep { step } if step == -1.0));
+        assert!(NumberParameters::new(0.0, 0.0, DecimalPrecision::ZERO).is_ok());
+    }
+
+    /// Verifies Slider construction admits only finite ascending ranges with finite non-negative
+    /// steps, eliminating the former conflicting descending orientation.
+    #[test]
+    fn slider_parameters_reject_non_finite_and_descending_ranges() {
+        for value in [Real::NAN, Real::INFINITY, Real::NEG_INFINITY] {
+            let error = slider_parameter_error(SliderParameters::new(value, 0.0, 1.0));
+            assert!(matches!(error, NumericParameterError::NonFiniteValue { value: rejected } if rejected.to_bits() == value.to_bits()));
+        }
+
+        for (low, high) in [(Real::NAN, 1.0), (0.0, Real::INFINITY), (Real::NEG_INFINITY, 1.0)] {
+            let error = slider_parameter_error(SliderParameters::new(0.0, low, high));
+            assert!(matches!(error, NumericParameterError::NonFiniteRangeBounds { .. }));
+        }
+
+        let descending = slider_parameter_error(SliderParameters::new(5.0, 10.0, 0.0));
+        assert!(matches!(descending, NumericParameterError::DescendingRange { low: 10.0, high: 0.0 }));
+
+        let excessive_span = slider_parameter_error(SliderParameters::new(0.0, -Real::MAX, Real::MAX));
+        assert!(matches!(excessive_span, NumericParameterError::NonFiniteRangeSpan { .. }));
+
+        for step in [Real::NAN, Real::INFINITY, Real::NEG_INFINITY] {
+            let error = slider_parameter_error(SliderParameters::with_opt(0.0, 0.0, 1.0, step, DecimalPrecision::ZERO, WidgetOption::FRAME));
+            assert!(matches!(error, NumericParameterError::NonFiniteStep { step: rejected } if rejected.to_bits() == step.to_bits()));
+        }
+        let negative_step = slider_parameter_error(SliderParameters::with_opt(0.0, 0.0, 1.0, -0.5, DecimalPrecision::ZERO, WidgetOption::FRAME));
+        assert!(matches!(negative_step, NumericParameterError::NegativeStep { step } if step == -0.5));
+    }
+
+    /// Verifies every ascending-slider input maps Left Arrow, negative wheel, and a lower pointer
+    /// coordinate to decrease, with their three opposites consistently increasing.
+    #[test]
+    fn ascending_slider_inputs_agree_on_direction() {
+        let parameters = || {
+            SliderParameters::with_opt(5.0, 0.0, 10.0, 1.0, DecimalPrecision::ZERO, WidgetOption::FRAME)
+                .expect("finite ascending direction fixture must validate")
+        };
+        let bounds = rect(0, 0, 100, 20);
+
+        let mut keyboard_increase = SliderBuilder::create_widget(parameters());
+        run_slider_once(
+            &mut keyboard_increase,
+            bounds,
+            vec![UiInputEvent::Key {
+                event: KeyEvent::pressed(Key::ArrowRight, Modifiers::NONE),
+            }],
+            false,
+            true,
+            false,
+            None,
+        );
+        let mut wheel_increase = SliderBuilder::create_widget(parameters());
+        run_slider_once(&mut wheel_increase, bounds, Vec::new(), true, false, false, Some(vec2(0, 1)));
+        let mut pointer_increase = SliderBuilder::create_widget(parameters());
+        run_slider_once(
+            &mut pointer_increase,
+            bounds,
+            vec![UiInputEvent::MouseDrag {
+                pos: vec2(60, 10),
+                delta: Vec2i::default(),
+                buttons: MouseButton::LEFT,
+            }],
+            true,
+            true,
+            true,
+            None,
+        );
+        assert_eq!([keyboard_increase.value(), wheel_increase.value(), pointer_increase.value()], [6.0; 3]);
+
+        let mut keyboard_decrease = SliderBuilder::create_widget(parameters());
+        run_slider_once(
+            &mut keyboard_decrease,
+            bounds,
+            vec![UiInputEvent::Key {
+                event: KeyEvent::pressed(Key::ArrowLeft, Modifiers::NONE),
+            }],
+            false,
+            true,
+            false,
+            None,
+        );
+        let mut wheel_decrease = SliderBuilder::create_widget(parameters());
+        run_slider_once(&mut wheel_decrease, bounds, Vec::new(), true, false, false, Some(vec2(0, -1)));
+        let mut pointer_decrease = SliderBuilder::create_widget(parameters());
+        run_slider_once(
+            &mut pointer_decrease,
+            bounds,
+            vec![UiInputEvent::MouseDrag {
+                pos: vec2(40, 10),
+                delta: Vec2i::default(),
+                buttons: MouseButton::LEFT,
+            }],
+            true,
+            true,
+            true,
+            None,
+        );
+        assert_eq!([keyboard_decrease.value(), wheel_decrease.value(), pointer_decrease.value()], [4.0; 3]);
+    }
+
     #[test]
     fn slider_zero_range_keeps_value() {
         let atlas = make_test_atlas();
         let style = test_style(&atlas);
 
-        let mut slider = SliderBuilder::create_widget(SliderParameters::new(5.0, 5.0, 5.0));
+        let mut slider = SliderBuilder::create_widget(SliderParameters::new(5.0, 5.0, 5.0).expect("equal finite bounds form a valid inert slider"));
         let rect = rect(0, 0, 100, 20);
         let input = vec![UiInputEvent::MouseDrag {
             pos: vec2(50, 10),
@@ -459,7 +627,10 @@ mod tests {
 
     #[test]
     fn slider_wheel_snaps_fractional_step_from_lower_bound() {
-        let mut slider = SliderBuilder::create_widget(SliderParameters::with_opt(1.15, 1.0, 2.0, 0.2, 2, WidgetOption::FRAME));
+        let mut slider = SliderBuilder::create_widget(
+            SliderParameters::with_opt(1.15, 1.0, 2.0, 0.2, precision(2), WidgetOption::FRAME)
+                .expect("finite ascending fractional slider parameters must validate"),
+        );
         let mut dispatcher = slider_dispatcher(&slider);
         run_slider_once(&mut slider, rect(0, 0, 100, 20), Vec::new(), true, false, false, Some(vec2(0, 1)));
 
@@ -471,7 +642,10 @@ mod tests {
 
     #[test]
     fn slider_drag_snaps_fractional_step_from_lower_bound() {
-        let mut slider = SliderBuilder::create_widget(SliderParameters::with_opt(10.0, 10.0, 20.0, 0.25, 2, WidgetOption::FRAME));
+        let mut slider = SliderBuilder::create_widget(
+            SliderParameters::with_opt(10.0, 10.0, 20.0, 0.25, precision(2), WidgetOption::FRAME)
+                .expect("finite ascending fractional slider parameters must validate"),
+        );
         let input = vec![UiInputEvent::MouseDrag {
             pos: vec2(33, 10),
             delta: Vec2i::default(),
@@ -487,7 +661,7 @@ mod tests {
         let atlas = make_test_atlas();
         let style = test_style(&atlas);
 
-        let mut slider = SliderBuilder::create_widget(SliderParameters::new(0.0, 0.0, 100.0));
+        let mut slider = SliderBuilder::create_widget(SliderParameters::new(0.0, 0.0, 100.0).expect("finite ascending slider parameters must validate"));
         let rect = rect(40, 20, 100, 20);
         let input = vec![UiInputEvent::MouseDrag {
             pos: vec2(90, 30),
@@ -504,7 +678,8 @@ mod tests {
 
     #[test]
     fn number_drag_records_a_typed_change_and_programmatic_setter_is_silent() {
-        let mut number = NumberBuilder::create_widget(NumberParameters::new(0.0, 2.0, 0));
+        let mut number =
+            NumberBuilder::create_widget(NumberParameters::new(0.0, 2.0, DecimalPrecision::ZERO).expect("finite non-negative number parameters must validate"));
         let mut dispatcher = number_dispatcher(&number);
         let mut values = Vec::new();
         number.set_value(4.0);
@@ -525,7 +700,7 @@ mod tests {
 
     #[test]
     fn slider_programmatic_setter_is_silent() {
-        let mut slider = SliderBuilder::create_widget(SliderParameters::new(0.0, -5.0, 5.0));
+        let mut slider = SliderBuilder::create_widget(SliderParameters::new(0.0, -5.0, 5.0).expect("finite ascending slider parameters must validate"));
         let mut dispatcher = slider_dispatcher(&slider);
         slider.set_value(4.0);
         assert_eq!(slider.value(), 4.0);
@@ -538,7 +713,7 @@ mod tests {
         let atlas = make_test_atlas();
         let mut style = test_style(&atlas);
         style.thumb_size = i32::MIN;
-        let mut slider = SliderBuilder::create_widget(SliderParameters::new(0.5, 0.0, 1.0));
+        let mut slider = SliderBuilder::create_widget(SliderParameters::new(0.5, 0.0, 1.0).expect("finite ascending slider parameters must validate"));
         let bounds = rect(0, 0, 100, 20);
         let mut display_list = crate::render::DisplayList::new();
         let mut ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut display_list, bounds, &style, &atlas, false, false, false, false);

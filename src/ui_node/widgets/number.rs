@@ -37,16 +37,16 @@ use super::numeric_edit::*;
 
 /// One-shot construction input for a [`Number`].
 pub struct NumberParameters {
-    /// Initial number value.
-    pub value: Real,
-    /// Step applied when dragging.
-    pub step: Real,
-    /// Number of digits after the decimal point when rendering.
-    pub precision: usize,
+    /// Validated finite initial number value.
+    value: Real,
+    /// Validated finite non-negative step applied by dragging and arrow keys.
+    step: Real,
+    /// Bounded number of digits after the decimal point when rendering.
+    precision: DecimalPrecision,
     /// Font used for the numeric label and editor.
-    pub font: FontChoice,
+    font: FontChoice,
     /// Base widget options.
-    pub opt: WidgetOption,
+    opt: WidgetOption,
 }
 
 impl crate::LeafWidget for Number {
@@ -59,25 +59,32 @@ impl WidgetParameters for NumberParameters {}
 
 impl NumberParameters {
     /// Creates number parameters with default widget options.
-    pub fn new(value: Real, step: Real, precision: usize) -> Self {
-        Self {
-            value,
-            step,
-            precision,
-            font: FontChoice::Role(FontRole::Body),
-            opt: WidgetOption::FRAME,
-        }
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NumericParameterError`] when `value` is not finite or `step` is not finite and
+    /// non-negative. Precision is already valid by construction through [`DecimalPrecision`].
+    pub fn new(value: Real, step: Real, precision: DecimalPrecision) -> Result<Self, NumericParameterError> {
+        Self::with_opt(value, step, precision, WidgetOption::FRAME)
     }
 
     /// Creates number parameters with explicit widget options.
-    pub fn with_opt(value: Real, step: Real, precision: usize, opt: WidgetOption) -> Self {
-        Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NumericParameterError`] when `value` is not finite or `step` is not finite and
+    /// non-negative. Failed construction publishes no partially normalized parameter value.
+    pub fn with_opt(value: Real, step: Real, precision: DecimalPrecision, opt: WidgetOption) -> Result<Self, NumericParameterError> {
+        // The numeric fields stay private, so this one gate establishes the invariant consumed by
+        // NumberBuilder and every later update/paint path.
+        validate_numeric_value_and_step(value, step)?;
+        Ok(Self {
             value,
             step,
             precision,
             font: FontChoice::Role(FontRole::Body),
             opt,
-        }
+        })
     }
 
     /// Replaces the font used for the numeric label and editor.
@@ -98,10 +105,10 @@ impl crate::WidgetEvent for NumberChanged {}
 
 /// Concrete retained number input, including its semantic and editing state.
 pub struct Number {
-    /// Initialization-only drag step.
+    /// Initialization-only validated drag and arrow-key step.
     step: Real,
-    /// Initialization-only display precision.
-    precision: usize,
+    /// Initialization-only bounded display precision.
+    precision: DecimalPrecision,
     /// Initialization-only font.
     font: FontChoice,
     /// Base widget options.
@@ -151,9 +158,9 @@ impl Number {
         let font = ctx.style().resolve_font_choice(self.font);
         let last = self.value;
         if !self.edit.editing {
-            // Up and Down use the positive magnitude of the configured drag step, matching a
-            // Windows spin control even when an application supplied a negative drag direction.
-            let amount = self.step.abs();
+            // Construction guarantees one non-negative direction policy: Up increases and Down
+            // decreases by the same configured amount used by horizontal dragging.
+            let amount = self.step;
             match ctx.action(input, self.keyboard_behavior()) {
                 Some(KeyboardAction::Decrease) => self.set_value(self.value - amount),
                 Some(KeyboardAction::Increase) => self.set_value(self.value + amount),
@@ -247,12 +254,14 @@ impl WidgetBuilder for NumberBuilder {
     type W = Number;
 
     fn create_widget(parameters: Self::Parameters) -> Self::W {
+        // NumberParameters' private numeric fields can only be produced by its fallible validated
+        // constructors, so the runtime starts finite without a second repair policy.
         Number {
             step: parameters.step,
             precision: parameters.precision,
             font: parameters.font,
             opt: parameters.opt,
-            value: if parameters.value.is_finite() { parameters.value } else { 0.0 },
+            value: parameters.value,
             edit: NumberEditState::default(),
             changed_event: Rc::new(RefCell::new(crate::event::WidgetEventPort::new())),
         }

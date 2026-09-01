@@ -281,10 +281,10 @@ pub mod prelude {
     pub use crate::widgets::{
         Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters, ColorSwatch,
         ColorSwatchBuilder, ColorSwatchParameters, Combo, ComboBuilder, ComboChanged, ComboParameters, ComboSubmitted, Custom, CustomBuilder, CustomParameters,
-        ListBox, ListBoxBuilder, ListBoxParameters, ListBoxSubmitted, ListItem, ListItemBuilder, ListItemParameters, ListItemSubmitted, Number, NumberBuilder,
-        NumberChanged, NumberParameters, Slider, SliderBuilder, SliderChanged, SliderParameters, TextArea, TextAreaChanged, TextAreaParameters,
-        TextAreaSubmitted, TextBlock, TextBlockBuilder, TextBlockParameters, Textbox, TextboxBuilder, TextboxChanged, TextboxParameters, TextboxSubmitted,
-        Real,
+        DecimalPrecision, DecimalPrecisionError, ListBox, ListBoxBuilder, ListBoxParameters, ListBoxSubmitted, ListItem, ListItemBuilder, ListItemParameters,
+        ListItemSubmitted, Number, NumberBuilder, NumberChanged, NumberParameters, NumericParameterError, Slider, SliderBuilder, SliderChanged,
+        SliderParameters, TextArea, TextAreaChanged, TextAreaParameters, TextAreaSubmitted, TextBlock, TextBlockBuilder, TextBlockParameters, Textbox,
+        TextboxBuilder, TextboxChanged, TextboxParameters, TextboxSubmitted, Real,
     };
     pub use rs_math3d::{
         Box3f, Color4b, CrossProduct, Dimension, Dimensioni, FloatVector, Mat4f, Quat, Quatf, Rect, Recti, Vec2f, Vec2i, Vec3f, Vec4f, Vector, Vector3,
@@ -315,9 +315,10 @@ pub use ui_node::{
 pub use widgets::{
     Button, ButtonBuilder, ButtonContent, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxBuilder, CheckboxChanged, CheckboxParameters, ColorSwatch,
     ColorSwatchBuilder, ColorSwatchParameters, Combo, ComboBuilder, ComboChanged, ComboParameters, ComboSubmitted, Custom, CustomBuilder, CustomParameters,
-    ListBox, ListBoxBuilder, ListBoxParameters, ListBoxSubmitted, ListItem, ListItemBuilder, ListItemParameters, ListItemSubmitted, Number, NumberBuilder,
-    NumberChanged, NumberParameters, Slider, SliderBuilder, SliderChanged, SliderParameters, TextArea, TextAreaChanged, TextAreaParameters, TextAreaSubmitted,
-    Real, TextBlock, TextBlockBuilder, TextBlockParameters, Textbox, TextboxBuilder, TextboxChanged, TextboxParameters, TextboxSubmitted,
+    DecimalPrecision, DecimalPrecisionError, ListBox, ListBoxBuilder, ListBoxParameters, ListBoxSubmitted, ListItem, ListItemBuilder, ListItemParameters,
+    ListItemSubmitted, Number, NumberBuilder, NumberChanged, NumberParameters, NumericParameterError, Slider, SliderBuilder, SliderChanged, SliderParameters,
+    TextArea, TextAreaChanged, TextAreaParameters, TextAreaSubmitted, Real, TextBlock, TextBlockBuilder, TextBlockParameters, Textbox, TextboxBuilder,
+    TextboxChanged, TextboxParameters, TextboxSubmitted,
 };
 
 #[allow(unused_imports)]

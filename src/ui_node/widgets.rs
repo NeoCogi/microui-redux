@@ -90,6 +90,7 @@ pub use custom::{Custom, CustomBuilder, CustomParameters};
 pub use list_box::{ListBox, ListBoxBuilder, ListBoxParameters, ListBoxSubmitted};
 pub use list_item::{ListItem, ListItemBuilder, ListItemParameters, ListItemSubmitted};
 pub use number::{Number, NumberBuilder, NumberChanged, NumberParameters};
+pub use numeric_edit::{DecimalPrecision, DecimalPrecisionError, NumericParameterError};
 pub use scrollbar::{Scrollbar, ScrollbarAxis, ScrollbarChanged, ScrollbarParameters};
 pub use slider::{Slider, SliderBuilder, SliderChanged, SliderParameters};
 pub use text_area::{TextArea, TextAreaChanged, TextAreaParameters, TextAreaSubmitted};
