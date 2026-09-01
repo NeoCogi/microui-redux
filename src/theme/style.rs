@@ -85,6 +85,12 @@ pub struct Style {
     pub default_cell_width: i32,
     /// Inner padding applied to most widgets.
     pub padding: i32,
+    /// Window-owned inset applied only around the application body after title and menu chrome.
+    ///
+    /// Keeping this separate from [`Self::padding`] lets a theme place application content flush
+    /// against classic window chrome without also collapsing button, input, and title interiors.
+    /// [`crate::WindowOption::NO_PADDING`] overrides these four values with zero for one root.
+    pub window_content_insets: SliceInsets,
     /// Spacing between cells in a layout.
     pub spacing: i32,
     /// Indentation applied to nested content.
@@ -191,6 +197,7 @@ impl Style {
             icons: ThemeIcons::from_atlas(atlas),
             default_cell_width: 68,
             padding: 5,
+            window_content_insets: SliceInsets::uniform(5),
             spacing: 4,
             indent: 24,
             title_height: 24,

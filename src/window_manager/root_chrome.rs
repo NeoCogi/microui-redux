@@ -314,11 +314,12 @@ pub(super) fn root_chrome_geometry(
     style: &Style,
     atlas: &AtlasHandle,
 ) -> RootChromeGeometry {
-    // Root padding belongs to the window surface rather than the application layout tree.
-    let padding = if options.intersects(WindowOption::NO_PADDING) {
-        0
+    // Application-body insets belong to root chrome rather than the descendant layout tree.
+    // NO_PADDING remains a per-window structural override and never alters widget padding.
+    let content_insets = if options.intersects(WindowOption::NO_PADDING) {
+        crate::SliceInsets::ZERO
     } else {
-        style.padding.max(0)
+        style.window_content_insets.normalized()
     };
     let title_height = root_titlebar_height(style, atlas);
     let frame = if options.intersects(WindowOption::FRAME) {
@@ -329,7 +330,11 @@ pub(super) fn root_chrome_geometry(
     // Each pair of frame cells contributes independently to its outer axis.
     let horizontal_frame_extent = frame.horizontal_extent();
     let vertical_frame_extent = frame.vertical_extent();
-    let padding_extent = padding.saturating_mul(2);
+    let horizontal_content_extent = content_insets.horizontal_extent();
+    let vertical_content_extent = content_insets.vertical_extent();
+    // Title text and caption controls still use the ordinary widget metric for internal breathing
+    // room; changing application-body insets must not collapse title composition.
+    let title_padding_extent = style.padding.max(0).saturating_mul(2);
     let menu_width = menu_intrinsic.map(|size| size.width.max(0)).unwrap_or(0);
     let menu_height = menu_intrinsic.map(|size| size.height.max(0)).unwrap_or(0);
     let auto_width = options.intersects(WindowOption::AUTO_WIDTH);
@@ -356,12 +361,12 @@ pub(super) fn root_chrome_geometry(
             .get_text_size(style.title_font, name)
             .width
             .saturating_add(caption_width)
-            .saturating_add(padding_extent);
+            .saturating_add(title_padding_extent);
         minimum_width = minimum_width.max(title_minimum_width);
     }
     // Title and menu are chrome siblings outside application padding. Retain enough client height
     // for both plus the body's two padding edges even when the application child measures empty.
-    minimum_height = minimum_height.max(title_extent.saturating_add(menu_height).saturating_add(padding_extent));
+    minimum_height = minimum_height.max(title_extent.saturating_add(menu_height).saturating_add(vertical_content_extent));
     // The frame contributes one border on every outer edge.
     let minimum_outer = Dimensioni::new(
         minimum_width.saturating_add(horizontal_frame_extent),
@@ -372,13 +377,13 @@ pub(super) fn root_chrome_geometry(
     let intrinsic_outer = Dimensioni::new(
         child_intrinsic
             .width
-            .saturating_add(padding_extent)
+            .saturating_add(horizontal_content_extent)
             .max(menu_width)
             .saturating_add(horizontal_frame_extent)
             .max(minimum_outer.width),
         child_intrinsic
             .height
-            .saturating_add(padding_extent)
+            .saturating_add(vertical_content_extent)
             .saturating_add(title_extent)
             .saturating_add(menu_height)
             .saturating_add(vertical_frame_extent)
@@ -439,7 +444,9 @@ pub(super) fn root_chrome_geometry(
         body.height = body.height.saturating_sub(height).max(0);
         rect
     });
-    body = crate::expand_rect(body, -padding);
+    // Apply the independent four-edge body inset only after all root-owned chrome has consumed its
+    // authoritative rectangles. The checked helper returns an empty body for undersized windows.
+    body = crate::ui_node::frame::frame_geometry_with_insets(body, content_insets).content_or_empty();
     body.width = body.width.max(0);
     body.height = body.height.max(0);
     let (resize_right, resize_bottom, resize_corner) = if !options.intersects(WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE) {

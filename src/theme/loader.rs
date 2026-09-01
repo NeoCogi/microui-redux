@@ -361,6 +361,7 @@ impl ThemeDefinition {
         self.style.apply(&mut style);
         let frame_insets = self.style.frame_insets.map(InsetsDocument::into_insets).unwrap_or_else(|| style.frame_insets());
         validate_non_negative("generic_frame", "style.frame_insets", frame_insets)?;
+        validate_non_negative("window_content", "style.window_content_insets", style.window_content_insets)?;
         validate_non_negative("window_frame", "style.window_border", style.window_border)?;
         style.appearances = AppearanceCatalog::from_flat_palette(
             frame_insets,
@@ -485,6 +486,8 @@ struct StyleDocument {
     default_cell_width: Option<i32>,
     /// General widget inner padding override.
     padding: Option<i32>,
+    /// Independent application-body inset applied after root-owned title and menu chrome.
+    window_content_insets: Option<InsetsDocument>,
     /// Layout spacing override.
     spacing: Option<i32>,
     /// Nested-content indentation override.
@@ -512,6 +515,11 @@ impl StyleDocument {
         // through reflection or stringly typed mutation.
         assign_if_some(&mut style.default_cell_width, self.default_cell_width);
         assign_if_some(&mut style.padding, self.padding);
+        if let Some(window_content_insets) = self.window_content_insets {
+            // Root layout consumes the concrete four-edge value directly, so asymmetric theme
+            // insets require no erased metric map or widget-specific special casing.
+            style.window_content_insets = window_content_insets.into_insets();
+        }
         assign_if_some(&mut style.spacing, self.spacing);
         assign_if_some(&mut style.indent, self.indent);
         assign_if_some(&mut style.title_height, self.title_height);
@@ -955,6 +963,12 @@ mod tests {
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (23, 23, 23, 23));
         let border = loaded.style().window_border;
         assert_eq!((border.left, border.top, border.right, border.bottom), (4, 4, 4, 4));
+        let content = loaded.style().window_content_insets;
+        assert_eq!(
+            (content.left, content.top, content.right, content.bottom),
+            (0, 0, 0, 0),
+            "period Windows applications decide their own content margins inside root chrome"
+        );
         // Ordinary windows retain their long L-corner bitmap. Only modal dialogs use the uniform
         // four-pixel blue focus frame visible around period Windows 3.11 dialog boxes.
         assert!(matches!(
@@ -1052,6 +1066,12 @@ mod tests {
         assert_eq!(images, 24, "each shared PNG path must be baked exactly once");
         assert_eq!(loaded.style().window_chrome_layout, crate::WindowChromeLayout::ClassicMac);
         assert_eq!(loaded.style().title_height, 18);
+        let content = loaded.style().window_content_insets;
+        assert_eq!(
+            (content.left, content.top, content.right, content.bottom),
+            (0, 0, 0, 0),
+            "Platinum windows expose their complete application body below root chrome"
+        );
         let insets = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (3, 3, 3, 3));
         let active_title = loaded.style().appearance(AppearanceRole::WindowTitleActive, VisualState::Pressed);

@@ -44,6 +44,7 @@ the theme directories must remain available beside the repository sources at run
   },
   "style": {
     "padding": 4,
+    "window_content_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
     "spacing": 4,
     "title_height": 20,
     "window_chrome_layout": "trailing_buttons",
@@ -105,6 +106,7 @@ The optional `style` object accepts these integer metrics:
 
 - `default_cell_width`
 - `padding`
+- `window_content_insets` (`left`, `top`, `right`, and `bottom` application-body insets)
 - `spacing`
 - `indent`
 - `title_height`
@@ -190,6 +192,12 @@ L-shaped ordinary-window corner while a modal dialog uses a uniform four-pixel o
 reserving 23 pixels around either client. The bottom-right two-axis region remains larger for easy
 input, but themes may leave `window_resize_grip` transparent when the frame corner itself is the
 complete visible affordance.
+
+`style.window_content_insets` is a separate four-edge inset around the application body. Root
+geometry applies it after the frame, title, and menu bar have been allocated, so it never narrows
+the menubar and never changes ordinary widget padding. The bundled Windows and Mac themes set all
+four edges to zero; the default flat Style retains a five-pixel body inset.
+`WindowOption::NO_PADDING` overrides the metric with zero for an individual root.
 
 Window caption controls are enabled explicitly through `WindowOption::MINIMIZE_BUTTON` and
 `WindowOption::MAXIMIZE_BUTTON`. The close button remains enabled unless `WindowOption::NO_CLOSE`

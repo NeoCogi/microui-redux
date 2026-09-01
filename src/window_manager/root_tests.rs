@@ -4289,6 +4289,25 @@ fn no_padding_option_makes_chromeless_root_content_edge_to_edge() {
     assert!(title.is_none() && close.is_none() && resize.is_none());
 }
 
+/// Verifies root content insets are independent from ordinary widget padding.
+#[test]
+fn window_content_insets_control_each_application_body_edge_without_changing_widget_padding() {
+    let mut ctx = context();
+    let mut style = ctx.style().clone();
+    let widget_padding = style.padding;
+    style.window_content_insets = crate::SliceInsets::new(2, 3, 5, 7);
+    ctx.set_style(style);
+    let outer = rect(10, 20, 100, 80);
+    let root = ctx.ui().create_window(Window::new("insets", outer, empty_content()));
+    ctx.ui().set_window_options(&root, WindowOption::NO_TITLE | WindowOption::NO_RESIZE).unwrap();
+
+    ctx.update_and_render_ui();
+
+    let body = ctx.debug_root_body(root.id()).unwrap();
+    assert_eq!((body.x, body.y, body.width, body.height), (12, 23, 93, 70));
+    assert_eq!(ctx.style().padding, widget_padding, "root body geometry must not mutate control padding");
+}
+
 #[test]
 fn auto_height_preserves_popup_width_and_stretches_column_items() {
     let mut item_ids = Vec::new();

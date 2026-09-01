@@ -13,6 +13,7 @@
   "style": {
     "default_cell_width": 96,
     "padding": 4,
+    "window_content_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
     "spacing": 4,
     "indent": 16,
     "title_height": 20,
