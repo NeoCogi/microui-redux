@@ -240,6 +240,10 @@ impl ThemeDefinition {
         validate_non_negative("generic_frame", "style.frame_insets", frame_insets)?;
         style.appearances =
             AppearanceCatalog::from_flat_palette(frame_insets, style.colors, style.focus_color, style.window_focus_color, style.menu_background);
+        // A theme commonly reuses one small bevel PNG across several semantic roles and states.
+        // Cache the Context-owned upload by its fully resolved path while retaining source slices,
+        // destination slices, and tint on each independently constructed NinePatchImage.
+        let mut uploaded_images = BTreeMap::<PathBuf, (i32, i32, TextureId)>::new();
 
         for (name, document) in self.appearances {
             let role = AppearanceRole::from_json_name(name.as_str()).ok_or_else(|| ThemeLoadError::UnknownAppearance { name: name.clone() })?;
@@ -263,18 +267,27 @@ impl ThemeDefinition {
                     continue;
                 };
                 let path = self.directory.join(relative_path);
-                let bytes = fs::read(path.as_path()).map_err(|source| ThemeLoadError::ImageRead { path: path.clone(), source })?;
-                let (width, height, colors) = crate::load_image_bytes(ImageSource::Png { bytes: bytes.as_slice() })
-                    .map_err(|source| ThemeLoadError::ImageDecode { path: path.clone(), source })?;
-                // Shared image validation guarantees both dimensions fit i32 and the RGBA byte
-                // count is bounded before this exact normalization copy.
-                let width = width as i32;
-                let height = height as i32;
-                let pixels: Vec<u8> = colors.into_iter().flat_map(|color| [color.x, color.y, color.z, color.w]).collect();
                 let source_insets = state_document.source_insets.map(InsetsDocument::into_insets).unwrap_or(destination_insets);
-                validate_source_insets(name.as_str(), source_insets, width, height)?;
-                let texture =
-                    upload(path.as_path(), width, height, pixels.as_slice()).map_err(|source| ThemeLoadError::ImageUpload { path: path.clone(), source })?;
+                let (width, height, texture) = if let Some(&(width, height, texture)) = uploaded_images.get(path.as_path()) {
+                    // Revalidate state-specific source slices even though the shared pixel payload
+                    // has already been decoded and uploaded for another role.
+                    validate_source_insets(name.as_str(), source_insets, width, height)?;
+                    (width, height, texture)
+                } else {
+                    let bytes = fs::read(path.as_path()).map_err(|source| ThemeLoadError::ImageRead { path: path.clone(), source })?;
+                    let (width, height, colors) = crate::load_image_bytes(ImageSource::Png { bytes: bytes.as_slice() })
+                        .map_err(|source| ThemeLoadError::ImageDecode { path: path.clone(), source })?;
+                    // Shared image validation guarantees both dimensions fit i32 and the RGBA byte
+                    // count is bounded before this exact normalization copy.
+                    let width = width as i32;
+                    let height = height as i32;
+                    validate_source_insets(name.as_str(), source_insets, width, height)?;
+                    let pixels: Vec<u8> = colors.into_iter().flat_map(|color| [color.x, color.y, color.z, color.w]).collect();
+                    let texture = upload(path.as_path(), width, height, pixels.as_slice())
+                        .map_err(|source| ThemeLoadError::ImageUpload { path: path.clone(), source })?;
+                    uploaded_images.insert(path.clone(), (width, height, texture));
+                    (width, height, texture)
+                };
                 let tint = state_document
                     .tint
                     .map(ColorDocument::into_color)
@@ -586,5 +599,27 @@ mod tests {
             Err(error) => error,
         };
         assert!(error.to_string().contains("unknown field `appearences`"));
+    }
+
+    /// Verifies the bundled Windows theme and every original PNG install through the public schema.
+    #[test]
+    fn bundled_windows_311_theme_reuses_shared_png_uploads() {
+        // Resolve from the Cargo manifest so this test is independent of the process working dir.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("themes/windows-3.11/theme.json");
+        let definition = ThemeDefinition::read(path.as_path()).expect("bundled Windows theme JSON must remain valid");
+        let mut uploads = 0_u32;
+        let loaded = definition
+            .install(Style::from_atlas(&test_atlas()), |_, width, height, pixels| {
+                // The loader must present one complete validated RGBA payload for each unique path.
+                uploads += 1;
+                assert_eq!(pixels.len(), width as usize * height as usize * 4);
+                Ok(TextureId::new_test(uploads, width, height))
+            })
+            .expect("bundled Windows theme PNGs must decode and install");
+
+        assert_eq!(loaded.name(), "Windows 3.11");
+        assert_eq!(uploads, 11, "each shared PNG path must be uploaded exactly once");
+        let insets = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
+        assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (4, 4, 4, 4));
     }
 }
