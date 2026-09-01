@@ -180,6 +180,16 @@ pub(super) struct RootChromeVisualState {
 }
 
 impl RootChromeVisualState {
+    /// Returns a noninteractive snapshot for transient chrome with no caption or resize controls.
+    pub(super) const fn idle() -> Self {
+        // Application popups reuse the frame recorder but never own movable or resizable chrome.
+        Self {
+            hovered: None,
+            interaction: RootInteraction::None,
+            maximized: false,
+        }
+    }
+
     /// Resolves one part's hover and pressed facts into a complete theme state.
     fn part_state(self, part: RootChromePart) -> VisualState {
         let hovered = self.hovered == Some(part);
@@ -232,6 +242,30 @@ pub(super) struct RootChromeGeometry {
     pub(super) minimum_outer: Dimensioni,
     /// Intrinsic outer size produced from a measured application child.
     pub(super) intrinsic_outer: Dimensioni,
+}
+
+/// Concrete semantic frame family used by root geometry and chrome painting.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub(super) enum RootFrameKind {
+    /// Ordinary independent or structurally owned window chrome.
+    Window,
+    /// Modal dialog chrome with its independently themed active and passive roles.
+    Dialog,
+    /// Transient application popup chrome shared with compact popup-menu panels.
+    Popup,
+}
+
+impl RootFrameKind {
+    /// Returns the structural client inset associated with this frame family.
+    fn structural_insets(self, style: &Style) -> crate::SliceInsets {
+        // Windows and dialogs retain the dedicated resize-border metric because their decorative
+        // corner artwork may be much larger. Popups do not resize, so their semantic patch insets
+        // directly define both the visible black outline and the content rectangle behind it.
+        match self {
+            Self::Window | Self::Dialog => style.window_border.normalized(),
+            Self::Popup => style.appearance(AppearanceRole::MenuPopup, VisualState::Normal).insets.normalized(),
+        }
+    }
 }
 
 /// Focused chrome geometry exposed only to crate-internal window behavior tests.
@@ -311,6 +345,7 @@ pub(super) fn root_chrome_geometry(
     menu_intrinsic: Option<Dimensioni>,
     name: &str,
     options: WindowOption,
+    frame_kind: RootFrameKind,
     style: &Style,
     atlas: &AtlasHandle,
 ) -> RootChromeGeometry {
@@ -323,7 +358,7 @@ pub(super) fn root_chrome_geometry(
     };
     let title_height = root_titlebar_height(style, atlas);
     let frame = if options.intersects(WindowOption::FRAME) {
-        style.window_border.normalized()
+        frame_kind.structural_insets(style)
     } else {
         crate::SliceInsets::ZERO
     };
@@ -567,18 +602,19 @@ fn root_titlebar_height(style: &Style, atlas: &AtlasHandle) -> i32 {
     style.title_height.max(text_height)
 }
 
-/// Resolves ordinary-window or dialog artwork while preserving its passive corner geometry.
-fn root_frame_patch(style: &Style, dialog: bool, active: bool, state: VisualState) -> crate::NinePatch {
+/// Resolves window, dialog, or popup artwork while preserving each family's frame geometry.
+fn root_frame_patch(style: &Style, frame_kind: RootFrameKind, active: bool, state: VisualState) -> crate::NinePatch {
     // Each root kind's passive frame artwork is the visual corner-span authority for both of its
-    // activation variants. Keeping the ordinary and dialog pairs independent allows a classic
-    // theme to use long L-shaped window corners and a uniformly thick dialog outline.
+    // activation variants. Keeping the ordinary, dialog, and popup families independent allows a
+    // classic theme to combine long L-shaped window corners, a thick dialog outline, and a compact
+    // black transient frame without geometry or artwork leaking between them.
     // Structural client and resize thickness lives in Style::window_border, so long transparent L
     // corners do not enlarge the client inset. Matching active visual insets still prevents focus
     // changes from moving or scaling the corner art itself.
-    let (passive_role, active_role) = if dialog {
-        (AppearanceRole::DialogFrame, AppearanceRole::DialogFrameActive)
-    } else {
-        (AppearanceRole::WindowFrame, AppearanceRole::WindowFrameActive)
+    let (passive_role, active_role) = match frame_kind {
+        RootFrameKind::Window => (AppearanceRole::WindowFrame, AppearanceRole::WindowFrameActive),
+        RootFrameKind::Dialog => (AppearanceRole::DialogFrame, AppearanceRole::DialogFrameActive),
+        RootFrameKind::Popup => (AppearanceRole::MenuPopup, AppearanceRole::MenuPopup),
     };
     let visual_insets = style.appearance(passive_role, VisualState::Normal).insets;
     let role = if active { active_role } else { passive_role };
@@ -591,7 +627,7 @@ pub(super) fn record_root_background(
     viewport: Recti,
     rect: Recti,
     style: &Style,
-    dialog: bool,
+    frame_kind: RootFrameKind,
     active_frame: bool,
     enabled: bool,
 ) {
@@ -605,7 +641,7 @@ pub(super) fn record_root_background(
     // activation cannot recolor the complete window interior. Explicit root disabling selects the
     // shared Disabled state, including its flat fallback center when no PNG was supplied.
     let state = if enabled { VisualState::Normal } else { VisualState::Disabled };
-    let patch = root_frame_patch(style, dialog, active_frame && enabled, state).with_insets(crate::SliceInsets::ZERO);
+    let patch = root_frame_patch(style, frame_kind, active_frame && enabled, state).with_insets(crate::SliceInsets::ZERO);
     let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch);
 }
 
@@ -619,7 +655,7 @@ pub(super) fn record_root_overlay(
     geometry: RootChromeGeometry,
     style: &Style,
     atlas: &AtlasHandle,
-    dialog: bool,
+    frame_kind: RootFrameKind,
     active: bool,
     enabled: bool,
     visual: RootChromeVisualState,
@@ -644,7 +680,7 @@ pub(super) fn record_root_overlay(
         // parent body without covering parent-owned frame chrome.
         painter.nine_patch(
             outer,
-            root_frame_patch(style, dialog, chrome_active, chrome_state(visual.frame_state())).without_center(),
+            root_frame_patch(style, frame_kind, chrome_active, chrome_state(visual.frame_state())).without_center(),
         );
     }
     if let Some(title) = geometry.title {

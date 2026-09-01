@@ -199,6 +199,11 @@ the menubar and never changes ordinary widget padding. The bundled Windows and M
 four edges to zero; the default flat Style retains a five-pixel body inset.
 `WindowOption::NO_PADDING` overrides the metric with zero for an individual root.
 
+Application-authored popup windows use the `menu_popup` appearance for both their structural
+client inset and their outer frame paint. This keeps combo/list popups aligned with themed menu
+panels instead of borrowing ordinary window L-corners or `style.window_border`; compact menu
+popups already paint the same role as their complete manager-owned panel.
+
 Window caption controls are enabled explicitly through `WindowOption::MINIMIZE_BUTTON` and
 `WindowOption::MAXIMIZE_BUTTON`. The close button remains enabled unless `WindowOption::NO_CLOSE`
 is present. Caption and resize roles receive `hovered` and `pressed` states from manager-owned

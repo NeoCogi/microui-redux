@@ -38,8 +38,8 @@ use crate::math::RectExt;
 use crate::{MouseButton, Node, UiInputEvent, Vec2i, rect};
 
 use super::root_chrome::{
-    RootCaptionButton, RootChromeGeometry, RootChromePart, RootChromeVisualState, RootInteraction, RootResizeAxis, record_root_background, record_root_overlay,
-    root_chrome_geometry,
+    RootCaptionButton, RootChromeGeometry, RootChromePart, RootChromeVisualState, RootFrameKind, RootInteraction, RootResizeAxis, record_root_background,
+    record_root_overlay, root_chrome_geometry,
 };
 
 /// Failure reason reported by a checked window or popup operation.
@@ -290,7 +290,7 @@ impl Surface {
     }
 
     /// Measures automatic axes and lays out the application tree in the derived body.
-    fn layout(&mut self, menu_bar: Option<&mut MenuSurface>, style: &Style, atlas: &crate::AtlasHandle, clip: Recti) {
+    fn layout(&mut self, menu_bar: Option<&mut MenuSurface>, frame_kind: RootFrameKind, style: &Style, atlas: &crate::AtlasHandle, clip: Recti) {
         // Commit the inherited surface boundary before any concrete body sees it. Every later
         // manager-owned hit or paint path reads this same snapshot until the next complete layout.
         self.clip = clip;
@@ -301,7 +301,16 @@ impl Surface {
         if self.options.intersects(WindowOption::AUTO_SIZE) {
             // Convert retained outer bounds to application-body bounds before asking the content
             // tree for intrinsic size. Fixed axes retain their programmed outer extent.
-            let shell = root_chrome_geometry(self.rect, Dimensioni::default(), menu_intrinsic, &self.name, self.options, style, atlas);
+            let shell = root_chrome_geometry(
+                self.rect,
+                Dimensioni::default(),
+                menu_intrinsic,
+                &self.name,
+                self.options,
+                frame_kind,
+                style,
+                atlas,
+            );
             let horizontal_chrome = self.rect.width.saturating_sub(shell.body.width);
             let vertical_chrome = self.rect.height.saturating_sub(shell.body.height);
             let constraints = crate::Constraints::new(
@@ -317,7 +326,7 @@ impl Surface {
                 },
             );
             let child = self.body.measure(style, atlas, constraints);
-            let intrinsic = root_chrome_geometry(Recti::default(), child, menu_intrinsic, &self.name, self.options, style, atlas).intrinsic_outer;
+            let intrinsic = root_chrome_geometry(Recti::default(), child, menu_intrinsic, &self.name, self.options, frame_kind, style, atlas).intrinsic_outer;
             if auto_width {
                 self.rect.width = intrinsic.width;
             }
@@ -327,7 +336,16 @@ impl Surface {
         }
 
         // Store one geometry snapshot shared by application layout, chrome hit testing, and paint.
-        self.geometry = root_chrome_geometry(self.rect, Dimensioni::default(), menu_intrinsic, &self.name, self.options, style, atlas);
+        self.geometry = root_chrome_geometry(
+            self.rect,
+            Dimensioni::default(),
+            menu_intrinsic,
+            &self.name,
+            self.options,
+            frame_kind,
+            style,
+            atlas,
+        );
         if let (Some(bar), Some(rect)) = (menu_bar, self.geometry.menu_bar) {
             // The menu consumes the exact chrome rectangle derived above. Popup anchors, overlay
             // paint, and hit testing subsequently read the MenuSurface's matching committed rect.
@@ -803,11 +821,18 @@ impl SurfaceNode {
             // changes resize a maximized top-level or child window without losing restoration data.
             self.surface.rect = viewport;
         }
+        let frame_kind = match &self.kind {
+            // Modal roots retain dialog artwork, ordinary roots retain window artwork, and every
+            // transient definition derives its structural inset from popup-panel appearance.
+            SurfaceKind::Root(root) if root.mode == RootMode::Modal => RootFrameKind::Dialog,
+            SurfaceKind::Root(_) => RootFrameKind::Window,
+            SurfaceKind::Popup(_) => RootFrameKind::Popup,
+        };
         let menu_bar = match &mut self.kind {
             SurfaceKind::Root(root) => root.menu_bar.as_mut(),
             SurfaceKind::Popup(_) => None,
         };
-        self.surface.layout(menu_bar, style, atlas, viewport);
+        self.surface.layout(menu_bar, frame_kind, style, atlas, viewport);
         if maximized {
             // Maximized windows keep caption actions but expose no resize hit regions or grip.
             self.surface.geometry = self.surface.geometry.without_resize();
@@ -2897,13 +2922,17 @@ impl WindowManager {
             let node_index = self.surfaces.node_index(SurfaceKey::Root(root)).expect("visible root must remain retained");
             let node = &mut self.surfaces.nodes[node_index];
             let window_active = window_enabled && active_window == Some(root);
-            let dialog = node.root().is_some_and(|state| state.mode == RootMode::Modal);
+            let frame_kind = if node.root().is_some_and(|state| state.mode == RootMode::Modal) {
+                RootFrameKind::Dialog
+            } else {
+                RootFrameKind::Window
+            };
             record_root_background(
                 &mut self.display_list,
                 node.surface.clip,
                 node.surface.rect,
                 style,
-                dialog,
+                frame_kind,
                 window_active,
                 window_enabled,
             );
@@ -2955,7 +2984,11 @@ impl WindowManager {
                 );
             }
             let root_state = node.root().expect("root overlay must retain root policy");
-            let dialog = root_state.mode == RootMode::Modal;
+            let frame_kind = if root_state.mode == RootMode::Modal {
+                RootFrameKind::Dialog
+            } else {
+                RootFrameKind::Window
+            };
             let visual = root_state.chrome_visual_state();
             record_root_overlay(
                 &mut self.display_list,
@@ -2966,7 +2999,7 @@ impl WindowManager {
                 node.surface.geometry,
                 style,
                 atlas,
-                dialog,
+                frame_kind,
                 window_enabled && active_window == Some(root),
                 window_enabled,
                 visual,
@@ -2986,9 +3019,19 @@ impl WindowManager {
             let popup_enabled = self.surface_accepts_input(key);
             let node_index = self.surfaces.node_index(key).expect("active popup must remain retained");
             let node = &mut self.surfaces.nodes[node_index];
-            // Popup shells retain the ordinary passive frame role used before window activation
-            // existed, while their transient contents remain visually active.
-            record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, style, false, false, popup_enabled);
+            let application_popup = matches!(&node.kind, SurfaceKind::Popup(PopupState::Application { .. }));
+            // Transient widget popups and compact menu popups share the semantic popup panel
+            // center. Compact menus paint their own complete panel inside the body; application
+            // popups receive the matching border overlay after their retained content below.
+            record_root_background(
+                &mut self.display_list,
+                node.surface.clip,
+                node.surface.rect,
+                style,
+                RootFrameKind::Popup,
+                false,
+                popup_enabled,
+            );
             node.surface.body.paint(
                 &mut self.display_list,
                 style,
@@ -2997,6 +3040,25 @@ impl WindowManager {
                 true,
                 popup_enabled,
             );
+            if application_popup {
+                // Record border cells last so application content cannot cover the popup's black
+                // outline. Popup options exclude title and resizing, making the shared recorder a
+                // single semantic frame pass with no hidden window behavior.
+                record_root_overlay(
+                    &mut self.display_list,
+                    node.surface.clip,
+                    node.surface.rect,
+                    node.surface.options,
+                    &node.surface.name,
+                    node.surface.geometry,
+                    style,
+                    atlas,
+                    RootFrameKind::Popup,
+                    false,
+                    popup_enabled,
+                    RootChromeVisualState::idle(),
+                );
+            }
         }
     }
 

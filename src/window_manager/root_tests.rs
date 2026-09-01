@@ -4399,6 +4399,59 @@ fn auto_height_preserves_popup_width_and_stretches_column_items() {
     }
 }
 
+/// Verifies application popups derive both client geometry and overlay paint from MenuPopup.
+#[test]
+fn application_popup_uses_the_semantic_popup_frame_instead_of_window_border_chrome() {
+    let atlas = test_atlas();
+    let mut style = test_style(&atlas);
+    let popup_insets = crate::SliceInsets::uniform(2);
+    let popup_border = color(3, 5, 7, 255);
+    let popup_fill = color(211, 213, 217, 255);
+    style.window_border = crate::SliceInsets::uniform(7);
+    style.window_content_insets = crate::SliceInsets::ZERO;
+    style.appearances.set(
+        AppearanceRole::MenuPopup,
+        StatefulAppearance::all(NinePatch::framed(popup_insets, popup_border, Some(popup_fill))),
+    );
+    let content = desired_size_node(30, 20);
+    let content_id = content.id();
+    let (backend, log) = recording_backend(atlas);
+    let mut ctx = Context::<_>::new(backend);
+    ctx.set_style(style);
+    let owner = ctx.ui().create_window(Window::new("owner", rect(10, 10, 80, 50), empty_content()));
+    ctx.ui()
+        .set_window_options(&owner, WindowOption::NO_TITLE | WindowOption::NO_RESIZE | WindowOption::NO_PADDING)
+        .unwrap();
+    let popup = ctx.ui().create_popup(&owner, "application popup", content).unwrap();
+    ctx.ui()
+        .set_popup_options(
+            &popup,
+            WindowOption::FRAME | WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE | WindowOption::NO_TITLE | WindowOption::NO_PADDING,
+        )
+        .unwrap();
+    ctx.ui().show_popup_at(&popup, rect(40, 70, 1, 1)).unwrap();
+    let dimensions = Dimensioni::new(320, 240);
+    ctx.update_ui(dimensions);
+
+    let outer = ctx.debug_popup_rect(&popup).expect("visible application popup must retain outer geometry");
+    let body = ctx
+        .debug_popup_node_rect(&popup, content_id)
+        .expect("visible application popup must lay out its retained body");
+    assert_eq!((body.x, body.y), (outer.x + popup_insets.left, outer.y + popup_insets.top));
+    assert_eq!(
+        (outer.width - body.width, outer.height - body.height),
+        (popup_insets.left + popup_insets.right, popup_insets.top + popup_insets.bottom),
+        "popup geometry must ignore the unrelated seven-pixel window border metric"
+    );
+
+    log.clear();
+    ctx.frame(frame_info(dimensions)).render_ui().unwrap();
+    assert!(
+        !atlas_quads_with_color(&log.snapshot(), popup_border).is_empty(),
+        "the popup border cells must be recorded after retained popup content"
+    );
+}
+
 #[test]
 fn auto_width_preserves_programmed_height() {
     let (_, item) = ListItem::create(ListItemParameters::new("intrinsic width"));
