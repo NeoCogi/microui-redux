@@ -37,9 +37,10 @@ use microui_redux::prelude::{
     MenuItemSubmitted, Recti, TextBlock, TextBlockParameters, TypedWidgetHandle, Vec2i, Window,
 };
 use microui_redux::{
-    color, rect, AtlasHandle, AtlasSource, AtlasUploadError, CharEntry, Constraints, Context, Disclosure, DisclosureParameters, FontEntry, FontRef, FontRole,
-    Grid, GridParameters, ImageError, Linear, LinearParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SourceFormat, Skin, SurfaceMutationError,
-    IconRef, IconRole, TextureError, TextureId,
+    color, rect, AppearanceRole, AtlasHandle, AtlasSource, AtlasUploadError, CaptionButtonSide, CharEntry, Constraints, Context, Disclosure,
+    DisclosureParameters, FontEntry, FontRef, FontRole, Grid, GridParameters, IconRef, IconRole, ImageError, Linear, LinearParameters, RoleTable, ScrollArea,
+    ScrollAreaOption, ScrollAreaParameters, Skin, SkinBundle, SkinPatch, SourceFormat, StateTable, SurfaceMutationError, TextureError, TextureId, VisualPatch,
+    VisualState, WindowChromeSkin, WindowTitleAlignment,
 };
 
 struct TestBackend {
@@ -145,30 +146,127 @@ fn context() -> Context<TestBackend> {
     context_with_state()
 }
 
-/// Verifies downstream retained resource references survive replacement atlas allocations.
+/// Converts a public color value into a tuple suitable for exact downstream assertions.
+fn color_channels(value: microui_redux::Color) -> (u8, u8, u8, u8) {
+    // Keep this adapter in the integration crate so the contract does not depend on private test
+    // helpers or require Color to implement equality solely for test convenience.
+    (value.r, value.g, value.b, value.a)
+}
+
+/// Verifies external code can traverse exhaustive typed tables and layer concrete skin patches.
 #[test]
-fn downstream_skin_and_theme_are_constructed_from_atlas_capabilities() {
+fn downstream_skin_tables_and_patches_are_concrete_and_deterministic() {
+    let context = context();
+    let base = context.skin().clone();
+    let original_hovered = base.foreground(AppearanceRole::Button, VisualState::Hovered);
+
+    // Closed enums and their generic tables expose total iteration and mutation without string
+    // keys, heterogeneous values, missing cells, or erased payloads.
+    let mut states = StateTable::filled(0_u8);
+    states.set(VisualState::Focused, 7);
+    let mut roles = RoleTable::filled(states);
+    roles.set(AppearanceRole::Button, StateTable::filled(11));
+    assert_eq!(roles.iter().count(), AppearanceRole::COUNT);
+    assert_eq!(roles[AppearanceRole::Button].iter().count(), VisualState::COUNT);
+    assert_eq!(roles[AppearanceRole::Button][VisualState::PressedFocused], 11);
+    assert_eq!(roles[AppearanceRole::TextInput][VisualState::Focused], 7);
+
+    // Patches mirror the resolved Skin shape. A later present value wins, while an omitted later
+    // value preserves the earlier layer and every unmentioned resolved value remains unchanged.
+    let first_foreground = color(10, 20, 30, 255);
+    let later_patch_color = color(40, 50, 60, 255);
+    let mut first = SkinPatch::default();
+    first.metrics.padding = Some(8);
+    first.metrics.spacing = Some(6);
+    first
+        .visuals
+        .set(AppearanceRole::Button, VisualState::Focused, VisualPatch::foreground(first_foreground));
+    let mut later = SkinPatch::default();
+    later.metrics.padding = Some(13);
+    later.visuals.set(
+        AppearanceRole::Button,
+        VisualState::Focused,
+        VisualPatch::patch(microui_redux::NinePatch::solid(later_patch_color)),
+    );
+    first.merge_later(&later);
+    let resolved = base.patched(&first);
+
+    assert_eq!(resolved.metrics.padding, 13);
+    assert_eq!(resolved.metrics.spacing, 6);
+    assert_eq!(
+        color_channels(resolved.foreground(AppearanceRole::Button, VisualState::Focused)),
+        color_channels(first_foreground)
+    );
+    assert_eq!(
+        color_channels(resolved.foreground(AppearanceRole::Button, VisualState::Hovered)),
+        color_channels(original_hovered)
+    );
+}
+
+/// Verifies stable named resources and one atomic bundle remain the only atlas replacement path.
+#[test]
+fn downstream_resources_bundle_and_chrome_form_one_typed_runtime_value() {
     let mut context = context();
-    let atlas = context.atlas();
-    let mut style = Skin::from_atlas(&atlas);
+    let body = context.resource_catalog().font_ref("body").expect("body must be in the application catalog");
+    let close = context.resource_catalog().icon_ref("close").expect("close must be in the application catalog");
+    assert!(context.resource_catalog().font_ref("missing-font").is_none());
+    assert!(context.resource_catalog().icon_ref("missing-icon").is_none());
 
-    // Stable public references resolve to exact short-lived capabilities for the active atlas.
-    let body = FontRef::role(FontRole::Body);
-    let close = IconRef::role(IconRole::Close);
-    assert_eq!(body.resolve(&style, &atlas), atlas.font_id("body").unwrap());
-    assert_eq!(close.resolve(&atlas), atlas.icon_id("close").unwrap());
+    // Build a separately allocated atlas/skin pair and describe manager-owned chrome with one
+    // concrete data recipe. Installing the bundle uploads and publishes both halves together.
+    let replacement_context = context_with_state::<()>();
+    let replacement_atlas = replacement_context.atlas();
+    let mut replacement_skin = Skin::from_atlas(&replacement_atlas);
+    replacement_skin.metrics.padding = 19;
+    replacement_skin.chrome = WindowChromeSkin::classic_mac(color(222, 222, 222, 255));
+    let replacement = SkinBundle::new(replacement_atlas, replacement_skin);
+    context
+        .set_skin_bundle(&replacement)
+        .expect("the downstream renderer accepts immutable atlas handles");
 
-    // Scalar customization contains no hidden resource IDs; Context accepts the skin by value.
-    style.metrics.padding = 9;
-    context.set_skin(style);
-    assert_eq!(context.skin().metrics.padding, 9);
+    assert_eq!(context.skin().metrics.padding, 19);
+    assert_eq!(context.skin().chrome.title_alignment, WindowTitleAlignment::Centered);
+    assert_eq!(context.skin().chrome.captions.close_side, CaptionButtonSide::Leading);
+    assert_eq!(body.resolve(context.skin(), &context.atlas()), context.atlas().font_id("body").unwrap());
+    assert_eq!(close.resolve(&context.atlas()), context.atlas().icon_id("close").unwrap());
 
-    // References resolve again against separately reconstructed equivalent metadata rather than
-    // retaining capabilities minted by the original allocation.
-    let foreign_context = context_with_state::<()>();
-    let foreign_atlas = foreign_context.atlas();
-    assert_eq!(body.resolve(foreign_context.skin(), &foreign_atlas), foreign_atlas.font_id("body").unwrap());
-    assert_eq!(close.resolve(&foreign_atlas), foreign_atlas.icon_id("close").unwrap());
+    // Semantic role references use the same late-resolution path and therefore also survive the
+    // replacement allocation without retaining its short-lived FontId or IconId capabilities.
+    let body_role = FontRef::role(FontRole::Body);
+    let close_role = IconRef::role(IconRole::Close);
+    assert_eq!(body_role.resolve(context.skin(), &context.atlas()), context.atlas().font_id("body").unwrap());
+    assert_eq!(close_role.resolve(&context.atlas()), context.atlas().icon_id("close").unwrap());
+}
+
+/// Verifies unmounted nodes and live typed handles share one replacement-only override contract.
+#[test]
+fn downstream_local_skin_override_is_a_complete_cascading_replacement() {
+    let mut context = context();
+    let first_override = context.skin().clone().with_metrics(|metrics| metrics.indent = 23);
+    let second_override = context.skin().clone().with_metrics(|metrics| metrics.indent = 31);
+    let (text, mut node) = TextBlock::create(TextBlockParameters::new("locally skinned"));
+
+    // Before mounting, Node owns the complete override and exposes explicit replacement/clear
+    // operations rather than a second set of style aliases or a partially inherited value.
+    node.set_skin_override(first_override);
+    assert_eq!(node.skin_override().expect("the node must retain its complete override").metrics.indent, 23);
+    node.clear_skin_override();
+    assert!(node.skin_override().is_none());
+
+    // Once mounted, the typed widget handle reaches the same concrete storage. Replacing and
+    // clearing the override invalidates retained measurement through the runtime-owned boundary.
+    let _window = context.ui().create_window(Window::new("local skin", rect(0, 0, 120, 80), node));
+    text.try_set_skin_override(second_override).expect("the mounted text widget must be available");
+    assert_eq!(
+        text.try_skin_override()
+            .expect("the mounted text widget must be readable")
+            .expect("the mounted text widget must have an override")
+            .metrics
+            .indent,
+        31
+    );
+    text.try_clear_skin_override().expect("the mounted text widget must be available");
+    assert!(text.try_skin_override().expect("the mounted text widget must be readable").is_none());
 }
 
 struct FileDialogModel {
