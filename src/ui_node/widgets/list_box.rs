@@ -40,7 +40,7 @@ pub struct ListBoxParameters {
     /// Optional image rendered alongside the label.
     pub image: Option<TextureId>,
     /// Font used for the label.
-    pub font: FontChoice,
+    pub font: FontRef,
     /// Base widget options.
     pub opt: WidgetOption,
 }
@@ -59,7 +59,7 @@ impl ListBoxParameters {
         Self {
             label: label.into(),
             image,
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt: WidgetOption::NONE,
         }
     }
@@ -69,13 +69,14 @@ impl ListBoxParameters {
         Self {
             label: label.into(),
             image,
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt,
         }
     }
 
     /// Replaces the font used for the label.
-    pub const fn font(mut self, font: FontChoice) -> Self {
+    pub fn font(mut self, font: FontRef) -> Self {
+        // Store the reference itself so a replacement skin can supply a new concrete font ID.
         self.font = font;
         self
     }
@@ -94,7 +95,7 @@ pub struct ListBox {
     /// Initialization-only image.
     image: Option<TextureId>,
     /// Initialization-only font.
-    font: FontChoice,
+    font: FontRef,
     /// Base widget options.
     opt: WidgetOption,
     /// Runtime-owned source for user submissions.
@@ -116,7 +117,7 @@ impl ListBox {
     /// Measures list-box inline label and optional image.
     fn preferred_size_widget(&self, style: &Skin, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         let visual = self.image.map(TextureId::size);
-        inline_content_size(style, atlas, self.font, &self.label, visual)
+        inline_content_size(style, atlas, &self.font, &self.label, visual)
     }
 
     /// Paints list-box frame, label, and optional image.
@@ -128,7 +129,7 @@ impl ListBox {
         let visual_size = self.image.map(TextureId::size);
         let placement = place_inline_content(rect, ctx.skin(), &self.label, visual_size);
         if !self.label.is_empty() {
-            let font = ctx.skin().resolve_font_choice(self.font);
+            let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
             ctx.draw_control_text_with_font(font, &self.label, placement.text, AppearanceRole::Button, self.opt);
         }
         if let (Some(image), Some(visual)) = (self.image, placement.visual) {

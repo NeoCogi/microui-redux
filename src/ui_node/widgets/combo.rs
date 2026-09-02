@@ -44,7 +44,7 @@ fn same_rect(left: Recti, right: Recti) -> bool {
 /// One-shot construction input for a [`Combo`].
 pub struct ComboParameters {
     /// Font used for the current label.
-    pub font: FontChoice,
+    pub font: FontRef,
     /// Base widget options.
     pub opt: WidgetOption,
 }
@@ -61,21 +61,19 @@ impl ComboParameters {
     /// Creates combo parameters with default widget options.
     pub const fn new() -> Self {
         Self {
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt: WidgetOption::FRAME,
         }
     }
 
     /// Creates combo parameters with explicit widget options.
     pub const fn with_opt(opt: WidgetOption) -> Self {
-        Self {
-            font: FontChoice::Role(FontRole::Body),
-            opt,
-        }
+        Self { font: FontRef::Role(FontRole::Body), opt }
     }
 
     /// Replaces the font used for the current label.
-    pub const fn font(mut self, font: FontChoice) -> Self {
+    pub fn font(mut self, font: FontRef) -> Self {
+        // Retain the stable selection across popup and skin replacement transactions.
         self.font = font;
         self
     }
@@ -96,7 +94,7 @@ pub struct Combo {
     /// Label text for the currently selected item.
     label: String,
     /// Initialization-only font.
-    font: FontChoice,
+    font: FontRef,
     /// Base widget options.
     opt: WidgetOption,
     /// Runtime-owned source for selection changes.
@@ -296,11 +294,11 @@ impl Combo {
         let text_w = if self.label.is_empty() {
             0
         } else {
-            text_size(style, atlas, self.font, self.label.as_str()).width
+            text_size(style, atlas, &self.font, self.label.as_str()).width
         };
-        let indicator = atlas.get_icon_size(style.resources.icons.expand_down);
+        let indicator = atlas.get_icon_size(crate::IconRole::ExpandDown.resolve(atlas));
         let width = padding.saturating_mul(3).saturating_add(text_w.max(0)).saturating_add(indicator.width.max(0));
-        let height = content_height(style, atlas, self.font, indicator.height);
+        let height = content_height(style, atlas, &self.font, indicator.height);
         Dimensioni::new(width, height)
     }
 
@@ -335,7 +333,8 @@ impl Combo {
     /// Paints the combo header from already-committed retained state.
     fn paint_widget(&self, ctx: &mut WidgetPaintCtx<'_>) {
         let header = ctx.local_rect();
-        let indicator_size = ctx.atlas().get_icon_size(ctx.skin().resources.icons.expand_down);
+        let indicator_id = crate::IconRole::ExpandDown.resolve(ctx.atlas());
+        let indicator_size = ctx.atlas().get_icon_size(indicator_id);
         let indicator_x = header.x + header.width - indicator_size.width;
         let indicator_y = header.y + ((header.height - indicator_size.height) / 2).max(0);
         let indicator = rect(indicator_x, indicator_y, indicator_size.width, indicator_size.height);
@@ -343,13 +342,13 @@ impl Combo {
         let mut text_rect = header;
         let reserved_width = indicator_size.width;
         text_rect.width = (text_rect.width - reserved_width).max(0);
-        let font = ctx.skin().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
         ctx.draw_control_text_with_font(font, self.label.as_str(), text_rect, AppearanceRole::Combo, self.opt);
 
         let indicator_content = ctx.draw_appearance(AppearanceRole::Button, indicator);
         let icon_color = ctx.foreground(AppearanceRole::Combo);
         if let Some(indicator_content) = indicator_content {
-            ctx.draw_icon(ctx.skin().resources.icons.expand_down, indicator_content, icon_color);
+            ctx.draw_icon(indicator_id, indicator_content, icon_color);
         }
     }
 }

@@ -346,7 +346,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// # Panics
     ///
     /// Panics when the backend atlas lacks the `body` font or any semantic icon required by
-    /// [`crate::ThemeIcons::from_atlas`]. Every constructible atlas already has a validated white
+    /// [`crate::IconRole::ALL`]. Every constructible atlas already has a validated white
     /// rendering tile.
     pub fn new(backend: B) -> Self {
         // The backend supplies the sole atlas; style construction mints every retained font and
@@ -1045,7 +1045,7 @@ mod theme_tests {
         let initial = test_atlas();
         let replacement = test_atlas();
         let replacement_style = Skin::from_atlas(&replacement);
-        let replacement_font = replacement_style.resources.fonts.body;
+        let replacement_font = replacement_style.resolve_font_role(&replacement, crate::FontRole::Body);
         let theme = LoadedTheme::from_skin("Replacement", replacement.clone(), replacement_style);
         let mut context = Context::<ThemeAtlasBackend>::new(ThemeAtlasBackend {
             atlas: initial.clone(),
@@ -1056,14 +1056,14 @@ mod theme_tests {
 
         assert!(context.atlas().ptr_eq(&replacement));
         assert!(!context.atlas().ptr_eq(&initial));
-        assert_eq!(context.skin().resources.fonts.body, replacement_font);
+        assert_eq!(context.skin().resolve_font_role(&context.atlas(), crate::FontRole::Body), replacement_font);
     }
 
     /// Verifies an atlas upload error leaves both sides of the active theme pair unchanged.
     #[test]
     fn set_theme_failure_preserves_previous_atlas_and_style() {
         let initial = test_atlas();
-        let initial_font = Skin::from_atlas(&initial).resources.fonts.body;
+        let initial_font = Skin::from_atlas(&initial).resolve_font_role(&initial, crate::FontRole::Body);
         let replacement = test_atlas();
         let theme = LoadedTheme::from_skin("Rejected", replacement.clone(), Skin::from_atlas(&replacement));
         let mut context = Context::<ThemeAtlasBackend>::new(ThemeAtlasBackend {
@@ -1075,6 +1075,6 @@ mod theme_tests {
 
         assert_eq!(error, AtlasUploadError::new("fixture rejected atlas"));
         assert!(context.atlas().ptr_eq(&initial));
-        assert_eq!(context.skin().resources.fonts.body, initial_font);
+        assert_eq!(context.skin().resolve_font_role(&context.atlas(), crate::FontRole::Body), initial_font);
     }
 }

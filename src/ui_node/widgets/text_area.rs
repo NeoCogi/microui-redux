@@ -76,7 +76,7 @@ pub struct TextAreaParameters {
     /// Wrapping mode used for measurement, editing, and paint.
     pub wrap: TextWrap,
     /// Font used for measurement, editing, and paint.
-    pub font: FontChoice,
+    pub font: FontRef,
     /// Presentation and scrolling options applied to the containing [`ScrollArea`].
     pub scroll_options: ScrollAreaOption,
 }
@@ -91,7 +91,7 @@ impl TextAreaParameters {
         Self {
             buf: buf.into(),
             wrap: TextWrap::None,
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             scroll_options: ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL,
         }
     }
@@ -112,7 +112,7 @@ impl TextAreaParameters {
     }
 
     /// Replaces the font used by the editable text content.
-    pub const fn font(mut self, font: FontChoice) -> Self {
+    pub fn font(mut self, font: FontRef) -> Self {
         // Preserve the semantic font choice until each phase resolves it against the active style.
         self.font = font;
         self
@@ -132,7 +132,7 @@ pub struct TextArea {
     /// Wrapping mode used by measurement, editing, and paint.
     wrap: TextWrap,
     /// Font used by measurement, editing, and paint.
-    font: FontChoice,
+    font: FontRef,
     /// Runtime-only derived editing state.
     interaction: TextAreaInteraction,
     /// Weak capability for scroll queries and caret reveal requests after composition.
@@ -303,7 +303,7 @@ impl TextArea {
     fn preferred_size_widget(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         // Resolve word wrapping against a bounded viewport width while leaving unwrapped content
         // intrinsically wide enough to create horizontal overflow.
-        let font = style.resolve_font_choice(self.font);
+        let font = style.resolve_font(atlas, &self.font);
         let max_width = if self.wrap == TextWrap::Word {
             constraints.width.bound().unwrap_or(i32::MAX / 4).max(1)
         } else {
@@ -334,7 +334,7 @@ impl TextArea {
             self.interaction.preferred_x = None;
             self.reset_preferred_x = false;
         }
-        let font = ctx.skin().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
         let outcome = textarea_update(ctx, input, self, font);
 
         // Emit complete immutable snapshots after the semantic update has committed cursor and text.
@@ -353,7 +353,7 @@ impl TextArea {
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         // ScrollArea has already applied translation and clipping before this child paint phase, so
         // the editor records no offset arithmetic or scrollbar operations.
-        let font = ctx.skin().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
         textarea_paint(ctx, self, font);
     }
 }
@@ -842,7 +842,7 @@ mod tests {
         );
         text_area.update(&mut ctx, Some(&down));
 
-        let font = style.resolve_font_choice(text_area.font);
+        let font = style.resolve_font(&atlas, &text_area.font);
         let layout = textarea_layout(bounds, &atlas, &text_area, font);
         assert_eq!(text_area.cursor(), 2);
         assert_eq!(text_area.interaction.caret_affinity, CaretAffinity::Downstream);
@@ -931,7 +931,7 @@ mod tests {
         // public byte cursors paint and reveal on the two intended visual lines.
         let atlas = test_atlas();
         let style = test_skin(&atlas);
-        let font = style.resolve_font_choice(from_continuation.font);
+        let font = style.resolve_font(&atlas, &from_continuation.font);
         let layout = textarea_layout(bounds, &atlas, &from_continuation, font);
         assert_eq!(line_index_for_cursor(&layout.lines, 2, from_continuation.interaction.caret_affinity), 1);
         assert_eq!(line_index_for_cursor(&layout.lines, 2, from_first_line.interaction.caret_affinity), 0);

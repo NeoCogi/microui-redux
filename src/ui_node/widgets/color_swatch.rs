@@ -39,7 +39,7 @@ pub struct ColorSwatchParameters {
     /// Initial optional label rendered on top of the swatch.
     pub label: String,
     /// Font used for the label.
-    pub font: FontChoice,
+    pub font: FontRef,
     /// Base widget options.
     pub opt: WidgetOption,
 }
@@ -58,7 +58,7 @@ impl ColorSwatchParameters {
         Self {
             fill,
             label: String::new(),
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt: WidgetOption::NO_INTERACT | WidgetOption::ALIGN_CENTER | WidgetOption::FRAME,
         }
     }
@@ -70,7 +70,8 @@ impl ColorSwatchParameters {
     }
 
     /// Replaces the font used for the label.
-    pub const fn font(mut self, font: FontChoice) -> Self {
+    pub fn font(mut self, font: FontRef) -> Self {
+        // Keep the stable reference unresolved until the swatch is measured or painted.
         self.font = font;
         self
     }
@@ -79,7 +80,7 @@ impl ColorSwatchParameters {
 /// Concrete retained color swatch, including its semantic state.
 pub struct ColorSwatch {
     /// Initialization-only font.
-    font: FontChoice,
+    font: FontRef,
     /// Base widget options.
     opt: WidgetOption,
     /// Mutable fill color.
@@ -118,7 +119,7 @@ impl ColorSwatch {
     /// Measures a square-ish color swatch with a text-friendly default height.
     fn preferred_size_widget(&self, style: &Skin, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         let padding = style.metrics.padding.max(0);
-        let font = style.resolve_font_choice(self.font);
+        let font = style.resolve_font(atlas, &self.font);
         let label_width = if self.label.is_empty() {
             0
         } else {
@@ -136,7 +137,7 @@ impl ColorSwatch {
         let rect = ctx.local_rect();
         ctx.draw_rect(rect, self.fill);
         if !self.label.is_empty() {
-            let font = ctx.skin().resolve_font_choice(self.font);
+            let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
             ctx.draw_control_text_with_font(font, self.label.as_str(), rect, AppearanceRole::Button, self.opt);
         }
     }

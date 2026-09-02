@@ -40,7 +40,7 @@ pub struct CustomParameters {
     /// Label used for debugging or inspection.
     pub name: String,
     /// Font used for default measurement.
-    pub font: FontChoice,
+    pub font: FontRef,
     /// Base widget options.
     pub opt: WidgetOption,
     /// Explicit keyboard capabilities for this otherwise behavior-free surface.
@@ -60,7 +60,7 @@ impl CustomParameters {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt: WidgetOption::NONE,
             keyboard: KeyboardBehavior::NONE,
         }
@@ -70,14 +70,15 @@ impl CustomParameters {
     pub fn with_opt(name: impl Into<String>, opt: WidgetOption) -> Self {
         Self {
             name: name.into(),
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt,
             keyboard: KeyboardBehavior::NONE,
         }
     }
 
     /// Replaces the font used for default measurement.
-    pub const fn font(mut self, font: FontChoice) -> Self {
+    pub fn font(mut self, font: FontRef) -> Self {
+        // Custom labels use the same stable reference contract as built-in retained widgets.
         self.font = font;
         self
     }
@@ -94,7 +95,7 @@ pub struct Custom {
     /// Initialization-only debug label.
     name: String,
     /// Initialization-only measurement font.
-    font: FontChoice,
+    font: FontRef,
     /// Base widget options.
     opt: WidgetOption,
     /// Keyboard behavior copied from the one-shot construction parameters.
@@ -113,10 +114,10 @@ impl Custom {
         let text_w = if self.name.is_empty() {
             0
         } else {
-            text_size(style, atlas, self.font, self.name.as_str()).width
+            text_size(style, atlas, &self.font, self.name.as_str()).width
         };
         let width = padding.saturating_mul(2).saturating_add(text_w.max(0));
-        let height = content_height(style, atlas, self.font, 0);
+        let height = content_height(style, atlas, &self.font, 0);
         Dimensioni::new(width, height)
     }
 }

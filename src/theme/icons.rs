@@ -28,77 +28,125 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-//! Atlas-bound semantic icon capabilities used by built-in UI components.
+//! Stable semantic and named icon references for retained UI state.
+
+use std::sync::Arc;
 
 use crate::atlas::{AtlasHandle, IconId};
 
-/// Atlas icon IDs selected for the semantic roles used by built-in components.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct ThemeIcons {
+/// Semantic icon roles required by built-in components.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum IconRole {
     /// Window and dialog close affordance.
-    pub close: IconId,
+    Close,
     /// Collapsed disclosure affordance.
-    pub expand: IconId,
+    Expand,
     /// Expanded disclosure affordance.
-    pub collapse: IconId,
-    /// Checked checkbox mark.
-    pub check: IconId,
+    Collapse,
+    /// Checked checkbox and menu-item mark.
+    Check,
     /// Combo-box dropdown affordance.
-    pub expand_down: IconId,
+    ExpandDown,
     /// Open-folder file-dialog item.
-    pub open_folder: IconId,
+    OpenFolder,
     /// Closed-folder file-dialog item.
-    pub closed_folder: IconId,
+    ClosedFolder,
     /// Regular file-dialog item.
-    pub file: IconId,
+    File,
 }
 
-impl ThemeIcons {
-    /// Resolves the built-in semantic roles into capabilities minted by `atlas`.
-    ///
-    /// Conventional lowercase names are used directly. Missing roles are configuration errors:
-    /// built-in widgets retain these concrete capabilities and must never manufacture positional
-    /// fallbacks or defer lookup until paint.
-    ///
-    /// # Panics
-    ///
-    /// Panics with the missing role name when any required semantic icon is absent.
-    pub fn from_atlas(atlas: &AtlasHandle) -> Self {
-        /// Resolves one required semantic role with a precise construction diagnostic.
-        fn required(atlas: &AtlasHandle, name: &'static str) -> IconId {
-            // Resolve exact lowercase names only; accepting historic uppercase aliases would keep
-            // two naming conventions alive and hide stale generated metadata.
-            atlas
-                .icon_id(name)
-                .unwrap_or_else(|| panic!("atlas does not contain required theme icon `{name}`"))
-        }
+impl IconRole {
+    /// Every semantic icon role in declaration order.
+    pub const ALL: [Self; 8] = [
+        Self::Close,
+        Self::Expand,
+        Self::Collapse,
+        Self::Check,
+        Self::ExpandDown,
+        Self::OpenFolder,
+        Self::ClosedFolder,
+        Self::File,
+    ];
 
-        // Every field is minted by this exact atlas, making the resulting bundle safe to retain in
-        // WindowManager and FileDialog without carrying the AtlasHandle beside it.
-        Self {
-            close: required(atlas, "close"),
-            expand: required(atlas, "expand"),
-            collapse: required(atlas, "collapse"),
-            check: required(atlas, "check"),
-            expand_down: required(atlas, "expand_down"),
-            open_folder: required(atlas, "open_folder"),
-            closed_folder: required(atlas, "closed_folder"),
-            file: required(atlas, "file"),
+    /// Returns the conventional atlas name for this semantic icon.
+    pub const fn atlas_name(self) -> &'static str {
+        // Exhaustive matching makes a newly added role choose its exact resource spelling before
+        // the crate compiles, avoiding parallel string lists in loaders and widgets.
+        match self {
+            Self::Close => "close",
+            Self::Expand => "expand",
+            Self::Collapse => "collapse",
+            Self::Check => "check",
+            Self::ExpandDown => "expand_down",
+            Self::OpenFolder => "open_folder",
+            Self::ClosedFolder => "closed_folder",
+            Self::File => "file",
         }
     }
 
-    /// Reports whether every semantic icon capability belongs to `atlas`.
-    pub(crate) fn belongs_to(&self, atlas: &AtlasHandle) -> bool {
-        // Keep the ownership check explicit so adding a future semantic field requires updating the
-        // validation list instead of being silently omitted by type erasure or iteration metadata.
-        atlas.contains_icon(self.close)
-            && atlas.contains_icon(self.expand)
-            && atlas.contains_icon(self.collapse)
-            && atlas.contains_icon(self.check)
-            && atlas.contains_icon(self.expand_down)
-            && atlas.contains_icon(self.open_folder)
-            && atlas.contains_icon(self.closed_folder)
-            && atlas.contains_icon(self.file)
+    /// Resolves this role into a capability minted by `atlas`.
+    ///
+    /// # Panics
+    ///
+    /// Panics with the missing role name when the required semantic icon is absent.
+    pub fn resolve(self, atlas: &AtlasHandle) -> IconId {
+        let name = self.atlas_name();
+        // Resolve exact lowercase names only; accepting historic aliases would preserve two public
+        // naming conventions and conceal malformed generated metadata.
+        atlas
+            .icon_id(name)
+            .unwrap_or_else(|| panic!("atlas does not contain required skin icon `{name}`"))
+    }
+}
+
+/// Stable reference to an icon used by retained UI state.
+///
+/// The reference carries a semantic role or resource name rather than an allocation-bound
+/// [`IconId`]. It can consequently survive a complete skin/atlas replacement and resolve against
+/// the newly installed atlas during measurement or paint.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum IconRef {
+    /// Resolves through one required semantic icon role.
+    Role(IconRole),
+    /// Resolves one exact application-owned atlas icon name.
+    Named(Arc<str>),
+}
+
+impl From<IconRole> for IconRef {
+    /// Converts a semantic role without binding it to the current atlas.
+    fn from(role: IconRole) -> Self {
+        // Preserve the role so switching skins also switches the concrete icon capability.
+        Self::Role(role)
+    }
+}
+
+impl IconRef {
+    /// Creates a semantic icon reference.
+    pub fn role(role: IconRole) -> Self {
+        // This constructor mirrors `named` and keeps public widget construction explicit.
+        Self::Role(role)
+    }
+
+    /// Creates a stable reference to one exact atlas icon name.
+    pub fn named(name: impl Into<Arc<str>>) -> Self {
+        let name = name.into();
+        // Empty names are never valid atlas keys and should fail where retained state is built.
+        assert!(!name.is_empty(), "icon reference name must not be empty");
+        Self::Named(name)
+    }
+
+    /// Resolves this stable reference into a capability owned by `atlas`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the semantic or named icon is absent from `atlas`.
+    pub fn resolve(&self, atlas: &AtlasHandle) -> IconId {
+        // Resolution is deliberately late but concrete: retained data stores this typed enum, and
+        // renderer-facing code receives an ordinary IconId for only the active atlas.
+        match self {
+            Self::Role(role) => role.resolve(atlas),
+            Self::Named(name) => atlas.icon_id(name).unwrap_or_else(|| panic!("atlas does not contain referenced icon `{name}`")),
+        }
     }
 }
 
@@ -107,9 +155,9 @@ mod tests {
     use super::*;
     use crate::{AtlasSource, CharEntry, FontEntry, Recti, SourceFormat, Vec2i};
 
-    /// Verifies semantic construction is name-based and independent of table position.
+    /// Verifies semantic resolution is name-based and independent of table position.
     #[test]
-    fn from_atlas_resolves_semantic_icons_independent_of_slot_order() {
+    fn icon_roles_resolve_independent_of_slot_order() {
         let pixels = [0xFF, 0xFF, 0xFF, 0xFF];
         let icons = [
             ("white", Recti::new(0, 0, 1, 1)),
@@ -152,15 +200,11 @@ mod tests {
         })
         .expect("semantic-icon fixture atlas must satisfy the complete atlas contract");
 
-        let bindings = ThemeIcons::from_atlas(&atlas);
+        for role in IconRole::ALL {
+            assert_eq!(role.resolve(&atlas), atlas.icon_id(role.atlas_name()).unwrap());
+        }
 
-        assert_eq!(bindings.close, atlas.icon_id("close").unwrap());
-        assert_eq!(bindings.expand, atlas.icon_id("expand").unwrap());
-        assert_eq!(bindings.collapse, atlas.icon_id("collapse").unwrap());
-        assert_eq!(bindings.check, atlas.icon_id("check").unwrap());
-        assert_eq!(bindings.expand_down, atlas.icon_id("expand_down").unwrap());
-        assert_eq!(bindings.open_folder, atlas.icon_id("open_folder").unwrap());
-        assert_eq!(bindings.closed_folder, atlas.icon_id("closed_folder").unwrap());
-        assert_eq!(bindings.file, atlas.icon_id("file").unwrap());
+        let named = IconRef::named("close");
+        assert_eq!(named.resolve(&atlas), atlas.icon_id("close").unwrap());
     }
 }

@@ -40,7 +40,7 @@ use std::{cell::RefCell, fmt, rc::Rc};
 use crate::ui_node::widgets::content_height;
 use crate::math::RectExt;
 use crate::{
-    AppearanceRole, AtlasHandle, Color, Dimensioni, FontChoice, FontRole, MouseButton, Recti, Skin, UiInputEvent, Vec2i, VisualState, WidgetEventPortHandle,
+    AppearanceRole, AtlasHandle, Color, Dimensioni, FontRef, FontRole, MouseButton, Recti, Skin, UiInputEvent, Vec2i, VisualState, WidgetEventPortHandle,
     WidgetOption, WidgetPaintCtx,
 };
 
@@ -72,7 +72,7 @@ pub struct MenuItemParameters {
     /// Presentation-only accelerator text aligned at the right edge.
     pub shortcut_hint: Option<String>,
     /// Font used by both the label and accelerator text.
-    pub font: FontChoice,
+    pub font: FontRef,
 }
 
 impl MenuItemParameters {
@@ -84,7 +84,7 @@ impl MenuItemParameters {
             enabled: true,
             mark: MenuItemMark::None,
             shortcut_hint: None,
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
         }
     }
 
@@ -130,7 +130,7 @@ impl MenuItemParameters {
     }
 
     /// Replaces the font used by this item.
-    pub const fn font(mut self, font: FontChoice) -> Self {
+    pub fn font(mut self, font: FontRef) -> Self {
         // One font choice drives measurement and paint for both strings.
         self.font = font;
         self
@@ -696,7 +696,7 @@ impl MenuSurface {
                     // interaction state as the row background.
                     let color = ctx.foreground_state(role, state);
                     paint_item_marker(&mut ctx, marker, item.parameters.mark, color);
-                    let font = style.resolve_font_choice(item.parameters.font);
+                    let font = style.resolve_font(ctx.atlas(), &item.parameters.font);
                     // Both strings share one clip so control padding is applied exactly once.
                     ctx.draw_control_text_color_with_font(font, &item.parameters.label, text, color, WidgetOption::NONE);
                     if let Some(hint) = &item.parameters.shortcut_hint {
@@ -718,7 +718,7 @@ impl MenuSurface {
                     let _ = ctx.draw_appearance_state(role, state, row);
                     // Bar headings use their full slot; popup branches reserve the marker gutter.
                     let text = if self.popup { text_region(row, self.geometry.marker_width) } else { row };
-                    let font = style.resolve_font_choice(FontChoice::Role(FontRole::Body));
+                    let font = style.resolve_font(ctx.atlas(), &FontRef::Role(FontRole::Body));
                     let color = ctx.foreground_state(role, state);
                     ctx.draw_control_text_color_with_font(font, label, text, color, WidgetOption::NONE);
                     if self.popup {
@@ -824,9 +824,10 @@ fn layout_bar(headings: &[MenuSlot], style: &Skin, atlas: &AtlasHandle, mut slot
 
     // Headings use one body font and retain intrinsic widths even when the bar stretches.
     let padding = style.metrics.padding.max(1);
-    let font_choice = FontChoice::Role(FontRole::Body);
-    let font = style.resolve_font_choice(font_choice);
-    let preferred_height = content_height(style, atlas, font_choice, atlas.get_icon_size(style.resources.icons.check).height);
+    let font_choice = FontRef::Role(FontRole::Body);
+    let font = style.resolve_font(atlas, &font_choice);
+    let check = crate::IconRole::Check.resolve(atlas);
+    let preferred_height = content_height(style, atlas, &font_choice, atlas.get_icon_size(check).height);
     let mut x = 0_i32;
     slots.reserve(headings.len());
     for heading in headings {
@@ -861,7 +862,7 @@ fn layout_popup(rows: &[MenuSlot], style: &Skin, atlas: &AtlasHandle, mut slots:
     for entry in rows {
         let height = match entry {
             MenuSlot::Item(item) => {
-                let font = style.resolve_font_choice(item.parameters.font);
+                let font = style.resolve_font(atlas, &item.parameters.font);
                 label_width = label_width.max(atlas.get_text_size(font, &item.parameters.label).width.max(0));
                 trailing_width = trailing_width.max(
                     item.parameters
@@ -872,18 +873,23 @@ fn layout_popup(rows: &[MenuSlot], style: &Skin, atlas: &AtlasHandle, mut slots:
                 );
                 // False check/radio values retain their role so toggling never moves adjacent text.
                 marker |= !matches!(item.parameters.mark, MenuItemMark::None);
-                content_height(style, atlas, item.parameters.font, atlas.get_icon_size(style.resources.icons.check).height)
+                content_height(
+                    style,
+                    atlas,
+                    &item.parameters.font,
+                    atlas.get_icon_size(crate::IconRole::Check.resolve(atlas)).height,
+                )
             }
             MenuSlot::Separator => style.metrics.spacing.max(3),
             MenuSlot::Branch { label, .. } => {
-                let font_choice = FontChoice::Role(FontRole::Body);
-                let font = style.resolve_font_choice(font_choice);
+                let font_choice = FontRef::Role(FontRole::Body);
+                let font = style.resolve_font(atlas, &font_choice);
                 label_width = label_width.max(atlas.get_text_size(font, label).width.max(0));
-                let arrow = atlas.get_icon_size(style.resources.icons.expand);
+                let arrow = atlas.get_icon_size(crate::IconRole::Expand.resolve(atlas));
                 trailing_width = trailing_width.max(arrow.width.max(0));
                 // Include arrow height as well as check height to avoid vertical glyph clipping.
-                let visual_height = arrow.height.max(atlas.get_icon_size(style.resources.icons.check).height);
-                content_height(style, atlas, font_choice, visual_height)
+                let visual_height = arrow.height.max(atlas.get_icon_size(crate::IconRole::Check.resolve(atlas)).height);
+                content_height(style, atlas, &font_choice, visual_height)
             }
         };
         slots.push(Recti::new(panel_insets.left, y, 0, height));
@@ -893,7 +899,7 @@ fn layout_popup(rows: &[MenuSlot], style: &Skin, atlas: &AtlasHandle, mut slots:
     let marker_width = if marker {
         // Radio marks use a drawn fallback, so reserve a usable column even if the check icon is empty.
         atlas
-            .get_icon_size(style.resources.icons.check)
+            .get_icon_size(crate::IconRole::Check.resolve(atlas))
             .width
             .max(MIN_MARKER_COLUMN_WIDTH)
             .saturating_add(padding)
@@ -948,14 +954,18 @@ fn paint_item_marker(ctx: &mut WidgetPaintCtx<'_>, bounds: Recti, mark: MenuItem
     match mark {
         MenuItemMark::None | MenuItemMark::Checked(false) | MenuItemMark::Radio(false) => {}
         MenuItemMark::Checked(true) => {
-            let icon_id = ctx.skin().resources.icons.check;
+            let icon_id = crate::IconRole::Check.resolve(ctx.atlas());
             let size = ctx.atlas().get_icon_size(icon_id);
             ctx.draw_icon(icon_id, trailing_rect(bounds, size, 0), color);
         }
         MenuItemMark::Radio(true) => {
             // The atlas has no radio glyph. Center its fallback square in the check-icon column,
             // excluding the leading gutter padding represented by the wider `bounds` rectangle.
-            let check_width = ctx.atlas().get_icon_size(ctx.skin().resources.icons.check).width.max(MIN_MARKER_COLUMN_WIDTH);
+            let check_width = ctx
+                .atlas()
+                .get_icon_size(crate::IconRole::Check.resolve(ctx.atlas()))
+                .width
+                .max(MIN_MARKER_COLUMN_WIDTH);
             let available = check_width.min(bounds.height.max(0));
             let extent = (available / 3).max(1).min(available);
             let column_x = bounds.x.saturating_add(bounds.width).saturating_sub(check_width);
@@ -974,9 +984,10 @@ fn paint_item_marker(ctx: &mut WidgetPaintCtx<'_>, bounds: Recti, mark: MenuItem
 fn paint_submenu_arrow(ctx: &mut WidgetPaintCtx<'_>, bounds: Recti, color: Color) {
     // Align the glyph with the right padding used by right-aligned shortcut text.
     let style = ctx.skin().clone();
-    let size = ctx.atlas().get_icon_size(style.resources.icons.expand);
+    let icon_id = crate::IconRole::Expand.resolve(ctx.atlas());
+    let size = ctx.atlas().get_icon_size(icon_id);
     let icon = trailing_rect(bounds, size, style.metrics.padding.max(1));
-    ctx.draw_icon(style.resources.icons.expand, icon, color);
+    ctx.draw_icon(icon_id, icon, color);
 }
 
 /// Paints one centered subdued separator rule.

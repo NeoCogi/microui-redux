@@ -205,17 +205,18 @@ impl DisclosureHeader {
         // Resolve icon and text metrics independently, then build the one-row content preference.
         let padding = style.metrics.padding.max(0);
         let vertical_pad = (padding / 2).max(1);
-        let font_height = atlas.get_font_height(style.resources.fonts.body) as i32;
+        let body_font = style.resolve_font_role(atlas, crate::FontRole::Body);
+        let font_height = atlas.get_font_height(body_font) as i32;
         // Expansion changes only presentation state, not the header's retained allocation. Reserve
         // the component-wise maximum of both possible icons so toggling cannot clip a larger
         // collapse image or require a state-dependent measurement invalidation.
-        let expand_icon = atlas.get_icon_size(style.resources.icons.expand);
-        let collapse_icon = atlas.get_icon_size(style.resources.icons.collapse);
+        let expand_icon = atlas.get_icon_size(crate::IconRole::Expand.resolve(atlas));
+        let collapse_icon = atlas.get_icon_size(crate::IconRole::Collapse.resolve(atlas));
         let icon = Dimensioni::new(expand_icon.width.max(collapse_icon.width), expand_icon.height.max(collapse_icon.height));
         let text_width = if self.label.is_empty() {
             0
         } else {
-            atlas.get_text_size(style.resources.fonts.body, &self.label).width
+            atlas.get_text_size(body_font, &self.label).width
         };
         let content_height = font_height.max(icon.height).max(0).saturating_add(vertical_pad.saturating_mul(2));
         let icon_width = content_height.saturating_sub(padding).max(icon.width).max(0);
@@ -279,20 +280,18 @@ impl Widget for DisclosureHeader {
             AppearanceRole::DisclosureHeader
         };
         let text_color = ctx.foreground(foreground_role);
-        ctx.draw_icon(
-            if expanded {
-                ctx.skin().resources.icons.collapse
-            } else {
-                ctx.skin().resources.icons.expand
-            },
-            Recti::new(row.x, row.y, row.height, row.height),
-            text_color,
-        );
+        let icon = if expanded {
+            crate::IconRole::Collapse.resolve(ctx.atlas())
+        } else {
+            crate::IconRole::Expand.resolve(ctx.atlas())
+        };
+        ctx.draw_icon(icon, Recti::new(row.x, row.y, row.height, row.height), text_color);
         // text_offset = row_height - padding.
         let offset = row.height.saturating_sub(ctx.skin().metrics.padding);
         // text_x = row_x + text_offset; text_width = row_width - text_offset.
         let text_rect = Recti::new(row.x.saturating_add(offset), row.y, row.width.saturating_sub(offset), row.height);
-        ctx.draw_control_text_with_font(ctx.skin().resources.fonts.body, &self.label, text_rect, foreground_role, self.opt);
+        let body_font = ctx.skin().resolve_font_role(ctx.atlas(), crate::FontRole::Body);
+        ctx.draw_control_text_with_font(body_font, &self.label, text_rect, foreground_role, self.opt);
     }
 
     // Framing belongs to the header sub-rectangle, not the complete descendant allocation.

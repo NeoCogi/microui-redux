@@ -71,7 +71,7 @@ pub struct SliderParameters {
     /// Bounded number of digits after the decimal point when rendering.
     precision: DecimalPrecision,
     /// Font used for the numeric label and editor.
-    font: FontChoice,
+    font: FontRef,
     /// Base widget options.
     opt: WidgetOption,
 }
@@ -113,13 +113,14 @@ impl SliderParameters {
             high,
             step,
             precision,
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt: opt | WidgetOption::GRAB_SCROLL,
         })
     }
 
     /// Replaces the font used for the numeric label and editor.
-    pub const fn font(mut self, font: FontChoice) -> Self {
+    pub fn font(mut self, font: FontRef) -> Self {
+        // Slider measurement resolves this stable choice only against the current atlas.
         self.font = font;
         self
     }
@@ -141,7 +142,7 @@ pub struct Slider {
     /// Initialization-only bounded display precision.
     precision: DecimalPrecision,
     /// Initialization-only font.
-    font: FontChoice,
+    font: FontRef,
     /// Base widget options.
     opt: WidgetOption,
     /// Current slider value.
@@ -191,13 +192,13 @@ impl Slider {
     /// Measures the slider track plus formatted value label.
     fn preferred_size_widget(&self, style: &Skin, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         let thumb_size = style.metrics.thumb_size.max(0);
-        number_preferred_size(style, atlas, self.font, self.value, self.precision, thumb_size, thumb_size)
+        number_preferred_size(style, atlas, &self.font, self.value, self.precision, thumb_size, thumb_size)
     }
 
     /// Updates slider value from shift-click text entry, scroll, or pointer drag.
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         let base = ctx.local_rect();
-        let font = ctx.skin().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
         let last = self.value;
         let mut value = last;
         if !self.edit.editing {
@@ -268,7 +269,7 @@ impl Slider {
 
     /// Paints either the inline numeric editor or the slider track/thumb/value label.
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        let font = ctx.skin().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
         if self.edit.editing {
             number_textbox_paint(ctx, &self.edit, font);
             return;

@@ -69,7 +69,7 @@ pub struct TextBlockParameters {
     /// Wrapping mode used for layout and rendering.
     pub wrap: TextWrap,
     /// Font used for text measurement and paint.
-    pub font: FontChoice,
+    pub font: FontRef,
     /// Base widget options.
     pub opt: WidgetOption,
 }
@@ -93,13 +93,14 @@ impl TextBlockParameters {
         Self {
             text: text.into(),
             wrap,
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt: WidgetOption::NO_INTERACT,
         }
     }
 
     /// Replaces the font used for text measurement and paint.
-    pub const fn font(mut self, font: FontChoice) -> Self {
+    pub fn font(mut self, font: FontRef) -> Self {
+        // Text layout resolves this stable value against whichever skin bundle is active later.
         self.font = font;
         self
     }
@@ -110,7 +111,7 @@ pub struct TextBlock {
     /// Initialization-only wrapping mode.
     wrap: TextWrap,
     /// Initialization-only font.
-    font: FontChoice,
+    font: FontRef,
     /// Base widget options.
     opt: WidgetOption,
     /// Mutable display text.
@@ -147,7 +148,7 @@ impl TextBlock {
             return Dimensioni::new(0, 0);
         }
 
-        let font = style.resolve_font_choice(self.font);
+        let font = style.resolve_font(atlas, &self.font);
         let line_height = atlas.get_font_height(font) as i32;
         let max_width = if self.wrap == TextWrap::Word {
             constraints.width.bound().unwrap_or(i32::MAX / 4).max(1)
@@ -165,7 +166,7 @@ impl TextBlock {
         }
 
         let bounds = ctx.local_rect();
-        let font = ctx.skin().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
         let color = ctx.foreground(AppearanceRole::GenericFrame);
         let line_height = ctx.atlas().get_font_height(font) as i32;
         let baseline = ctx.atlas().get_font_baseline(font);
@@ -250,7 +251,7 @@ mod tests {
         let mut block = TextBlockBuilder::create_widget(TextBlockParameters {
             text: "a\r\nb\rc\n".to_owned(),
             wrap: TextWrap::None,
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt: WidgetOption::NO_INTERACT,
         });
         assert_eq!(block.text(), "a\nb\nc\n");

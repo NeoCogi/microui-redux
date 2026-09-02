@@ -42,8 +42,8 @@
 use std::{cell::RefCell, path::Path, rc::Rc};
 
 use crate::{
-    Button, ButtonParameters, ButtonSubmitted, IconId, Linear, LinearItem, LinearParameters, ListItem, ListItemParameters, ListItemSubmitted, Node, Recti,
-    Context, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Textbox, TextboxParameters, TextboxSubmitted, ThemeIcons, TypedWidgetHandle, Ui,
+    Button, ButtonParameters, ButtonSubmitted, Context, IconRef, IconRole, Linear, LinearItem, LinearParameters, ListItem, ListItemParameters,
+    ListItemSubmitted, Node, Recti, ScrollArea, ScrollAreaOption, ScrollAreaParameters, Textbox, TextboxParameters, TextboxSubmitted, TypedWidgetHandle, Ui,
     WidgetEventPortHandle, WidgetOption, Window, WindowEvent, WindowHandle, WindowOption,
 };
 use crate::event::WidgetEventPort;
@@ -221,8 +221,6 @@ pub struct FileDialog {
     folders: Vec<String>,
     /// Display names currently mounted in the file column.
     files: Vec<String>,
-    /// Theme icon identifiers captured for rebuilding dynamic rows.
-    icons: ThemeIcons,
     /// Weak retained topology capability for replacing folder rows in place.
     folder_column: TypedWidgetHandle<Linear>,
     /// Weak retained topology capability for replacing file rows in place.
@@ -266,11 +264,10 @@ impl FileDialog {
         let current_working_directory = String::new();
         let folders = Vec::new();
         let files = Vec::new();
-        let icons = ctx.skin().resources.icons;
         let folder_item_port = Rc::new(RefCell::new(WidgetEventPort::new()));
         let file_item_port = Rc::new(RefCell::new(WidgetEventPort::new()));
-        let folder_rows = Self::make_folder_rows(&current_working_directory, &folders, icons.closed_folder, &folder_item_port);
-        let file_rows = Self::make_file_rows(&files, icons.file, &file_item_port);
+        let folder_rows = Self::make_folder_rows(&current_working_directory, &folders, &folder_item_port);
+        let file_rows = Self::make_file_rows(&files, &file_item_port);
 
         let (up_handle, up_node) = Button::create(ButtonParameters::new("Up"));
         let (home_handle, home_node) = Button::create(ButtonParameters::new("Home"));
@@ -365,7 +362,6 @@ impl FileDialog {
             current_working_directory,
             folders,
             files,
-            icons,
             folder_column,
             file_column,
             folder_scroll,
@@ -414,7 +410,7 @@ impl FileDialog {
         }
     }
 
-    fn make_folder_rows(cwd: &str, folders: &[String], folder_icon: IconId, submitted_event: &Rc<RefCell<WidgetEventPort<ListItemSubmitted>>>) -> DialogRows {
+    fn make_folder_rows(cwd: &str, folders: &[String], submitted_event: &Rc<RefCell<WidgetEventPort<ListItemSubmitted>>>) -> DialogRows {
         if folders.is_empty() {
             return DialogRows {
                 nodes: vec![Self::static_item("No folders")],
@@ -427,7 +423,12 @@ impl FileDialog {
         let mut ids = Vec::with_capacity(folders.len());
         for folder in folders {
             let label = Self::folder_label(cwd, folder);
-            let (_, node) = ListItem::create_with_event_port(ListItemParameters::with_icon(label, folder_icon), Rc::clone(submitted_event));
+            // Rows retain the semantic role, so an open dialog adopts replacement skin artwork
+            // without rebuilding its retained topology or keeping an old atlas capability alive.
+            let (_, node) = ListItem::create_with_event_port(
+                ListItemParameters::with_icon(label, IconRef::role(IconRole::ClosedFolder)),
+                Rc::clone(submitted_event),
+            );
             #[cfg(test)]
             ids.push(node.id());
             nodes.push(node);
@@ -439,7 +440,7 @@ impl FileDialog {
         }
     }
 
-    fn make_file_rows(files: &[String], file_icon: IconId, submitted_event: &Rc<RefCell<WidgetEventPort<ListItemSubmitted>>>) -> DialogRows {
+    fn make_file_rows(files: &[String], submitted_event: &Rc<RefCell<WidgetEventPort<ListItemSubmitted>>>) -> DialogRows {
         if files.is_empty() {
             return DialogRows {
                 nodes: vec![Self::static_item("No files")],
@@ -451,7 +452,7 @@ impl FileDialog {
         #[cfg(test)]
         let mut ids = Vec::with_capacity(files.len());
         for file in files {
-            let (_, node) = ListItem::create_with_event_port(ListItemParameters::with_icon(file, file_icon), Rc::clone(submitted_event));
+            let (_, node) = ListItem::create_with_event_port(ListItemParameters::with_icon(file, IconRef::role(IconRole::File)), Rc::clone(submitted_event));
             #[cfg(test)]
             ids.push(node.id());
             nodes.push(node);
@@ -465,8 +466,8 @@ impl FileDialog {
 
     fn refresh_entries(&mut self) {
         let (folders, files) = Self::read_directory(Path::new(&self.current_working_directory));
-        let folder_rows = Self::make_folder_rows(&self.current_working_directory, &folders, self.icons.closed_folder, &self.folder_item_port);
-        let file_rows = Self::make_file_rows(&files, self.icons.file, &self.file_item_port);
+        let folder_rows = Self::make_folder_rows(&self.current_working_directory, &folders, &self.folder_item_port);
+        let file_rows = Self::make_file_rows(&files, &self.file_item_port);
         #[cfg(test)]
         let folder_item_ids = folder_rows.ids;
         #[cfg(test)]
@@ -519,10 +520,7 @@ impl FileDialog {
     ///
     /// Panics when the dialog is already open or its application-owned window was destroyed.
     pub fn open(&mut self, ui: &mut Ui<'_>, request: FileDialogRequest) {
-        // Capture theme-owned icons before mutating the retained dialog so model reset and surface
-        // visibility remain one transaction through the shared façade.
-        let icons = ui.skin().resources.icons;
-        let (title, rect) = self.prepare_open(request, icons);
+        let (title, rect) = self.prepare_open(request);
         ui.set_window_name(&self.window, title)
             .expect("application-owned file-dialog window must remain registered");
         ui.set_window_rect(&self.window, rect)
@@ -546,12 +544,11 @@ impl FileDialog {
     }
 
     /// Resets activation-specific model and widget state before the dialog window is shown.
-    fn prepare_open(&mut self, request: FileDialogRequest, icons: ThemeIcons) -> (String, Recti) {
+    fn prepare_open(&mut self, request: FileDialogRequest) -> (String, Recti) {
         assert!(!self.active, "file dialog is already open");
         assert!(self.window.events().is_alive(), "application-owned file-dialog window was destroyed");
 
         let FileDialogRequest { title, initial_directory, rect } = request;
-        self.icons = icons;
         self.current_working_directory = initial_directory;
         self.path_box
             .try_update_with(self.current_working_directory.clone(), |state, path| state.set_text(path))

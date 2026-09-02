@@ -978,7 +978,7 @@ mod tests {
         assert_eq!(scroll.try_read(|state| state.geometry.horizontal.is_none()), Some(true));
         let text_rect = runtime.node_rect(std::slice::from_ref(&root), text_id).unwrap();
         assert_eq!(text_rect.width, 56);
-        assert!(text_rect.height > atlas.get_font_height(style.resources.fonts.body) as i32);
+        assert!(text_rect.height > atlas.get_font_height(style.resolve_font_role(&atlas, crate::FontRole::Body)) as i32);
     }
 
     #[test]

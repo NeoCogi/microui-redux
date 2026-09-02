@@ -37,9 +37,9 @@ use microui_redux::prelude::{
     MenuItemSubmitted, Recti, TextBlock, TextBlockParameters, TypedWidgetHandle, Vec2i, Window,
 };
 use microui_redux::{
-    color, rect, AtlasHandle, AtlasSource, AtlasUploadError, CharEntry, Constraints, Context, Disclosure, DisclosureParameters, FontChoice, FontEntry, Grid,
-    GridParameters, ImageError, Linear, LinearParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SourceFormat, Skin, SurfaceMutationError,
-    TextureError, TextureId, ThemeIcons,
+    color, rect, AtlasHandle, AtlasSource, AtlasUploadError, CharEntry, Constraints, Context, Disclosure, DisclosureParameters, FontEntry, FontRef, FontRole,
+    Grid, GridParameters, ImageError, Linear, LinearParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SourceFormat, Skin, SurfaceMutationError,
+    IconRef, IconRole, TextureError, TextureId,
 };
 
 struct TestBackend {
@@ -145,31 +145,30 @@ fn context() -> Context<TestBackend> {
     context_with_state()
 }
 
-/// Verifies downstream code constructs and installs only atlas-owned style capabilities.
+/// Verifies downstream retained resource references survive replacement atlas allocations.
 #[test]
 fn downstream_style_and_theme_are_constructed_from_atlas_capabilities() {
     let mut context = context();
     let atlas = context.atlas();
-    let icons = ThemeIcons::from_atlas(&atlas);
     let mut style = Skin::from_atlas(&atlas);
 
-    // Public lookups and semantic construction must agree on the exact opaque capabilities.
-    assert_eq!(style.resources.fonts.body, atlas.font_id("body").unwrap());
-    assert_eq!(icons.close, atlas.icon_id("close").unwrap());
-    assert_eq!(FontChoice::id(style.resources.fonts.body).resolve(&style), style.resources.fonts.body);
+    // Stable public references resolve to exact short-lived capabilities for the active atlas.
+    let body = FontRef::role(FontRole::Body);
+    let close = IconRef::role(IconRole::Close);
+    assert_eq!(body.resolve(&style, &atlas), atlas.font_id("body").unwrap());
+    assert_eq!(close.resolve(&atlas), atlas.icon_id("close").unwrap());
 
-    // Scalar customization preserves those IDs; Context accepts the complete style by value.
+    // Scalar customization contains no hidden resource IDs; Context accepts the skin by value.
     style.metrics.padding = 9;
     context.set_skin(style);
     assert_eq!(context.skin().metrics.padding, 9);
-    assert_eq!(context.skin().resources.icons, icons);
 
-    // A style from separately reconstructed identical metadata carries a different AtlasId and is
-    // rejected at the Context mutation boundary rather than aliasing same-slot resources.
+    // References resolve again against separately reconstructed equivalent metadata rather than
+    // retaining capabilities minted by the original allocation.
     let foreign_context = context_with_state::<()>();
-    let foreign_style = foreign_context.skin().clone();
-    let foreign_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| context.set_skin(foreign_style)));
-    assert!(foreign_result.is_err());
+    let foreign_atlas = foreign_context.atlas();
+    assert_eq!(body.resolve(foreign_context.skin(), &foreign_atlas), foreign_atlas.font_id("body").unwrap());
+    assert_eq!(close.resolve(&foreign_atlas), foreign_atlas.icon_id("close").unwrap());
 }
 
 struct FileDialogModel {

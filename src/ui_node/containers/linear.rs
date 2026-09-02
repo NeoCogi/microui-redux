@@ -844,7 +844,7 @@ fn minimum_content_cross(direction: LinearDirection, style: &Skin, atlas: &Atlas
         return 0;
     }
     let padding = style.metrics.padding.max(0);
-    (atlas.get_font_height(style.resources.fonts.body) as i32)
+    (atlas.get_font_height(style.resolve_font_role(atlas, crate::FontRole::Body)) as i32)
         .saturating_add(padding.saturating_mul(2))
         .max(padding.saturating_mul(2))
 }

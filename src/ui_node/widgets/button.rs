@@ -44,7 +44,7 @@ pub enum ButtonContent {
         /// Text displayed on the button.
         label: String,
         /// Optional icon rendered on the button.
-        icon: Option<IconId>,
+        icon: Option<IconRef>,
     },
     /// A text label and optional image.
     Image {
@@ -73,7 +73,7 @@ pub struct ButtonParameters {
     /// Content rendered inside the button.
     pub content: ButtonContent,
     /// Font used for text content.
-    pub font: FontChoice,
+    pub font: FontRef,
     /// Base widget options.
     pub opt: WidgetOption,
     /// Fill behavior for the button background.
@@ -87,7 +87,7 @@ impl ButtonParameters {
     pub fn new(label: impl Into<String>) -> Self {
         Self {
             content: ButtonContent::Text { label: label.into(), icon: None },
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt: WidgetOption::FRAME,
             fill: WidgetFillOption::ALL,
         }
@@ -97,17 +97,17 @@ impl ButtonParameters {
     pub fn with_opt(label: impl Into<String>, opt: WidgetOption) -> Self {
         Self {
             content: ButtonContent::Text { label: label.into(), icon: None },
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt,
             fill: WidgetFillOption::ALL,
         }
     }
 
     /// Creates button parameters with an atlas icon.
-    pub fn with_icon(label: impl Into<String>, icon: IconId, opt: WidgetOption, fill: WidgetFillOption) -> Self {
+    pub fn with_icon(label: impl Into<String>, icon: IconRef, opt: WidgetOption, fill: WidgetFillOption) -> Self {
         Self {
             content: ButtonContent::Text { label: label.into(), icon: Some(icon) },
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt,
             fill,
         }
@@ -117,7 +117,7 @@ impl ButtonParameters {
     pub fn with_image(label: impl Into<String>, image: Option<TextureId>, opt: WidgetOption, fill: WidgetFillOption) -> Self {
         Self {
             content: ButtonContent::Image { label: label.into(), image },
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt,
             fill,
         }
@@ -127,14 +127,15 @@ impl ButtonParameters {
     pub fn with_scaled_image(label: impl Into<String>, image: Option<TextureId>, opt: WidgetOption, fill: WidgetFillOption) -> Self {
         Self {
             content: ButtonContent::ScaledImage { label: label.into(), image },
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt,
             fill,
         }
     }
 
     /// Replaces the font used for text content.
-    pub const fn font(mut self, font: FontChoice) -> Self {
+    pub fn font(mut self, font: FontRef) -> Self {
+        // Store the stable reference without resolving it against the currently active atlas.
         self.font = font;
         self
     }
@@ -151,7 +152,7 @@ pub struct Button {
     /// Initialization-only content.
     content: ButtonContent,
     /// Initialization-only font.
-    font: FontChoice,
+    font: FontRef,
     /// Base widget options.
     opt: WidgetOption,
     /// Initialization-only fill behavior.
@@ -176,19 +177,19 @@ impl Button {
     fn preferred_size_widget(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         match &self.content {
             ButtonContent::Text { label, icon } => {
-                let visual = icon.map(|icon| atlas.get_icon_size(icon));
-                inline_content_size(style, atlas, self.font, label, visual)
+                let visual = icon.as_ref().map(|icon| atlas.get_icon_size(icon.resolve(atlas)));
+                inline_content_size(style, atlas, &self.font, label, visual)
             }
             ButtonContent::Image { label, image } => {
                 let visual = image.map(TextureId::size);
-                inline_content_size(style, atlas, self.font, label, visual)
+                inline_content_size(style, atlas, &self.font, label, visual)
             }
             ButtonContent::ScaledImage { label, image } => {
                 let visual = image.map(TextureId::size);
                 if visual.is_some() && constraints.width.bound().is_some() {
                     scaled_visual_content_size(constraints, visual)
                 } else {
-                    inline_content_size(style, atlas, self.font, label, visual)
+                    inline_content_size(style, atlas, &self.font, label, visual)
                 }
             }
         }
@@ -202,18 +203,19 @@ impl Button {
             // allocation. An unframed button asks for only the role's stretchable center payload.
             ctx.draw_appearance_center(AppearanceRole::Button, rect);
         }
-        let font = ctx.skin().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
         match &self.content {
             ButtonContent::Text { label, icon } => {
                 // Text/icon buttons use atlas icon metrics when placing the inline visual.
-                let visual_size = icon.map(|icon| ctx.atlas().get_icon_size(icon));
+                let icon_id = icon.as_ref().map(|icon| icon.resolve(ctx.atlas()));
+                let visual_size = icon_id.map(|icon| ctx.atlas().get_icon_size(icon));
                 let placement = place_inline_content(rect, ctx.skin(), label, visual_size);
                 if !label.is_empty() {
                     ctx.draw_control_text_with_font(font, label, placement.text, AppearanceRole::Button, self.opt);
                 }
-                if let (Some(icon), Some(visual)) = (icon, placement.visual) {
+                if let (Some(icon), Some(visual)) = (icon_id, placement.visual) {
                     let color = ctx.foreground(AppearanceRole::Button);
-                    ctx.draw_icon(*icon, visual, color);
+                    ctx.draw_icon(icon, visual, color);
                 }
             }
             ButtonContent::Image { label, image } => {

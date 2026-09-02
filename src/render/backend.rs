@@ -359,7 +359,7 @@ pub trait RendererBackend: 'static {
     /// Every constructible [`AtlasHandle`] already contains a validated opaque white rendering tile
     /// named `white`, which the renderer samples for solid geometry. Backends used with
     /// [`crate::Context`] must additionally return a handle containing the `body` font and every
-    /// lowercase semantic icon required by [`crate::ThemeIcons::from_atlas`].
+    /// lowercase semantic icon required by [`crate::IconRole::ALL`].
     fn get_atlas(&self) -> AtlasHandle;
     /// Uploads and publishes one replacement UI atlas transactionally.
     ///

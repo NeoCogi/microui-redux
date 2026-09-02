@@ -48,7 +48,7 @@ pub struct CheckboxParameters {
     /// Initial checked value.
     pub checked: bool,
     /// Font used to measure and paint the label.
-    pub font: FontChoice,
+    pub font: FontRef,
     /// Base widget options used for interaction and painting.
     pub opt: WidgetOption,
 }
@@ -67,7 +67,7 @@ impl CheckboxParameters {
         Self {
             label: label.into(),
             checked,
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt: WidgetOption::NONE,
         }
     }
@@ -78,7 +78,8 @@ impl CheckboxParameters {
     }
 
     /// Replaces the label font used by the retained runtime.
-    pub const fn font(mut self, font: FontChoice) -> Self {
+    pub fn font(mut self, font: FontRef) -> Self {
+        // Keep semantic or named selection independent of the atlas active during construction.
         self.font = font;
         self
     }
@@ -98,7 +99,7 @@ pub struct Checkbox {
     /// Label displayed beside the checkbox square.
     label: String,
     /// Font used for the label.
-    font: FontChoice,
+    font: FontRef,
     /// Base widget options.
     opt: WidgetOption,
     /// Current checked value.
@@ -142,12 +143,12 @@ impl Checkbox {
     /// Measures the checkbox square plus optional label.
     fn preferred_size(&self, style: &Skin, atlas: &AtlasHandle) -> Dimensioni {
         let padding = style.metrics.padding.max(0);
-        let check_icon = atlas.get_icon_size(style.resources.icons.check);
-        let height = content_height(style, atlas, self.font, check_icon.height);
+        let check_icon = atlas.get_icon_size(crate::IconRole::Check.resolve(atlas));
+        let height = content_height(style, atlas, &self.font, check_icon.height);
         let mut width = padding.saturating_mul(2).saturating_add(height.max(0));
         if !self.label.is_empty() {
             width = width
-                .saturating_add(text_size(style, atlas, self.font, &self.label).width.max(0))
+                .saturating_add(text_size(style, atlas, &self.font, &self.label).width.max(0))
                 .saturating_add(padding);
         }
         Dimensioni::new(width.max(0), height)
@@ -162,12 +163,12 @@ impl Checkbox {
         if checked {
             let color = ctx.foreground(role);
             if let Some(box_content) = box_content {
-                ctx.draw_icon(ctx.skin().resources.icons.check, box_content, color);
+                ctx.draw_icon(crate::IconRole::Check.resolve(ctx.atlas()), box_content, color);
             }
         }
         let text_rect = rect(bounds.x + box_rect.width, bounds.y, bounds.width - box_rect.width, bounds.height);
         if !self.label.is_empty() {
-            let font = ctx.skin().resolve_font_choice(self.font);
+            let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
             ctx.draw_control_text_with_font(font, &self.label, text_rect, role, self.opt);
         }
     }

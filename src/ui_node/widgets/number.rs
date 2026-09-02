@@ -44,7 +44,7 @@ pub struct NumberParameters {
     /// Bounded number of digits after the decimal point when rendering.
     precision: DecimalPrecision,
     /// Font used for the numeric label and editor.
-    font: FontChoice,
+    font: FontRef,
     /// Base widget options.
     opt: WidgetOption,
 }
@@ -82,13 +82,14 @@ impl NumberParameters {
             value,
             step,
             precision,
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt,
         })
     }
 
     /// Replaces the font used for the numeric label and editor.
-    pub const fn font(mut self, font: FontChoice) -> Self {
+    pub fn font(mut self, font: FontRef) -> Self {
+        // Defer capability resolution until numeric measurement uses the active atlas.
         self.font = font;
         self
     }
@@ -110,7 +111,7 @@ pub struct Number {
     /// Initialization-only bounded display precision.
     precision: DecimalPrecision,
     /// Initialization-only font.
-    font: FontChoice,
+    font: FontRef,
     /// Base widget options.
     opt: WidgetOption,
     /// Current number value.
@@ -155,12 +156,12 @@ impl Number {
 
     /// Measures the formatted number label.
     fn preferred_size_widget(&self, style: &Skin, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
-        number_preferred_size(style, atlas, self.font, self.value, self.precision, 0, 0)
+        number_preferred_size(style, atlas, &self.font, self.value, self.precision, 0, 0)
     }
 
     /// Updates number value from shift-click text entry or horizontal drag.
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
-        let font = ctx.skin().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
         let last = self.value;
         if !self.edit.editing {
             // Construction guarantees one non-negative direction policy: Up increases and Down
@@ -191,7 +192,7 @@ impl Number {
 
     /// Paints either the inline numeric editor or the formatted value.
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        let font = ctx.skin().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
         if self.edit.editing {
             number_textbox_paint(ctx, &self.edit, font);
             return;

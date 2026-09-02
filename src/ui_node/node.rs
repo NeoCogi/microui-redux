@@ -59,18 +59,18 @@ pub(crate) struct MeasurementStyleKey {
 }
 
 impl MeasurementStyleKey {
-    pub(crate) fn new(style: &Skin) -> Self {
+    pub(crate) fn new(style: &Skin, atlas: &AtlasHandle) -> Self {
         // Cache only measurement-observable style values. Colors and cell payloads affect paint,
         // while every role's normalized insets can affect a framed descendant's constraints.
         Self {
-            font: style.resources.fonts.body,
-            small_font: style.resources.fonts.small,
-            title_font: style.resources.fonts.title,
-            heading_font: style.resources.fonts.heading,
-            mono_font: style.resources.fonts.mono,
-            expand_icon: style.resources.icons.expand,
-            expand_down_icon: style.resources.icons.expand_down,
-            check_icon: style.resources.icons.check,
+            font: style.resolve_font_role(atlas, crate::FontRole::Body),
+            small_font: style.resolve_font_role(atlas, crate::FontRole::Small),
+            title_font: style.resolve_font_role(atlas, crate::FontRole::Title),
+            heading_font: style.resolve_font_role(atlas, crate::FontRole::Heading),
+            mono_font: style.resolve_font_role(atlas, crate::FontRole::Mono),
+            expand_icon: crate::IconRole::Expand.resolve(atlas),
+            expand_down_icon: crate::IconRole::ExpandDown.resolve(atlas),
+            check_icon: crate::IconRole::Check.resolve(atlas),
             default_cell_width: style.metrics.default_cell_width,
             padding: style.metrics.padding,
             spacing: style.metrics.spacing,
@@ -358,7 +358,7 @@ impl Node {
     pub(crate) fn measure_with_cache_status(&mut self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> (Dimensioni, bool) {
         let style = self.resolve_style(style);
         let style = &style;
-        let style_key = MeasurementStyleKey::new(style);
+        let style_key = MeasurementStyleKey::new(style, atlas);
         if let Some(cached) = self.state.measurement.lookup(constraints, style_key, atlas) {
             return (cached, true);
         }

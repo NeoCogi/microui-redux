@@ -392,8 +392,9 @@ pub(super) fn root_chrome_geometry(
                 caption_extent.saturating_mul(close_count.max(trailing_count)).saturating_mul(2)
             }
         };
+        let title_font = style.resolve_font_role(atlas, crate::FontRole::Title);
         let title_minimum_width = atlas
-            .get_text_size(style.resources.fonts.title, name)
+            .get_text_size(title_font, name)
             .width
             .saturating_add(caption_width)
             .saturating_add(title_padding_extent);
@@ -597,7 +598,8 @@ fn root_title_text_rect(title: Recti, geometry: RootChromeGeometry, layout: Wind
 /// Returns a title height large enough for the configured title font and padding.
 fn root_titlebar_height(style: &Skin, atlas: &AtlasHandle) -> i32 {
     // The style value acts as a minimum rather than allowing text to escape a too-short title.
-    let font_height = atlas.get_font_height(style.resources.fonts.title) as i32;
+    let title_font = style.resolve_font_role(atlas, crate::FontRole::Title);
+    let font_height = atlas.get_font_height(title_font) as i32;
     let vertical_padding = (style.metrics.padding.max(0) / 2).max(1);
     let text_height = font_height.saturating_add(vertical_padding.saturating_mul(2));
     style.metrics.title_height.max(text_height)
@@ -703,18 +705,19 @@ pub(super) fn record_root_overlay(
                 WindowChromeLayout::TrailingButtons => crate::WidgetOption::NONE,
                 WindowChromeLayout::ClassicMac => crate::WidgetOption::ALIGN_CENTER,
             };
-            let position = crate::ui_node::text_layout::control_text_position_with_font(style, atlas, style.resources.fonts.title, name, text, options);
+            let title_font = style.resolve_font_role(atlas, crate::FontRole::Title);
+            let position = crate::ui_node::text_layout::control_text_position_with_font(style, atlas, title_font, name, text, options);
             if chrome_active && style.chrome.layout == WindowChromeLayout::ClassicMac {
                 // Platinum interrupts the active racing stripes with a flat label field. Paint only
                 // the measured title span plus compact horizontal breathing room so stripes remain
                 // visible on both sides and long titles still clip inside their symmetric reserve.
-                let measured = atlas.get_text_size(style.resources.fonts.title, name);
+                let measured = atlas.get_text_size(title_font, name);
                 let desired_label = Recti::new(position.x.saturating_sub(4), title.y, measured.width.saturating_add(8), title.height);
                 if let Some(label) = desired_label.positive_intersection(text) {
                     painter.fill_rect(label, style.chrome.title_backdrop);
                 }
             }
-            painter.with_clip(text, |painter| painter.text(style.resources.fonts.title, name, position, color));
+            painter.with_clip(text, |painter| painter.text(title_font, name, position, color));
         }
         if chrome_active || style.chrome.layout != WindowChromeLayout::ClassicMac {
             // Classic Mac OS removes caption boxes from passive titles rather than presenting them
@@ -803,7 +806,7 @@ fn paint_caption_button(
     match button {
         RootCaptionButton::Close => {
             // Close retains the atlas icon already required by every Skin and test atlas.
-            painter.icon(style.resources.icons.close, content, color);
+            painter.icon(crate::IconRole::Close.resolve(atlas), content, color);
         }
         RootCaptionButton::Minimize => {
             // A centered lower horizontal stroke supplies a deterministic flat fallback over either

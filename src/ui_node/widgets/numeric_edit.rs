@@ -218,14 +218,15 @@ pub(super) fn number_label(value: Real, precision: DecimalPrecision) -> String {
 pub(super) fn number_preferred_size(
     style: &Skin,
     atlas: &AtlasHandle,
-    font: FontChoice,
+    font: &FontRef,
     value: Real,
     precision: DecimalPrecision,
     visual_width: i32,
     visual_height: i32,
 ) -> Dimensioni {
     let label = number_label(value, precision);
-    let resolved_font = style.resolve_font_choice(font);
+    // Resolve at measurement time so retained numeric widgets survive atlas replacement.
+    let resolved_font = style.resolve_font(atlas, font);
     let text_w = atlas.get_text_size(resolved_font, label.as_str()).width;
     let padding = style.metrics.padding.max(0);
     let vertical_pad = (padding / 2).max(1);

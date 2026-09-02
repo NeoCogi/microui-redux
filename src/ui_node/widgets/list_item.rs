@@ -40,9 +40,9 @@ pub struct ListItemParameters {
     /// Initial label displayed for the list item.
     pub label: String,
     /// Optional atlas icon rendered alongside the label.
-    pub icon: Option<IconId>,
+    pub icon: Option<IconRef>,
     /// Font used for the label.
-    pub font: FontChoice,
+    pub font: FontRef,
     /// Base widget options.
     pub opt: WidgetOption,
 }
@@ -61,7 +61,7 @@ impl ListItemParameters {
         Self {
             label: label.into(),
             icon: None,
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt: WidgetOption::NONE,
         }
     }
@@ -71,33 +71,34 @@ impl ListItemParameters {
         Self {
             label: label.into(),
             icon: None,
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt,
         }
     }
 
     /// Creates list-item parameters with an icon and default widget options.
-    pub fn with_icon(label: impl Into<String>, icon: IconId) -> Self {
+    pub fn with_icon(label: impl Into<String>, icon: IconRef) -> Self {
         Self {
             label: label.into(),
             icon: Some(icon),
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt: WidgetOption::NONE,
         }
     }
 
     /// Creates list-item parameters with an icon and explicit widget options.
-    pub fn with_icon_opt(label: impl Into<String>, icon: IconId, opt: WidgetOption) -> Self {
+    pub fn with_icon_opt(label: impl Into<String>, icon: IconRef, opt: WidgetOption) -> Self {
         Self {
             label: label.into(),
             icon: Some(icon),
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt,
         }
     }
 
     /// Replaces the font used for the label.
-    pub const fn font(mut self, font: FontChoice) -> Self {
+    pub fn font(mut self, font: FontRef) -> Self {
+        // Retain the semantic or named reference so later atlas replacement remains valid.
         self.font = font;
         self
     }
@@ -115,9 +116,9 @@ impl crate::WidgetEvent for ListItemSubmitted {}
 /// Concrete retained list item, including its semantic state.
 pub struct ListItem {
     /// Initialization-only icon.
-    icon: Option<IconId>,
+    icon: Option<IconRef>,
     /// Initialization-only font.
-    font: FontChoice,
+    font: FontRef,
     /// Base widget options.
     opt: WidgetOption,
     /// Mutable label displayed for the item.
@@ -168,15 +169,15 @@ impl ListItem {
         let padding = style.metrics.padding.max(0);
         let mut width = padding.saturating_mul(2);
         let mut visual_h = 0;
-        if let Some(icon) = self.icon {
-            let size = atlas.get_icon_size(icon);
+        if let Some(icon) = &self.icon {
+            let size = atlas.get_icon_size(icon.resolve(atlas));
             width = width.saturating_add(size.width.max(0)).saturating_add(padding);
             visual_h = size.height;
         }
         if !self.label.is_empty() {
-            width = width.saturating_add(text_size(style, atlas, self.font, &self.label).width.max(0));
+            width = width.saturating_add(text_size(style, atlas, &self.font, &self.label).width.max(0));
         }
-        let height = content_height(style, atlas, self.font, visual_h);
+        let height = content_height(style, atlas, &self.font, visual_h);
         Dimensioni::new(width.max(0), height)
     }
 
@@ -188,7 +189,8 @@ impl ListItem {
         ctx.draw_appearance_center(AppearanceRole::ListItem, bounds);
 
         let mut text_rect = bounds;
-        if let Some(icon) = self.icon {
+        if let Some(icon) = &self.icon {
+            let icon = icon.resolve(ctx.atlas());
             // Icons consume the left padding + icon width before the text region starts.
             let padding = ctx.skin().metrics.padding.max(0);
             let icon_size = ctx.atlas().get_icon_size(icon);
@@ -208,7 +210,7 @@ impl ListItem {
         }
 
         if !self.label.is_empty() {
-            let font = ctx.skin().resolve_font_choice(self.font);
+            let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
             ctx.draw_control_text_with_font(font, &self.label, text_rect, AppearanceRole::ListItem, self.opt);
         }
     }
@@ -292,8 +294,7 @@ mod tests {
         let atlas = test_atlas();
         let mut style = test_skin(&atlas);
         style.metrics.padding = i32::MAX;
-        let icon = atlas.icon_id("check").expect("the shared fixture icon must exist");
-        let mut item = ListItemBuilder::create_widget(ListItemParameters::with_icon("item", icon));
+        let mut item = ListItemBuilder::create_widget(ListItemParameters::with_icon("item", IconRef::named("check")));
         let bounds = rect(0, 0, 20, 20);
         let mut display_list = DisplayList::new();
         let mut ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut display_list, bounds, &style, &atlas, true, true, false, false, false, true);

@@ -69,7 +69,7 @@ pub struct TextboxParameters {
     /// Initial buffer edited by the textbox; CR and LF are removed when the widget is mounted.
     buf: String,
     /// Font used for measurement, editing, and paint.
-    pub font: FontChoice,
+    pub font: FontRef,
     /// Base widget options.
     pub opt: WidgetOption,
 }
@@ -87,7 +87,7 @@ impl TextboxParameters {
     pub fn new(buf: impl Into<String>) -> Self {
         Self {
             buf: buf.into(),
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt: WidgetOption::FRAME,
         }
     }
@@ -96,13 +96,14 @@ impl TextboxParameters {
     pub fn with_opt(buf: impl Into<String>, opt: WidgetOption) -> Self {
         Self {
             buf: buf.into(),
-            font: FontChoice::Role(FontRole::Body),
+            font: FontRef::Role(FontRole::Body),
             opt,
         }
     }
 
     /// Replaces the font used by the textbox.
-    pub const fn font(mut self, font: FontChoice) -> Self {
+    pub fn font(mut self, font: FontRef) -> Self {
+        // The editable buffer retains no allocation-bound typography capability.
         self.font = font;
         self
     }
@@ -115,7 +116,7 @@ pub struct Textbox {
     /// Current byte cursor, always positioned at a Unicode scalar-value boundary.
     cursor: usize,
     /// Initialization-only font.
-    font: FontChoice,
+    font: FontRef,
     /// Base widget options.
     opt: WidgetOption,
     /// Runtime-owned source for user-originated text changes.
@@ -243,7 +244,7 @@ impl Textbox {
     fn preferred_size_widget(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         let padding = style.metrics.padding.max(0);
         let vertical_pad = (padding / 2).max(1);
-        let font = style.resolve_font_choice(self.font);
+        let font = style.resolve_font(atlas, &self.font);
         let font_height = atlas.get_font_height(font) as i32;
         let text_w = if self.buf.is_empty() {
             0
@@ -262,7 +263,7 @@ impl Textbox {
 
     /// Applies input and cursor movement for this textbox.
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
-        let font = ctx.skin().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
         let outcome = textbox_update(ctx, input, &mut self.buf, &mut self.cursor, self.opt, font);
         let changed = outcome.changed.then(|| TextboxChanged {
             text: self.buf.clone(),
@@ -279,7 +280,7 @@ impl Textbox {
 
     /// Paints the textbox frame, text, and caret.
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        let font = ctx.skin().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
         textbox_paint(ctx, self.buf.as_str(), self.cursor, self.opt, font);
     }
 }
