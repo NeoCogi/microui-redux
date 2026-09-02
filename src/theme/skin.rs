@@ -54,7 +54,7 @@
 
 use super::{
     ChromeRole, ChromeState, Color, ControlRole, ControlState, FlatPalette, FontRef, FontRole, IconRole, MenuRole, MenuState, SurfaceRole, SurfaceState,
-    Visual, appearance::visuals_from_flat_palette, catalog::AppearanceCatalog,
+    Visual, catalog::AppearanceCatalog,
 };
 use crate::atlas::{AtlasHandle, FontId};
 use crate::render::{NinePatch, SliceInsets};
@@ -276,7 +276,7 @@ impl Skin {
         let palette = FlatPalette::default();
         // Build complete visuals from the same concrete flat values stored below. JSON theme
         // loading follows this identical fallback constructor before replacing authored states.
-        let appearances = visuals_from_flat_palette(SliceInsets::uniform(1), &palette);
+        let appearances = AppearanceCatalog::from_flat_palette(SliceInsets::uniform(1), &palette);
         Self {
             revision: SkinRevision::allocate(),
             metrics: SkinMetrics {
@@ -318,7 +318,7 @@ impl Skin {
         // Preserve the currently selected generic frame geometry while replacing all flat paint
         // values. Callers that need different frame geometry can update that typed visual after.
         let frame_insets = self.frame_insets();
-        self.appearances = visuals_from_flat_palette(frame_insets, &palette);
+        self.appearances = AppearanceCatalog::from_flat_palette(frame_insets, &palette);
         self.window_chrome.set_backdrop_color(palette.title_background);
     }
 
@@ -403,10 +403,11 @@ impl Skin {
     }
 
     /// Rebuilds all visual roles from a flat palette and a shared fallback frame geometry.
+    #[cfg(feature = "theme-json")]
     pub(crate) fn replace_flat_visuals(&mut self, frame_insets: SliceInsets, palette: &FlatPalette) {
         // Theme loading compiles authoring data into the same private concrete table as defaults.
         // The serialized representation is never retained as a second source of runtime truth.
-        self.appearances = visuals_from_flat_palette(frame_insets, palette);
+        self.appearances = AppearanceCatalog::from_flat_palette(frame_insets, palette);
     }
 
     /// Returns the active atlas capability for one semantic font role.
