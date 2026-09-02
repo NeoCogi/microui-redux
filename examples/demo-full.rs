@@ -1187,6 +1187,13 @@ impl DemoTheme {
             Self::MacOs9 => "Mac OS 9",
         }
     }
+
+    /// Reports whether the theme is constructed entirely from editable flat palette colors.
+    const fn supports_flat_palette_editing(self) -> bool {
+        // Bundled classic themes own multicolor PNG artwork whose pixels have no exact mapping to
+        // one RGBA palette field. Only the programmatic default has reversible palette semantics.
+        matches!(self, Self::Default)
+    }
 }
 
 /// Context-bound skin bundles retained for instant demo switching.
@@ -1228,6 +1235,13 @@ impl DemoThemes {
     fn selected_skin(&self) -> &Skin {
         // Index conversion remains centralized on the enum rather than leaking numeric slots.
         self.themes[self.selected.index()].bundle().skin()
+    }
+
+    /// Reports whether the selected theme exposes meaningful flat palette color editing.
+    fn palette_editable(&self) -> bool {
+        // Keep this decision beside selection state so editor handlers cannot infer theme kind from
+        // atlas contents or resolved nine-patch variants.
+        self.selected.supports_flat_palette_editing()
     }
 
     /// Changes the base selection and returns an editable copy for application state.
@@ -1792,7 +1806,7 @@ impl State {
             .expect("demo window must expose framed minimize and maximize chrome");
         let _style_root = ctx
             .ui()
-            .create_child_window(&grid_root, Window::new("Skin Editor", rect(350, 250, 300, 240), style_node))
+            .create_child_window(&grid_root, Window::new("Flat Palette / Skin Metrics", rect(350, 250, 300, 240), style_node))
             .expect("grid root must own the style editor");
         let _log_root = ctx
             .ui()
@@ -2118,6 +2132,12 @@ impl State {
     }
 
     fn style_color_changed(&mut self, index: &usize, event: &SliderChanged) {
+        if !self.themes.palette_editable() {
+            // Programmatic slider setters are silent, so restoring the displayed authored value
+            // cannot recursively publish another change event. Image theme pixels remain intact.
+            self.sync_skin_controls_from_skin();
+            return;
+        }
         let color_index = *index / 4;
         let color = match color_index {
             0 => &mut self.style_palette.text,

@@ -164,8 +164,10 @@ fn select<B: RendererBackend, State: 'static>(context: &mut Context<B, State>, t
 
 Capture `context.skin_bundle().clone()` in `LoadedTheme::new("Default Skin", bundle)` when a
 selector needs to return to the initial flat appearance after choosing a file theme. Ordinary Skin
-Editor changes clone `context.skin()` and use `Context::set_skin`; image-backed visual edits must
-continue to belong to the currently active atlas.
+changes clone `context.skin()` and use `Context::set_skin`; image-backed visual edits must continue
+to belong to the currently active atlas. A flat palette editor cannot reinterpret multicolor PNG
+pixels as named RGBA fields, so `demo-full` enables its palette controls only for the programmatic
+flat skin while continuing to permit concrete metric changes for image-backed themes.
 
 ## Appearance roles
 
