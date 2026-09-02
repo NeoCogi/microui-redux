@@ -235,36 +235,42 @@ impl Node {
         Self::from_kind(NodeKind::Container(container))
     }
 
-    /// Installs a cascading style override before this node is mounted.
+    /// Installs a cascading skin override before this node is mounted.
     ///
-    /// On a leaf the override affects only that widget. On a container the style is also inherited
+    /// On a leaf the override affects only that widget. On a container the skin is also inherited
     /// by every descendant until another descendant supplies its own override.
-    pub fn with_style_override(mut self, style_override: Skin) -> Self {
-        self.set_style_override(style_override);
+    pub fn with_skin_override(mut self, skin_override: Skin) -> Self {
+        // Delegate to the in-place path so builder-style and direct construction share one
+        // invalidation and replacement policy.
+        self.set_skin_override(skin_override);
         self
     }
 
-    /// Replaces this unmounted node's cascading style override.
+    /// Replaces this unmounted node's cascading skin override.
     ///
     /// Once ownership has moved into a retained tree, use the node's [`TypedWidgetHandle`] to
     /// change the override.
-    pub fn set_style_override(&mut self, style_override: Skin) {
-        self.data.set_style_override(Some(style_override));
+    pub fn set_skin_override(&mut self, skin_override: Skin) {
+        // NodeKind forwards to the one common WidgetStorage owner for either leaf or container.
+        self.data.set_skin_override(Some(skin_override));
     }
 
-    /// Clears this unmounted node's override so it inherits its parent style again.
-    pub fn clear_style_override(&mut self) {
-        self.data.set_style_override(None);
+    /// Clears this unmounted node's override so it inherits its parent skin again.
+    pub fn clear_skin_override(&mut self) {
+        // Removing the local value restores ordinary cascading resolution on the next phase.
+        self.data.set_skin_override(None);
     }
 
-    /// Returns this node's local style override, if one is installed.
-    pub fn style_override(&self) -> Option<Skin> {
-        self.data.style_override()
+    /// Returns this node's local skin override, if one is installed.
+    pub fn skin_override(&self) -> Option<Skin> {
+        // Return an owned value projection so the private retained widget borrow cannot escape.
+        self.data.skin_override()
     }
 
-    /// Resolves this node's local override against the inherited style.
-    pub(crate) fn resolve_style(&self, inherited: &Skin) -> Skin {
-        self.data.resolve_style(inherited)
+    /// Resolves this node's local override against the inherited skin.
+    pub(crate) fn resolve_skin(&self, inherited: &Skin) -> Skin {
+        // Both concrete node kinds store overrides in their common WidgetStorage record.
+        self.data.resolve_skin(inherited)
     }
 
     fn from_kind(kind: NodeKind) -> Self {
@@ -316,7 +322,7 @@ impl Node {
 
     /// Measures and reports whether the retained result satisfied this exact query.
     pub(crate) fn measure_with_cache_status(&mut self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> (Dimensioni, bool) {
-        let style = self.resolve_style(style);
+        let style = self.resolve_skin(style);
         let style = &style;
         let revision = style.revision();
         if let Some(cached) = self.state.measurement.lookup(constraints, revision) {
@@ -466,28 +472,35 @@ pub(crate) enum NodeKind {
 }
 
 impl NodeKind {
-    pub(crate) fn style_override(&self) -> Option<Skin> {
+    /// Returns the optional complete skin stored by either concrete runtime variant.
+    pub(crate) fn skin_override(&self) -> Option<Skin> {
+        // Scope erased widget borrows to this projection so recursive traversal never overlaps it.
         match self {
-            Self::Widget(node) => node.widget.try_borrow().unwrap_or_else(|_| widget_borrow_conflict()).style_override(),
-            Self::Container(container) => container.style_override(),
+            Self::Widget(node) => node.widget.try_borrow().unwrap_or_else(|_| widget_borrow_conflict()).skin_override(),
+            Self::Container(container) => container.skin_override(),
         }
     }
 
-    pub(crate) fn set_style_override(&mut self, style_override: Option<Skin>) {
+    /// Replaces or clears the complete local skin through the common widget storage boundary.
+    pub(crate) fn set_skin_override(&mut self, skin_override: Option<Skin>) {
+        // Each branch delegates to WidgetStorage, which also owns measurement invalidation.
         match self {
             Self::Widget(node) => node
                 .widget
                 .try_borrow_mut()
                 .unwrap_or_else(|_| widget_borrow_conflict())
-                .set_style_override(style_override),
-            Self::Container(container) => container.set_style_override(style_override),
+                .set_skin_override(skin_override),
+            Self::Container(container) => container.set_skin_override(skin_override),
         }
     }
 
-    pub(crate) fn resolve_style(&self, inherited: &Skin) -> Skin {
+    /// Selects a local complete skin when present and otherwise clones the inherited skin.
+    pub(crate) fn resolve_skin(&self, inherited: &Skin) -> Skin {
+        // Variant dispatch remains concrete; no heterogeneous skin payload or runtime downcast is
+        // involved in cascading appearance state.
         match self {
-            Self::Widget(node) => node.widget.try_borrow().unwrap_or_else(|_| widget_borrow_conflict()).resolve_style(inherited),
-            Self::Container(container) => container.resolve_style(inherited),
+            Self::Widget(node) => node.widget.try_borrow().unwrap_or_else(|_| widget_borrow_conflict()).resolve_skin(inherited),
+            Self::Container(container) => container.resolve_skin(inherited),
         }
     }
 

@@ -28,7 +28,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-//! Semantic UI appearance, typography, palette, and style configuration.
+//! Semantic UI appearance, typography, resources, and resolved skin configuration.
 
 mod appearance;
 mod bundle;
@@ -39,7 +39,7 @@ mod palette;
 mod patch;
 mod resources;
 mod roles;
-mod style;
+mod skin;
 mod tables;
 mod typography;
 
@@ -53,7 +53,7 @@ pub use palette::FlatPalette;
 pub use patch::{SkinEffectsPatch, SkinMetricsPatch, SkinPatch, VisualPatch, VisualPatchCatalog, WindowChromePatch};
 pub use resources::ResourceCatalog;
 pub use roles::{AppearanceRole, VisualState};
-pub use style::{CaptionButtonSide, CaptionButtonsSkin, Skin, SkinEffects, SkinMetrics, TitleBackdropSkin, WindowChromeSkin, WindowTitleAlignment};
-pub(crate) use style::SkinRevision;
+pub use skin::{CaptionButtonSide, CaptionButtonsSkin, Skin, SkinEffects, SkinMetrics, TitleBackdropSkin, WindowChromeSkin, WindowTitleAlignment};
+pub(crate) use skin::SkinRevision;
 pub use tables::{RoleTable, StateTable};
 pub use typography::{FontRef, FontRole};

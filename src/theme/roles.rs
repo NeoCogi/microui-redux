@@ -74,7 +74,7 @@ indexed_enum! {
     /// Semantic visual part painted by the built-in user interface.
     ///
     /// Roles describe meaning rather than widget Rust types. Composite controls can consequently
-    /// select separate track, thumb, popup, and caption visuals without erased style lookup.
+    /// select separate track, thumb, popup, and caption visuals without erased skin lookup.
     pub enum AppearanceRole {
         /// Generic frame requested through [`crate::WidgetOption::FRAME`].
         GenericFrame => "generic_frame",

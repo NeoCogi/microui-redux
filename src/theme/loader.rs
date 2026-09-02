@@ -268,7 +268,7 @@ struct ThemeDocument {
     fonts: Option<FontCatalogDocument>,
     /// Sparse scalar and flat-color overrides merged onto the parent layer.
     #[serde(default)]
-    style: StyleDocument,
+    skin: SkinDocument,
     /// String-keyed syntax converted to concrete [`AppearanceRole`] values during resolution.
     #[serde(default)]
     appearances: BTreeMap<String, AppearanceDocument>,
@@ -285,7 +285,7 @@ pub(crate) struct ThemeDefinition {
     /// Optional complete semantic font recipe with fully resolved file paths.
     fonts: Option<FontCatalogDocument>,
     /// Fully merged sparse scalar and flat-color overrides.
-    style: StyleDocument,
+    skin: SkinDocument,
     /// Closed role table containing optional authored appearance overrides.
     appearances: RoleTable<Option<AppearanceDocument>>,
 }
@@ -360,7 +360,7 @@ impl ThemeDefinition {
         let mut definition = parent.unwrap_or_else(|| Self {
             name: String::new(),
             fonts: None,
-            style: StyleDocument::default(),
+            skin: SkinDocument::default(),
             appearances: RoleTable::filled(None),
         });
         definition.name = document.name;
@@ -369,7 +369,7 @@ impl ThemeDefinition {
             // semantic recipe instead of mixing file and texture dimensions across layers.
             definition.fonts = Some(fonts);
         }
-        definition.style.merge(document.style);
+        definition.skin.merge(document.skin);
         for (name, appearance) in document.appearances {
             let role = AppearanceRole::from_json_name(name.as_str()).ok_or_else(|| ThemeLoadError::UnknownAppearance { name })?;
             let mut merged = definition.appearances.get(role).clone().unwrap_or_default();
@@ -468,29 +468,29 @@ impl ThemeDefinition {
     }
 
     /// Resolves flat fallbacks and binds explicitly supplied PNG states to baked atlas regions.
-    pub(crate) fn install(self, theme_atlas: ThemeAtlas, mut style: Skin) -> Result<LoadedTheme, ThemeLoadError> {
+    pub(crate) fn install(self, theme_atlas: ThemeAtlas, mut skin: Skin) -> Result<LoadedTheme, ThemeLoadError> {
         let ThemeAtlas { atlas, images } = theme_atlas;
         // Installation may only bind appearance icons onto a Skin created for this exact atlas;
         // enforcing that here prevents a LoadedTheme from ever containing mixed resources.
-        assert!(style.belongs_to(&atlas), "theme base skin contains image capabilities from another atlas");
+        assert!(skin.belongs_to(&atlas), "theme base skin contains image capabilities from another atlas");
         // Apply palette and metric overrides before constructing fallbacks, so every omitted PNG
         // state reflects the JSON theme's own flat colors rather than the built-in default palette.
         let mut palette = FlatPalette::default();
-        self.style.apply(&mut style, &mut palette);
-        let frame_insets = self.style.frame_insets.map(InsetsDocument::into_insets).unwrap_or_else(|| style.frame_insets());
-        validate_non_negative("generic_frame", "style.frame_insets", frame_insets)?;
-        validate_non_negative("window_content", "style.metrics.window_content_insets", style.metrics.window_content_insets)?;
-        validate_non_negative("window_frame", "style.metrics.window_border", style.metrics.window_border)?;
-        style.visuals = VisualCatalog::from_flat_palette(frame_insets, &palette);
-        style.effects.focus_outline = palette.focus;
-        style.effects.window_activation = palette.window_focus;
-        style.chrome.set_backdrop_color(palette.title_background);
+        self.skin.apply(&mut skin, &mut palette);
+        let frame_insets = self.skin.frame_insets.map(InsetsDocument::into_insets).unwrap_or_else(|| skin.frame_insets());
+        validate_non_negative("generic_frame", "skin.frame_insets", frame_insets)?;
+        validate_non_negative("window_content", "skin.metrics.window_content_insets", skin.metrics.window_content_insets)?;
+        validate_non_negative("window_frame", "skin.metrics.window_border", skin.metrics.window_border)?;
+        skin.visuals = VisualCatalog::from_flat_palette(frame_insets, &palette);
+        skin.effects.focus_outline = palette.focus;
+        skin.effects.window_activation = palette.window_focus;
+        skin.chrome.set_backdrop_color(palette.title_background);
         for role in AppearanceRole::ALL {
             let Some(document) = self.appearances.get(role) else {
                 continue;
             };
             let name = role.json_name();
-            let mut visuals = style.visuals.get(role);
+            let mut visuals = skin.visuals.get(role);
             let destination_insets = document
                 .insets
                 .map(InsetsDocument::into_insets)
@@ -531,11 +531,11 @@ impl ThemeDefinition {
                 visual.patch = NinePatch::image(destination_insets, image);
                 visuals.set(state, visual);
             }
-            style.visuals.set(role, visuals);
+            skin.visuals.set(role, visuals);
         }
 
         // Pair atlas and resolved skin at the only public construction boundary before naming it.
-        Ok(LoadedTheme::new(self.name, SkinBundle::new(atlas, style)))
+        Ok(LoadedTheme::new(self.name, SkinBundle::new(atlas, skin)))
     }
 
     /// Returns every fully resolved PNG path in deterministic deduplicated order.
@@ -617,10 +617,10 @@ impl FontDocument {
     }
 }
 
-/// Optional style metrics and colors applied before appearance fallback construction.
+/// Optional skin metrics and colors applied before appearance fallback construction.
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-struct StyleDocument {
+struct SkinDocument {
     /// Default layout cell width override.
     default_cell_width: Option<i32>,
     /// General widget inner padding override.
@@ -647,11 +647,11 @@ struct StyleDocument {
     colors: ColorPaletteDocument,
 }
 
-impl StyleDocument {
-    /// Merges one more-derived sparse style layer over this inherited layer.
+impl SkinDocument {
+    /// Merges one more-derived sparse skin layer over this inherited layer.
     fn merge(&mut self, overlay: Self) {
         // Every optional scalar has one explicit ownership point. Replacing only present values
-        // preserves parent fields without reflection, string maps, or a second runtime style type.
+        // preserves parent fields without reflection, string maps, or a second runtime skin type.
         replace_if_some(&mut self.default_cell_width, overlay.default_cell_width);
         replace_if_some(&mut self.padding, overlay.padding);
         replace_if_some(&mut self.window_content_insets, overlay.window_content_insets);
@@ -667,31 +667,31 @@ impl StyleDocument {
     }
 
     /// Applies present fields and returns foreground inputs for visual fallback construction.
-    fn apply(&self, style: &mut Skin, palette: &mut FlatPalette) {
+    fn apply(&self, skin: &mut Skin, palette: &mut FlatPalette) {
         // Keep assignment explicit so the strict JSON schema and public Skin fields cannot drift
         // through reflection or stringly typed mutation.
-        assign_if_some(&mut style.metrics.default_cell_width, self.default_cell_width);
-        assign_if_some(&mut style.metrics.padding, self.padding);
+        assign_if_some(&mut skin.metrics.default_cell_width, self.default_cell_width);
+        assign_if_some(&mut skin.metrics.padding, self.padding);
         if let Some(window_content_insets) = self.window_content_insets {
             // Root layout consumes the concrete four-edge value directly, so asymmetric theme
             // insets require no erased metric map or widget-specific special casing.
-            style.metrics.window_content_insets = window_content_insets.into_insets();
+            skin.metrics.window_content_insets = window_content_insets.into_insets();
         }
-        assign_if_some(&mut style.metrics.spacing, self.spacing);
-        assign_if_some(&mut style.metrics.indent, self.indent);
-        assign_if_some(&mut style.metrics.title_height, self.title_height);
+        assign_if_some(&mut skin.metrics.spacing, self.spacing);
+        assign_if_some(&mut skin.metrics.indent, self.indent);
+        assign_if_some(&mut skin.metrics.title_height, self.title_height);
         if let Some(window_chrome_layout) = self.window_chrome_layout {
             // The schema enum converts once into the public runtime enum, keeping deserialization
             // details out of Skin when JSON support is not compiled.
-            style.chrome = window_chrome_layout.into_skin(crate::Color { r: 0, g: 0, b: 0, a: 0 });
+            skin.chrome = window_chrome_layout.into_skin(crate::Color { r: 0, g: 0, b: 0, a: 0 });
         }
         if let Some(window_border) = self.window_border {
             // Keep the schema-to-runtime conversion explicit because negative components are
             // rejected by installation before they can affect layout or hit testing.
-            style.metrics.window_border = window_border.into_insets();
+            skin.metrics.window_border = window_border.into_insets();
         }
-        assign_if_some(&mut style.metrics.scrollbar_size, self.scrollbar_size);
-        assign_if_some(&mut style.metrics.thumb_size, self.thumb_size);
+        assign_if_some(&mut skin.metrics.scrollbar_size, self.scrollbar_size);
+        assign_if_some(&mut skin.metrics.thumb_size, self.thumb_size);
         // The authored palette remains compiler input and is consumed into visuals by install.
         self.colors.apply(palette);
     }
@@ -1068,7 +1068,7 @@ mod tests {
             r#"{
                 "schema_version": 1,
                 "name": "Flat only",
-                "style": {
+                "skin": {
                     "colors": {
                         "button": [1, 2, 3, 255],
                         "button_hover": [4, 5, 6, 255],
@@ -1114,7 +1114,7 @@ mod tests {
             r#"{
                 "schema_version": 1,
                 "name": "Foreground states",
-                "style": { "colors": { "menu_foreground": [1, 2, 3, 255] } },
+                "skin": { "colors": { "menu_foreground": [1, 2, 3, 255] } },
                 "appearances": {
                     "menu_item": {
                         "hovered": { "foreground": [250, 251, 252, 255] },
@@ -1160,7 +1160,7 @@ mod tests {
             r#"{
                 "schema_version": 1,
                 "name": "Parent",
-                "style": {
+                "skin": {
                     "padding": 3,
                     "colors": { "button": [1, 2, 3, 255] }
                 },
@@ -1178,7 +1178,7 @@ mod tests {
                 "schema_version": 1,
                 "name": "Child",
                 "extends": "../parent/theme.json",
-                "style": {
+                "skin": {
                     "spacing": 7,
                     "colors": { "button_hover": [8, 9, 10, 255] }
                 },
@@ -1202,10 +1202,10 @@ mod tests {
         let hovered = button.hovered.as_ref().expect("hovered state must come from the child");
 
         assert_eq!(definition.name, "Child");
-        assert_eq!(definition.style.padding, Some(3));
-        assert_eq!(definition.style.spacing, Some(7));
-        let parent_button = definition.style.colors.button.expect("parent button color must survive").into_color();
-        let child_hover = definition.style.colors.button_hover.expect("child hover color must apply").into_color();
+        assert_eq!(definition.skin.padding, Some(3));
+        assert_eq!(definition.skin.spacing, Some(7));
+        let parent_button = definition.skin.colors.button.expect("parent button color must survive").into_color();
+        let child_hover = definition.skin.colors.button_hover.expect("child hover color must apply").into_color();
         assert_eq!((parent_button.r, parent_button.g, parent_button.b, parent_button.a), (1, 2, 3, 255));
         assert_eq!((child_hover.r, child_hover.g, child_hover.b, child_hover.a), (8, 9, 10, 255));
         assert_eq!(normal.png.as_deref(), Some(parent_directory.join("parent.png").as_path()));

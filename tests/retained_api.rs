@@ -147,7 +147,7 @@ fn context() -> Context<TestBackend> {
 
 /// Verifies downstream retained resource references survive replacement atlas allocations.
 #[test]
-fn downstream_style_and_theme_are_constructed_from_atlas_capabilities() {
+fn downstream_skin_and_theme_are_constructed_from_atlas_capabilities() {
     let mut context = context();
     let atlas = context.atlas();
     let mut style = Skin::from_atlas(&atlas);

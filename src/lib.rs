@@ -258,7 +258,7 @@ pub mod retained {
 
 /// Common imports for retained UI applications.
 ///
-/// The prelude intentionally favors retained authoring, widget state, style/input/image types, and
+/// The prelude intentionally favors retained authoring, widget state, skin/input/image types, and
 /// renderer integration. Low-level backend contracts live under [`render`].
 pub mod prelude {
     pub use crate::event::{SubscribeError, TypedWidget, WidgetEvent, WidgetEventPortHandle};

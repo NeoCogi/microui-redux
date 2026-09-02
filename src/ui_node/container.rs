@@ -41,20 +41,24 @@ use super::{ChildParticipation, Children, NodeLayout, NodeRuntime, UiRuntime, Wi
 /// only derived geometry. Neither a [`Node`](crate::Node) nor the child collection crosses the
 /// public container-widget boundary.
 pub struct MeasureCtx<'a> {
-    style: &'a Skin,
+    /// Complete effective skin inherited by the actively measured container.
+    skin: &'a Skin,
+    /// Immutable atlas paired with `skin` for concrete font and icon resolution.
     atlas: &'a crate::AtlasHandle,
+    /// Authoritative direct children available only for this scoped measure call.
     children: &'a mut Children,
 }
 
 impl<'a> MeasureCtx<'a> {
     /// Creates one runtime-scoped measurement context.
-    pub(crate) fn new(style: &'a Skin, atlas: &'a crate::AtlasHandle, children: &'a mut Children) -> Self {
-        Self { style, atlas, children }
+    pub(crate) fn new(skin: &'a Skin, atlas: &'a crate::AtlasHandle, children: &'a mut Children) -> Self {
+        // Store the complete resolved skin and matching atlas borrowed for this measurement scope.
+        Self { skin, atlas, children }
     }
 
-    /// Returns the active UI style.
+    /// Returns the active UI skin.
     pub fn skin(&self) -> &Skin {
-        self.style
+        self.skin
     }
 
     /// Returns the active atlas.
@@ -71,7 +75,7 @@ impl<'a> MeasureCtx<'a> {
     pub fn measure_child(&mut self, index: usize, constraints: Constraints) -> Option<Dimensioni> {
         // Reborrow exactly one node for the recursive call; only copied geometry leaves this scope.
         let node = self.children.get_mut(index)?;
-        Some(node.measure(self.style, self.atlas, constraints))
+        Some(node.measure(self.skin, self.atlas, constraints))
     }
 }
 
@@ -226,22 +230,29 @@ impl Container {
         f(&mut widget.widget)
     }
 
-    pub(crate) fn style_override(&self) -> Option<Skin> {
-        self.widget.try_borrow().unwrap_or_else(|_| typed_container_borrow_conflict()).style_override()
+    /// Returns the optional complete skin stored on this concrete container widget.
+    pub(crate) fn skin_override(&self) -> Option<Skin> {
+        // Scope the shared widget borrow to an owned copy-on-write Skin projection.
+        self.widget.try_borrow().unwrap_or_else(|_| typed_container_borrow_conflict()).skin_override()
     }
 
-    pub(crate) fn set_style_override(&mut self, style_override: Option<Skin>) {
+    /// Replaces or clears this container's complete cascading skin.
+    pub(crate) fn set_skin_override(&mut self, skin_override: Option<Skin>) {
+        // WidgetStorage owns the corresponding measurement marker so container and leaf overrides
+        // cannot drift into different invalidation behavior.
         self.widget
             .try_borrow_mut()
             .unwrap_or_else(|_| typed_container_borrow_conflict())
-            .set_style_override(style_override);
+            .set_skin_override(skin_override);
     }
 
-    pub(crate) fn resolve_style(&self, inherited: &Skin) -> Skin {
+    /// Resolves this container's local complete skin against its inherited value.
+    pub(crate) fn resolve_skin(&self, inherited: &Skin) -> Skin {
+        // The owned result can be passed recursively after the widget borrow ends.
         self.widget
             .try_borrow()
             .unwrap_or_else(|_| typed_container_borrow_conflict())
-            .resolve_style(inherited)
+            .resolve_skin(inherited)
     }
 
     pub(crate) fn is_measurement_dirty(&self) -> bool {
@@ -278,10 +289,15 @@ fn typed_container_borrow_conflict() -> ! {
 /// The context measures or places indexed children and commits derived viewport/participation
 /// results. It never lends a node or permits topology mutation.
 pub struct ContainerLayoutCtx<'a> {
+    /// Runtime recursion services used to measure and place selected direct children.
     runtime: &'a mut UiRuntime,
-    style: &'a Skin,
+    /// Complete effective skin inherited by this active placement call.
+    skin: &'a Skin,
+    /// Immutable atlas paired with `skin` for child measurement and placement.
     atlas: &'a crate::AtlasHandle,
+    /// Exact node-local content rectangle assigned to the container.
     content: Recti,
+    /// Common runtime state on which this container publishes derived geometry.
     current: &'a mut NodeRuntime,
 }
 
@@ -289,19 +305,19 @@ impl ContainerLayoutCtx<'_> {
     /// Creates one runtime-scoped placement context.
     pub(crate) fn new<'a>(
         runtime: &'a mut UiRuntime,
-        style: &'a Skin,
+        skin: &'a Skin,
         atlas: &'a crate::AtlasHandle,
         content: Recti,
         current: &'a mut NodeRuntime,
     ) -> ContainerLayoutCtx<'a> {
         // All references share one placement lifetime, preventing the context from escaping the
         // runtime call that owns the mutable current-node state.
-        ContainerLayoutCtx { runtime, style, atlas, content, current }
+        ContainerLayoutCtx { runtime, skin, atlas, content, current }
     }
 
-    /// Returns the active UI style.
+    /// Returns the active UI skin.
     pub fn skin(&self) -> &Skin {
-        self.style
+        self.skin
     }
 
     /// Returns the active atlas.
@@ -314,7 +330,7 @@ impl ContainerLayoutCtx<'_> {
         // Placement participates in the same runtime epoch as the measure phase immediately before
         // it, so identical child queries reuse the node-local preferred-size result.
         let node = children.get_mut(index)?;
-        Some(self.runtime.measure_node(node, self.style, self.atlas, constraints))
+        Some(self.runtime.measure_node(node, self.skin, self.atlas, constraints))
     }
 
     /// Assigns one exact indexed child rectangle and returns its allocated size.
@@ -324,7 +340,7 @@ impl ContainerLayoutCtx<'_> {
     pub fn layout_child(&mut self, children: &mut Children, index: usize, rect: Recti) -> Option<Dimensioni> {
         // Resolve the child internally, recurse immediately, and return only copied geometry.
         let node = children.get_mut(index)?;
-        Some(self.runtime.layout_node_ref(node, self.style, self.atlas, rect))
+        Some(self.runtime.layout_node_ref(node, self.skin, self.atlas, rect))
     }
 
     /// Reads one child's content extent from its most recent placement in this pass.

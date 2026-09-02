@@ -187,15 +187,15 @@ impl crate::LeafWidget for DesiredSize {
     }
 }
 
-/// Measurement probe whose preferred width observes a style field omitted by the old cache key.
-struct CompleteStyleMeasureProbe {
+/// Measurement probe whose preferred width observes one complete skin visual field.
+struct CompleteSkinMeasureProbe {
     /// Shared counter used after the uniquely owned probe moves into the retained tree.
     measures: Rc<Cell<usize>>,
     /// Stable noninteractive policy returned by reference through [`Widget::widget_opt`].
     opt: WidgetOption,
 }
 
-impl Widget for CompleteStyleMeasureProbe {
+impl Widget for CompleteSkinMeasureProbe {
     /// Returns the probe's fixed interaction policy.
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
@@ -208,7 +208,7 @@ impl Widget for CompleteStyleMeasureProbe {
     fn paint(&mut self, _ctx: &mut WidgetPaintCtx<'_>) {}
 }
 
-impl crate::LeafWidget for CompleteStyleMeasureProbe {
+impl crate::LeafWidget for CompleteSkinMeasureProbe {
     /// Derives preferred width from the complete public Skin passed to custom leaf measurement.
     fn measure(&self, style: &Skin, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         // Foreground color is paint-only for built-ins. Observing it here proves the complete skin
@@ -812,7 +812,7 @@ fn tab_focused_builtins_share_windows_activation_and_arrow_adjustment() {
 }
 
 #[test]
-fn active_window_and_only_its_remembered_widget_use_style_focus_accents() {
+fn active_window_and_only_its_remembered_widget_use_skin_focus_accents() {
     // Preserve one atlas identity across backend construction and the customized Skin so the
     // focus-color assertions cannot accidentally rely on globally meaningful resource slots.
     let atlas = test_atlas();
@@ -1355,7 +1355,7 @@ fn empty_public_update_consumes_programmatic_text_area_caret_reveal() {
 #[test]
 fn global_skin_revision_invalidates_measurements_lazily_in_hidden_surfaces() {
     let measures = Rc::new(Cell::new(0));
-    let probe = Node::widget(CompleteStyleMeasureProbe {
+    let probe = Node::widget(CompleteSkinMeasureProbe {
         measures: measures.clone(),
         opt: WidgetOption::NO_INTERACT,
     });

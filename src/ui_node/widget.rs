@@ -71,33 +71,47 @@ pub use super::widget_context::{WidgetPaintCtx, WidgetUpdateCtx};
 /// The marker is written while the handle already owns this cell's exclusive borrow. Tree
 /// traversal later consumes it and invalidates node-local caches on the recursive call stack.
 pub(crate) struct WidgetStorage<W: ?Sized> {
+    /// Whether typed application mutation invalidated this widget's preferred measurement.
     measurement_dirty: bool,
-    style_override: Option<Skin>,
+    /// Optional complete local skin inherited by descendants when `W` is a container.
+    skin_override: Option<Skin>,
+    /// Concrete or erased widget behavior stored behind this one common retained record.
     pub(crate) widget: W,
 }
 
 impl<W> WidgetStorage<W> {
+    /// Wraps one newly mounted concrete widget with clean derived state and no local skin.
     pub(crate) fn new(widget: W) -> Self {
+        // A new node has no cache to invalidate and inherits the manager skin until explicitly
+        // assigned a complete override through its unmounted node or typed handle.
         Self {
             measurement_dirty: false,
-            style_override: None,
+            skin_override: None,
             widget,
         }
     }
 }
 
 impl<W: ?Sized> WidgetStorage<W> {
-    pub(crate) fn style_override(&self) -> Option<Skin> {
-        self.style_override.clone()
+    /// Clones the optional complete local skin without lending the widget cell.
+    pub(crate) fn skin_override(&self) -> Option<Skin> {
+        // Skin uses copy-on-write visual tables, so cloning retains ordinary value semantics.
+        self.skin_override.clone()
     }
 
-    pub(crate) fn set_style_override(&mut self, style_override: Option<Skin>) {
-        self.style_override = style_override;
+    /// Replaces the complete local skin and marks preferred measurement stale.
+    pub(crate) fn set_skin_override(&mut self, skin_override: Option<Skin>) {
+        // Custom widgets may observe any Skin field while measuring, so adding, replacing, or
+        // clearing an override must conservatively invalidate this node's retained result.
+        self.skin_override = skin_override;
         self.mark_measurement_dirty();
     }
 
-    pub(crate) fn resolve_style(&self, inherited: &Skin) -> Skin {
-        self.style_override.clone().unwrap_or_else(|| inherited.clone())
+    /// Resolves this widget's complete effective skin from local and inherited values.
+    pub(crate) fn resolve_skin(&self, inherited: &Skin) -> Skin {
+        // Overrides replace rather than partially shadow the inherited value; sparse composition
+        // belongs to SkinPatch before a complete Skin is installed on retained state.
+        self.skin_override.clone().unwrap_or_else(|| inherited.clone())
     }
 
     pub(crate) fn mark_measurement_dirty(&mut self) {
@@ -332,32 +346,38 @@ impl<W: Widget + 'static> TypedWidgetHandle<W> {
         Ok(result)
     }
 
-    /// Returns this widget's local cascading style override.
+    /// Returns this widget's local cascading skin override.
     ///
     /// The outer [`Option`] reports whether the retained widget is alive and available; the inner
-    /// value is `None` when the widget currently inherits its complete parent style.
-    pub fn try_style_override(&self) -> Option<Option<Skin>> {
+    /// value is `None` when the widget currently inherits its complete parent skin.
+    pub fn try_skin_override(&self) -> Option<Option<Skin>> {
+        // Upgrade and borrow in separate checked steps so a stale or actively borrowed widget
+        // reports unavailability without panicking or exposing its storage cell.
         let widget = self.widget.upgrade()?;
         let widget = widget.try_borrow().ok()?;
-        Some(widget.style_override())
+        Some(widget.skin_override())
     }
 
-    /// Installs a local style override when the retained widget is alive and available.
+    /// Installs a local skin override when the retained widget is alive and available.
     ///
     /// Container overrides cascade to descendants. A descendant's own override replaces the
-    /// inherited style for that descendant and its subtree.
-    pub fn try_set_style_override(&self, style_override: Skin) -> Option<()> {
+    /// inherited skin for that descendant and its subtree.
+    pub fn try_set_skin_override(&self, skin_override: Skin) -> Option<()> {
+        // The storage setter owns measurement invalidation, keeping the public typed handle from
+        // duplicating retained-tree cache policy.
         let widget = self.widget.upgrade()?;
         let mut widget = widget.try_borrow_mut().ok()?;
-        widget.set_style_override(Some(style_override));
+        widget.set_skin_override(Some(skin_override));
         Some(())
     }
 
-    /// Clears the local override so this widget inherits its complete parent style again.
-    pub fn try_clear_style_override(&self) -> Option<()> {
+    /// Clears the local override so this widget inherits its complete parent skin again.
+    pub fn try_clear_skin_override(&self) -> Option<()> {
+        // Clearing follows the same checked mutation path as replacement and therefore cannot leave
+        // a preference measured under the removed local skin in use.
         let widget = self.widget.upgrade()?;
         let mut widget = widget.try_borrow_mut().ok()?;
-        widget.set_style_override(None);
+        widget.set_skin_override(None);
         Some(())
     }
 
@@ -447,7 +467,7 @@ pub trait Widget {
 /// query. Returned components are clamped to zero before the node's frame is applied.
 pub trait LeafWidget: Widget {
     /// Returns this leaf's preferred content size.
-    fn measure(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni;
+    fn measure(&self, skin: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni;
 }
 
 impl Widget for WidgetOption {
@@ -467,7 +487,7 @@ impl LeafWidget for WidgetOption {
         let font_height = atlas.get_font_height(style.resolve_font_role(atlas, crate::FontRole::Body)) as i32;
         let icon_height = atlas.get_icon_size(crate::IconRole::ExpandDown.resolve(atlas)).height;
         let content = max(font_height, icon_height).max(0);
-        // Valid font metrics and application style values may independently reach i32 limits;
+        // Valid font metrics and application skin values may independently reach i32 limits;
         // preferred geometry clamps rather than wrapping before the parent applies constraints.
         let height = content.saturating_add(vertical_pad.saturating_mul(2));
         let width = padding.saturating_mul(2).saturating_add(content);

@@ -196,7 +196,7 @@ pub(crate) fn test_atlas_with_font_sizes(fonts: &[(&str, usize)]) -> AtlasHandle
     AtlasHandle::try_from(&source).expect("shared test atlas must satisfy the complete atlas contract")
 }
 
-/// Constructs a resolved style whose resource capabilities belong to `atlas`.
+/// Constructs a resolved skin whose resource capabilities belong to `atlas`.
 pub(crate) fn test_skin(atlas: &AtlasHandle) -> Skin {
     // Tests must retain and pass this same handle allocation; reconstructing identical metadata is
     // intentionally a different ownership domain after atlas IDs become scoped.

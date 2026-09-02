@@ -1066,7 +1066,7 @@ mod theme_tests {
 
     /// Verifies a successful selection publishes one matching skin bundle to the Context.
     #[test]
-    fn set_theme_replaces_atlas_and_style_together() {
+    fn set_theme_replaces_atlas_and_skin_together() {
         let initial = test_atlas();
         let replacement = test_atlas();
         let replacement_style = Skin::from_atlas(&replacement);
@@ -1086,7 +1086,7 @@ mod theme_tests {
 
     /// Verifies an atlas upload error leaves both sides of the active theme pair unchanged.
     #[test]
-    fn set_theme_failure_preserves_previous_atlas_and_style() {
+    fn set_theme_failure_preserves_previous_atlas_and_skin() {
         let initial = test_atlas();
         let initial_font = Skin::from_atlas(&initial).resolve_font_role(&initial, crate::FontRole::Body);
         let replacement = test_atlas();

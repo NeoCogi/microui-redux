@@ -174,7 +174,7 @@ pub struct Config<'a> {
     /// Fonts baked into the atlas for the printable ASCII range.
     ///
     /// A standard Context atlas must include the `body` key. The optional conventional keys
-    /// `small`, `title`, `heading`, and `mono` populate their corresponding style roles; missing
+    /// `small`, `title`, `heading`, and `mono` populate their corresponding skin roles; missing
     /// optional roles use `body`.
     pub fonts: &'a [FontAsset<'a>],
 }

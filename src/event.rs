@@ -474,7 +474,7 @@ impl<Target: 'static> WidgetEventDispatcher<Target> {
     /// an empty manager here keeps their scope narrow without weakening the production signature.
     #[cfg(test)]
     pub(crate) fn dispatch(&mut self, target: &mut Target) -> bool {
-        // Bind the temporary manager's style to one concrete atlas ownership domain, just as a
+        // Bind the temporary manager's skin to one concrete atlas ownership domain, just as a
         // production Context does. Keeping the handle alive for the complete dispatch also makes
         // the otherwise-unused test capability explicit instead of manufacturing ownerless IDs.
         let atlas = crate::test_support::test_atlas();

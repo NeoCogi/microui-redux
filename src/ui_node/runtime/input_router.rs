@@ -550,7 +550,7 @@ impl InputRouter {
         style: &Skin,
         event: &UiInputEvent,
     ) -> Option<(RuntimeNodeId, RouteResult)> {
-        let style = current.resolve_style(style);
+        let style = current.resolve_skin(style);
         let style = &style;
         if current.id() == target {
             // The target was already selected geometrically; its result only controls handling.
@@ -608,7 +608,7 @@ impl InputRouter {
         style: &Skin,
         event: &UiInputEvent,
     ) -> Option<RouteResult> {
-        let style = current.resolve_style(style);
+        let style = current.resolve_skin(style);
         let style = &style;
         if current.id() == target {
             // Direct focus/capture delivery stops at the target and never bubbles.

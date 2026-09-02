@@ -37,7 +37,7 @@ impl UiRuntime {
     pub(super) fn update_node_ref(&mut self, node: &mut Node, parent_transform: Transform, style: &Skin, atlas: crate::AtlasHandle, input: InputSnapshot) {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.updates += 1);
-        let style = node.resolve_style(style);
+        let style = node.resolve_skin(style);
         let style = &style;
         // Reconstruct exactly the frame/content coordinate spaces committed during layout. Widgets
         // see content-local geometry even though allocations and inherited clips use other spaces.

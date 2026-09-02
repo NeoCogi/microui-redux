@@ -2609,7 +2609,7 @@ impl WindowManager {
 
     /// Runs one ordinary update with no routed event across every currently eligible widget tree.
     fn update_eligible_widget_trees(&mut self, atlas: &crate::AtlasHandle, input: crate::input::InputSnapshot) {
-        // Copy the resolved style once, matching event-driven traversal, then use the forest's
+        // Copy the resolved skin once, matching event-driven traversal, then use the forest's
         // shared visible order so modal scope and popup ownership have one eligibility policy.
         let style = self.bundle.skin().clone();
         let modal = self.surfaces.active_modal_root();

@@ -413,7 +413,7 @@ mod tests {
         assert_eq!(FontRef::named("heading").resolve(&style, &atlas), heading);
     }
 
-    /// Verifies one-pass style construction resolves named roles and uses body for missing roles.
+    /// Verifies one-pass skin construction resolves named roles and uses body for missing roles.
     #[test]
     fn from_atlas_resolves_named_fonts_and_falls_back_to_body() {
         let atlas = make_test_atlas(&[
@@ -468,7 +468,7 @@ mod tests {
         assert!(!candidate.belongs_to(&local_atlas));
     }
 
-    /// Verifies standard style construction never substitutes a positional font for missing body.
+    /// Verifies standard skin construction never substitutes a positional font for missing body.
     #[test]
     #[should_panic(expected = "atlas does not contain required font `body`")]
     fn from_atlas_requires_the_exact_body_font_name() {

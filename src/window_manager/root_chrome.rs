@@ -807,7 +807,7 @@ fn paint_caption_button(
     if glyph.is_visible() {
         // Image glyphs retain their authored pixel dimensions and are centered in the button's
         // usable content instead of stretching to fill it. A visible flat glyph still receives the
-        // complete content rectangle, keeping programmatic styles concrete and deterministic.
+        // complete content rectangle, keeping programmatic skins concrete and deterministic.
         let glyph_rect = if let Some(image) = glyph.image_content() {
             let image_size = atlas.get_icon_size(image.icon);
             let width = image_size.width.max(0).min(content.width.max(0));

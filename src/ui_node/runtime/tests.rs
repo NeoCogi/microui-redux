@@ -57,24 +57,24 @@ struct Probe {
 }
 
 #[derive(Default)]
-struct StyleObservations {
+struct SkinObservations {
     measure: Cell<(i32, i32)>,
     update: Cell<(i32, i32)>,
     paint: Cell<(i32, i32)>,
 }
 
-struct StyleProbe {
-    observations: Rc<StyleObservations>,
+struct SkinProbe {
+    observations: Rc<SkinObservations>,
     opt: WidgetOption,
 }
 
-impl StyleProbe {
+impl SkinProbe {
     fn observe(style: &Skin) -> (i32, i32) {
         (style.metrics.padding, style.metrics.spacing)
     }
 }
 
-impl Widget for StyleProbe {
+impl Widget for SkinProbe {
     fn widget_opt(&self) -> &WidgetOption {
         &self.opt
     }
@@ -88,7 +88,7 @@ impl Widget for StyleProbe {
     }
 }
 
-impl crate::LeafWidget for StyleProbe {
+impl crate::LeafWidget for SkinProbe {
     fn measure(&self, style: &Skin, _atlas: &crate::AtlasHandle, _constraints: Constraints) -> Dimensioni {
         self.observations.measure.set(Self::observe(style));
         Dimensioni::new(10, 10)
@@ -628,20 +628,20 @@ fn common_phases_are_parent_first_and_siblings_are_forward() {
 }
 
 #[test]
-fn container_style_cascades_and_child_override_replaces_it_in_every_phase() {
+fn container_skin_cascades_and_child_override_replaces_it_in_every_phase() {
     let atlas = test_atlas();
-    let observations = Rc::new(StyleObservations::default());
-    let child = StyleProbe {
+    let observations = Rc::new(SkinObservations::default());
+    let child = SkinProbe {
         observations: observations.clone(),
         opt: WidgetOption::NONE,
     };
     let (child, child_node) = Node::typed_widget(child);
     let (container, _) = TraversalContainer::new([child_node], Rc::new(RefCell::new(Vec::new())));
-    let container_style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
+    let container_skin = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
         metrics.padding = 17;
         metrics.spacing = 19;
     });
-    let mut root = Node::container(container).with_style_override(container_style);
+    let mut root = Node::container(container).with_skin_override(container_skin);
 
     let style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
         metrics.padding = 3;
@@ -657,22 +657,18 @@ fn container_style_cascades_and_child_override_replaces_it_in_every_phase() {
     assert_eq!(observations.update.get(), (17, 19));
     assert_eq!(observations.paint.get(), (17, 19));
 
-    let child_style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
+    let child_skin = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
         metrics.padding = 29;
         metrics.spacing = 31;
     });
-    child.try_set_style_override(child_style).unwrap();
+    child.try_set_skin_override(child_skin).unwrap();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
     assert_eq!(observations.measure.get(), (29, 31));
-    assert_eq!(child.try_style_override().flatten().unwrap().metrics.spacing, 31);
+    assert_eq!(child.try_skin_override().flatten().unwrap().metrics.spacing, 31);
 
-    child.try_clear_style_override().unwrap();
+    child.try_clear_skin_override().unwrap();
     layout_root(&mut runtime, &mut root, &style, atlas);
-    assert_eq!(
-        observations.measure.get(),
-        (17, 19),
-        "clearing a child override must reveal its container style"
-    );
+    assert_eq!(observations.measure.get(), (17, 19), "clearing a child override must reveal its container skin");
 }
 
 #[test]

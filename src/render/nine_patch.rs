@@ -38,7 +38,7 @@ use crate::{Color, IconId, Recti};
 /// Insets separating the fixed outer rows and columns from a stretchable center cell.
 ///
 /// Values are expressed in destination pixels. Negative values are accepted at construction
-/// boundaries and normalized to zero when geometry is resolved, keeping malformed style input from
+/// boundaries and normalized to zero when geometry is resolved, keeping malformed skin input from
 /// producing inverted rectangles.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct SliceInsets {
@@ -59,7 +59,7 @@ impl SliceInsets {
     /// Creates four equal insets from one convenient scalar value.
     pub const fn uniform(value: i32) -> Self {
         // Store the caller's exact value. Geometry normalization is intentionally deferred so
-        // public style mutation remains transparent and every consumer applies the same policy.
+        // public skin mutation remains transparent and every consumer applies the same policy.
         Self {
             left: value,
             top: value,
@@ -70,7 +70,7 @@ impl SliceInsets {
 
     /// Creates independently configurable left, top, right, and bottom insets.
     pub const fn new(left: i32, top: i32, right: i32, bottom: i32) -> Self {
-        // A plain constructor keeps theme deserialization and programmatic style construction on
+        // A plain constructor keeps theme deserialization and programmatic skin construction on
         // the same concrete representation without introducing builder-only mirror types.
         Self { left, top, right, bottom }
     }
@@ -78,7 +78,7 @@ impl SliceInsets {
     /// Returns an equivalent value whose four components are non-negative.
     pub(crate) fn normalized(self) -> Self {
         // Clamp once before either layout or painting arithmetic. This prevents the two paths from
-        // disagreeing when an application installs a style containing a negative inset.
+        // disagreeing when an application installs a skin containing a negative inset.
         Self {
             left: self.left.max(0),
             top: self.top.max(0),
@@ -261,7 +261,7 @@ impl NinePatchCells {
 
     /// Creates equal border cells around an independently configured center.
     pub const fn framed(border: NinePatchCell, center: NinePatchCell) -> Self {
-        // Corners and edges deliberately share one value for the current flat style. The named
+        // Corners and edges deliberately share one value for the current flat skin. The named
         // fields remain independently mutable for later classic raised/sunken theme definitions.
         Self {
             top_left: border,
@@ -337,7 +337,7 @@ impl NinePatch {
     /// Creates a flat patch from explicit destination insets and named cells.
     pub const fn new(insets: SliceInsets, cells: NinePatchCells) -> Self {
         // Preserve exact author input. All geometry consumers normalize through [`Self::geometry`]
-        // so style construction does not need a second validation representation.
+        // so skin construction does not need a second validation representation.
         Self {
             insets,
             content: NinePatchContent::Flat { cells },
