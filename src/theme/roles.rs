@@ -27,6 +27,8 @@ macro_rules! indexed_enum {
     ) => {
         $(#[$enum_meta])*
         #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+        #[cfg_attr(feature = "theme-json", derive(serde::Deserialize))]
+        #[cfg_attr(feature = "theme-json", serde(rename_all = "snake_case"))]
         #[repr(u8)]
         pub enum $name {
             $(
@@ -49,15 +51,6 @@ macro_rules! indexed_enum {
                 match self {
                     $(Self::$variant => $external_name,)+
                 }
-            }
-
-            /// Parses one exact authored spelling into its concrete enum value.
-            #[cfg(feature = "theme-json")]
-            #[allow(dead_code, reason = "every generated domain owns its parser before all document maps use it")]
-            pub(crate) fn from_json_name(name: &str) -> Option<Self> {
-                // The closed ordered array is small and parsing happens only while compiling a
-                // skin, so a linear scan is clearer than maintaining another lookup structure.
-                Self::ALL.into_iter().find(|value| value.json_name() == name)
             }
 
             /// Converts the value into its checked fixed-table index.
@@ -108,15 +101,15 @@ indexed_enum! {
     /// Menu-owned surface or entry independent of retained widget implementation types.
     pub enum MenuRole {
         /// Menu bar spanning a window.
-        Bar => "menu_bar",
+        Bar => "bar",
         /// Menu-bar title that does not own an open popup.
-        Title => "menu_title",
+        Title => "title",
         /// Menu-bar title whose popup is open.
-        TitleOpen => "menu_title_open",
+        TitleOpen => "title_open",
         /// Popup-menu panel.
-        Popup => "menu_popup",
+        Popup => "popup",
         /// Ordinary menu item row.
-        Item => "menu_item",
+        Item => "item",
     }
 }
 
@@ -132,27 +125,27 @@ indexed_enum! {
         /// Active modal-dialog outer frame and body.
         DialogFrameActive => "dialog_frame_active",
         /// Normal window title background.
-        Title => "window_title",
+        Title => "title",
         /// Active window title background.
-        TitleActive => "window_title_active",
+        TitleActive => "title_active",
         /// Window close caption button.
-        CloseButton => "window_close_button",
+        CloseButton => "close_button",
         /// Window minimize caption button.
-        MinimizeButton => "window_minimize_button",
+        MinimizeButton => "minimize_button",
         /// Window maximize caption button.
-        MaximizeButton => "window_maximize_button",
+        MaximizeButton => "maximize_button",
         /// Window restore caption button used while maximized.
-        RestoreButton => "window_restore_button",
+        RestoreButton => "restore_button",
         /// Visible bottom-right resize grip.
-        ResizeGrip => "window_resize_grip",
+        ResizeGrip => "resize_grip",
         /// Optional themed glyph painted inside the window close button.
-        CloseGlyph => "window_close_glyph",
+        CloseGlyph => "close_glyph",
         /// Optional themed glyph painted inside the window minimize button.
-        MinimizeGlyph => "window_minimize_glyph",
+        MinimizeGlyph => "minimize_glyph",
         /// Optional themed glyph painted inside the window maximize button.
-        MaximizeGlyph => "window_maximize_glyph",
+        MaximizeGlyph => "maximize_glyph",
         /// Optional themed glyph painted inside the window restore button.
-        RestoreGlyph => "window_restore_glyph",
+        RestoreGlyph => "restore_glyph",
     }
 }
 
@@ -211,34 +204,6 @@ impl AppearanceRole {
             source += 1;
         }
         roles
-    }
-
-    /// Returns the current flat theme spelling for the categorized role.
-    pub const fn json_name(self) -> &'static str {
-        // Flat spellings remain only until the following schema commit replaces the document
-        // shape. Delegation keeps this independently buildable commit free of new aliases.
-        match self {
-            Self::Surface(role) => role.json_name(),
-            Self::Control(role) => role.json_name(),
-            Self::Menu(role) => role.json_name(),
-            Self::Chrome(role) => role.json_name(),
-        }
-    }
-
-    /// Parses one current flat theme spelling into its categorized role.
-    #[cfg(feature = "theme-json")]
-    pub(crate) fn from_json_name(name: &str) -> Option<Self> {
-        // Each family owns disjoint spellings in the current document, so concrete attempts require
-        // neither a string registry nor knowledge of widget implementation types.
-        if let Some(role) = SurfaceRole::from_json_name(name) {
-            Some(Self::Surface(role))
-        } else if let Some(role) = ControlRole::from_json_name(name) {
-            Some(Self::Control(role))
-        } else if let Some(role) = MenuRole::from_json_name(name) {
-            Some(Self::Menu(role))
-        } else {
-            ChromeRole::from_json_name(name).map(Self::Chrome)
-        }
     }
 
     /// Converts one categorized role into its checked flattened table index.
@@ -306,6 +271,19 @@ mod tests {
     fn generated_metadata_is_complete_and_index_ordered() {
         for (index, role) in AppearanceRole::ALL.into_iter().enumerate() {
             assert_eq!(role.index(), index);
+        }
+        // Category-local authored names are exhaustive within each typed document map; equal
+        // local names such as control.item and menu.item remain unambiguous through their family.
+        for role in SurfaceRole::ALL {
+            assert!(!role.json_name().is_empty());
+        }
+        for role in ControlRole::ALL {
+            assert!(!role.json_name().is_empty());
+        }
+        for role in MenuRole::ALL {
+            assert!(!role.json_name().is_empty());
+        }
+        for role in ChromeRole::ALL {
             assert!(!role.json_name().is_empty());
         }
         for (index, state) in VisualState::ALL.into_iter().enumerate() {

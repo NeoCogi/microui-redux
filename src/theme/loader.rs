@@ -38,7 +38,7 @@ use std::{
 
 use serde::Deserialize;
 
-use super::{AppearanceRole, FlatPalette, FontRole, RoleTable, Skin, SkinBundle, VisualState};
+use super::{AppearanceRole, ChromeRole, ControlRole, FlatPalette, FontRole, MenuRole, RoleTable, Skin, SkinBundle, SurfaceRole, VisualState};
 use crate::{
     atlas::{
         AtlasHandle,
@@ -48,7 +48,7 @@ use crate::{
 };
 
 /// Theme-file schema version understood by this crate release.
-pub const THEME_SCHEMA_VERSION: u32 = 2;
+pub const THEME_SCHEMA_VERSION: u32 = 1;
 
 /// Maximum number of parent documents resolved for one loaded theme.
 ///
@@ -136,11 +136,6 @@ pub enum ThemeLoadError {
     },
     /// The document's display name is empty or whitespace-only.
     EmptyName,
-    /// An appearance map key does not name a built-in semantic role.
-    UnknownAppearance {
-        /// Unrecognized exact JSON object key.
-        name: String,
-    },
     /// Destination or source slice insets are negative or do not fit their source image.
     InvalidInsets {
         /// Semantic appearance key containing the invalid value.
@@ -193,7 +188,6 @@ impl fmt::Display for ThemeLoadError {
                 write!(formatter, "theme inheritance at {} exceeds the maximum depth of {maximum}", path.display())
             }
             Self::EmptyName => formatter.write_str("theme name must not be empty"),
-            Self::UnknownAppearance { name } => write!(formatter, "unknown theme appearance `{name}`"),
             Self::InvalidInsets { appearance, field, insets, image_size } => {
                 write!(
                     formatter,
@@ -226,7 +220,6 @@ impl Error for ThemeLoadError {
             | Self::InheritanceCycle { .. }
             | Self::InheritanceDepth { .. }
             | Self::EmptyName
-            | Self::UnknownAppearance { .. }
             | Self::InvalidInsets { .. }
             | Self::FontPathNotUtf8 { .. } => None,
         }
@@ -269,9 +262,51 @@ struct ThemeDocument {
     /// Sparse scalar and flat-color overrides merged onto the parent layer.
     #[serde(default)]
     skin: SkinDocument,
-    /// String-keyed syntax converted to concrete [`AppearanceRole`] values during resolution.
+    /// Sparse appearance overrides grouped and keyed by concrete semantic enums.
     #[serde(default)]
-    appearances: BTreeMap<String, AppearanceDocument>,
+    appearances: AppearanceCatalogDocument,
+}
+
+/// Strict categorized appearance syntax for one source document.
+///
+/// Each JSON object key is deserialized directly into its family's concrete role enum. The loader
+/// therefore never receives an unvalidated role string and cannot acquire knowledge of the widget
+/// or manager implementation that eventually consumes the visual.
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct AppearanceCatalogDocument {
+    /// Structural surface appearances keyed by their category-local names.
+    surface: BTreeMap<SurfaceRole, AppearanceDocument>,
+    /// Interactive control appearances keyed by their category-local names.
+    control: BTreeMap<ControlRole, AppearanceDocument>,
+    /// Compact menu appearances keyed by their category-local names.
+    menu: BTreeMap<MenuRole, AppearanceDocument>,
+    /// Manager-owned window chrome appearances keyed by their category-local names.
+    chrome: BTreeMap<ChromeRole, AppearanceDocument>,
+}
+
+impl AppearanceCatalogDocument {
+    /// Iterates mutably over every authored appearance independent of its semantic family.
+    fn values_mut(&mut self) -> impl Iterator<Item = &mut AppearanceDocument> {
+        // All four maps hold the same concrete document value, so ordinary iterator chaining
+        // shares path normalization without erasing or converting their typed keys.
+        self.surface
+            .values_mut()
+            .chain(self.control.values_mut())
+            .chain(self.menu.values_mut())
+            .chain(self.chrome.values_mut())
+    }
+
+    /// Consumes the categorized syntax into the single runtime role sum type.
+    fn into_entries(self) -> impl Iterator<Item = (AppearanceRole, AppearanceDocument)> {
+        // Conversion happens only after strict deserialization. Each closure exhaustively chooses
+        // the outer category while preserving the already validated nested role value.
+        let surfaces = self.surface.into_iter().map(|(role, document)| (AppearanceRole::Surface(role), document));
+        let controls = self.control.into_iter().map(|(role, document)| (AppearanceRole::Control(role), document));
+        let menus = self.menu.into_iter().map(|(role, document)| (AppearanceRole::Menu(role), document));
+        let chrome = self.chrome.into_iter().map(|(role, document)| (AppearanceRole::Chrome(role), document));
+        surfaces.chain(controls).chain(menus).chain(chrome)
+    }
 }
 
 /// Fully inherited and path-resolved compiler input used to build one runtime skin bundle.
@@ -370,8 +405,7 @@ impl ThemeDefinition {
             definition.fonts = Some(fonts);
         }
         definition.skin.merge(document.skin);
-        for (name, appearance) in document.appearances {
-            let role = AppearanceRole::from_json_name(name.as_str()).ok_or_else(|| ThemeLoadError::UnknownAppearance { name })?;
+        for (role, appearance) in document.appearances.into_entries() {
             let mut merged = definition.appearances.get(role).clone().unwrap_or_default();
             merged.merge(appearance);
             definition.appearances.set(role, Some(merged));
@@ -487,13 +521,13 @@ impl ThemeDefinition {
             let Some(document) = self.appearances.get(role) else {
                 continue;
             };
-            let name = role.json_name();
+            let name = appearance_path(role);
             let mut visuals = skin.role_visuals(role);
             let destination_insets = document
                 .insets
                 .map(InsetsDocument::into_insets)
                 .unwrap_or_else(|| visuals.get(VisualState::Normal).patch.insets);
-            validate_non_negative(name, "insets", destination_insets)?;
+            validate_non_negative(name.as_str(), "insets", destination_insets)?;
 
             // Role-level insets also apply to states that intentionally omit a PNG and retain their
             // flat fallback, keeping layout stable across hover/focus transitions.
@@ -519,7 +553,7 @@ impl ThemeDefinition {
                 let source_insets = state_document.source_insets.map(InsetsDocument::into_insets).unwrap_or(destination_insets);
                 let icon = *images.get(path).expect("every declared theme PNG must have one baked atlas capability");
                 let image_size = atlas.get_icon_size(icon);
-                validate_source_insets(name, source_insets, image_size.width, image_size.height)?;
+                validate_source_insets(name.as_str(), source_insets, image_size.width, image_size.height)?;
                 let tint = state_document
                     .tint
                     .map(ColorDocument::into_color)
@@ -1012,6 +1046,18 @@ fn assign_color(destination: &mut Color, value: Option<ColorDocument>) {
     }
 }
 
+/// Formats one typed role as its category-qualified path for loader diagnostics.
+fn appearance_path(role: AppearanceRole) -> String {
+    // Only error construction needs an owned string. Runtime lookup continues to use the concrete
+    // sum type and never performs formatting, parsing, hashing, or string comparison.
+    match role {
+        AppearanceRole::Surface(role) => format!("surface.{}", role.json_name()),
+        AppearanceRole::Control(role) => format!("control.{}", role.json_name()),
+        AppearanceRole::Menu(role) => format!("menu.{}", role.json_name()),
+        AppearanceRole::Chrome(role) => format!("chrome.{}", role.json_name()),
+    }
+}
+
 /// Rejects negative destination or source inset components.
 fn validate_non_negative(appearance: &str, field: &'static str, insets: SliceInsets) -> Result<(), ThemeLoadError> {
     // Destination insets may exceed a tiny runtime allocation because NinePatch collapses them, but
@@ -1073,7 +1119,7 @@ mod tests {
     fn omitted_png_states_use_theme_flat_colors() {
         let document = ThemeDefinition::parse_for_test(
             r#"{
-                "schema_version": 2,
+                "schema_version": 1,
                 "name": "Flat only",
                 "skin": {
                     "colors": {
@@ -1083,7 +1129,9 @@ mod tests {
                     }
                 },
                 "appearances": {
-                    "button": { "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+                    "control": {
+                        "button": { "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+                    }
                 }
             }"#,
         )
@@ -1131,13 +1179,15 @@ mod tests {
     fn state_foreground_override_does_not_require_a_png() {
         let document = ThemeDefinition::parse_for_test(
             r#"{
-                "schema_version": 2,
+                "schema_version": 1,
                 "name": "Foreground states",
                 "skin": { "colors": { "menu_foreground": [1, 2, 3, 255] } },
                 "appearances": {
-                    "menu_item": {
-                        "hovered": { "foreground": [250, 251, 252, 255] },
-                        "disabled": { "foreground": [90, 91, 92, 255] }
+                    "menu": {
+                        "item": {
+                            "hovered": { "foreground": [250, 251, 252, 255] },
+                            "disabled": { "foreground": [90, 91, 92, 255] }
+                        }
                     }
                 }
             }"#,
@@ -1171,28 +1221,27 @@ mod tests {
     /// Verifies the strict schema rejects misspelled fields instead of silently ignoring them.
     #[test]
     fn unknown_json_fields_are_rejected() {
-        let error = match ThemeDefinition::parse_for_test(r#"{ "schema_version": 2, "name": "Broken", "appearences": {} }"#) {
+        let error = match ThemeDefinition::parse_for_test(r#"{ "schema_version": 1, "name": "Broken", "appearences": {} }"#) {
             Ok(_) => panic!("misspelled root field must be rejected"),
             Err(error) => error,
         };
         assert!(error.to_string().contains("unknown field `appearences`"));
     }
 
-    /// Verifies the role and palette vocabulary change rejects the previous schema outright.
+    /// Verifies the loader accepts exactly schema v1 without maintaining compatibility branches.
     #[test]
-    fn previous_theme_schema_is_not_accepted_as_a_compatibility_format() {
-        let error = match ThemeDefinition::parse_for_test(r#"{ "schema_version": 1, "name": "Legacy" }"#) {
-            Ok(_) => panic!("schema version one must not enter the version-two compiler"),
+    fn a_different_theme_schema_is_not_accepted_as_a_compatibility_format() {
+        let error = match ThemeDefinition::parse_for_test(r#"{ "schema_version": 2, "name": "Future" }"#) {
+            Ok(_) => panic!("schema version two must not enter the version-one compiler"),
             Err(error) => error,
         };
 
-        // A single exact version keeps parsing deterministic; no alias or migration layer can
-        // silently reinterpret the removed palette fields and redundant appearance roles.
+        // An exact version check keeps parsing deterministic without aliases or migration code.
         assert!(matches!(
             error,
             ThemeLoadError::UnsupportedSchema {
                 expected: THEME_SCHEMA_VERSION,
-                actual: 1,
+                actual: 2,
             }
         ));
     }
@@ -1208,15 +1257,17 @@ mod tests {
         fs::write(
             parent_directory.join("theme.json"),
             r#"{
-                "schema_version": 2,
+                "schema_version": 1,
                 "name": "Parent",
                 "skin": {
                     "padding": 3,
                     "colors": { "button": [1, 2, 3, 255] }
                 },
                 "appearances": {
-                    "button": {
-                        "normal": { "png": "parent.png", "tint": [4, 5, 6, 255] }
+                    "control": {
+                        "button": {
+                            "normal": { "png": "parent.png", "tint": [4, 5, 6, 255] }
+                        }
                     }
                 }
             }"#,
@@ -1225,7 +1276,7 @@ mod tests {
         fs::write(
             child_directory.join("theme.json"),
             r#"{
-                "schema_version": 2,
+                "schema_version": 1,
                 "name": "Child",
                 "extends": "../parent/theme.json",
                 "skin": {
@@ -1233,9 +1284,11 @@ mod tests {
                     "colors": { "button_hover": [8, 9, 10, 255] }
                 },
                 "appearances": {
-                    "button": {
-                        "normal": { "foreground": [11, 12, 13, 255] },
-                        "hovered": { "png": "child.png" }
+                    "control": {
+                        "button": {
+                            "normal": { "foreground": [11, 12, 13, 255] },
+                            "hovered": { "png": "child.png" }
+                        }
                     }
                 }
             }"#,
@@ -1275,8 +1328,8 @@ mod tests {
         let root = tempfile::tempdir().expect("temporary cycle directory must be available");
         let first = root.path().join("first.json");
         let second = root.path().join("second.json");
-        fs::write(first.as_path(), r#"{ "schema_version": 2, "name": "First", "extends": "second.json" }"#).expect("first cycle document must be writable");
-        fs::write(second.as_path(), r#"{ "schema_version": 2, "name": "Second", "extends": "first.json" }"#).expect("second cycle document must be writable");
+        fs::write(first.as_path(), r#"{ "schema_version": 1, "name": "First", "extends": "second.json" }"#).expect("first cycle document must be writable");
+        fs::write(second.as_path(), r#"{ "schema_version": 1, "name": "Second", "extends": "first.json" }"#).expect("second cycle document must be writable");
 
         let error = match ThemeDefinition::read(first.as_path()) {
             Ok(_) => panic!("cyclic inheritance must fail before a definition is returned"),
@@ -1286,29 +1339,29 @@ mod tests {
         assert!(matches!(error, ThemeLoadError::InheritanceCycle { path } if path == fs::canonicalize(first).unwrap()));
     }
 
-    /// Verifies appearance strings become typed roles while source documents are resolved.
+    /// Verifies misspelled appearance keys are rejected by the concrete role enum.
     #[test]
-    fn unknown_inherited_appearance_is_rejected_during_read() {
+    fn unknown_inherited_role_key_is_rejected_during_read() {
         let root = tempfile::tempdir().expect("temporary appearance directory must be available");
         let parent = root.path().join("parent.json");
         let child = root.path().join("child.json");
         fs::write(
             parent.as_path(),
             r#"{
-                "schema_version": 2,
+                "schema_version": 1,
                 "name": "Parent",
-                "appearances": { "buton": {} }
+                "appearances": { "control": { "buton": {} } }
             }"#,
         )
         .expect("invalid parent document must be writable");
-        fs::write(child.as_path(), r#"{ "schema_version": 2, "name": "Child", "extends": "parent.json" }"#).expect("child document must be writable");
+        fs::write(child.as_path(), r#"{ "schema_version": 1, "name": "Child", "extends": "parent.json" }"#).expect("child document must be writable");
 
         let error = match ThemeDefinition::read(child.as_path()) {
-            Ok(_) => panic!("unknown parent appearance must fail during typed source resolution"),
+            Ok(_) => panic!("unknown parent role key must fail during typed source resolution"),
             Err(error) => error,
         };
 
-        assert!(matches!(error, ThemeLoadError::UnknownAppearance { name } if name == "buton"));
+        assert!(matches!(error, ThemeLoadError::DefinitionJson { source, .. } if source.to_string().contains("buton")));
     }
 
     /// Verifies a declared font catalog is complete rather than silently borrowing a missing role
@@ -1317,7 +1370,7 @@ mod tests {
     fn font_catalog_requires_every_semantic_role() {
         let error = match ThemeDefinition::parse_for_test(
             r#"{
-                "schema_version": 2,
+                "schema_version": 1,
                 "name": "Incomplete fonts",
                 "fonts": {
                     "texture_width": 512,

@@ -1034,15 +1034,17 @@ mod theme_tests {
         fs::write(
             directory.path().join("theme.json"),
             r#"{
-                "schema_version": 2,
+                "schema_version": 1,
                 "name": "Rollback",
                 "appearances": {
-                    "button": {
-                        "insets": { "left": 1, "top": 1, "right": 1, "bottom": 1 },
-                        "normal": { "png": "button.png" }
-                    },
-                    "checkbox": {
-                        "normal": { "png": "missing.png" }
+                    "control": {
+                        "button": {
+                            "insets": { "left": 1, "top": 1, "right": 1, "bottom": 1 },
+                            "normal": { "png": "button.png" }
+                        },
+                        "checkbox": {
+                            "normal": { "png": "missing.png" }
+                        }
                     }
                 }
             }"#,
@@ -1112,18 +1114,22 @@ mod theme_tests {
         fs::write(
             directory.path().join("first.json"),
             r#"{
-                "schema_version": 2,
+                "schema_version": 1,
                 "name": "First",
-                "appearances": { "button": { "normal": { "png": "first.png" } } }
+                "appearances": {
+                    "control": { "button": { "normal": { "png": "first.png" } } }
+                }
             }"#,
         )
         .expect("first fixture JSON must be writable");
         fs::write(
             directory.path().join("second.json"),
             r#"{
-                "schema_version": 2,
+                "schema_version": 1,
                 "name": "Second",
-                "appearances": { "checkbox": { "normal": { "png": "second.png" } } }
+                "appearances": {
+                    "control": { "checkbox": { "normal": { "png": "second.png" } } }
+                }
             }"#,
         )
         .expect("second fixture JSON must be writable");
