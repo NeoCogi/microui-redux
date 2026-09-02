@@ -2,9 +2,9 @@
 
 This bundled theme reconstructs the late Mac OS 9 Platinum visual language through the crate's
 typed appearance catalog. Active windows use centered labels over interrupted horizontal racing
-stripes, a blank leading close box, and compact trailing windowshade and zoom boxes. Passive
-windows recede to flat gray titles without caption boxes. The surrounding chrome uses thin black
-outlines, directional white and dark-gray bevels, sixteen-pixel scrollbars, and a grooved diagonal
+stripes, a blank leading close box, and compact trailing windowshade and zoom boxes. Windows
+without activation use the base flat-gray title role without caption boxes. The surrounding chrome
+uses thin black outlines, directional white and dark-gray bevels, sixteen-pixel scrollbars, and a grooved diagonal
 resize handle. Popup menus use a heavy black perimeter and black selections with white text.
 
 Controls use chamfered raised faces, recessed white fields, black focus keylines, reversed pressed

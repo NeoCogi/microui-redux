@@ -761,7 +761,7 @@ struct ColorPaletteDocument {
     border: Option<ColorDocument>,
     /// Window body background.
     window_background: Option<ColorDocument>,
-    /// Passive window title background.
+    /// Base window title background used when the active chrome role is not selected.
     title_background: Option<ColorDocument>,
     /// Window title text.
     title_text: Option<ColorDocument>,
@@ -1537,11 +1537,11 @@ mod tests {
             VisualState::HoveredFocused,
             VisualState::PressedFocused,
         ] {
-            // Passive Windows 3.11 titles are white and require black text, while selected blue
+            // Base Windows 3.11 titles are white and require black text, while selected blue
             // titles retain white text for every enabled interaction combination.
-            let passive = loaded.bundle().skin().visual(AppearanceRole::Chrome(ChromeRole::Title), state).foreground;
+            let base = loaded.bundle().skin().visual(AppearanceRole::Chrome(ChromeRole::Title), state).foreground;
             let active = loaded.bundle().skin().visual(AppearanceRole::Chrome(ChromeRole::TitleActive), state).foreground;
-            assert_eq!((passive.r, passive.g, passive.b, passive.a), (0, 0, 0, 255));
+            assert_eq!((base.r, base.g, base.b, base.a), (0, 0, 0, 255));
             assert_eq!((active.r, active.g, active.b, active.a), (255, 255, 255, 255));
         }
         let disabled_title = loaded
@@ -1625,7 +1625,7 @@ mod tests {
         let chrome = loaded.bundle().skin().chrome;
         assert_eq!(chrome.title_alignment, crate::WindowTitleAlignment::Centered);
         assert_eq!(chrome.captions.close_side, crate::CaptionButtonSide::Leading);
-        assert!(!chrome.captions.show_when_inactive);
+        assert!(!chrome.captions.show_without_activation);
         assert_eq!(loaded.bundle().skin().metrics.title_height, 18);
         let content = loaded.bundle().skin().metrics.window_content_insets;
         assert_eq!(
@@ -1669,7 +1669,7 @@ mod tests {
             crate::NinePatchContent::Image { .. }
         ));
 
-        // Hovering or pressing a passive frame must not borrow the darker active-frame bitmap.
+        // Hovering or pressing a base frame must not borrow the darker active-frame bitmap.
         // This guards the Platinum distinction before the manager supplies the active role.
         let normal_frame = loaded
             .bundle()

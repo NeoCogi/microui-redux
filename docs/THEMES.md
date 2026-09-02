@@ -32,7 +32,7 @@ the theme directories must remain available beside the repository sources at run
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 1,
   "name": "Example",
   "fonts": {
     "texture_width": 512,
@@ -62,18 +62,20 @@ the theme directories must remain available beside the repository sources at run
     }
   },
   "appearances": {
-    "button": {
-      "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
-      "normal": {
-        "png": "button-normal.png",
-        "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }
-      },
-      "hovered": { "png": "button-hovered.png" },
-      "pressed": { "png": "button-pressed.png", "foreground": [255, 255, 255, 255] },
-      "focused": { "png": "button-focused.png" },
-      "hovered_focused": { "png": "button-hovered-focused.png" },
-      "pressed_focused": { "png": "button-pressed-focused.png" },
-      "disabled": { "png": "button-disabled.png", "tint": [255, 255, 255, 160] }
+    "control": {
+      "button": {
+        "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
+        "normal": {
+          "png": "button-normal.png",
+          "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }
+        },
+        "hovered": { "png": "button-hovered.png" },
+        "pressed": { "png": "button-pressed.png", "foreground": [255, 255, 255, 255] },
+        "focused": { "png": "button-focused.png" },
+        "hovered_focused": { "png": "button-hovered-focused.png" },
+        "pressed_focused": { "png": "button-pressed-focused.png" },
+        "disabled": { "png": "button-disabled.png", "tint": [255, 255, 255, 160] }
+      }
     }
   }
 }
@@ -148,13 +150,14 @@ five semantic entries and atlas dimensions form one unit.
 The `skin` object merges field by field. Appearance roles merge independently; within a role,
 `insets` and each visual state merge independently; within a state, `png`, `source_insets`, `tint`,
 and `foreground` merge independently. The more-derived present value wins and an omitted value
-preserves its parent. There is no JSON `null` removal operation in schema version 2.
+preserves its parent. There is no JSON `null` removal operation in schema version 1.
 
-The loader rejects unknown document fields, unknown skin/palette fields, unknown appearance names,
-unknown state fields, cycles, chains deeper than 32 documents, unsupported schema versions, and
-invalid names before constructing an atlas. The fully merged compiler input contains typed
-`AppearanceRole` tables and fully resolved paths; the runtime bundle retains no inheritance graph
-or string-keyed role map.
+The loader rejects unknown document fields, unknown skin/palette fields, unknown appearance
+categories or role keys, unknown state fields, cycles, chains deeper than 32 documents, unsupported
+schema versions, and invalid names before constructing an atlas. Family and role keys deserialize
+directly into concrete enums; no string-keyed appearance map exists between syntax parsing and the
+fully merged `AppearanceRole` table. The runtime bundle retains no inheritance graph or authored
+key strings.
 
 ## Loading and selecting
 
@@ -175,33 +178,40 @@ flat skin while continuing to permit concrete metric changes for image-backed th
 
 ## Appearance roles
 
-The `appearances` object accepts the following exact keys:
+The `appearances` object accepts four exact family objects, each with its own closed role-key
+vocabulary:
 
-- `generic_frame`, `panel`, `button`, `checkbox`, `text_input`, `item`
-- `combo`, `slider_track`, `slider_thumb`, `scrollbar_track`, `scrollbar_thumb`
-- `menu_bar`, `menu_title`, `menu_title_open`, `menu_popup`, `menu_item`
-- `window_frame`, `window_frame_active`, `dialog_frame`, `dialog_frame_active`
-- `window_title`, `window_title_active`
-- `window_close_button`, `window_minimize_button`, `window_maximize_button`,
-  `window_restore_button`, `window_resize_grip`
-- `window_close_glyph`, `window_minimize_glyph`, `window_maximize_glyph`,
-  `window_restore_glyph`
+- `surface`: `generic_frame`, `panel`
+- `control`: `button`, `checkbox`, `text_input`, `item`, `combo`, `slider_track`,
+  `slider_thumb`, `scrollbar_track`, `scrollbar_thumb`
+- `menu`: `bar`, `title`, `title_open`, `popup`, `item`
+- `chrome`: `window_frame`, `window_frame_active`, `dialog_frame`, `dialog_frame_active`, `title`,
+  `title_active`, `close_button`, `minimize_button`, `maximize_button`, `restore_button`,
+  `resize_grip`, `close_glyph`, `minimize_glyph`, `maximize_glyph`, `restore_glyph`
 
-Unknown fields and role names are errors. This prevents a misspelled state or control name from
-silently falling back to a flat appearance.
+Category qualification makes local names such as `control.item` and `menu.item` unambiguous while
+keeping widget implementation types out of the loader. Unknown categories, role names, and fields
+are errors, so a misspelled state or control name cannot silently fall back to a flat appearance.
 
-`panel` and container-owned generic frames are passive structure: their body and border resolve the
-normal appearance while the pointer moves across them. Losing top-level activation selects the
-passive `window_frame`, `dialog_frame`, and `window_title` roles but does not rewrite enabled child
-widgets. A disabled widget or subtree resolves `disabled` independently of activation; its
-foreground uses `disabled_text` (or `disabled_title_text` for chrome), and omitted PNG states use
+Every role has the same closed interaction-state vocabulary: `normal`, `hovered`, `pressed`,
+`focused`, `hovered_focused`, `pressed_focused`, and `disabled`. `normal` means enabled with no
+current pointer press, hover, or visible focus combination; it does not mean that a window lacks
+activation. Window activation instead selects a base or `*_active` role inside the `chrome`
+family. Open menu titles likewise select `menu.title_open` rather than inventing an `open` state.
+
+`surface.panel` and container-owned `surface.generic_frame` are noninteractive structure: their
+body and border resolve the normal appearance while the pointer moves across them. Losing
+top-level activation selects the base `chrome.window_frame`, `chrome.dialog_frame`, and
+`chrome.title` roles but does not rewrite enabled child widgets. A disabled widget or subtree
+resolves `disabled` independently of activation; its foreground uses `disabled_text` (or
+`disabled_title_text` for chrome), and omitted PNG states use
 `disabled_background` as their flat fallback. The ordinary frame pair and modal dialog pair also
 use normal center artwork for the application body even when a resize edge is hovered or captured.
 Interactive descendants, resize borders, caption controls, and the title remain free to resolve
 their own hover and pressed states while enabled.
 
 `WindowOption::DISABLED` is the explicit whole-window counterpart. It keeps the root visible and
-keeps its retained update traversal running, but resolves the passive frame/title roles, intrinsic
+keeps its retained update traversal running, but resolves the base frame/title roles, intrinsic
 menu bar, caption controls, and complete widget tree through `disabled`. It also rejects pointer,
 keyboard, popup, move, resize, and caption input while retaining focus for later re-enabling. A
 structural child window inherits a disabled structural parent; an owned modal dialog remains an
@@ -212,13 +222,13 @@ children.
 ## Window borders and caption controls
 
 `skin.window_border` is the window's structural border thickness. Its four values drive client
-layout and the right/bottom one-axis resize hit regions. `window_frame.insets` and
-`dialog_frame.insets` instead control the fixed visual corner span for their respective
-three-by-three artwork; each active role is normalized to its corresponding passive role's visual
+layout and the right/bottom one-axis resize hit regions. `chrome.window_frame.insets` and
+`chrome.dialog_frame.insets` instead control the fixed visual corner span for their respective
+three-by-three artwork; each active role is normalized to its corresponding base role's visual
 authority. Keeping the values separate permits a four-pixel Windows 3.11 edge to carry a 23-pixel
 L-shaped ordinary-window corner while a modal dialog uses a uniform four-pixel outline, without
 reserving 23 pixels around either client. The bottom-right two-axis region remains larger for easy
-input, but themes may leave `window_resize_grip` transparent when the frame corner itself is the
+input, but themes may leave `chrome.resize_grip` transparent when the frame corner itself is the
 complete visible affordance.
 
 `skin.window_content_insets` is a separate four-edge inset around the application body. Root
@@ -227,7 +237,7 @@ the menubar and never changes ordinary widget padding. The bundled Windows and M
 four edges to zero; the default flat Skin retains a five-pixel body inset.
 `WindowOption::NO_PADDING` overrides the metric with zero for an individual root.
 
-Application-authored popup windows use the `menu_popup` appearance for both their structural
+Application-authored popup windows use the `menu.popup` appearance for both their structural
 client inset and their outer frame paint. This keeps combo/list popups aligned with themed menu
 panels instead of borrowing ordinary window L-corners or `skin.window_border`; compact menu
 popups already paint the same role as their complete manager-owned panel.
@@ -242,7 +252,7 @@ longer painted pressed and does not activate on release.
 caption roles. `trailing_buttons` preserves the ordinary left-aligned title and places every
 caption control at the trailing edge. `classic_mac` centers the title, places a compact close box
 at the leading edge, places compact zoom/windowshade controls at the trailing edge, and omits those
-faces from passive titles. Classic Mac caption PNGs are complete faces, so this layout does not
+faces from base titles. Classic Mac caption PNGs are complete faces, so this layout does not
 overlay the generic procedural glyphs used by flat and Windows-oriented skins. The JSON enum is
 compiled once into a concrete `WindowChromeSkin` data recipe; manager code does not branch on a
 theme or platform mode.
@@ -255,4 +265,4 @@ without forcing every flat application skin to ship additional images.
 Minimize hides the retained window and emits `WindowEvent::Minimized`; the same `WindowHandle` can
 be shown again. Maximize saves the exact normal outer rectangle, tracks the complete inherited
 viewport, and emits `WindowEvent::Maximized`. Activating the same caption position while maximized
-uses `window_restore_button`, restores the saved rectangle, and emits `WindowEvent::Restored`.
+uses `chrome.restore_button`, restores the saved rectangle, and emits `WindowEvent::Restored`.

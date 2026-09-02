@@ -265,7 +265,7 @@ pub(super) fn number_textbox_update(
     if shift_click {
         edit.editing = true;
         edit.buf.clear();
-        // The same validated precision drives passive labels and the initial editor contents.
+        // The same validated precision drives formatted labels and the initial editor contents.
         let _ = write!(edit.buf, "{:.*}", precision.digits(), value);
         edit.cursor = edit.buf.len();
     }

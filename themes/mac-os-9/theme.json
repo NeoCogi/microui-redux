@@ -205,10 +205,10 @@
       },
       "title": {
         "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
-        "normal": { "png": "title-inactive.png", "foreground": [102, 102, 102, 255] },
-        "hovered": { "png": "title-inactive.png", "foreground": [102, 102, 102, 255] },
-        "pressed": { "png": "title-inactive.png", "foreground": [102, 102, 102, 255] },
-        "disabled": { "png": "title-inactive.png", "foreground": [119, 119, 119, 255] }
+        "normal": { "png": "title-normal.png", "foreground": [102, 102, 102, 255] },
+        "hovered": { "png": "title-normal.png", "foreground": [102, 102, 102, 255] },
+        "pressed": { "png": "title-normal.png", "foreground": [102, 102, 102, 255] },
+        "disabled": { "png": "title-normal.png", "foreground": [119, 119, 119, 255] }
       },
       "title_active": {
         "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },

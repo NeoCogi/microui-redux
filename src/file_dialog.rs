@@ -259,7 +259,7 @@ impl FileDialog {
         parent: &WindowHandle,
         accessor: for<'a> fn(&'a mut State) -> &'a mut FileDialog,
     ) -> Self {
-        // Start with an empty inactive model. The first activation supplies directory data, title, and
+        // Start with an empty dormant model. The first activation supplies directory data, title, and
         // geometry immediately before this already-retained modal window becomes visible.
         let current_working_directory = String::new();
         let folders = Vec::new();

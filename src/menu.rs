@@ -644,7 +644,7 @@ impl MenuSurface {
             self.keyboard_slot = Some(slot);
         }
 
-        // Hover never opens an inactive bar. Once a menu path exists, however, the complete bar
+        // Hover never opens a closed bar. Once a menu path exists, however, the complete bar
         // and popup ancestry enter one hot-tracking scope: sibling headings replace the top-level
         // popup, submenu branches extend or replace the path, and ordinary sibling rows close a
         // now-unrelated child branch. Moving outside menu entries intentionally emits no action so

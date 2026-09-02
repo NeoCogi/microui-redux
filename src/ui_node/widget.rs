@@ -393,7 +393,7 @@ pub trait Widget {
     /// Returns declarative keyboard routing capabilities for this widget surface.
     ///
     /// Keyboard focus is persistent and owned by retained routing rather than by pointer capture.
-    /// Override this method for focusable custom widgets; the default keeps passive drawing and
+    /// Override this method for focusable custom widgets; the default keeps structural drawing and
     /// structural containers out of Tab order without another opt-out flag.
     fn keyboard_behavior(&self) -> KeyboardBehavior {
         KeyboardBehavior::NONE

@@ -55,9 +55,10 @@ let mut skin = ctx.skin().clone().with_metrics(|metrics| {
     metrics.spacing = 8;
     metrics.padding = 6;
 });
-let mut button = skin.visual(AppearanceRole::Button, VisualState::Normal);
+let button_role = AppearanceRole::Control(ControlRole::Button);
+let mut button = skin.visual(button_role, VisualState::Normal);
 button.foreground = color(55, 90, 160, 255);
-skin.set_visual(AppearanceRole::Button, VisualState::Normal, button);
+skin.set_visual(button_role, VisualState::Normal, button);
 ctx.set_skin(skin);
 ```
 
@@ -208,7 +209,7 @@ intrinsic menu retains its narrower keyboard scope, and an active modal dialog c
 `WindowOption::DISABLED` is independent from activation and visibility. A disabled root remains in
 layout, update, paint, and hit-test order so retained state stays current and its pixels still
 occlude lower windows, but it is excluded from pointer, keyboard, popup, menu, and chrome routing.
-Painting passes one explicit enabled fact through passive window chrome, the intrinsic menu, and
+Painting passes one explicit enabled fact through base window chrome, the intrinsic menu, and
 the root widget runtime; it does not synthesize disabled state merely because a different window is
 active. Structural children inherit their parent's disabled policy. Modal dialogs own their policy
 independently, allowing an enabled dialog to remain usable above a disabled owner.
@@ -225,7 +226,7 @@ the pointer. Hiding or destroying an active surface or structural ancestor repai
 identity from the retained forest.
 
 The manager projects that same routing decision into paint. Only the current keyboard surface
-receives a visible focused state; inactive runtimes preserve their target without drawing duplicate
+receives a visible focused state; nonselected runtimes preserve their target without drawing duplicate
 carets or fills. Each widget paints the focused state of its semantic role during the ordinary tree
 pass, while the active owner window selects its active title and frame roles. During menu navigation
 the menu selection replaces the suspended widget cue while the owning window remains visibly active.

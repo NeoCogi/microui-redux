@@ -22,7 +22,7 @@ pub struct FlatPalette {
     pub border: Color,
     /// Window and dialog client-area background.
     pub window_background: Color,
-    /// Passive window title background.
+    /// Base window title background used when the active chrome role is not selected.
     pub title_background: Color,
     /// Window title and caption foreground.
     pub title_foreground: Color,

@@ -199,7 +199,7 @@ fn export_theme(output_dir: &Path) -> Result<(), Box<dyn Error>> {
         ("recessed-focused.png", recessed_control(true)),
         ("resize-grip.png", resize_grip()),
         ("title-active.png", title_strip(true)),
-        ("title-inactive.png", title_strip(false)),
+        ("title-normal.png", title_strip(false)),
         ("window-frame-active.png", window_frame(true)),
         ("window-frame.png", window_frame(false)),
         ("caption-close.png", caption_button(CaptionMark::Close, false)),
@@ -302,7 +302,7 @@ fn recessed_control(focused: bool) -> Bitmap {
     bitmap
 }
 
-/// Builds the active racing-stripe title source or the passive flat title source.
+/// Builds the active racing-stripe title source or the base flat title source.
 fn title_strip(active: bool) -> Bitmap {
     let mut bitmap = Bitmap::new(8, 18, FACE);
     if active {
@@ -316,11 +316,11 @@ fn title_strip(active: bool) -> Bitmap {
     bitmap
 }
 
-/// Builds the passive or active one-pixel structural window frame with a three-pixel visual bevel.
+/// Builds the base or active one-pixel structural window frame with a three-pixel visual bevel.
 fn window_frame(active: bool) -> Bitmap {
     let fill = if active { FACE } else { PRESSED_FACE };
     let mut bitmap = Bitmap::new(11, 11, fill);
-    // Active and passive frames share exact geometry so activation never moves the client. Only the
+    // Active and base frames share exact geometry so activation never moves the client. Only the
     // interior fill and title role distinguish them at runtime.
     bitmap.horizontal(0, 10, 0, BLACK);
     bitmap.horizontal(0, 10, 10, BLACK);

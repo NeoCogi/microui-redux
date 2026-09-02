@@ -38,7 +38,9 @@ switching themes cannot gradually accumulate fonts, icons, or artwork.
 | `Skin` | One resolved value containing metrics, complete visuals, and chrome policy. |
 | `SkinMetrics` | Layout, spacing, window inset, border, title, scrollbar, and thumb geometry. |
 | `Skin::visual` | Resolves one complete `Visual { patch, foreground }` for a role and state. |
-| `AppearanceRole` | Closed semantic UI-part domain such as `Button`, `TextInput`, or `WindowFrame`. |
+| `AppearanceRole` | Closed sum of the surface, control, menu, and chrome role families. |
+| `SurfaceRole` / `ControlRole` | Concrete structural and interactive widget-facing roles. |
+| `MenuRole` / `ChromeRole` | Concrete menu and manager-owned window-decoration roles. |
 | `VisualState` | Closed interaction domain: normal, hover, press, focus combinations, and disabled. |
 | `StateTable<T>` | Exhaustive state-indexed generic storage with one concrete `T`. |
 | `WindowChromeSkin` | Data recipe for title alignment, caption placement, sizing, and backdrop. |
@@ -55,13 +57,14 @@ Start from a skin whose atlas ownership is known, mutate its concrete fields, an
 completed value:
 
 ```rust,ignore
-use microui_redux::{color, AppearanceRole, Visual, VisualState};
+use microui_redux::{color, AppearanceRole, ControlRole, Visual, VisualState};
 
 let mut skin = context.skin().clone();
 skin.metrics.padding = 8;
-let focused_button = skin.visual(AppearanceRole::Button, VisualState::Focused);
+let button = AppearanceRole::Control(ControlRole::Button);
+let focused_button = skin.visual(button, VisualState::Focused);
 skin.set_visual(
-    AppearanceRole::Button,
+    button,
     VisualState::Focused,
     Visual::new(focused_button.patch, color(255, 255, 255, 255)),
 );
@@ -105,8 +108,9 @@ The optional `theme-json` feature adds a strict authoring format documented in
 
 1. Decode each file into a strict syntax document and resolve `extends` paths and asset paths
    relative to the file that declares them.
-2. Merge parents into one typed definition, converting appearance names to `AppearanceRole` and
-   rejecting unknown keys, cycles, excessive depth, and invalid schema data before atlas work.
+2. Deserialize family-local appearance keys directly into concrete role enums, merge parents into
+   one typed definition, and reject unknown keys, cycles, excessive depth, and invalid schema data
+   before atlas work.
 3. Build one immutable atlas, compile flat fallbacks and authored state images into a complete
    `Skin`, then construct one validated `SkinBundle`.
 

@@ -206,8 +206,9 @@ impl RootChromeVisualState {
         };
         // As with widgets, a captured pointer outside its originating part is no longer visually
         // pressed even though release routing remains captured by the manager.
-        // This helper resolves only interaction within active chrome. The recording boundary uses
-        // Normal for passive chrome so deactivation never masquerades as disabled presentation.
+        // This helper resolves only interaction within selected chrome. The recording boundary
+        // independently uses Normal when the window does not own activation, so activation never
+        // masquerades as disabled presentation or become part of the interaction-state domain.
         VisualState::from_interaction(true, hovered, false, captured && hovered)
     }
 
@@ -254,7 +255,7 @@ pub(super) struct RootChromeGeometry {
 pub(super) enum RootFrameKind {
     /// Ordinary independent or structurally owned window chrome.
     Window,
-    /// Modal dialog chrome with its independently themed active and passive roles.
+    /// Modal dialog chrome with independently themed base and active roles.
     Dialog,
     /// Transient application popup chrome shared with compact popup-menu panels.
     Popup,
@@ -632,14 +633,14 @@ fn root_titlebar_height(style: &Skin, atlas: &AtlasHandle) -> i32 {
 
 /// Resolves window, dialog, or popup artwork while preserving each family's frame geometry.
 fn root_frame_patch(style: &Skin, frame_kind: RootFrameKind, active: bool, state: VisualState) -> crate::NinePatch {
-    // Each root kind's passive frame artwork is the visual corner-span authority for both of its
+    // Each root kind's base frame artwork is the visual corner-span authority for both of its
     // activation variants. Keeping the ordinary, dialog, and popup families independent allows a
     // classic theme to combine long L-shaped window corners, a thick dialog outline, and a compact
     // black transient frame without geometry or artwork leaking between them.
     // Structural client and resize thickness lives in Skin::window_border, so long transparent L
     // corners do not enlarge the client inset. Matching active visual insets still prevents focus
     // changes from moving or scaling the corner art itself.
-    let (passive_role, active_role) = match frame_kind {
+    let (base_role, active_role) = match frame_kind {
         RootFrameKind::Window => (
             AppearanceRole::Chrome(ChromeRole::WindowFrame),
             AppearanceRole::Chrome(ChromeRole::WindowFrameActive),
@@ -650,8 +651,8 @@ fn root_frame_patch(style: &Skin, frame_kind: RootFrameKind, active: bool, state
         ),
         RootFrameKind::Popup => (AppearanceRole::Menu(MenuRole::Popup), AppearanceRole::Menu(MenuRole::Popup)),
     };
-    let visual_insets = style.visual(passive_role, VisualState::Normal).patch.insets;
-    let role = if active { active_role } else { passive_role };
+    let visual_insets = style.visual(base_role, VisualState::Normal).patch.insets;
+    let role = if active { active_role } else { base_role };
     style.visual(role, state).patch.with_insets(visual_insets)
 }
 
@@ -696,8 +697,9 @@ pub(super) fn record_root_overlay(
 ) {
     // Reuse committed geometry so hit-testing and painting cannot disagree within one UI commit.
     let mut painter = Painter::screen_space(display_list, viewport);
-    // Explicit disabling wins over interaction. Passive enabled chrome resolves Normal even if it
-    // retains a stale hover snapshot, because losing activation does not disable the window.
+    // Explicit disabling wins over interaction. Enabled chrome without activation resolves Normal
+    // even if it retains a stale hover snapshot, because losing activation does not disable the
+    // window and does not introduce another VisualState value.
     let chrome_active = active && enabled;
     let chrome_state = |state| {
         if !enabled {
@@ -755,8 +757,9 @@ pub(super) fn record_root_overlay(
             }
             painter.with_clip(text, |painter| painter.text(title_font, name, position, color));
         }
-        if chrome_active || style.chrome.captions.show_when_inactive {
-            // Recipe visibility controls inactive presentation and matches pointer hit testing.
+        if chrome_active || style.chrome.captions.show_without_activation {
+            // The activation-specific recipe flag controls presentation and matches pointer hit
+            // testing without overloading the interaction state used to paint the button itself.
             for button in [RootCaptionButton::Minimize, RootCaptionButton::Maximize, RootCaptionButton::Close] {
                 if let Some(rect) = geometry.caption(button) {
                     paint_caption_button(&mut painter, rect, button, style, atlas, chrome_active, enabled, visual);

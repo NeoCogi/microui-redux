@@ -111,8 +111,12 @@ pub struct CaptionButtonsSkin {
     pub extent_inset: i32,
     /// Minimum square caption extent after applying the inset.
     pub minimum_extent: i32,
-    /// Whether caption controls remain visible and hittable on inactive windows.
-    pub show_when_inactive: bool,
+    /// Whether caption controls remain visible and hittable without window activation.
+    ///
+    /// Activation selects the base or `*Active` chrome role; it is not a [`VisualState`]. Keeping
+    /// this policy named after that condition avoids treating [`VisualState::Normal`] as a synonym
+    /// for a window that does not own activation.
+    pub show_without_activation: bool,
     /// Whether a separate semantic glyph layer is painted over each caption button face.
     pub draw_separate_glyphs: bool,
 }
@@ -171,8 +175,8 @@ pub struct WindowChromeSkin {
 impl WindowChromeSkin {
     /// Creates a leading-title recipe with every caption button on the trailing edge.
     pub const fn trailing_buttons() -> Self {
-        // This conventional recipe retains visible inactive controls and manager-drawn fallback
-        // glyphs when a skin supplies only button backgrounds.
+        // This conventional recipe retains visible caption controls without activation and uses
+        // manager-drawn fallback glyphs when a skin supplies only button backgrounds.
         Self {
             title_alignment: WindowTitleAlignment::Leading,
             captions: CaptionButtonsSkin {
@@ -181,7 +185,7 @@ impl WindowChromeSkin {
                 maximize_side: CaptionButtonSide::Trailing,
                 extent_inset: 0,
                 minimum_extent: 0,
-                show_when_inactive: true,
+                show_without_activation: true,
                 draw_separate_glyphs: true,
             },
             active_title_backdrop: None,
@@ -200,7 +204,7 @@ impl WindowChromeSkin {
                 maximize_side: CaptionButtonSide::Trailing,
                 extent_inset: 6,
                 minimum_extent: 1,
-                show_when_inactive: false,
+                show_without_activation: false,
                 draw_separate_glyphs: false,
             },
             active_title_backdrop: Some(TitleBackdropSkin {

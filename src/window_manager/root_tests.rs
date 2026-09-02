@@ -741,7 +741,7 @@ fn ctrl_f6_preserves_each_window_focus_and_consumes_the_complete_chord() {
     assert_eq!(first_state.try_read(|state| state.events.clone()), Some(vec!["text"]));
 
     // Returning to the second root immediately restores its retained probe focus without another
-    // Tab command. Text proves the inactive runtime remembered rather than discarded that target.
+    // Tab command. Text proves the nonselected runtime remembered rather than discarded that target.
     ctx.key(KeyEvent::pressed(Key::Function(6), Modifiers::CTRL));
     ctx.key(KeyEvent::released(Key::Function(6), Modifiers::NONE));
     ctx.text("second again");
@@ -889,7 +889,7 @@ fn active_window_and_only_its_remembered_widget_use_role_state_visuals() {
             let RenderEvent::AtlasQuad(vertices) = event else { unreachable!() };
             vertices.iter().all(|vertex| vertex.position[0] <= 150.0)
         }),
-        "the inactive second runtime must not expose its remembered focus"
+        "the nonselected second runtime must not expose its remembered focus"
     );
 
     let window_focus = atlas_quads_with_color(&events, window_activation);
@@ -947,7 +947,8 @@ fn modal_dialog_uses_its_own_active_frame_role() {
     assert!(atlas_quads_with_color(&events, dialog_frame_color).is_empty());
 
     // Opening the modal transfers activation and selects only the dialog-specific active frame.
-    // The inactive owner uses its passive ordinary-window role rather than either active color.
+    // The owner without activation uses its base ordinary-window role rather than either active
+    // color. Its interaction state remains Normal rather than acquiring an activation state.
     ctx.ui().set_window_visible(&dialog, true).unwrap();
     ctx.update_ui(dimensions);
     assert_eq!(ctx.debug_active_root(), Some(dialog.id()));
@@ -964,7 +965,7 @@ fn deactivated_window_keeps_enabled_child_widget_appearance() {
     // Distinct role and state colors make activation and disabling independently observable.
     let atlas = test_atlas();
     let active_window_color = color(13, 31, 47, 255);
-    let passive_window_color = color(61, 79, 97, 255);
+    let base_window_color = color(61, 79, 97, 255);
     let enabled_control_color = color(109, 127, 149, 255);
     let disabled_control_color = color(157, 173, 191, 255);
     let enabled_text_color = color(199, 211, 223, 255);
@@ -976,7 +977,7 @@ fn deactivated_window_keeps_enabled_child_widget_appearance() {
     replace_skin_patches(
         &mut style,
         AppearanceRole::Chrome(ChromeRole::WindowFrame),
-        StateTable::filled(NinePatch::solid(passive_window_color)),
+        StateTable::filled(NinePatch::solid(base_window_color)),
     );
     replace_skin_patches(
         &mut style,
@@ -992,9 +993,9 @@ fn deactivated_window_keeps_enabled_child_widget_appearance() {
     ctx.set_skin(style);
     let (_, first_node) = Button::create(ButtonParameters::new("active child"));
     let first_id = first_node.id();
-    let (_, second_node) = Button::create(ButtonParameters::new("passive child"));
+    let (_, second_node) = Button::create(ButtonParameters::new("base child"));
     let first = ctx.ui().create_window(Window::new("active title", rect(10, 10, 150, 100), first_node));
-    let _second = ctx.ui().create_window(Window::new("passive title", rect(220, 10, 150, 100), second_node));
+    let _second = ctx.ui().create_window(Window::new("base title", rect(220, 10, 150, 100), second_node));
     let dimensions = Dimensioni::new(400, 240);
     ctx.update_ui(dimensions);
 
@@ -1010,9 +1011,9 @@ fn deactivated_window_keeps_enabled_child_widget_appearance() {
     log.clear();
     ctx.frame(frame_info(dimensions)).render_ui().unwrap();
     let events = log.snapshot();
-    let passive_frame = atlas_quads_with_color(&events, passive_window_color);
-    assert!(!passive_frame.is_empty());
-    assert!(passive_frame.iter().all(|event| {
+    let base_frame = atlas_quads_with_color(&events, base_window_color);
+    assert!(!base_frame.is_empty());
+    assert!(base_frame.iter().all(|event| {
         let RenderEvent::AtlasQuad(vertices) = event else { unreachable!() };
         vertices.iter().all(|vertex| vertex.position[0] >= 200.0)
     }));
@@ -1080,7 +1081,7 @@ fn external_widget_images_use_color_preserving_white_tint() {
 #[test]
 fn disabled_window_propagates_disabled_presentation_and_rejects_input() {
     // Give each layer of the retained window a unique Disabled color. Their simultaneous presence
-    // proves that disabling reaches passive chrome, the intrinsic menu, and the widget tree rather
+    // proves that disabling reaches base chrome, the intrinsic menu, and the widget tree rather
     // than being inferred from whichever surface happens to lack activation or keyboard focus.
     let atlas = test_atlas();
     let disabled_frame_color = color(17, 29, 43, 255);
@@ -1170,7 +1171,7 @@ fn disabled_window_propagates_disabled_presentation_and_rejects_input() {
     }
     assert!(
         atlas_quads_with_color(&events, forbidden_active_frame_color).is_empty(),
-        "disabled windows use the passive frame role even when they were most recently active"
+        "disabled windows use the base frame role even when they were most recently active"
     );
 
     // Pointer delivery, caption actions, and resizing are all rejected while the visible surface
@@ -1271,11 +1272,11 @@ fn disabled_parent_disables_child_windows_but_not_its_modal_dialog() {
     assert_eq!(dialog_checkbox.checked(), Some(true));
 }
 
-/// Verifies pointer location cannot recolor passive window and container backgrounds.
+/// Verifies pointer location cannot recolor base window and structural container backgrounds.
 #[test]
 fn window_and_container_backgrounds_ignore_hover_state_artwork() {
     // Give each forbidden hover center a unique tint while retaining identical border cells. Any
-    // recorded hover tint therefore proves a body or passive container resolved interactive art;
+    // recorded hover tint therefore proves a body or structural container resolved interactive art;
     // legitimate resize-edge overlay painting continues to use the shared border tint.
     let atlas = test_atlas();
     let mut style = test_skin(&atlas);
@@ -1304,7 +1305,7 @@ fn window_and_container_backgrounds_ignore_hover_state_artwork() {
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
     ctx.set_skin(style);
-    let root = ctx.ui().create_window(Window::new("passive backgrounds", rect(30, 30, 160, 120), content));
+    let root = ctx.ui().create_window(Window::new("structural backgrounds", rect(30, 30, 160, 120), content));
     ctx.ui().set_window_options(&root, WindowOption::FRAME | WindowOption::NO_TITLE).unwrap();
     let dimensions = Dimensioni::new(320, 240);
     ctx.update_ui(dimensions);
@@ -3562,19 +3563,19 @@ fn classic_mac_chrome_places_compact_close_and_trailing_controls_on_opposite_edg
 }
 
 #[test]
-fn passive_classic_mac_caption_reserve_activates_title_without_triggering_hidden_button() {
+fn base_classic_mac_caption_reserve_activates_title_without_triggering_hidden_button() {
     let atlas = test_atlas();
     let mut style = test_skin(&atlas);
     style.chrome = crate::WindowChromeSkin::classic_mac(crate::color(255, 255, 255, 255));
     let dimensions = Dimensioni::new(460, 260);
     let mut ctx = Context::new_test(NoopRenderer { atlas }, dimensions);
     ctx.set_skin(style);
-    let passive = ctx.ui().create_window(Window::new("passive", rect(20, 25, 170, 120), empty_content()));
+    let base = ctx.ui().create_window(Window::new("base", rect(20, 25, 170, 120), empty_content()));
     let active = ctx.ui().create_window(Window::new("active", rect(240, 25, 170, 120), empty_content()));
     ctx.update_ui(dimensions);
 
-    // Select the second window through ordinary content so the first window paints its passive
-    // title without caption faces.
+    // Select the second window through ordinary content so the first window paints its base title
+    // in Normal interaction state without caption faces.
     let active_body = ctx.debug_root_body(active.id()).unwrap();
     let active_point = crate::vec2(active_body.x + active_body.width / 2, active_body.y + active_body.height / 2);
     ctx.mousedown(active_point.x, active_point.y, MouseButton::LEFT);
@@ -3583,18 +3584,18 @@ fn passive_classic_mac_caption_reserve_activates_title_without_triggering_hidden
     ctx.update_ui(dimensions);
     assert_eq!(ctx.debug_active_root(), Some(active.id()));
 
-    let close = ctx.debug_root_chrome(passive.id()).unwrap().1.unwrap();
+    let close = ctx.debug_root_chrome(base.id()).unwrap().1.unwrap();
     let reserved_point = crate::vec2(close.x + close.width / 2, close.y + close.height / 2);
     ctx.mousedown(reserved_point.x, reserved_point.y, MouseButton::LEFT);
     ctx.update_ui(dimensions);
 
     // The hidden close allocation behaves as title for this first activation press. It begins a
     // move capture and cannot hide the window when the matching release arrives at the same point.
-    assert_eq!(ctx.debug_active_root(), Some(passive.id()));
-    assert_eq!(ctx.debug_root_moving(passive.id()), Some(true));
+    assert_eq!(ctx.debug_active_root(), Some(base.id()));
+    assert_eq!(ctx.debug_root_moving(base.id()), Some(true));
     ctx.mouseup(reserved_point.x, reserved_point.y, MouseButton::LEFT);
     ctx.update_ui(dimensions);
-    assert_eq!(ctx.debug_root_visible(passive.id()), Some(true));
+    assert_eq!(ctx.debug_root_visible(base.id()), Some(true));
 }
 
 #[test]
@@ -3871,7 +3872,7 @@ fn active_menu_path_hot_tracks_headings_and_submenu_siblings_without_outside_hov
     // relation is Edit while the two unresolved middle anchors belong to File's submenus.
     let edit_heading = headings.last().copied().flatten().unwrap();
 
-    // An inactive menu bar is hoverable but cannot open a popup until click or keyboard input has
+    // A closed menu bar is hoverable but cannot open a popup until click or keyboard input has
     // deliberately entered menu mode.
     ctx.mousemove(edit_heading.x + edit_heading.width / 2, edit_heading.y + edit_heading.height / 2);
     ctx.update_and_render_ui();
@@ -4030,7 +4031,7 @@ fn opening_sibling_submenu_replaces_the_complete_descendant_suffix() {
 /// Verifies that pointer menus suspend application key delivery and restore its retained focus.
 #[test]
 fn menu_pointer_scope_suspends_and_restores_preexisting_application_keyboard_focus() {
-    // The application body is an ordinary persistent keyboard target. Menu surfaces are passive,
+    // The application body is an ordinary persistent keyboard target. Menu surfaces are transient,
     // so their independent pointer capture must never replace this retained identity.
     let (probe, body) = OrderedProbe::create(WidgetOption::NONE);
     let body_id = body.id();
@@ -4279,7 +4280,7 @@ fn menu_item_dismissal_swallows_the_invalidated_popup_capture_tail() {
     ctx.update_and_render_ui();
 
     // Opening the popup completes the heading's independent captured gesture. Pressing its sole
-    // enabled row then closes the popup during MouseDown, while that now-inactive surface still
+    // enabled row then closes the popup during MouseDown, while that now-closed surface still
     // owns the physical gesture that began the invocation.
     let heading = ctx.debug_menu_anchor_rects(root.id()).unwrap()[0].unwrap();
     click_rect(&mut ctx, heading);

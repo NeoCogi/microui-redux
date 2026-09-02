@@ -383,7 +383,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// checked named [`crate::FontRef`] and [`crate::IconRef`] values here and keep them in retained
     /// widget state across theme switches.
     pub fn resource_catalog(&self) -> &ResourceCatalog {
-        // Expose stable named-resource lookup without exposing the inactive base atlas itself.
+        // Expose stable named-resource lookup without exposing the catalog's source atlas itself.
         &self.resource_catalog
     }
 

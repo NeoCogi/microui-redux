@@ -1057,7 +1057,7 @@ fn captured_container_receives_direct_drag_while_capture_is_active() {
 }
 
 #[test]
-fn routing_time_release_exposes_inactive_state_during_that_event_update() {
+fn routing_time_release_exposes_neutral_state_during_that_event_update() {
     let (container, state) = CaptureContainer::new();
     state.try_update(|state| state.active = true).unwrap();
     let mut root = Node::container(container);

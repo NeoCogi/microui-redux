@@ -133,12 +133,12 @@ impl InputRouter {
             self.hover = None;
         }
         // Do not clear focus before target selection. Focusable pointer-down recipients replace it
-        // below, while passive surfaces such as scrollbars leave it untouched.
+        // below, while non-focusable surfaces such as scrollbars leave it untouched.
     }
 
     /// Clears every transient target while preserving no reference to a retained node.
     pub(super) fn clear_transient_targets(&mut self) {
-        // Widgets reconcile their private interaction modes from the next inactive update
+        // Widgets reconcile their private interaction modes from the next neutral update
         // snapshot. Clearing router identities therefore needs no out-of-band widget callback.
         self.focus = None;
         self.hover = None;
@@ -178,7 +178,7 @@ impl InputRouter {
     /// Records an accepted pointer press and conditionally replaces the keyboard focus owner.
     fn claim_pointer_press(&mut self, node: RuntimeNodeId, button: MouseButton, focusable: bool) {
         // Pointer capture is acquired separately from keyboard focus. An explicitly focusable
-        // control replaces the persistent owner; a passive pointer target preserves it naturally.
+        // control replaces the persistent owner; a non-focusable pointer target preserves it naturally.
         if focusable {
             self.focus = Some(node);
         }
@@ -206,7 +206,7 @@ impl InputRouter {
         input: InputSnapshot,
         opt: WidgetOption,
     ) -> (bool, bool, bool, bool) {
-        // A disabled surface must observe a completely inactive snapshot even if its identity was
+        // A disabled surface must observe a completely neutral snapshot even if its identity was
         // selected before a state change disabled it.
         if opt.intersects(WidgetOption::NO_INTERACT) {
             return (false, false, false, false);
@@ -376,7 +376,7 @@ impl InputRouter {
     /// Invalidates current capture after its retained target becomes externally ineligible.
     pub(super) fn invalidate_pointer_capture(&mut self) {
         // A subsequent drag/release belongs to the revoked gesture and must not fall through to a
-        // replacement target. Widgets reconcile private modes from a later inactive update.
+        // replacement target. Widgets reconcile private modes from a later neutral update.
         if self.capture.take().is_some() {
             self.discard_invalidated_capture_events = true;
         }

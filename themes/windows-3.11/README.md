@@ -1,7 +1,7 @@
 # Windows 3.11 for Workgroups example theme
 
 This bundled theme implements the earlier Windows 3.11 visual language as a theme distinct from
-Windows 95. It uses bright `#0000AA` active captions, white inactive captions and menus, compact
+Windows 95. It uses bright `#0000AA` active captions, white base captions and menus, compact
 black outlines, tight white/dark-gray bevels, square controls, and the original gray application
 background. Keyboard focus keeps the black period control frame instead of borrowing the blue
 selection color reserved for active titles and selected rows. Pointer hover remains deliberately
@@ -24,7 +24,7 @@ The four-pixel window edge follows the period's black-gray-gray-black outline. I
 independent from the four-pixel client inset and resize hit thickness. The bottom-right L is the
 visible two-axis affordance; the larger semantic grip image is intentionally transparent, so no
 filled rectangle appears over the client. Those L-shaped roles belong only to ordinary windows.
-Modal dialogs instead use a uniform four-pixel outer frame: black while passive and the period
+Modal dialogs instead use a uniform four-pixel outer frame: black in the base role and the period
 `#0000AA` focus blue while active.
 
 Menu bars and popup interiors are white, popup shells use a solid two-pixel black frame instead of

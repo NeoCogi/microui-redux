@@ -466,7 +466,7 @@ impl<'a> WidgetPaintCtx<'a> {
     /// Draws only the stretchable center of one semantic role over an unframed rectangle.
     pub(crate) fn draw_appearance_center(&mut self, role: AppearanceRole, rect: Recti) {
         // Interactive controls resolve their ordinary pointer/focus state before sharing the same
-        // center-only recording path used by passive containers with an explicit state.
+        // center-only recording path used by structural containers with an explicit state.
         self.draw_appearance_center_state(role, self.visual_state(), rect);
     }
 

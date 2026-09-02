@@ -944,7 +944,7 @@ impl SurfaceForest {
         self.rebuild_visible_order();
     }
 
-    /// Inserts an inactive popup; visibility remains derived from `active_popup`.
+    /// Inserts a retained popup whose visibility remains derived from `active_popup`.
     fn insert_popup(&mut self, node: SurfaceNode) {
         debug_assert!(matches!(node.key, SurfaceKey::Popup(_)) && node.popup().is_some());
         self.nodes.push(node);
@@ -2097,7 +2097,7 @@ impl WindowManager {
     /// Routes a pointer event directly to a root bar or menu-popup body.
     fn route_menu_pointer(&mut self, key: SurfaceKey, event: &UiInputEvent) -> Option<crate::menu::MenuRoute> {
         // A click or keyboard command must establish the menu scope before pointer movement can
-        // navigate it. Restrict hot-tracking to the same owning root so merely crossing an inactive
+        // navigate it. Restrict hot-tracking to the same owning root so merely crossing a closed
         // window's menu bar cannot steal another window's active menu path.
         let hot_tracking = self
             .active_menu_root()
@@ -2482,7 +2482,7 @@ impl WindowManager {
                         true
                     }
                     Some(RootChromePart::Caption(_)) | Some(RootChromePart::Title) => {
-                        // A passive Classic Mac title does not display caption boxes. Its first
+                        // A base Classic Mac title does not display caption boxes. Its first
                         // press therefore treats their reserved geometry as ordinary title rather
                         // than activating an invisible close, zoom, or windowshade action.
                         let node = self.root_node_mut(root).expect("chrome target must remain retained");
@@ -2859,7 +2859,7 @@ impl WindowManager {
                                 .is_some_and(|state| state.interaction != RootInteraction::None);
                             if chrome_captured {
                                 // Continuation belongs to an already-visible caption or another
-                                // chrome capture, so passive first-press filtering no longer applies.
+                                // chrome capture, so activation-time first-press filtering no longer applies.
                                 self.route_chrome_event(root, event, true)
                             } else {
                                 self.surfaces
@@ -2883,7 +2883,7 @@ impl WindowManager {
             if !handled && let Some(surface) = pointer {
                 handled = match surface {
                     SurfaceKey::Root(root) => {
-                        let caption_controls_visible = pointer_owner_was_active || style.chrome.captions.show_when_inactive;
+                        let caption_controls_visible = pointer_owner_was_active || style.chrome.captions.show_without_activation;
                         self.route_chrome_event(root, event, caption_controls_visible)
                     }
                     SurfaceKey::Popup(_) => false,

@@ -14,7 +14,7 @@ persistent retained focus, wrapping Tab traversal, Ctrl+F6 window cycling, share
 and F10/Alt menu navigation provide one Windows-style keyboard contract across windows, widgets,
 and examples.
 Focused widget roles and active window roles make the sole keyboard and window scopes visible
-without a second universal outline or exposing remembered focus in inactive windows.
+without a second universal outline or exposing remembered focus in nonselected windows.
 
 > **Alpha status:** `0.8.0-alpha.6` is the current alpha of the breaking retained-API
 > redesign. The 0.8 line is not API-compatible with 0.7 and may continue to evolve before the

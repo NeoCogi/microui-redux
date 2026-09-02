@@ -45,7 +45,7 @@ impl UiRuntime {
         root_enabled: bool,
     ) {
         // Every runtime remembers focus independently, but only the manager-selected keyboard
-        // surface may present it. This prevents passive windows and menu-suspended widgets from
+        // surface may present it. This prevents windows without activation and menu-suspended widgets from
         // showing simultaneous carets, fills, or outlines. Activation remains available to custom
         // widget paint code but does not rewrite the semantic state of enabled descendants.
         // Focus is an ordinary VisualState input. Each widget or container selects its semantic
@@ -89,7 +89,7 @@ impl UiRuntime {
         let visual_state = crate::VisualState::from_interaction(enabled, node.state.hovered, focused, node.state.active && node.state.hovered);
         if let Some(role) = frame_role {
             // Semantic framing belongs beneath the widget's own paint and descendant paint.
-            // A container frame describes passive structure rather than a selectable control, so
+            // A container frame describes noninteractive structure rather than a selectable control, so
             // pointer hover and capture must not replace its background or border artwork.
             let frame_state = if !enabled {
                 crate::VisualState::Disabled
