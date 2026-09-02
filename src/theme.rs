@@ -31,6 +31,7 @@
 //! Semantic UI appearance, typography, palette, and style configuration.
 
 mod appearance;
+mod bundle;
 mod icons;
 #[cfg(feature = "theme-json")]
 pub(crate) mod loader;
@@ -41,6 +42,7 @@ mod tables;
 mod typography;
 
 pub use appearance::{StatefulVisual, Visual, VisualCatalog};
+pub use bundle::SkinBundle;
 pub use crate::render::{Color, color};
 pub use icons::{IconRef, IconRole};
 #[cfg(feature = "theme-json")]

@@ -38,7 +38,7 @@ use std::{
 
 use serde::Deserialize;
 
-use super::{AppearanceRole, FlatPalette, FontRole, Skin, VisualCatalog, VisualState};
+use super::{AppearanceRole, FlatPalette, FontRole, Skin, SkinBundle, VisualCatalog, VisualState};
 use crate::{
     atlas::{
         AtlasHandle,
@@ -59,51 +59,35 @@ pub const THEME_SCHEMA_VERSION: u32 = 1;
 pub struct LoadedTheme {
     /// Human-readable name supplied by the JSON definition.
     name: String,
-    /// Immutable atlas containing semantic icons, fonts, and deduplicated theme-state artwork.
-    atlas: AtlasHandle,
-    /// Atlas-bound skin containing resolved state-artwork capabilities.
-    skin: Skin,
+    /// Validated resolved skin and the exact immutable atlas containing all of its resources.
+    bundle: SkinBundle,
 }
 
 impl LoadedTheme {
-    /// Creates a loaded theme after schema resolution and atlas construction have succeeded.
-    pub(crate) fn new(name: String, atlas: AtlasHandle, skin: Skin) -> Self {
-        // The loader constructs Skin from this exact atlas, making the ownership assertion an
-        // internal invariant rather than a runtime condition deferred until rendering.
-        debug_assert!(skin.belongs_to(&atlas));
-        Self { name, atlas, skin }
-    }
-
-    /// Captures an already resolved atlas/style pair as one installable named theme.
-    ///
-    /// This is primarily useful for retaining an application's initial flat style beside loaded
-    /// file themes. Image-backed appearances remain valid only with the atlas whose [`IconId`]
-    /// capabilities they retain.
+    /// Creates a named installable theme from one already validated skin bundle.
     ///
     /// # Panics
     ///
-    /// Panics if `name` is empty or the style contains a font or icon from another atlas.
-    pub fn from_skin(name: impl Into<String>, atlas: AtlasHandle, skin: Skin) -> Self {
+    /// Panics if `name` is empty or contains only whitespace.
+    pub fn new(name: impl Into<String>, bundle: SkinBundle) -> Self {
         let name = name.into();
         assert!(!name.trim().is_empty(), "theme name must not be empty");
-        assert!(skin.belongs_to(&atlas), "theme skin contains font or icon IDs from another atlas");
-        Self { name, atlas, skin }
+        // SkinBundle already established semantic-resource completeness and image ownership. Keep
+        // LoadedTheme responsible only for the human-facing selection name.
+        Self { name, bundle }
     }
 
     /// Returns the human-readable theme name from the JSON file.
     pub fn name(&self) -> &str {
+        // Lend the owned selector label without exposing the bundle's construction internals.
         self.name.as_str()
     }
 
-    /// Borrows the complete resolved skin without transferring atlas capabilities.
-    pub fn skin(&self) -> &Skin {
-        &self.skin
-    }
-
-    /// Returns the immutable atlas containing this theme's fonts and semantic icons.
-    pub fn atlas(&self) -> AtlasHandle {
-        // AtlasHandle is a cheap shared capability; callers cannot mutate its pixels or tables.
-        self.atlas.clone()
+    /// Borrows the validated skin/atlas pair installed by this theme.
+    pub fn bundle(&self) -> &SkinBundle {
+        // Expose the atomic unit so callers cannot accidentally select a skin and atlas from
+        // different loaded themes.
+        &self.bundle
     }
 }
 
@@ -355,7 +339,7 @@ impl ThemeDefinition {
         let ThemeAtlas { atlas, images } = theme_atlas;
         // Installation may only bind appearance icons onto a Skin created for this exact atlas;
         // enforcing that here prevents a LoadedTheme from ever containing mixed resources.
-        assert!(style.belongs_to(&atlas), "theme base style contains font or icon IDs from another atlas");
+        assert!(style.belongs_to(&atlas), "theme base skin contains image capabilities from another atlas");
         // Apply palette and metric overrides before constructing fallbacks, so every omitted PNG
         // state reflects the JSON theme's own flat colors rather than the built-in default palette.
         let mut palette = FlatPalette::default();
@@ -417,8 +401,8 @@ impl ThemeDefinition {
             style.visuals.set(role, visuals);
         }
 
-        // Retain atlas and style as the only public unit that can be safely selected later.
-        Ok(LoadedTheme::new(self.name, atlas, style))
+        // Pair atlas and resolved skin at the only public construction boundary before naming it.
+        Ok(LoadedTheme::new(self.name, SkinBundle::new(atlas, style)))
     }
 
     /// Returns every fully resolved PNG path in deterministic deduplicated order.
@@ -824,9 +808,9 @@ mod tests {
         let style = Skin::from_atlas(theme_atlas.atlas());
         let loaded = document.install(theme_atlas, style).expect("flat-only theme must install");
 
-        let normal = loaded.skin().appearance(AppearanceRole::Button, VisualState::Normal);
-        let hovered = loaded.skin().appearance(AppearanceRole::Button, VisualState::Hovered);
-        let disabled = loaded.skin().appearance(AppearanceRole::Button, VisualState::Disabled);
+        let normal = loaded.bundle().skin().appearance(AppearanceRole::Button, VisualState::Normal);
+        let hovered = loaded.bundle().skin().appearance(AppearanceRole::Button, VisualState::Hovered);
+        let disabled = loaded.bundle().skin().appearance(AppearanceRole::Button, VisualState::Disabled);
         assert_eq!(normal.insets.left, 2);
         assert!(matches!(
             normal.content,
@@ -867,9 +851,9 @@ mod tests {
         let style = Skin::from_atlas(theme_atlas.atlas());
         let loaded = document.install(theme_atlas, style).expect("foreground-only theme must install");
 
-        let normal = loaded.skin().foreground(AppearanceRole::MenuItem, VisualState::Normal);
-        let hovered = loaded.skin().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
-        let disabled = loaded.skin().foreground(AppearanceRole::MenuItem, VisualState::Disabled);
+        let normal = loaded.bundle().skin().foreground(AppearanceRole::MenuItem, VisualState::Normal);
+        let hovered = loaded.bundle().skin().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
+        let disabled = loaded.bundle().skin().foreground(AppearanceRole::MenuItem, VisualState::Disabled);
         assert_eq!((normal.r, normal.g, normal.b, normal.a), (1, 2, 3, 255));
         assert_eq!((hovered.r, hovered.g, hovered.b, hovered.a), (250, 251, 252, 255));
         assert_eq!((disabled.r, disabled.g, disabled.b, disabled.a), (90, 91, 92, 255));
@@ -915,7 +899,7 @@ mod tests {
         let (loaded, images) = install_bundled_theme("themes/windows-95/theme.json");
         assert_eq!(loaded.name(), "Windows 95");
         assert_eq!(images, 11, "each shared PNG path must be baked exactly once");
-        let atlas = loaded.atlas();
+        let atlas = loaded.bundle().atlas();
         assert_eq!((atlas.width(), atlas.height()), (512, 256));
         assert_eq!(
             atlas.clone_font_table().len(),
@@ -923,14 +907,18 @@ mod tests {
             "the theme atlas must contain exactly its five semantic font roles"
         );
         assert_eq!(atlas.get_font_size(atlas.font_id("heading").unwrap()), 18);
-        let insets = loaded.skin().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
+        let insets = loaded.bundle().skin().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (4, 4, 4, 4));
         assert!(matches!(
-            loaded.skin().appearance(AppearanceRole::Button, VisualState::Disabled).content,
+            loaded.bundle().skin().appearance(AppearanceRole::Button, VisualState::Disabled).content,
             crate::NinePatchContent::Image { .. }
         ));
         assert!(matches!(
-            loaded.skin().appearance(AppearanceRole::DialogFrameActive, VisualState::Normal).content,
+            loaded
+                .bundle()
+                .skin()
+                .appearance(AppearanceRole::DialogFrameActive, VisualState::Normal)
+                .content,
             crate::NinePatchContent::Image { .. }
         ));
     }
@@ -941,11 +929,11 @@ mod tests {
         let (loaded, images) = install_bundled_theme("themes/windows-3.11/theme.json");
         assert_eq!(loaded.name(), "Windows 3.11 for Workgroups");
         assert_eq!(images, 21, "each shared PNG path must be baked exactly once");
-        let insets = loaded.skin().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
+        let insets = loaded.bundle().skin().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (23, 23, 23, 23));
-        let border = loaded.skin().metrics.window_border;
+        let border = loaded.bundle().skin().metrics.window_border;
         assert_eq!((border.left, border.top, border.right, border.bottom), (4, 4, 4, 4));
-        let content = loaded.skin().metrics.window_content_insets;
+        let content = loaded.bundle().skin().metrics.window_content_insets;
         assert_eq!(
             (content.left, content.top, content.right, content.bottom),
             (0, 0, 0, 0),
@@ -954,10 +942,14 @@ mod tests {
         // Ordinary windows retain their long L-corner bitmap. Only modal dialogs use the uniform
         // four-pixel blue focus frame visible around period Windows 3.11 dialog boxes.
         assert!(matches!(
-            loaded.skin().appearance(AppearanceRole::WindowFrameActive, VisualState::Normal).content,
+            loaded
+                .bundle()
+                .skin()
+                .appearance(AppearanceRole::WindowFrameActive, VisualState::Normal)
+                .content,
             crate::NinePatchContent::Image { .. }
         ));
-        let dialog_frame = loaded.skin().appearance(AppearanceRole::DialogFrameActive, VisualState::Normal);
+        let dialog_frame = loaded.bundle().skin().appearance(AppearanceRole::DialogFrameActive, VisualState::Normal);
         assert_eq!(
             (
                 dialog_frame.insets.left,
@@ -973,7 +965,7 @@ mod tests {
                 if matches!(cells.top, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (0, 0, 170, 255))
                     && matches!(cells.center, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (195, 199, 203, 255))
         ));
-        let menu_popup = loaded.skin().appearance(AppearanceRole::MenuPopup, VisualState::Normal);
+        let menu_popup = loaded.bundle().skin().appearance(AppearanceRole::MenuPopup, VisualState::Normal);
         assert_eq!(
             (menu_popup.insets.left, menu_popup.insets.top, menu_popup.insets.right, menu_popup.insets.bottom),
             (2, 2, 2, 2)
@@ -985,15 +977,19 @@ mod tests {
                     && matches!(cells.center, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (255, 255, 255, 255))
         ));
         assert!(matches!(
-            loaded.skin().appearance(AppearanceRole::WindowTitle, VisualState::Pressed).content,
+            loaded.bundle().skin().appearance(AppearanceRole::WindowTitle, VisualState::Pressed).content,
             crate::NinePatchContent::Image { .. }
         ));
         assert!(matches!(
-            loaded.skin().appearance(AppearanceRole::WindowTitleActive, VisualState::Pressed).content,
+            loaded
+                .bundle()
+                .skin()
+                .appearance(AppearanceRole::WindowTitleActive, VisualState::Pressed)
+                .content,
             crate::NinePatchContent::Image { .. }
         ));
         assert!(matches!(
-            loaded.skin().appearance(AppearanceRole::WindowTitle, VisualState::Disabled).content,
+            loaded.bundle().skin().appearance(AppearanceRole::WindowTitle, VisualState::Disabled).content,
             crate::NinePatchContent::Image { .. }
         ));
         for state in [
@@ -1006,18 +1002,18 @@ mod tests {
         ] {
             // Passive Windows 3.11 titles are white and require black text, while selected blue
             // titles retain white text for every enabled interaction combination.
-            let passive = loaded.skin().foreground(AppearanceRole::WindowTitle, state);
-            let active = loaded.skin().foreground(AppearanceRole::WindowTitleActive, state);
+            let passive = loaded.bundle().skin().foreground(AppearanceRole::WindowTitle, state);
+            let active = loaded.bundle().skin().foreground(AppearanceRole::WindowTitleActive, state);
             assert_eq!((passive.r, passive.g, passive.b, passive.a), (0, 0, 0, 255));
             assert_eq!((active.r, active.g, active.b, active.a), (255, 255, 255, 255));
         }
-        let disabled_title = loaded.skin().foreground(AppearanceRole::WindowTitle, VisualState::Disabled);
+        let disabled_title = loaded.bundle().skin().foreground(AppearanceRole::WindowTitle, VisualState::Disabled);
         assert_eq!((disabled_title.r, disabled_title.g, disabled_title.b, disabled_title.a), (125, 125, 125, 255));
-        let minimize_glyph = loaded.skin().appearance(AppearanceRole::WindowMinimizeGlyph, VisualState::Normal);
+        let minimize_glyph = loaded.bundle().skin().appearance(AppearanceRole::WindowMinimizeGlyph, VisualState::Normal);
         let crate::NinePatchContent::Image { image: minimize_image } = minimize_glyph.content else {
             panic!("Windows 3.11 minimize glyph must use baked artwork");
         };
-        let minimize_size = loaded.atlas().get_icon_size(minimize_image.icon);
+        let minimize_size = loaded.bundle().atlas().get_icon_size(minimize_image.icon);
         assert_eq!((minimize_size.width, minimize_size.height), (9, 9));
         // Disabling must preserve the raised caption face authored by the theme. Letting these
         // roles fall back to their flat palette appearance would combine a one-pixel black frame
@@ -1028,31 +1024,35 @@ mod tests {
             AppearanceRole::WindowMaximizeButton,
             AppearanceRole::WindowRestoreButton,
         ] {
-            let normal = loaded.skin().appearance(role, VisualState::Normal);
-            let disabled = loaded.skin().appearance(role, VisualState::Disabled);
+            let normal = loaded.bundle().skin().appearance(role, VisualState::Normal);
+            let disabled = loaded.bundle().skin().appearance(role, VisualState::Disabled);
             assert!(matches!(
                 (normal.content, disabled.content),
                 (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: disabled })
                     if normal.icon == disabled.icon
             ));
         }
-        let selected_text = loaded.skin().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
+        let selected_text = loaded.bundle().skin().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
         assert_eq!((selected_text.r, selected_text.g, selected_text.b, selected_text.a), (255, 255, 255, 255));
         // Checked menu rows retain their marker without becoming permanently highlighted. The
         // normal patch must therefore remain transparent over the white popup panel, while an
         // actual hover still selects the authored blue bitmap and contrasting white foreground.
-        let checked_normal = loaded.skin().appearance(AppearanceRole::MenuItemSelected, VisualState::Normal);
+        let checked_normal = loaded.bundle().skin().appearance(AppearanceRole::MenuItemSelected, VisualState::Normal);
         assert!(matches!(
             checked_normal.content,
             crate::NinePatchContent::Flat { cells }
                 if matches!(cells.center, crate::NinePatchCell::Empty)
         ));
         assert!(matches!(
-            loaded.skin().appearance(AppearanceRole::MenuItemSelected, VisualState::Hovered).content,
+            loaded
+                .bundle()
+                .skin()
+                .appearance(AppearanceRole::MenuItemSelected, VisualState::Hovered)
+                .content,
             crate::NinePatchContent::Image { .. }
         ));
-        let checked_normal_text = loaded.skin().foreground(AppearanceRole::MenuItemSelected, VisualState::Normal);
-        let checked_hovered_text = loaded.skin().foreground(AppearanceRole::MenuItemSelected, VisualState::Hovered);
+        let checked_normal_text = loaded.bundle().skin().foreground(AppearanceRole::MenuItemSelected, VisualState::Normal);
+        let checked_hovered_text = loaded.bundle().skin().foreground(AppearanceRole::MenuItemSelected, VisualState::Hovered);
         assert_eq!(
             (checked_normal_text.r, checked_normal_text.g, checked_normal_text.b, checked_normal_text.a),
             (0, 0, 0, 255)
@@ -1061,14 +1061,14 @@ mod tests {
             (checked_hovered_text.r, checked_hovered_text.g, checked_hovered_text.b, checked_hovered_text.a),
             (255, 255, 255, 255)
         );
-        let focus = loaded.skin().effects.focus_outline;
+        let focus = loaded.bundle().skin().effects.focus_outline;
         assert_eq!(
             (focus.r, focus.g, focus.b, focus.a),
             (0, 0, 0, 255),
             "period control focus must preserve black combo and slider frames"
         );
-        let slider_normal = loaded.skin().appearance(AppearanceRole::SliderTrack, VisualState::Normal);
-        let slider_focused = loaded.skin().appearance(AppearanceRole::SliderTrack, VisualState::Focused);
+        let slider_normal = loaded.bundle().skin().appearance(AppearanceRole::SliderTrack, VisualState::Normal);
+        let slider_focused = loaded.bundle().skin().appearance(AppearanceRole::SliderTrack, VisualState::Focused);
         assert!(matches!(
             (slider_normal.content, slider_focused.content),
             (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: focused })
@@ -1084,10 +1084,10 @@ mod tests {
             // Combo popup choices are ordinary retained ListItems. Their complete interactive
             // state ladder must therefore carry both blue selection art and contrasting text.
             assert!(matches!(
-                loaded.skin().appearance(AppearanceRole::ListItem, state).content,
+                loaded.bundle().skin().appearance(AppearanceRole::ListItem, state).content,
                 crate::NinePatchContent::Image { .. }
             ));
-            let foreground = loaded.skin().foreground(AppearanceRole::ListItem, state);
+            let foreground = loaded.bundle().skin().foreground(AppearanceRole::ListItem, state);
             assert_eq!((foreground.r, foreground.g, foreground.b, foreground.a), (255, 255, 255, 255));
         }
     }
@@ -1098,35 +1098,39 @@ mod tests {
         let (loaded, images) = install_bundled_theme("themes/mac-os-9/theme.json");
         assert_eq!(loaded.name(), "Mac OS 9");
         assert_eq!(images, 24, "each shared PNG path must be baked exactly once");
-        assert_eq!(loaded.skin().chrome.layout, crate::WindowChromeLayout::ClassicMac);
-        assert_eq!(loaded.skin().metrics.title_height, 18);
-        let content = loaded.skin().metrics.window_content_insets;
+        assert_eq!(loaded.bundle().skin().chrome.layout, crate::WindowChromeLayout::ClassicMac);
+        assert_eq!(loaded.bundle().skin().metrics.title_height, 18);
+        let content = loaded.bundle().skin().metrics.window_content_insets;
         assert_eq!(
             (content.left, content.top, content.right, content.bottom),
             (0, 0, 0, 0),
             "Platinum windows expose their complete application body below root chrome"
         );
-        let insets = loaded.skin().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
+        let insets = loaded.bundle().skin().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (3, 3, 3, 3));
-        let active_title = loaded.skin().appearance(AppearanceRole::WindowTitleActive, VisualState::Pressed);
+        let active_title = loaded.bundle().skin().appearance(AppearanceRole::WindowTitleActive, VisualState::Pressed);
         let crate::NinePatchContent::Image { image: active_title_image } = active_title.content else {
             panic!("Mac OS 9 active title must use baked artwork");
         };
-        let active_title_size = loaded.atlas().get_icon_size(active_title_image.icon);
+        let active_title_size = loaded.bundle().atlas().get_icon_size(active_title_image.icon);
         assert_eq!((active_title_size.width, active_title_size.height), (8, 18));
         assert!(matches!(
-            loaded.skin().appearance(AppearanceRole::Button, VisualState::Disabled).content,
+            loaded.bundle().skin().appearance(AppearanceRole::Button, VisualState::Disabled).content,
             crate::NinePatchContent::Image { .. }
         ));
         assert!(matches!(
-            loaded.skin().appearance(AppearanceRole::DialogFrameActive, VisualState::Normal).content,
+            loaded
+                .bundle()
+                .skin()
+                .appearance(AppearanceRole::DialogFrameActive, VisualState::Normal)
+                .content,
             crate::NinePatchContent::Image { .. }
         ));
 
         // Hovering or pressing a passive frame must not borrow the darker active-frame bitmap.
         // This guards the Platinum distinction before the manager supplies the active role.
-        let normal_frame = loaded.skin().appearance(AppearanceRole::WindowFrame, VisualState::Normal);
-        let pressed_frame = loaded.skin().appearance(AppearanceRole::WindowFrame, VisualState::Pressed);
+        let normal_frame = loaded.bundle().skin().appearance(AppearanceRole::WindowFrame, VisualState::Normal);
+        let pressed_frame = loaded.bundle().skin().appearance(AppearanceRole::WindowFrame, VisualState::Pressed);
         assert!(matches!(
             (normal_frame.content, pressed_frame.content),
             (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: pressed })
@@ -1135,26 +1139,26 @@ mod tests {
 
         // The Mac layout consumes complete caption-face images and does not overlay generic
         // Windows glyphs. Pressed artwork remains a distinct upload for visible inset feedback.
-        let close = loaded.skin().appearance(AppearanceRole::WindowCloseButton, VisualState::Normal);
-        let close_pressed = loaded.skin().appearance(AppearanceRole::WindowCloseButton, VisualState::Pressed);
+        let close = loaded.bundle().skin().appearance(AppearanceRole::WindowCloseButton, VisualState::Normal);
+        let close_pressed = loaded.bundle().skin().appearance(AppearanceRole::WindowCloseButton, VisualState::Pressed);
         let (crate::NinePatchContent::Image { image: close_image }, crate::NinePatchContent::Image { image: pressed_image }) =
             (close.content, close_pressed.content)
         else {
             panic!("Mac OS 9 close states must use baked artwork");
         };
-        let close_size = loaded.atlas().get_icon_size(close_image.icon);
+        let close_size = loaded.bundle().atlas().get_icon_size(close_image.icon);
         assert_eq!((close_size.width, close_size.height), (12, 12));
         assert_ne!(close_image.icon, pressed_image.icon);
 
         // Platinum popup selection uses black image-backed rows with white foreground text, while
         // the popup itself retains its authored thick black and beveled frame.
-        let menu_popup = loaded.skin().appearance(AppearanceRole::MenuPopup, VisualState::Normal);
+        let menu_popup = loaded.bundle().skin().appearance(AppearanceRole::MenuPopup, VisualState::Normal);
         let crate::NinePatchContent::Image { image: menu_popup_image } = menu_popup.content else {
             panic!("Mac OS 9 popup must use baked artwork");
         };
-        let menu_popup_size = loaded.atlas().get_icon_size(menu_popup_image.icon);
+        let menu_popup_size = loaded.bundle().atlas().get_icon_size(menu_popup_image.icon);
         assert_eq!((menu_popup_size.width, menu_popup_size.height), (7, 7));
-        let selected_text = loaded.skin().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
+        let selected_text = loaded.bundle().skin().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
         assert_eq!((selected_text.r, selected_text.g, selected_text.b, selected_text.a), (255, 255, 255, 255));
     }
 }

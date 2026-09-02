@@ -2565,19 +2565,21 @@ impl WindowManager {
     }
 
     /// Performs one update per queued event or one eventless update when the queue is empty.
-    pub(crate) fn update(&mut self, dimensions: Dimensioni, atlas: &crate::AtlasHandle) {
+    pub(crate) fn update(&mut self, dimensions: Dimensioni) {
         // Polling contexts have no application dispatcher, so the safe boundary performs no work.
-        self.update_with(dimensions, atlas, &mut (), |_, _| false);
+        self.update_with(dimensions, &mut (), |_, _| false);
     }
 
     /// Performs retained updates while exposing each safe subscriber-dispatch boundary.
     pub(crate) fn update_with<DispatchState>(
         &mut self,
         dimensions: Dimensioni,
-        atlas: &crate::AtlasHandle,
         dispatch_state: &mut DispatchState,
         mut after_update: impl FnMut(&mut Self, &mut DispatchState) -> bool,
     ) {
+        // Clone the immutable handle from the same bundle as the skin used below. Holding an owned
+        // handle also avoids borrowing the manager across application dispatch callbacks.
+        let atlas = self.bundle.atlas().clone();
         self.ui_commit = None;
         let viewport = Recti::new(0, 0, dimensions.width, dimensions.height);
         for node in &mut self.surfaces.nodes {
@@ -2588,9 +2590,9 @@ impl WindowManager {
         // Commit geometry before any update so widgets receive authoritative content rectangles.
         // Preserve the pre-input subscriber boundary: a handler may change surface geometry that
         // must be laid out before either eventless traversal or routing the first queued event.
-        self.layout(viewport, atlas);
+        self.layout(viewport, &atlas);
         if after_update(self, dispatch_state) {
-            self.layout(viewport, atlas);
+            self.layout(viewport, &atlas);
         }
 
         // A routed event already gives every eligible widget one ordinary update, so add an
@@ -2599,19 +2601,19 @@ impl WindowManager {
         // Context update a real synchronization boundary for caret reveal and similar requests.
         if !self.input.has_pending() {
             let input = self.input.snapshot();
-            self.update_eligible_widget_trees(atlas, input);
+            self.update_eligible_widget_trees(&atlas, input);
             // Eventless widget work can emit typed events. Dispatch only after all widget borrows
             // end, then commit widget and subscriber mutations in the same mandatory layout.
             after_update(self, dispatch_state);
-            self.layout(viewport, atlas);
+            self.layout(viewport, &atlas);
         }
 
         while let Some(event) = self.input.pop_event() {
             let input = self.input.snapshot();
-            self.update_for_event(atlas, &event, input);
+            self.update_for_event(&atlas, &event, input);
             // Subscribers run after all retained borrows are released and before the next layout.
             after_update(self, dispatch_state);
-            self.layout(viewport, atlas);
+            self.layout(viewport, &atlas);
         }
         self.ui_commit = Some(dimensions);
     }
@@ -2620,7 +2622,7 @@ impl WindowManager {
     fn update_eligible_widget_trees(&mut self, atlas: &crate::AtlasHandle, input: crate::input::InputSnapshot) {
         // Copy the resolved style once, matching event-driven traversal, then use the forest's
         // shared visible order so modal scope and popup ownership have one eligibility policy.
-        let style = self.skin.clone();
+        let style = self.bundle.skin().clone();
         let modal = self.surfaces.active_modal_root();
         for index in 0..self.surfaces.visible_order.len() {
             let key = self.surfaces.visible_order[index];
@@ -2680,7 +2682,7 @@ impl WindowManager {
     fn layout(&mut self, viewport: Recti, atlas: &crate::AtlasHandle) {
         self.sync_menu_presentation();
         self.surfaces.rebuild_visible_order();
-        let style = self.skin.clone();
+        let style = self.bundle.skin().clone();
         for index in 0..self.surfaces.nodes.len() {
             let key = self.surfaces.nodes[index].key;
             if !self.surfaces.visible_order.contains(&key) {
@@ -2712,7 +2714,7 @@ impl WindowManager {
     fn update_for_event(&mut self, atlas: &crate::AtlasHandle, event: &UiInputEvent, input: crate::input::InputSnapshot) {
         // Resolve event-wide dismissal and menu-toggle context before selecting a recipient. An
         // outside press may change the visible forest and must do so before hit testing below.
-        let style = self.skin.clone();
+        let style = self.bundle.skin().clone();
         let popup_keyboard_handled = self.route_application_popup_keyboard(event);
         let menu_keyboard_handled = !popup_keyboard_handled && self.route_menu_keyboard(event);
         let window_keyboard_handled = !popup_keyboard_handled && !menu_keyboard_handled && self.route_window_keyboard(event);
@@ -3063,13 +3065,15 @@ impl WindowManager {
     }
 
     /// Paints fixed window families, their transient tier, and then the manager-owned modal tier.
-    pub(crate) fn paint(&mut self, _dimensions: Dimensioni, atlas: &crate::AtlasHandle) {
+    pub(crate) fn paint(&mut self, _dimensions: Dimensioni) {
         // Frame validation has already matched `_dimensions` to the latest UI commit. Painting uses
         // the committed per-surface clips from that transaction so no traversal can accidentally
         // widen a structurally clipped child back to the full drawable viewport.
+        // Resolve both projections from one bundle before mutating display-list and surface state.
+        let atlas = self.bundle.atlas().clone();
         self.display_list.clear();
         self.surfaces.rebuild_visible_order();
-        let style = self.skin.clone();
+        let style = self.bundle.skin().clone();
         let active_mode = self.active_popup_owner().and_then(|owner| self.surfaces.stacking_mode(owner));
         // A menu owns keyboard presentation without discarding application focus. Otherwise the
         // same surface selected by routing is the only runtime allowed to paint remembered focus.
@@ -3097,11 +3101,11 @@ impl WindowManager {
                     }
                 };
                 if let Some(root) = root {
-                    self.paint_root_tree(root, &style, atlas, focus_surface, active_window);
+                    self.paint_root_tree(root, &style, &atlas, focus_surface, active_window);
                 }
             }
             if active_mode == Some(RootMode::Normal { layer }) {
-                self.paint_active_popup_path(&style, atlas, focus_surface);
+                self.paint_active_popup_path(&style, &atlas, focus_surface);
             }
         }
 
@@ -3115,11 +3119,11 @@ impl WindowManager {
                 }
             };
             if let Some(modal) = modal {
-                self.paint_root_tree(modal, &style, atlas, focus_surface, active_window);
+                self.paint_root_tree(modal, &style, &atlas, focus_surface, active_window);
             }
         }
         if active_mode == Some(RootMode::Modal) {
-            self.paint_active_popup_path(&style, atlas, focus_surface);
+            self.paint_active_popup_path(&style, &atlas, focus_surface);
         }
     }
 
@@ -3351,7 +3355,7 @@ impl WindowManager {
 
     /// Returns a window body rectangle for chrome geometry tests.
     #[cfg(test)]
-    pub(crate) fn debug_root_body(&self, root: RootId, _atlas: &crate::AtlasHandle) -> Option<Recti> {
+    pub(crate) fn debug_root_body(&self, root: RootId) -> Option<Recti> {
         let node = self.surfaces.root_node(root)?;
         // Committed geometry excludes the root-owned menu bar and therefore names app content.
         Some(node.surface.geometry.body)
@@ -3391,7 +3395,7 @@ impl WindowManager {
 
     /// Returns title, close, and resize geometry for one window.
     #[cfg(test)]
-    pub(crate) fn debug_root_chrome(&self, root: RootId, _atlas: &crate::AtlasHandle) -> Option<(Option<Recti>, Option<Recti>, Option<Recti>)> {
+    pub(crate) fn debug_root_chrome(&self, root: RootId) -> Option<(Option<Recti>, Option<Recti>, Option<Recti>)> {
         let node = self.surfaces.root_node(root)?;
         // The committed snapshot already includes the measured menu contribution and matches the
         // exact geometry consumed by layout, hit testing, and paint in the current UI commit.
@@ -3404,7 +3408,7 @@ impl WindowManager {
 
     /// Returns optional minimize, maximize, right-edge, bottom-edge, and corner geometry for tests.
     #[cfg(test)]
-    pub(crate) fn debug_root_chrome_controls(&self, root: RootId, _atlas: &crate::AtlasHandle) -> Option<super::DebugRootChromeControls> {
+    pub(crate) fn debug_root_chrome_controls(&self, root: RootId) -> Option<super::DebugRootChromeControls> {
         let node = self.surfaces.root_node(root)?;
         // Return the same committed geometry as ordinary interaction instead of reconstructing a
         // shell without access to the root-owned menu's measured size.

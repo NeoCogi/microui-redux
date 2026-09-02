@@ -61,7 +61,7 @@ use bitflags::bitflags;
 use crate::input::Input;
 use crate::menu::MenuBar;
 use crate::render::DisplayList;
-use crate::{Dimensioni, Node, Recti, Skin, UiRuntime};
+use crate::{Dimensioni, Node, Recti, Skin, SkinBundle, UiRuntime};
 use roots::{SurfaceForest, SurfaceKey};
 mod root_chrome;
 mod roots;
@@ -235,9 +235,8 @@ pub enum LayerBinding {
 pub(crate) struct WindowManager {
     /// Reusable operation storage for window-manager frame and chrome drawing.
     display_list: DisplayList,
-    /// Window-manager-owned style used by all roots and scroll areas.
-    /// Complete resolved skin shared by every retained surface and manager-owned chrome part.
-    skin: Skin,
+    /// Atomic resolved skin and atlas shared by every retained surface and chrome part.
+    bundle: SkinBundle,
 
     /// Concrete ownership forest for independent windows, child windows, dialogs, and popups.
     ///
@@ -276,12 +275,12 @@ pub(crate) struct WindowManager {
 
 impl WindowManager {
     /// Creates an empty manager with a resolved skin and no committed UI frame.
-    pub(crate) fn new(skin: Skin) -> Self {
+    pub(crate) fn new(bundle: SkinBundle) -> Self {
         // Retained identities come from the process-wide allocator, so manager construction needs
         // no local namespace or counter that could collide with another Context.
         Self {
             display_list: DisplayList::new(),
-            skin,
+            bundle,
             surfaces: SurfaceForest::new(),
             discard_pointer_capture_tail: false,
             active_surface: None,
@@ -300,16 +299,22 @@ impl WindowManager {
 
     /// Borrows the resolved skin shared by window chrome and application trees.
     pub(crate) fn skin(&self) -> &Skin {
-        // The manager is the sole style owner used during retained traversal.
-        &self.skin
+        // Project from the atomic bundle so retained traversal cannot observe a mismatched atlas.
+        self.bundle.skin()
     }
 
-    /// Replaces the resolved skin and invalidates geometry measured with the old value.
-    pub(crate) fn set_skin(&mut self, skin: Skin) {
+    /// Borrows the atomic resolved skin and atlas installed in this manager.
+    pub(crate) fn skin_bundle(&self) -> &SkinBundle {
+        // Context uses this same pair for public projections and renderer synchronization checks.
+        &self.bundle
+    }
+
+    /// Replaces the complete skin bundle and invalidates geometry measured with its old pair.
+    pub(crate) fn set_skin_bundle(&mut self, bundle: SkinBundle) {
         // LeafWidget::measure receives the complete Skin, including values that built-in widgets
         // use only while painting. Clear every retained cache rather than maintaining a partial
         // style fingerprint that cannot represent the public measurement contract.
-        self.skin = skin;
+        self.bundle = bundle;
         self.surfaces.invalidate_widget_measurements();
         self.invalidate_ui_commit();
     }

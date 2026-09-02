@@ -263,7 +263,6 @@ impl<B: RendererBackend> Renderer<B> {
     /// The backend commits first so an upload failure cannot expose CPU metadata for pixels that
     /// were never published. Once that transaction succeeds, resolving the required white icon and
     /// its normalized UV is infallible under the validated [`AtlasHandle`] contract.
-    #[cfg(feature = "theme-json")]
     pub(crate) fn replace_atlas(&mut self, atlas: AtlasHandle) -> Result<(), super::backend::AtlasUploadError> {
         // Do not re-upload a bundle that is already active. The pointer comparison is exact atlas
         // identity rather than structural equality, matching FontId and IconId provenance.

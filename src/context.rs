@@ -40,7 +40,7 @@ use crate::window_manager::{LayerBinding, PopupHandle, SurfaceCreationError, Sur
 #[cfg(test)]
 use crate::window_manager::RootId;
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, FrameInfo, RenderError, Renderer, RendererBackend};
-use crate::{AtlasHandle, Dimensioni, ImageSource, KeyEvent, MouseButton, Node, Recti, Skin, TextureError, TextureId};
+use crate::{AtlasHandle, Dimensioni, ImageSource, KeyEvent, MouseButton, Node, Recti, Skin, SkinBundle, TextureError, TextureId};
 #[cfg(feature = "theme-json")]
 use crate::{LoadedTheme, ThemeLoadError};
 #[cfg(feature = "theme-json")]
@@ -349,13 +349,13 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// [`crate::IconRole::ALL`]. Every constructible atlas already has a validated white
     /// rendering tile.
     pub fn new(backend: B) -> Self {
-        // The backend supplies the sole atlas; style construction mints every retained font and
-        // icon capability from that exact allocation before WindowManager can retain them.
+        // Pair the backend atlas with its default resolved skin before WindowManager can observe
+        // either projection. Retained widgets resolve stable resource references through this pair.
         let renderer = Renderer::new(backend);
-        let skin = Skin::from_atlas(&renderer.atlas());
+        let bundle = SkinBundle::from_atlas(renderer.atlas());
         Self {
             renderer,
-            window_manager: WindowManager::new(skin),
+            window_manager: WindowManager::new(bundle),
             widget_event_dispatcher: crate::event::WidgetEventDispatcher::new(),
             #[cfg(test)]
             test_dimensions: Dimensioni::new(1, 1),
@@ -404,8 +404,7 @@ impl<B: RendererBackend> Context<B> {
     #[track_caller]
     pub fn update_ui(&mut self, dimensions: Dimensioni) {
         assert!(dimensions.width > 0 && dimensions.height > 0, "update_ui dimensions must be positive");
-        let atlas = self.renderer.atlas();
-        self.window_manager.update(dimensions, &atlas);
+        self.window_manager.update(dimensions);
     }
 }
 
@@ -435,13 +434,12 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     #[track_caller]
     pub fn update_ui_state(&mut self, dimensions: Dimensioni, state: &mut State) {
         assert!(dimensions.width > 0 && dimensions.height > 0, "update_ui_state dimensions must be positive");
-        let atlas = self.renderer.atlas();
         // Split the two Context-owned transaction participants before entering WindowManager. The
         // dispatch closure can then lend the manager back through Ui without aliasing the
         // independently borrowed application dispatcher.
         let window_manager = &mut self.window_manager;
         let widget_event_dispatcher = &mut self.widget_event_dispatcher;
-        window_manager.update_with(dimensions, &atlas, state, |window_manager, state| {
+        window_manager.update_with(dimensions, state, |window_manager, state| {
             // This closure runs only after complete retained traversals release widget borrows.
             let mut ui = Ui::new(window_manager);
             widget_event_dispatcher.dispatch_with_context(state, &mut ui)
@@ -570,49 +568,63 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
 
     /// Replaces the current UI skin.
     ///
-    /// Every font and icon capability must originate from this Context's atlas. Start from
-    /// `context.skin().clone()` when changing scalar values, or use [`Skin::from_atlas`] with the handle
-    /// returned by [`Context::atlas`].
+    /// Image-backed visuals must originate from this Context's current bundle atlas. Start from
+    /// `context.skin().clone()` when changing scalar values.
     ///
     /// # Panics
     ///
-    /// Panics when any font, semantic icon, or appearance-image capability belongs to another
-    /// atlas allocation.
+    /// Panics when an appearance-image capability belongs to another atlas allocation.
     pub fn set_skin(&mut self, skin: Skin) {
-        // Skin ownership includes fonts, semantic icons, and every image-backed nine-patch, so a
-        // single concrete check covers the complete immutable atlas resource vocabulary.
-        assert!(skin.belongs_to(&self.renderer.atlas()), "skin contains font or icon IDs from another atlas");
-        self.window_manager.set_skin(skin);
+        // Re-pair the edited skin with the existing immutable atlas at the one validated boundary.
+        // The renderer needs no upload because this operation cannot replace atlas pixels.
+        let bundle = SkinBundle::new(self.window_manager.skin_bundle().atlas().clone(), skin);
+        self.window_manager.set_skin_bundle(bundle);
     }
 
-    /// Replaces the renderer atlas and installs the matching loaded theme as one transaction.
+    /// Uploads and installs one complete skin bundle as a single context transaction.
     ///
-    /// The backend uploads the theme atlas before this Context publishes its new Skin. If upload
-    /// fails, both the previous renderer atlas and previous Skin remain active. Theme artwork is
-    /// baked into that same atlas, so no secondary texture transaction is required.
+    /// The backend receives the atlas before the retained manager publishes either projection. If
+    /// upload fails, the previous bundle remains active and renderable.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::AtlasUploadError`] when the backend cannot install the bundle atlas.
+    pub fn set_skin_bundle(&mut self, bundle: &SkinBundle) -> Result<(), crate::AtlasUploadError> {
+        // Renderer replacement is the only fallible step. Publish the already validated pair only
+        // after it succeeds so Context never exposes a half-installed skin or atlas.
+        self.renderer.replace_atlas(bundle.atlas().clone())?;
+        debug_assert!(self.renderer.atlas().ptr_eq(bundle.atlas()));
+        self.window_manager.set_skin_bundle(bundle.clone());
+        Ok(())
+    }
+
+    /// Installs the loaded theme's complete skin bundle as one transaction.
+    ///
+    /// The backend uploads the theme atlas before this Context publishes the new bundle. If upload
+    /// fails, the previous bundle remains active. Theme artwork is baked into the bundle atlas, so
+    /// no secondary texture transaction is required.
     ///
     /// # Errors
     ///
     /// Returns [`crate::AtlasUploadError`] when the backend cannot allocate, upload, or bind the
     /// replacement atlas. The current theme remains unchanged.
     ///
-    /// # Panics
-    ///
-    /// Panics if any capability in the bundle's Skin does not belong to its own atlas.
     #[cfg(feature = "theme-json")]
     pub fn set_theme(&mut self, theme: &LoadedTheme) -> Result<(), crate::AtlasUploadError> {
-        let atlas = theme.atlas();
-        assert!(theme.skin().belongs_to(&atlas), "theme skin contains font or icon IDs from another atlas");
-        // Renderer commits the backend texture and its CPU lookup cache first. Publishing the
-        // cloned Skin last makes a returned error a complete no-op at Context level.
-        self.renderer.replace_atlas(atlas)?;
-        self.window_manager.set_skin(theme.skin().clone());
-        Ok(())
+        // LoadedTheme contributes only a selection name around the same atomic runtime value.
+        self.set_skin_bundle(theme.bundle())
+    }
+
+    /// Borrows the complete resolved skin and matching immutable atlas.
+    pub fn skin_bundle(&self) -> &SkinBundle {
+        // WindowManager owns the authoritative pair used by every retained phase.
+        self.window_manager.skin_bundle()
     }
 
     /// Returns the resolved UI skin currently used by this context.
     pub fn skin(&self) -> &Skin {
-        self.window_manager.skin()
+        // Preserve the concise read API as a projection, never as an independently owned field.
+        self.skin_bundle().skin()
     }
 
     /// Returns the immutable atlas capability supplied by this context's rendering backend.
@@ -621,9 +633,9 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// [`Skin`]. Frame execution and resource bookkeeping remain context-owned implementation
     /// details; custom GPU work continues through [`Context::register_custom_renderer`].
     pub fn atlas(&self) -> AtlasHandle {
-        // AtlasHandle is a cheap shared capability. Returning a clone avoids exposing the internal
-        // display-list executor or lending its backend through an abstraction-breaking accessor.
-        self.renderer.atlas()
+        // Return the atlas from the same bundle as `skin()` rather than consulting a parallel
+        // renderer cache. Successful installation keeps the renderer on this exact allocation.
+        self.skin_bundle().atlas().clone()
     }
 
     /// Attempts to load an RGBA image into this Context and returns its [`TextureId`].
@@ -690,7 +702,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// Relative image paths are resolved against the JSON file's directory. Missing PNG entries
     /// remain concrete flat-color patches derived from the document's palette. Successfully
     /// Each unique PNG path becomes one atlas region, allowing callers to retain several
-    /// [`LoadedTheme`] values and switch their matching atlases and styles safely.
+    /// [`LoadedTheme`] values and switch their complete skin bundles safely.
     ///
     /// # Errors
     ///
@@ -702,7 +714,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         // Build theme typography and state artwork without mutating the live renderer. This lets
         // applications preload several bundles and choose one later without repeated file I/O.
         let definition = crate::theme::loader::ThemeDefinition::read(path.as_ref())?;
-        let theme_atlas = definition.build_atlas(&self.renderer.atlas())?;
+        let theme_atlas = definition.build_atlas(self.skin_bundle().atlas())?;
         let base = Skin::from_atlas(theme_atlas.atlas());
         definition.install(theme_atlas, base)
     }
@@ -828,7 +840,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// Returns the committed application-body rectangle for internal chrome tests.
     pub(crate) fn debug_root_body(&self, root: RootId) -> Option<Recti> {
         // The manager retains the exact body snapshot consumed by application layout.
-        self.window_manager.debug_root_body(root, &self.renderer.atlas())
+        self.window_manager.debug_root_body(root)
     }
 
     /// Returns the committed framed client rectangle for internal chrome tests.
@@ -864,13 +876,13 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// Returns title, close, and resize rectangles for one window in internal tests.
     pub(crate) fn debug_root_chrome(&self, root: RootId) -> Option<(Option<Recti>, Option<Recti>, Option<Recti>)> {
         // Use the renderer atlas so test geometry matches production title measurement.
-        self.window_manager.debug_root_chrome(root, &self.renderer.atlas())
+        self.window_manager.debug_root_chrome(root)
     }
 
     /// Returns optional caption and per-axis resize rectangles for internal window tests.
     pub(crate) fn debug_root_chrome_controls(&self, root: RootId) -> Option<crate::window_manager::DebugRootChromeControls> {
         // Use the renderer atlas for the same title-height calculation as committed layout.
-        self.window_manager.debug_root_chrome_controls(root, &self.renderer.atlas())
+        self.window_manager.debug_root_chrome_controls(root)
     }
 }
 
@@ -902,8 +914,7 @@ impl<B: RendererBackend, State: 'static> ContextFrame<'_, B, State> {
             self.completed = true;
             return Err(RenderError::UiUpdateRequired);
         }
-        let atlas = self.context.renderer.atlas();
-        self.context.window_manager.paint(self.info.dimensions(), &atlas);
+        self.context.window_manager.paint(self.info.dimensions());
         let Context { renderer, window_manager, .. } = &mut *self.context;
         let result = renderer.render(self.info, window_manager.display_list_mut());
         self.completed = true;
@@ -1039,14 +1050,14 @@ mod theme_tests {
         );
     }
 
-    /// Verifies a successful selection publishes one matching atlas/style pair to the Context.
+    /// Verifies a successful selection publishes one matching skin bundle to the Context.
     #[test]
     fn set_theme_replaces_atlas_and_style_together() {
         let initial = test_atlas();
         let replacement = test_atlas();
         let replacement_style = Skin::from_atlas(&replacement);
         let replacement_font = replacement_style.resolve_font_role(&replacement, crate::FontRole::Body);
-        let theme = LoadedTheme::from_skin("Replacement", replacement.clone(), replacement_style);
+        let theme = LoadedTheme::new("Replacement", SkinBundle::new(replacement.clone(), replacement_style));
         let mut context = Context::<ThemeAtlasBackend>::new(ThemeAtlasBackend {
             atlas: initial.clone(),
             reject_replacement: false,
@@ -1065,7 +1076,7 @@ mod theme_tests {
         let initial = test_atlas();
         let initial_font = Skin::from_atlas(&initial).resolve_font_role(&initial, crate::FontRole::Body);
         let replacement = test_atlas();
-        let theme = LoadedTheme::from_skin("Rejected", replacement.clone(), Skin::from_atlas(&replacement));
+        let theme = LoadedTheme::new("Rejected", SkinBundle::new(replacement.clone(), Skin::from_atlas(&replacement)));
         let mut context = Context::<ThemeAtlasBackend>::new(ThemeAtlasBackend {
             atlas: initial.clone(),
             reject_replacement: true,

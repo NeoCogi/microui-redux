@@ -1189,7 +1189,7 @@ impl DemoTheme {
     }
 }
 
-/// Context-bound atlas/style bundles retained for instant demo switching.
+/// Context-bound skin bundles retained for instant demo switching.
 struct DemoThemes {
     /// Complete installable themes indexed by [`DemoTheme`].
     themes: [LoadedTheme; DemoTheme::ALL.len()],
@@ -1204,7 +1204,7 @@ impl DemoThemes {
     fn load(context: &mut Context<SelectedBackend, State>) -> Self {
         // Theme loading bakes each unique PNG into its candidate atlas and leaves the installed
         // Context style alone. Retaining every bundle permits switching without later file I/O.
-        let default = LoadedTheme::from_skin("Default Skin", context.atlas(), context.skin().clone());
+        let default = LoadedTheme::new("Default Skin", context.skin_bundle().clone());
         let windows_311_path = demo_asset_path("themes/windows-3.11/theme.json");
         let windows_311 = context
             .load_theme_file(windows_311_path.as_path())
@@ -1227,17 +1227,17 @@ impl DemoThemes {
     /// Borrows the style associated with the current typed selection.
     fn selected_skin(&self) -> &Skin {
         // Index conversion remains centralized on the enum rather than leaking numeric slots.
-        self.themes[self.selected.index()].skin()
+        self.themes[self.selected.index()].bundle().skin()
     }
 
     /// Changes the base selection and returns an editable copy for application state.
     fn select(&mut self, selection: DemoTheme) -> Skin {
         // State's Skin Editor intentionally mutates a clone; pristine bundled choices stay reusable.
         self.selected = selection;
-        self.themes[selection.index()].skin().clone()
+        self.themes[selection.index()].bundle().skin().clone()
     }
 
-    /// Installs a newly selected atlas/style bundle before the editable Skin copy is published.
+    /// Installs a newly selected skin bundle before the editable Skin copy is published.
     fn install_selected(&mut self, context: &mut Context<SelectedBackend, State>) {
         if self.installed == self.selected {
             // Skin Editor changes do not require a GPU atlas upload while the base theme is stable.
@@ -1472,7 +1472,7 @@ struct State {
     /// Publishing invalidates every retained measurement cache, so animation frames must not call
     /// `Context::set_skin` unless a theme selector or Skin Editor input actually changed it.
     style_dirty: bool,
-    /// Pristine Context-bound atlas/style bundles used by the demo theme selector.
+    /// Pristine Context-bound skin bundles used by the demo theme selector.
     themes: DemoThemes,
     /// Concrete radio items updated whenever the selected base theme changes.
     theme_menu_items: [MenuItemHandle; DemoTheme::ALL.len()],
