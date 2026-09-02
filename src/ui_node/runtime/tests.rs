@@ -628,21 +628,19 @@ fn common_phases_are_parent_first_and_siblings_are_forward() {
 }
 
 #[test]
-fn container_skin_cascades_and_child_override_replaces_it_in_every_phase() {
+fn every_runtime_phase_observes_the_same_context_skin() {
     let atlas = test_atlas();
     let observations = Rc::new(SkinObservations::default());
     let child = SkinProbe {
         observations: observations.clone(),
         opt: WidgetOption::NONE,
     };
-    let (child, child_node) = Node::typed_widget(child);
+    let (_, child_node) = Node::typed_widget(child);
     let (container, _) = TraversalContainer::new([child_node], Rc::new(RefCell::new(Vec::new())));
-    let container_skin = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
-        metrics.padding = 17;
-        metrics.spacing = 19;
-    });
-    let mut root = Node::container(container).with_skin_override(container_skin);
+    let mut root = Node::container(container);
 
+    // Measurement, update, and paint all receive the same complete value selected by Context.
+    // Retained nodes do not own another skin source that can diverge between runtime phases.
     let style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
         metrics.padding = 3;
         metrics.spacing = 5;
@@ -653,22 +651,23 @@ fn container_skin_cascades_and_child_override_replaces_it_in_every_phase() {
     runtime.update_tree_root(&mut root, &style, atlas.clone(), empty_input());
     runtime.paint_tree_root(&mut root, &mut DisplayList::default(), &style, atlas.clone(), true, true, true);
 
-    assert_eq!(observations.measure.get(), (17, 19));
-    assert_eq!(observations.update.get(), (17, 19));
-    assert_eq!(observations.paint.get(), (17, 19));
+    assert_eq!(observations.measure.get(), (3, 5));
+    assert_eq!(observations.update.get(), (3, 5));
+    assert_eq!(observations.paint.get(), (3, 5));
 
-    let child_skin = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
+    // A later complete context replacement becomes the one value seen everywhere on the next
+    // commit, including measurement whose cache identity is the replacement skin's revision.
+    let replacement = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
         metrics.padding = 29;
         metrics.spacing = 31;
     });
-    child.try_set_skin_override(child_skin).unwrap();
-    layout_root(&mut runtime, &mut root, &style, atlas.clone());
-    assert_eq!(observations.measure.get(), (29, 31));
-    assert_eq!(child.try_skin_override().flatten().unwrap().metrics.spacing, 31);
+    layout_root(&mut runtime, &mut root, &replacement, atlas.clone());
+    runtime.update_tree_root(&mut root, &replacement, atlas.clone(), empty_input());
+    runtime.paint_tree_root(&mut root, &mut DisplayList::default(), &replacement, atlas, true, true, true);
 
-    child.try_clear_skin_override().unwrap();
-    layout_root(&mut runtime, &mut root, &style, atlas);
-    assert_eq!(observations.measure.get(), (17, 19), "clearing a child override must reveal its container skin");
+    assert_eq!(observations.measure.get(), (29, 31));
+    assert_eq!(observations.update.get(), (29, 31));
+    assert_eq!(observations.paint.get(), (29, 31));
 }
 
 #[test]

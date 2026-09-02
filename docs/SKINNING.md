@@ -1,9 +1,9 @@
 # Skin architecture
 
 Skinning has one resolved runtime model. Built-in widgets, manager-owned window chrome, JSON
-themes, programmatic edits, and retained overrides all converge on the same concrete `Skin` value.
-There is no property bag, `Any` payload, string-keyed runtime lookup, or parallel background and
-foreground model.
+themes, and programmatic edits all use the same context-owned concrete `Skin` value. There is no
+property bag, `Any` payload, string-keyed runtime lookup, local override cascade, or parallel
+background and foreground model.
 
 ## Runtime ownership
 
@@ -15,7 +15,7 @@ ResourceCatalog ── builds/loads ──> Skin + exact AtlasHandle
                                          │ atomic install
                                          v
                                       Context
-                                         │ complete value inheritance
+                                         │ one borrowed value
                                          v
                             WindowManager ──> retained Node tree
 ```
@@ -87,17 +87,16 @@ and icons are copied into every rebuilt JSON-theme atlas, while a theme may repl
 semantic font roles. Custom renderer code that caches atlas rectangles or UVs must still refresh
 those allocation-bound values after a bundle switch.
 
-## Retained overrides and caches
+## Global skin and caches
 
-A node override is a complete `Skin`, not a partial mutation bag. `Node::with_skin_override`,
-`Node::set_skin_override`, and the matching `TypedWidgetHandle::try_set_skin_override` path replace
-the inherited value for that node. A container passes the value to descendants until another node
-provides its own complete replacement. Clearing the override restores inheritance.
+`Context` owns the sole active skin. Window chrome, every retained node, and every runtime phase
+borrow that same complete value; containers and widgets neither store nor resolve local skins.
+Replacing it through `Context::set_skin` or `Context::set_skin_bundle` therefore has one explicit
+scope: the entire UI managed by that context.
 
-Each validated bundle receives one private, non-reused skin revision. Retained measurement caches
-key their results by constraints and that complete revision. Installing a bundle or changing a
-local override therefore cannot accidentally reuse measurements from a skin that happens to share
-only a few scalar fields.
+Each validated skin receives one private, non-reused revision. Retained measurement caches key
+their results by constraints and that complete revision, so a global replacement cannot reuse
+measurements produced with an earlier skin whose scalar fields happened to look similar.
 
 ## JSON compilation
 

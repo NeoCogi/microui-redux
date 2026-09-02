@@ -196,37 +196,6 @@ fn downstream_resources_bundle_and_chrome_form_one_typed_runtime_value() {
     assert_eq!(close_role.resolve(&context.atlas()), context.atlas().icon_id("close").unwrap());
 }
 
-/// Verifies unmounted nodes and live typed handles share one replacement-only override contract.
-#[test]
-fn downstream_local_skin_override_is_a_complete_cascading_replacement() {
-    let mut context = context();
-    let first_override = context.skin().clone().with_metrics(|metrics| metrics.indent = 23);
-    let second_override = context.skin().clone().with_metrics(|metrics| metrics.indent = 31);
-    let (text, mut node) = TextBlock::create(TextBlockParameters::new("locally skinned"));
-
-    // Before mounting, Node owns the complete override and exposes explicit replacement/clear
-    // operations rather than a second set of style aliases or a partially inherited value.
-    node.set_skin_override(first_override);
-    assert_eq!(node.skin_override().expect("the node must retain its complete override").metrics.indent, 23);
-    node.clear_skin_override();
-    assert!(node.skin_override().is_none());
-
-    // Once mounted, the typed widget handle reaches the same concrete storage. Replacing and
-    // clearing the override invalidates retained measurement through the runtime-owned boundary.
-    let _window = context.ui().create_window(Window::new("local skin", rect(0, 0, 120, 80), node));
-    text.try_set_skin_override(second_override).expect("the mounted text widget must be available");
-    assert_eq!(
-        text.try_skin_override()
-            .expect("the mounted text widget must be readable")
-            .expect("the mounted text widget must have an override")
-            .metrics
-            .indent,
-        31
-    );
-    text.try_clear_skin_override().expect("the mounted text widget must be available");
-    assert!(text.try_skin_override().expect("the mounted text widget must be readable").is_none());
-}
-
 struct FileDialogModel {
     dialog: FileDialog,
     /// Terminal result observed only through the component-owned typed source.

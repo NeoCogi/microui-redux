@@ -42,7 +42,7 @@ struct FocusIndicator {
     rect: Recti,
     /// Traversal-derived screen clip that prevents the outline escaping scroll or parent clips.
     clip: Recti,
-    /// Resolved per-node Skin accent, including a widget-local skin override when present.
+    /// Context Skin accent captured for the focused node.
     color: crate::Color,
     /// Inside-aligned stroke width shared with ordinary Skin-owned frames.
     width: i32,
@@ -104,8 +104,6 @@ impl UiRuntime {
     ) -> Option<FocusIndicator> {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.paints += 1);
-        let style = node.resolve_skin(style);
-        let style = &style;
         // Resolve the same outer/content geometry used for input and update before recording paint.
         let frame_role = node_frame_role(node);
         let screen_rect = parent_transform.resolve(node.state.layout.allocation);

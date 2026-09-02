@@ -183,8 +183,8 @@ The `VisualCatalog` entries for `MenuTitle`, `MenuTitleOpen`, `MenuItem`, and
 state. `MenuPopup` supplies the separator color. A theme can therefore pair a dark selected PNG or
 flat highlight with a light hovered/focused foreground without changing ordinary menu text.
 The `MenuBar` and `MenuPopup` visuals fill the persistent bar and popup surfaces. Menu surfaces
-receive the resolved owning-window skin and paint directly; because they are not widget nodes, they
-do not run a separate menu-node skin cascade. `SkinEffects::focus_outline` marks the current
+receive the same context skin as window chrome and retained widgets and paint it directly.
+`SkinEffects::focus_outline` marks the current
 keyboard-selected heading or row, and `SkinEffects::window_activation` continues to mark the owning window while menu scope
 suspends its application widget cue.
 

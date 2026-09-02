@@ -11,8 +11,8 @@ cover the retained UI model, integration details, and repository workflows.
 - [Application menus](MENUS.md) — concrete registered items, retained composition, popup
   coordination, and Windows-style keyboard/submenu navigation.
 - [Typography](TYPOGRAPHY.md) — semantic font roles, UTF-8 behavior, glyph coverage, and atlas setup.
-- [Skin architecture](SKINNING.md) — concrete roles and states, typed patches, stable resources,
-  atomic bundles, retained overrides, and cache identity.
+- [Skin architecture](SKINNING.md) — concrete roles and states, stable resources, atomic bundles,
+  one context-wide skin, and cache identity.
 - [JSON themes](THEMES.md) — typed appearance roles and states, PNG nine-patches, flat fallbacks,
   inheritance, bundled classic themes, and window chrome recipes.
 

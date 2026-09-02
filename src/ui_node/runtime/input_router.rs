@@ -550,8 +550,6 @@ impl InputRouter {
         style: &Skin,
         event: &UiInputEvent,
     ) -> Option<(RuntimeNodeId, RouteResult)> {
-        let style = current.resolve_skin(style);
-        let style = &style;
         if current.id() == target {
             // The target was already selected geometrically; its result only controls handling.
             let result = self.route_input_event_to_node_only_ref(current, parent_transform, style, event);
@@ -608,8 +606,6 @@ impl InputRouter {
         style: &Skin,
         event: &UiInputEvent,
     ) -> Option<RouteResult> {
-        let style = current.resolve_skin(style);
-        let style = &style;
         if current.id() == target {
             // Direct focus/capture delivery stops at the target and never bubbles.
             return Some(self.route_input_event_to_node_only_ref(current, parent_transform, style, event));

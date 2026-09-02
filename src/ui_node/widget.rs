@@ -73,46 +73,19 @@ pub use super::widget_context::{WidgetPaintCtx, WidgetUpdateCtx};
 pub(crate) struct WidgetStorage<W: ?Sized> {
     /// Whether typed application mutation invalidated this widget's preferred measurement.
     measurement_dirty: bool,
-    /// Optional complete local skin inherited by descendants when `W` is a container.
-    skin_override: Option<Skin>,
     /// Concrete or erased widget behavior stored behind this one common retained record.
     pub(crate) widget: W,
 }
 
 impl<W> WidgetStorage<W> {
-    /// Wraps one newly mounted concrete widget with clean derived state and no local skin.
+    /// Wraps one newly mounted concrete widget with clean derived state.
     pub(crate) fn new(widget: W) -> Self {
-        // A new node has no cache to invalidate and inherits the manager skin until explicitly
-        // assigned a complete override through its unmounted node or typed handle.
-        Self {
-            measurement_dirty: false,
-            skin_override: None,
-            widget,
-        }
+        // A new node has no cached measurement to invalidate.
+        Self { measurement_dirty: false, widget }
     }
 }
 
 impl<W: ?Sized> WidgetStorage<W> {
-    /// Clones the optional complete local skin without lending the widget cell.
-    pub(crate) fn skin_override(&self) -> Option<Skin> {
-        // Skin uses copy-on-write visual tables, so cloning retains ordinary value semantics.
-        self.skin_override.clone()
-    }
-
-    /// Replaces the complete local skin and marks preferred measurement stale.
-    pub(crate) fn set_skin_override(&mut self, skin_override: Option<Skin>) {
-        // Custom widgets may observe any Skin field while measuring, so adding, replacing, or
-        // clearing an override must conservatively invalidate this node's retained result.
-        self.skin_override = skin_override;
-        self.mark_measurement_dirty();
-    }
-
-    /// Resolves this widget's complete effective skin from local and inherited values.
-    pub(crate) fn resolve_skin(&self, inherited: &Skin) -> Skin {
-        // Overrides replace rather than partially shadow the inherited complete value.
-        self.skin_override.clone().unwrap_or_else(|| inherited.clone())
-    }
-
     pub(crate) fn mark_measurement_dirty(&mut self) {
         self.measurement_dirty = true;
     }
@@ -343,41 +316,6 @@ impl<W: Widget + 'static> TypedWidgetHandle<W> {
         widget.mark_measurement_dirty();
         let result = f(&mut widget.widget, input);
         Ok(result)
-    }
-
-    /// Returns this widget's local cascading skin override.
-    ///
-    /// The outer [`Option`] reports whether the retained widget is alive and available; the inner
-    /// value is `None` when the widget currently inherits its complete parent skin.
-    pub fn try_skin_override(&self) -> Option<Option<Skin>> {
-        // Upgrade and borrow in separate checked steps so a stale or actively borrowed widget
-        // reports unavailability without panicking or exposing its storage cell.
-        let widget = self.widget.upgrade()?;
-        let widget = widget.try_borrow().ok()?;
-        Some(widget.skin_override())
-    }
-
-    /// Installs a local skin override when the retained widget is alive and available.
-    ///
-    /// Container overrides cascade to descendants. A descendant's own override replaces the
-    /// inherited skin for that descendant and its subtree.
-    pub fn try_set_skin_override(&self, skin_override: Skin) -> Option<()> {
-        // The storage setter owns measurement invalidation, keeping the public typed handle from
-        // duplicating retained-tree cache policy.
-        let widget = self.widget.upgrade()?;
-        let mut widget = widget.try_borrow_mut().ok()?;
-        widget.set_skin_override(Some(skin_override));
-        Some(())
-    }
-
-    /// Clears the local override so this widget inherits its complete parent skin again.
-    pub fn try_clear_skin_override(&self) -> Option<()> {
-        // Clearing follows the same checked mutation path as replacement and therefore cannot leave
-        // a preference measured under the removed local skin in use.
-        let widget = self.widget.upgrade()?;
-        let mut widget = widget.try_borrow_mut().ok()?;
-        widget.set_skin_override(None);
-        Some(())
     }
 
     /// Mutates derived or interaction state known not to affect preferred measurement.

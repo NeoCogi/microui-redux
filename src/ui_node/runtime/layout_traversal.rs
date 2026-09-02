@@ -55,8 +55,6 @@ impl UiRuntime {
         // Preserve the measure/layout phase contract while keeping the parent's rectangle
         // authoritative. Sizing relationships live in the parent container, never on Node.
         let (preferred, measurement_cached) = self.measure_node_for_layout(node, style, atlas, Constraints::bounded(Dimensioni::new(rect.width, rect.height)));
-        let style = node.resolve_skin(style);
-        let style = &style;
         let outer = Recti::new(rect.x, rect.y, rect.width.max(0), rect.height.max(0));
         self.layout_node_outer_ref(node, style, atlas, frame_role, outer, preferred, measurement_cached)
     }

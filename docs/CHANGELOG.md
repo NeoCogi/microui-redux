@@ -10,7 +10,7 @@ authoring, input, events, windows, menus, and rendering around uniquely owned re
 superseded alpha APIs and their compatibility layers are not retained.
 
 - [x] Theming/Skinning
-    - [x] One structured `Skin` with exhaustive typed role/state visuals, stable font/icon references, deterministic concrete patches, data-driven window chrome, and atomic skin/atlas bundles
+    - [x] One structured `Skin` with exhaustive typed role/state visuals, stable font/icon references, direct complete-value replacement, data-driven window chrome, and atomic skin/atlas bundles
     - [x] Strict inherited JSON definitions compile into typed values before atlas construction, while per-state PNG omissions retain flat fallbacks
     - [x] Original Windows 3.11, Windows 95, and Mac OS 9 example themes with `demo-full` selection
 - [x] Rebuilt retained authoring around unique `Node` ownership and typed weak handles.
@@ -43,10 +43,10 @@ superseded alpha APIs and their compatibility layers are not retained.
     - [x] F10 or an unchorded Alt tap enters intrinsic menu navigation with Windows-style heading, popup, submenu, activation, cancellation, and disabled-row skipping behavior.
     - [x] Ctrl+F6 and Ctrl+Shift+F6 cycle visible independent and child windows while preserving each runtime's focused widget and respecting popup, menu, and modal scope.
     - [x] `SkinEffects::focus_outline` identifies the selected control/menu and its shared outline; `SkinEffects::window_activation` identifies the active title and framed window.
-- [x] Completed reusable retained scrolling and skin composition.
+- [x] Completed reusable retained scrolling and unified skin ownership.
     - [x] Public `Scrollbar` exposes a typed range, value, and event contract; `ScrollArea` is a one-child viewport with retained bars and `scroll_to_end` support.
     - [x] `TextArea` composes editable content with `ScrollArea`, including nested wheel delegation and stable viewport layout.
-    - [x] Cascading complete per-widget skin replacements coexist with Context-owned theme defaults.
+    - [x] One Context-owned skin consistently styles window chrome, menus, containers, and widgets.
 - [x] Unified rendering and expanded atlas support.
     - [x] `Painter` records backend-neutral work into the framework-owned display list, and `RendererBackend::Frame<'a>` gives each backend one exclusive submission frame.
     - [x] Typed custom-render callbacks receive the selected backend frame directly; Glow, Vulkan, and WGPU examples share the same retained application lifecycle and logical input adapter.

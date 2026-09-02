@@ -16,10 +16,10 @@
 - **Typography**: atlases can bake multiple named fonts and sizes. `Skin` resolves semantic roles
   (`body`, `small`, `title`, `heading`, `mono`) through stable `FontRef` values, while text-bearing
   `*Parameters` select a per-widget font with `.font(...)`.
-- **Skin overrides**: every retained node can supply a complete `Skin` in place of its inherited
-  skin. A container passes that value to its descendants until another node replaces it. The same
-  effective value drives measurement, placement, input localization, update, and paint. See the
-  [skin architecture](SKINNING.md) for its concrete tables and ownership boundaries.
+- **Skin**: `Context` owns one complete value shared by manager-owned window chrome and every
+  retained node. The same value drives measurement, placement, input localization, update, and
+  paint; nodes and containers add no override or inheritance layer. See the [skin
+  architecture](SKINNING.md) for its concrete tables and ownership boundaries.
 - **Application components**: application state may coordinate multiple retained windows and
   widgets behind a typed semantic API. `FileDialog` owns dialog behavior; a `Window` construction
   value transfers its body and optional declarative `MenuBar` together. Each `MenuItemHandle`
@@ -48,37 +48,25 @@ mutate leaves and containers through weak
 `Context::update_ui(...)` or subscriber-driven contexts through `Context::update_ui_state(...)`,
 and paint with `Context::frame(FrameInfo).render_ui()?`.
 
-Local skins can be installed while building a node or changed later through its typed widget
-handle:
+The application constructs one complete skin and installs it on the context:
 
 ```rust
-let section_skin = ctx.skin().clone().with_metrics(|metrics| {
+let mut skin = ctx.skin().clone().with_metrics(|metrics| {
     metrics.spacing = 8;
     metrics.padding = 6;
 });
-
-let (submit, submit_node) = Button::create(ButtonParameters::new("Submit"));
-let (_, section) = Linear::create(LinearParameters::vertical([
-    LinearItem::content(submit_node),
-]));
-let section = section.with_skin_override(section_skin.clone());
-
-// The button inherits section_skin. After mounting, its handle can replace the complete value.
-let mut submit_skin = section_skin;
-submit_skin.visuals.set_foreground(
+skin.visuals.set_foreground(
     AppearanceRole::Button,
     VisualState::Normal,
     color(55, 90, 160, 255),
 );
-submit.try_set_skin_override(submit_skin);
-submit.try_clear_skin_override();
+ctx.set_skin(skin);
 ```
 
-An override is a complete `Skin`, so derive it from `Context::skin()` or from the intended
-container skin when only a few fields need to differ. As with other layout-affecting handle
-mutations, call `Context::update_ui` before painting. Custom widgets can inspect the effective
-value through `MeasureCtx::skin`, `ContainerLayoutCtx::skin`, `WidgetUpdateCtx::skin`, and
-`WidgetPaintCtx::skin`.
+The context value styles manager-owned window chrome and every retained widget. Nodes, containers,
+windows, and typed widget handles do not own local overrides. Call `Context::update_ui` after a
+layout-affecting replacement and before painting. Custom widgets inspect the same value through
+`MeasureCtx::skin`, `ContainerLayoutCtx::skin`, `WidgetUpdateCtx::skin`, and `WidgetPaintCtx::skin`.
 
 Window and dialog creation consume one complete `Window` and return a non-owning `WindowHandle`;
 popup creation consumes one persistent application `Node` and returns the distinct non-owning

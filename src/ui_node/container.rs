@@ -41,7 +41,7 @@ use super::{ChildParticipation, Children, NodeLayout, NodeRuntime, UiRuntime, Wi
 /// only derived geometry. Neither a [`Node`](crate::Node) nor the child collection crosses the
 /// public container-widget boundary.
 pub struct MeasureCtx<'a> {
-    /// Complete effective skin inherited by the actively measured container.
+    /// Complete context skin used by the actively measured container.
     skin: &'a Skin,
     /// Immutable atlas paired with `skin` for concrete font and icon resolution.
     atlas: &'a crate::AtlasHandle,
@@ -230,31 +230,6 @@ impl Container {
         f(&mut widget.widget)
     }
 
-    /// Returns the optional complete skin stored on this concrete container widget.
-    pub(crate) fn skin_override(&self) -> Option<Skin> {
-        // Scope the shared widget borrow to an owned copy-on-write Skin projection.
-        self.widget.try_borrow().unwrap_or_else(|_| typed_container_borrow_conflict()).skin_override()
-    }
-
-    /// Replaces or clears this container's complete cascading skin.
-    pub(crate) fn set_skin_override(&mut self, skin_override: Option<Skin>) {
-        // WidgetStorage owns the corresponding measurement marker so container and leaf overrides
-        // cannot drift into different invalidation behavior.
-        self.widget
-            .try_borrow_mut()
-            .unwrap_or_else(|_| typed_container_borrow_conflict())
-            .set_skin_override(skin_override);
-    }
-
-    /// Resolves this container's local complete skin against its inherited value.
-    pub(crate) fn resolve_skin(&self, inherited: &Skin) -> Skin {
-        // The owned result can be passed recursively after the widget borrow ends.
-        self.widget
-            .try_borrow()
-            .unwrap_or_else(|_| typed_container_borrow_conflict())
-            .resolve_skin(inherited)
-    }
-
     pub(crate) fn is_measurement_dirty(&self) -> bool {
         self.widget
             .try_borrow()
@@ -291,7 +266,7 @@ fn typed_container_borrow_conflict() -> ! {
 pub struct ContainerLayoutCtx<'a> {
     /// Runtime recursion services used to measure and place selected direct children.
     runtime: &'a mut UiRuntime,
-    /// Complete effective skin inherited by this active placement call.
+    /// Complete context skin used by this active placement call.
     skin: &'a Skin,
     /// Immutable atlas paired with `skin` for child measurement and placement.
     atlas: &'a crate::AtlasHandle,
