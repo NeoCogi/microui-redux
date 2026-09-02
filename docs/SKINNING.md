@@ -108,13 +108,11 @@ measurements produced with an earlier skin whose scalar fields happened to look 
 The optional `theme-json` feature adds a strict authoring format documented in
 [JSON themes](THEMES.md). Loading has three boundaries:
 
-1. Decode each file into a strict syntax document and resolve `extends` paths and asset paths
-   relative to the file that declares them.
-2. Deserialize family-local appearance keys directly into concrete role enums, merge parents into
-   one typed definition, and reject unknown keys, cycles, excessive depth, and invalid schema data
-   before atlas work.
+1. Decode one strict, self-contained document and resolve its asset paths relative to that file.
+2. Deserialize family-local appearance keys directly into concrete role enums and reject unknown
+   keys or invalid schema data before atlas work.
 3. Build one immutable atlas, compile flat fallbacks and authored state images into a complete
    `Skin`, then construct one validated `SkinBundle`.
 
-The runtime never retains the source documents, palette, inheritance graph, or string appearance
-keys. Those are compiler inputs only.
+The runtime never retains the source document, palette, or string appearance keys. Those are
+compiler inputs only.

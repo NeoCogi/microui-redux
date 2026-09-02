@@ -52,13 +52,6 @@ use crate::{
 /// Theme-file schema version understood by this crate release.
 pub const THEME_SCHEMA_VERSION: u32 = 1;
 
-/// Maximum number of parent documents resolved for one loaded theme.
-///
-/// The bound keeps recursive filesystem input from consuming an unbounded call stack. Ordinary
-/// theme families should require only one or two layers; thirty-two remains generous while making
-/// pathological acyclic chains a typed validation error.
-const MAX_THEME_INHERITANCE_DEPTH: usize = 32;
-
 /// A loaded theme with its display name, rebuilt resource atlas, and complete resolved skin.
 ///
 /// Fonts, semantic icons, and PNG state artwork share one immutable atlas. Install this complete
@@ -124,18 +117,6 @@ pub enum ThemeLoadError {
         /// Version declared by the document.
         actual: u32,
     },
-    /// A document extends itself directly or through a parent chain.
-    InheritanceCycle {
-        /// Canonical file path encountered for the second time.
-        path: PathBuf,
-    },
-    /// A parent chain exceeds the loader's explicit recursion bound.
-    InheritanceDepth {
-        /// Definition path that would exceed the supported depth.
-        path: PathBuf,
-        /// Maximum number of parent documents accepted by the loader.
-        maximum: usize,
-    },
     /// The document's display name is empty or whitespace-only.
     EmptyName,
     /// Destination or source slice insets are negative or do not fit their source image.
@@ -185,10 +166,6 @@ impl fmt::Display for ThemeLoadError {
             Self::UnsupportedSchema { expected, actual } => {
                 write!(formatter, "unsupported theme schema {actual}; expected {expected}")
             }
-            Self::InheritanceCycle { path } => write!(formatter, "theme inheritance cycle reaches {} more than once", path.display()),
-            Self::InheritanceDepth { path, maximum } => {
-                write!(formatter, "theme inheritance at {} exceeds the maximum depth of {maximum}", path.display())
-            }
             Self::EmptyName => formatter.write_str("theme name must not be empty"),
             Self::InvalidInsets { appearance, field, insets, image_size } => {
                 write!(
@@ -218,12 +195,7 @@ impl Error for ThemeLoadError {
             Self::DefinitionJson { source, .. } => Some(source),
             Self::ImageDecode { source, .. } => Some(source),
             Self::AtlasBuild { source } => Some(source),
-            Self::UnsupportedSchema { .. }
-            | Self::InheritanceCycle { .. }
-            | Self::InheritanceDepth { .. }
-            | Self::EmptyName
-            | Self::InvalidInsets { .. }
-            | Self::FontPathNotUtf8 { .. } => None,
+            Self::UnsupportedSchema { .. } | Self::EmptyName | Self::InvalidInsets { .. } | Self::FontPathNotUtf8 { .. } => None,
         }
     }
 }
@@ -249,22 +221,24 @@ impl ThemeAtlas {
     }
 }
 
-/// Strict syntax tree for exactly one authored JSON file before inheritance resolution.
+/// Strict syntax tree and compiler input for exactly one self-contained JSON theme file.
+///
+/// The document deliberately has no parent link or overlay semantics. Optional fields mean
+/// "retain the built-in fallback" rather than "search another document," so every authored value
+/// has one source directory and one unambiguous effect.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ThemeDocument {
+pub(crate) struct ThemeDefinition {
     /// Version selecting the exact schema contract.
     schema_version: u32,
-    /// Human-readable selector label contributed by this most-derived document.
+    /// Human-readable selector label for the loaded theme.
     name: String,
-    /// Optional parent JSON path resolved relative to this document.
-    extends: Option<PathBuf>,
-    /// Optional complete semantic font recipe replacing the inherited recipe.
+    /// Optional complete semantic font recipe replacing the base atlas's semantic fonts.
     fonts: Option<FontCatalogDocument>,
-    /// Sparse scalar and flat-color overrides merged onto the parent layer.
+    /// Sparse scalar and flat-color overrides applied to the built-in skin.
     #[serde(default)]
     skin: SkinDocument,
-    /// Sparse appearance overrides grouped and keyed by concrete semantic enums.
+    /// Sparse appearance overrides applied after flat fallback construction.
     #[serde(default)]
     appearances: AppearanceCatalogDocument,
 }
@@ -306,16 +280,6 @@ impl AppearanceCatalogDocument {
         }
     }
 
-    /// Merges one more-derived categorized appearance document over this inherited document.
-    fn merge(&mut self, overlay: Self) {
-        // Role maps remain family-specific through inheritance and installation. There is no
-        // intermediate flattened role table or universal state document.
-        merge_appearance_map(&mut self.surface, overlay.surface, SurfaceAppearanceDocument::merge);
-        merge_appearance_map(&mut self.control, overlay.control, ControlAppearanceDocument::merge);
-        merge_appearance_map(&mut self.menu, overlay.menu, MenuAppearanceDocument::merge);
-        merge_appearance_map(&mut self.chrome, overlay.chrome, ChromeAppearanceDocument::merge);
-    }
-
     /// Visits every authored state document without erasing its owning family.
     fn for_each_state(&self, mut visit: impl FnMut(&StateDocument)) {
         // Image packing needs only state-owned paths. Family state types remain inside their own
@@ -335,122 +299,56 @@ impl AppearanceCatalogDocument {
     }
 }
 
-/// Fully inherited and path-resolved compiler input used to build one runtime skin bundle.
-///
-/// This value contains no unvalidated appearance strings and no paths whose meaning depends on a
-/// later current directory. Parent layers are gone: scalar fields and every role/state override
-/// have already been merged into one concrete typed definition.
-pub(crate) struct ThemeDefinition {
-    /// Human-readable selector label from the most-derived source document.
-    name: String,
-    /// Optional complete semantic font recipe with fully resolved file paths.
-    fonts: Option<FontCatalogDocument>,
-    /// Fully merged sparse scalar and flat-color overrides.
-    skin: SkinDocument,
-    /// Fully merged family-specific appearance overrides.
-    appearances: AppearanceCatalogDocument,
-}
-
 impl ThemeDefinition {
-    /// Reads, inherits, path-resolves, and validates one JSON theme definition.
+    /// Reads, validates, and anchors every asset in one JSON theme definition.
     pub(crate) fn read(path: &Path) -> Result<Self, ThemeLoadError> {
-        // One explicit ancestry stack handles both direct and indirect cycles while preserving a
-        // small recursive implementation whose maximum depth is checked before another read.
-        let mut ancestry = Vec::new();
-        Self::read_layer(path, &mut ancestry)
+        // The file path is retained verbatim in diagnostics. Its lexical parent is sufficient to
+        // anchor assets because one document is now their only possible owner.
+        let bytes = fs::read(path).map_err(|source| ThemeLoadError::DefinitionRead { path: path.to_path_buf(), source })?;
+        let mut definition: Self =
+            serde_json::from_slice(bytes.as_slice()).map_err(|source| ThemeLoadError::DefinitionJson { path: path.to_path_buf(), source })?;
+        definition.validate_header()?;
+
+        let directory = path.parent().unwrap_or_else(|| Path::new("."));
+        definition.resolve_paths(directory);
+        Ok(definition)
     }
 
-    /// Resolves one source layer and all of its parents into a single typed definition.
-    fn read_layer(path: &Path, ancestry: &mut Vec<PathBuf>) -> Result<Self, ThemeLoadError> {
-        if ancestry.len() >= MAX_THEME_INHERITANCE_DEPTH {
-            // Reject the next layer before recursion so the configured maximum is exact and the
-            // stack cannot grow in response to untrusted acyclic input.
-            return Err(ThemeLoadError::InheritanceDepth {
-                path: path.to_path_buf(),
-                maximum: MAX_THEME_INHERITANCE_DEPTH,
-            });
-        }
-
-        // Read through the caller's spelling for precise I/O diagnostics, then canonicalize the
-        // existing file solely for cycle identity. This treats `a/../theme.json` and symlinked
-        // paths as the same source without imposing a stringly path-normalization algorithm.
-        let bytes = fs::read(path).map_err(|source| ThemeLoadError::DefinitionRead { path: path.to_path_buf(), source })?;
-        let canonical_path = fs::canonicalize(path).map_err(|source| ThemeLoadError::DefinitionRead { path: path.to_path_buf(), source })?;
-        if ancestry.contains(&canonical_path) {
-            return Err(ThemeLoadError::InheritanceCycle { path: canonical_path });
-        }
-        let directory = canonical_path.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
-        ancestry.push(canonical_path);
-
-        let document: ThemeDocument =
-            serde_json::from_slice(bytes.as_slice()).map_err(|source| ThemeLoadError::DefinitionJson { path: path.to_path_buf(), source })?;
-        if document.schema_version != THEME_SCHEMA_VERSION {
+    /// Validates the root fields that require semantic checks beyond JSON deserialization.
+    fn validate_header(&self) -> Result<(), ThemeLoadError> {
+        // Keep schema and name validation next to decoding while giving filesystem and unit-test
+        // entry points one identical contract.
+        if self.schema_version != THEME_SCHEMA_VERSION {
             return Err(ThemeLoadError::UnsupportedSchema {
                 expected: THEME_SCHEMA_VERSION,
-                actual: document.schema_version,
+                actual: self.schema_version,
             });
         }
-        if document.name.trim().is_empty() {
+        if self.name.trim().is_empty() {
             return Err(ThemeLoadError::EmptyName);
         }
-
-        let parent = match document.extends.as_ref() {
-            Some(relative_parent) => {
-                // Absolute paths remain absolute under Path::join; relative paths intentionally
-                // belong to the document that declares the inheritance edge.
-                let parent_path = directory.join(relative_parent);
-                Some(Self::read_layer(parent_path.as_path(), ancestry)?)
-            }
-            None => None,
-        };
-        ancestry.pop();
-        Self::resolve(document, directory.as_path(), parent)
+        Ok(())
     }
 
-    /// Merges one decoded source document over its optional fully resolved parent.
-    fn resolve(mut document: ThemeDocument, directory: &Path, parent: Option<Self>) -> Result<Self, ThemeLoadError> {
-        // Resolve asset ownership before merging. Parent paths were resolved in their own layer,
-        // so moving their typed documents into the child cannot reinterpret relative filenames.
-        if let Some(fonts) = &mut document.fonts {
+    /// Resolves every relative asset path against this document's directory exactly once.
+    fn resolve_paths(&mut self, directory: &Path) {
+        // Fonts and appearance images share one source owner. No later compilation stage needs to
+        // retain the definition filename or reinterpret a path.
+        if let Some(fonts) = &mut self.fonts {
             fonts.resolve_paths(directory);
         }
-        document.appearances.resolve_paths(directory);
-
-        let mut definition = parent.unwrap_or_else(|| Self {
-            name: String::new(),
-            fonts: None,
-            skin: SkinDocument::default(),
-            appearances: AppearanceCatalogDocument::default(),
-        });
-        definition.name = document.name;
-        if let Some(fonts) = document.fonts {
-            // Font catalogs are complete by schema, so a child replaces the entire inherited
-            // semantic recipe instead of mixing file and texture dimensions across layers.
-            definition.fonts = Some(fonts);
-        }
-        definition.skin.merge(document.skin);
-        definition.appearances.merge(document.appearances);
-        Ok(definition)
+        self.appearances.resolve_paths(directory);
     }
 
     /// Strictly parses one standalone source string for schema-focused unit tests.
     #[cfg(test)]
     fn parse_for_test(json: &str) -> Result<Self, ThemeLoadError> {
-        // Tests without filesystem inheritance still cross the same version, name, typed-role, and
-        // path-resolution boundary. A synthetic relative path keeps diagnostics deterministic.
+        // A synthetic relative path keeps schema diagnostics and asset anchoring deterministic.
         let path = Path::new("theme.json");
-        let document: ThemeDocument = serde_json::from_str(json).map_err(|source| ThemeLoadError::DefinitionJson { path: path.to_path_buf(), source })?;
-        if document.schema_version != THEME_SCHEMA_VERSION {
-            return Err(ThemeLoadError::UnsupportedSchema {
-                expected: THEME_SCHEMA_VERSION,
-                actual: document.schema_version,
-            });
-        }
-        if document.name.trim().is_empty() {
-            return Err(ThemeLoadError::EmptyName);
-        }
-        assert!(document.extends.is_none(), "standalone parser cannot resolve an inheritance path");
-        Self::resolve(document, Path::new("."), None)
+        let mut definition: Self = serde_json::from_str(json).map_err(|source| ThemeLoadError::DefinitionJson { path: path.to_path_buf(), source })?;
+        definition.validate_header()?;
+        definition.resolve_paths(Path::new("."));
+        Ok(definition)
     }
 
     /// Builds the atlas selected by this definition while preserving required base resources.
@@ -631,7 +529,7 @@ fn install_appearance<const N: usize, State: Copy>(
         let mut visual = get(skin, state);
         visual.patch = visual.patch.with_insets(destination_insets);
         let Some(authored) = authored else {
-            // Even an omitted state inherits the role-wide destination geometry.
+            // Even an omitted state receives the role-wide destination geometry.
             set(skin, state, visual);
             continue;
         };
@@ -689,7 +587,7 @@ impl FontCatalogDocument {
     /// Resolves every relative font filename against its declaring document directory.
     fn resolve_paths(&mut self, directory: &Path) {
         // Traverse through the same typed role list used by atlas insertion so no semantic font
-        // can retain ambiguous path ownership after inheritance resolution.
+        // retains a path whose base directory depends on a later compilation stage.
         self.body.resolve_path(directory);
         self.small.resolve_path(directory);
         self.title.resolve_path(directory);
@@ -748,24 +646,6 @@ struct SkinDocument {
 }
 
 impl SkinDocument {
-    /// Merges one more-derived sparse skin layer over this inherited layer.
-    fn merge(&mut self, overlay: Self) {
-        // Every optional scalar has one explicit ownership point. Replacing only present values
-        // preserves parent fields without reflection, string maps, or a second runtime skin type.
-        replace_if_some(&mut self.default_cell_width, overlay.default_cell_width);
-        replace_if_some(&mut self.padding, overlay.padding);
-        replace_if_some(&mut self.window_content_insets, overlay.window_content_insets);
-        replace_if_some(&mut self.spacing, overlay.spacing);
-        replace_if_some(&mut self.indent, overlay.indent);
-        replace_if_some(&mut self.title_height, overlay.title_height);
-        replace_if_some(&mut self.window_chrome_layout, overlay.window_chrome_layout);
-        replace_if_some(&mut self.window_border, overlay.window_border);
-        replace_if_some(&mut self.scrollbar_size, overlay.scrollbar_size);
-        replace_if_some(&mut self.thumb_size, overlay.thumb_size);
-        replace_if_some(&mut self.frame_insets, overlay.frame_insets);
-        self.colors.merge(overlay.colors);
-    }
-
     /// Applies present fields and returns foreground inputs for visual fallback construction.
     fn apply(&self, skin: &mut Skin, palette: &mut FlatPalette) {
         // Keep assignment explicit so the strict JSON schema and public Skin fields cannot drift
@@ -868,33 +748,6 @@ struct ColorPaletteDocument {
 }
 
 impl ColorPaletteDocument {
-    /// Merges one more-derived sparse palette layer over inherited semantic colors.
-    fn merge(&mut self, overlay: Self) {
-        // Keep this list parallel to `apply`: the source compiler owns inheritance while the
-        // runtime Skin receives only the final resolved palette values.
-        replace_if_some(&mut self.text, overlay.text);
-        replace_if_some(&mut self.border, overlay.border);
-        replace_if_some(&mut self.window_background, overlay.window_background);
-        replace_if_some(&mut self.title_background, overlay.title_background);
-        replace_if_some(&mut self.title_text, overlay.title_text);
-        replace_if_some(&mut self.disabled_text, overlay.disabled_text);
-        replace_if_some(&mut self.disabled_background, overlay.disabled_background);
-        replace_if_some(&mut self.disabled_title_text, overlay.disabled_title_text);
-        replace_if_some(&mut self.panel_background, overlay.panel_background);
-        replace_if_some(&mut self.button, overlay.button);
-        replace_if_some(&mut self.button_hover, overlay.button_hover);
-        replace_if_some(&mut self.input, overlay.input);
-        replace_if_some(&mut self.input_hover, overlay.input_hover);
-        replace_if_some(&mut self.scrollbar_track, overlay.scrollbar_track);
-        replace_if_some(&mut self.scrollbar_thumb, overlay.scrollbar_thumb);
-        replace_if_some(&mut self.control_focus, overlay.control_focus);
-        replace_if_some(&mut self.selection_background, overlay.selection_background);
-        replace_if_some(&mut self.selection_foreground, overlay.selection_foreground);
-        replace_if_some(&mut self.window_active, overlay.window_active);
-        replace_if_some(&mut self.menu_foreground, overlay.menu_foreground);
-        replace_if_some(&mut self.menu_background, overlay.menu_background);
-    }
-
     /// Applies supplied palette fields and returns foregrounds needed by fallback construction.
     fn apply(&self, palette: &mut FlatPalette) {
         // Assign every authored semantic color directly to a named compiler input. The resulting
@@ -936,14 +789,6 @@ struct SurfaceAppearanceDocument {
 }
 
 impl SurfaceAppearanceDocument {
-    /// Merges one more-derived surface layer over inherited values.
-    fn merge(&mut self, overlay: Self) {
-        // Insets and states inherit independently so a child can retint one state only.
-        replace_if_some(&mut self.insets, overlay.insets);
-        merge_state(&mut self.normal, overlay.normal);
-        merge_state(&mut self.disabled, overlay.disabled);
-    }
-
     /// Resolves every surface PNG path against the declaring document directory.
     fn resolve_paths(&mut self, directory: &Path) {
         // Only the two valid structural states are traversed.
@@ -976,14 +821,6 @@ struct PointerAppearanceDocument {
 }
 
 impl PointerAppearanceDocument {
-    /// Merges one more-derived pointer-state branch over inherited values.
-    fn merge(&mut self, overlay: Self) {
-        // Every state object merges field by field through the common concrete state recipe.
-        merge_state(&mut self.normal, overlay.normal);
-        merge_state(&mut self.hovered, overlay.hovered);
-        merge_state(&mut self.pressed, overlay.pressed);
-    }
-
     /// Resolves every pointer-state PNG path against the declaring document directory.
     fn resolve_paths(&mut self, directory: &Path) {
         // The branch contains exactly the pointer states representable inside ControlState.
@@ -1006,15 +843,6 @@ struct ControlAppearanceDocument {
 }
 
 impl ControlAppearanceDocument {
-    /// Merges one more-derived control layer over inherited values.
-    fn merge(&mut self, overlay: Self) {
-        // The two enabled branches retain their nested identity throughout inheritance.
-        replace_if_some(&mut self.insets, overlay.insets);
-        merge_state(&mut self.disabled, overlay.disabled);
-        self.enabled.merge(overlay.enabled);
-        self.focused.merge(overlay.focused);
-    }
-
     /// Resolves every control PNG path against the declaring document directory.
     fn resolve_paths(&mut self, directory: &Path) {
         // Disabled is terminal; enabled and focused branches resolve their concrete pointer states.
@@ -1065,18 +893,6 @@ struct MenuAppearanceDocument {
 }
 
 impl MenuAppearanceDocument {
-    /// Merges one more-derived menu layer over inherited values.
-    fn merge(&mut self, overlay: Self) {
-        // Menu selection states stay independent so open ownership does not impersonate hover.
-        replace_if_some(&mut self.insets, overlay.insets);
-        merge_state(&mut self.normal, overlay.normal);
-        merge_state(&mut self.hovered, overlay.hovered);
-        merge_state(&mut self.pressed, overlay.pressed);
-        merge_state(&mut self.focused, overlay.focused);
-        merge_state(&mut self.open, overlay.open);
-        merge_state(&mut self.disabled, overlay.disabled);
-    }
-
     /// Resolves every menu PNG path against the declaring document directory.
     fn resolve_paths(&mut self, directory: &Path) {
         // The fixed field list is the complete menu state vocabulary.
@@ -1128,15 +944,6 @@ struct ChromeAppearanceDocument {
 }
 
 impl ChromeAppearanceDocument {
-    /// Merges one more-derived chrome layer over inherited values.
-    fn merge(&mut self, overlay: Self) {
-        // Activation and availability remain explicit state fields rather than duplicate roles.
-        replace_if_some(&mut self.insets, overlay.insets);
-        merge_state(&mut self.base, overlay.base);
-        merge_state(&mut self.active, overlay.active);
-        merge_state(&mut self.disabled, overlay.disabled);
-    }
-
     /// Resolves every chrome PNG path against the declaring document directory.
     fn resolve_paths(&mut self, directory: &Path) {
         // Chrome has no pointer or keyboard-focus states to normalize.
@@ -1175,17 +982,7 @@ struct StateDocument {
 }
 
 impl StateDocument {
-    /// Merges one more-derived state layer over inherited visual source fields.
-    fn merge(&mut self, overlay: Self) {
-        // Each field is independently optional in the schema, so child documents can adjust
-        // foreground, slicing, or tint while retaining a parent-owned PNG path.
-        replace_if_some(&mut self.foreground, overlay.foreground);
-        replace_if_some(&mut self.png, overlay.png);
-        replace_if_some(&mut self.source_insets, overlay.source_insets);
-        replace_if_some(&mut self.tint, overlay.tint);
-    }
-
-    /// Makes this state's optional PNG path independent of later inheritance layers.
+    /// Anchors this state's optional PNG path to the one containing theme document.
     fn resolve_path(&mut self, directory: &Path) {
         // Only an authored image needs path ownership; flat states remain allocation-free.
         if let Some(path) = &mut self.png {
@@ -1236,32 +1033,9 @@ impl ColorDocument {
     }
 }
 
-/// Replaces one optional source field only when the more-derived layer supplies a value.
-fn replace_if_some<T>(destination: &mut Option<T>, overlay: Option<T>) {
-    // Moving the concrete value keeps inheritance generic only over one homogeneous field type;
-    // it never permits heterogeneous or runtime-erased theme data.
-    if let Some(value) = overlay {
-        *destination = Some(value);
-    }
-}
-
-/// Merges every typed role entry from one family map into its inherited family map.
-fn merge_appearance_map<Role: Ord, Appearance: Default>(
-    inherited: &mut BTreeMap<Role, Appearance>,
-    overlay: BTreeMap<Role, Appearance>,
-    merge: impl Fn(&mut Appearance, Appearance),
-) {
-    // The helper is generic only over homogeneous map storage. Family-specific appearance shapes
-    // and their state enums remain concrete at each call site.
-    for (role, appearance) in overlay {
-        merge(inherited.entry(role).or_default(), appearance);
-    }
-}
-
 /// Resolves a fixed family-specific set of optional state paths.
 fn resolve_state_paths<const N: usize>(states: [Option<&mut StateDocument>; N], directory: &Path) {
-    // Missing states remain absent; present concrete state recipes own their resolved path before
-    // inheritance moves them into another document.
+    // Missing states remain absent; every present recipe is anchored to the containing document.
     for state in states.into_iter().flatten() {
         state.resolve_path(directory);
     }
@@ -1274,18 +1048,6 @@ fn visit_present_states<const N: usize, State: Copy>(states: [(State, Option<&St
     for (_, state) in states {
         if let Some(state) = state {
             visit(state);
-        }
-    }
-}
-
-/// Merges one optional state document without duplicating seven field-level branches.
-fn merge_state(destination: &mut Option<StateDocument>, overlay: Option<StateDocument>) {
-    // A present child state refines an inherited state when available and otherwise becomes the
-    // complete first layer for that typed role/state slot.
-    if let Some(overlay) = overlay {
-        match destination {
-            Some(destination) => destination.merge(overlay),
-            None => *destination = Some(overlay),
         }
     }
 }
@@ -1478,122 +1240,29 @@ mod tests {
         ));
     }
 
-    /// Verifies inheritance merges typed fields while retaining each layer's asset directory.
+    /// Verifies the removed composition feature cannot silently return through a permissive root.
     #[test]
-    fn inherited_documents_resolve_paths_before_deep_typed_merge() {
-        let root = tempfile::tempdir().expect("temporary inheritance directory must be available");
-        let parent_directory = root.path().join("parent");
-        let child_directory = root.path().join("child");
-        fs::create_dir_all(parent_directory.as_path()).expect("parent directory must be creatable");
-        fs::create_dir_all(child_directory.as_path()).expect("child directory must be creatable");
-        fs::write(
-            parent_directory.join("theme.json"),
-            r#"{
-                "schema_version": 1,
-                "name": "Parent",
-                "skin": {
-                    "padding": 3,
-                    "colors": { "button": [1, 2, 3, 255] }
-                },
-                "appearances": {
-                    "control": {
-                        "button": {
-                            "enabled": {
-                                "normal": { "png": "parent.png", "tint": [4, 5, 6, 255] }
-                            }
-                        }
-                    }
-                }
-            }"#,
-        )
-        .expect("parent JSON must be writable");
-        fs::write(
-            child_directory.join("theme.json"),
-            r#"{
-                "schema_version": 1,
-                "name": "Child",
-                "extends": "../parent/theme.json",
-                "skin": {
-                    "spacing": 7,
-                    "colors": { "button_hover": [8, 9, 10, 255] }
-                },
-                "appearances": {
-                    "control": {
-                        "button": {
-                            "enabled": {
-                                "normal": { "foreground": [11, 12, 13, 255] },
-                                "hovered": { "png": "child.png" }
-                            }
-                        }
-                    }
-                }
-            }"#,
-        )
-        .expect("child JSON must be writable");
-
-        let definition = ThemeDefinition::read(child_directory.join("theme.json").as_path()).expect("typed inheritance must resolve");
-        let button = definition
-            .appearances
-            .control
-            .get(&ControlRole::Button)
-            .expect("button appearance must be inherited");
-        let normal = button.enabled.normal.as_ref().expect("normal state must be inherited and refined");
-        let hovered = button.enabled.hovered.as_ref().expect("hovered state must come from the child");
-
-        assert_eq!(definition.name, "Child");
-        assert_eq!(definition.skin.padding, Some(3));
-        assert_eq!(definition.skin.spacing, Some(7));
-        let parent_button = definition.skin.colors.button.expect("parent button color must survive").into_color();
-        let child_hover = definition.skin.colors.button_hover.expect("child hover color must apply").into_color();
-        assert_eq!((parent_button.r, parent_button.g, parent_button.b, parent_button.a), (1, 2, 3, 255));
-        assert_eq!((child_hover.r, child_hover.g, child_hover.b, child_hover.a), (8, 9, 10, 255));
-        assert_eq!(normal.png.as_deref(), Some(parent_directory.join("parent.png").as_path()));
-        let child_foreground = normal.foreground.expect("child foreground must refine the inherited state").into_color();
-        let parent_tint = normal.tint.expect("parent tint must survive the child refinement").into_color();
-        assert_eq!(
-            (child_foreground.r, child_foreground.g, child_foreground.b, child_foreground.a),
-            (11, 12, 13, 255)
-        );
-        assert_eq!((parent_tint.r, parent_tint.g, parent_tint.b, parent_tint.a), (4, 5, 6, 255));
-        assert_eq!(hovered.png.as_deref(), Some(child_directory.join("child.png").as_path()));
-    }
-
-    /// Verifies a cyclic parent graph fails with its concrete canonical source path.
-    #[test]
-    fn inheritance_cycles_are_rejected_before_source_merge() {
-        let root = tempfile::tempdir().expect("temporary cycle directory must be available");
-        let first = root.path().join("first.json");
-        let second = root.path().join("second.json");
-        fs::write(first.as_path(), r#"{ "schema_version": 1, "name": "First", "extends": "second.json" }"#).expect("first cycle document must be writable");
-        fs::write(second.as_path(), r#"{ "schema_version": 1, "name": "Second", "extends": "first.json" }"#).expect("second cycle document must be writable");
-
-        let error = match ThemeDefinition::read(first.as_path()) {
-            Ok(_) => panic!("cyclic inheritance must fail before a definition is returned"),
+    fn extends_is_rejected_as_an_unknown_schema_field() {
+        let error = match ThemeDefinition::parse_for_test(r#"{ "schema_version": 1, "name": "Child", "extends": "parent.json" }"#) {
+            Ok(_) => panic!("a parent link must not be accepted by the single-file schema"),
             Err(error) => error,
         };
 
-        assert!(matches!(error, ThemeLoadError::InheritanceCycle { path } if path == fs::canonicalize(first).unwrap()));
+        // Explicit rejection distinguishes removal from accidentally ignoring the obsolete field.
+        assert!(error.to_string().contains("unknown field `extends`"));
     }
 
-    /// Verifies misspelled appearance keys are rejected by the concrete role enum.
+    /// Verifies misspelled appearance keys are rejected directly by the concrete role enum.
     #[test]
-    fn unknown_inherited_role_key_is_rejected_during_read() {
-        let root = tempfile::tempdir().expect("temporary appearance directory must be available");
-        let parent = root.path().join("parent.json");
-        let child = root.path().join("child.json");
-        fs::write(
-            parent.as_path(),
+    fn unknown_appearance_role_key_is_rejected_during_decode() {
+        let error = match ThemeDefinition::parse_for_test(
             r#"{
                 "schema_version": 1,
-                "name": "Parent",
+                "name": "Broken role",
                 "appearances": { "control": { "buton": {} } }
             }"#,
-        )
-        .expect("invalid parent document must be writable");
-        fs::write(child.as_path(), r#"{ "schema_version": 1, "name": "Child", "extends": "parent.json" }"#).expect("child document must be writable");
-
-        let error = match ThemeDefinition::read(child.as_path()) {
-            Ok(_) => panic!("unknown parent role key must fail during typed source resolution"),
+        ) {
+            Ok(_) => panic!("an unknown control role must not enter theme compilation"),
             Err(error) => error,
         };
 

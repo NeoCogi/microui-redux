@@ -11,7 +11,7 @@ superseded alpha APIs and their compatibility layers are not retained.
 
 - [x] Theming/Skinning
     - [x] One structured `Skin` with exhaustive typed role/state visuals, stable font/icon references, direct complete-value replacement, data-driven window chrome, and atomic skin/atlas bundles
-    - [x] Strict inherited JSON definitions compile into typed values before atlas construction, while per-state PNG omissions retain flat fallbacks
+    - [x] Strict self-contained JSON definitions compile into typed values before atlas construction, while per-state PNG omissions retain flat fallbacks
     - [x] Original Windows 3.11, Windows 95, and Mac OS 9 example themes with `demo-full` selection
 - [x] Rebuilt retained authoring around unique `Node` ownership and typed weak handles.
     - [x] Built-in leaf and container constructors return their `TypedWidgetHandle<W>` with the sole mountable `Node`; moving or mounting transfers ownership without invalidating handles.

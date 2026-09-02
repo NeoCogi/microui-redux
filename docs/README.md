@@ -14,7 +14,7 @@ cover the retained UI model, integration details, and repository workflows.
 - [Skin architecture](SKINNING.md) — concrete roles and states, stable resources, atomic bundles,
   one context-wide skin, and cache identity.
 - [JSON themes](THEMES.md) — typed appearance roles and states, PNG nine-patches, flat fallbacks,
-  inheritance, bundled classic themes, and window chrome recipes.
+  bundled classic themes, and window chrome recipes.
 
 ## Rendering and integration
 

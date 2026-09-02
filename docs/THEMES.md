@@ -144,24 +144,14 @@ override is installed. Each family role/state cell is one concrete `Visual { pat
 background and foreground cannot drift through parallel catalogs, and no erased or string-keyed
 payload participates at runtime.
 
-## Inheritance
-
-A document may set `"extends": "../base/theme.json"`. Parent paths, font paths, and PNG paths are
-resolved relative to the exact document that declares them. The child name becomes the loaded
-theme name. A child-supplied `fonts` object replaces the complete inherited font recipe because the
-five semantic entries and atlas dimensions form one unit.
-
-The `skin` object merges field by field. Appearance roles merge independently; within a role,
-`insets` and each visual state merge independently; within a state, `png`, `source_insets`, `tint`,
-and `foreground` merge independently. The more-derived present value wins and an omitted value
-preserves its parent. There is no JSON `null` removal operation in schema version 1.
+Each theme is one self-contained document. Schema version 1 has no parent links, overlays, or merge
+rules; an `extends` field is rejected like any other unknown field. Optional values select the
+built-in flat or atlas-derived fallback described above rather than consulting another document.
 
 The loader rejects unknown document fields, unknown skin/palette fields, unknown appearance
-categories or role keys, unknown state fields, cycles, chains deeper than 32 documents, unsupported
-schema versions, and invalid names before constructing an atlas. Family and role keys deserialize
-directly into concrete enums; no string-keyed appearance map exists between syntax parsing and the
-fully merged family documents. The runtime bundle retains no inheritance graph or authored key
-strings.
+categories or role keys, unknown state fields, unsupported schema versions, and invalid names
+before constructing an atlas. Family and role keys deserialize directly into concrete enums; no
+string-keyed appearance map exists between syntax parsing and the typed family documents.
 
 ## Loading and selecting
 
