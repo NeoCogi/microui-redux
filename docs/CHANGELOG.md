@@ -42,7 +42,7 @@ superseded alpha APIs and their compatibility layers are not retained.
     - [x] Application-popup Escape dismissal consumes only an initial non-repeated press; repeats and releases remain ordinary input for the subsequently active focused surface.
     - [x] F10 or an unchorded Alt tap enters intrinsic menu navigation with Windows-style heading, popup, submenu, activation, cancellation, and disabled-row skipping behavior.
     - [x] Ctrl+F6 and Ctrl+Shift+F6 cycle visible independent and child windows while preserving each runtime's focused widget and respecting popup, menu, and modal scope.
-    - [x] `SkinEffects::focus_outline` identifies the selected control/menu and its shared outline; `SkinEffects::window_activation` identifies the active title and framed window.
+    - [x] Focused control/menu visuals identify the keyboard target; active title and frame roles identify the active window without an out-of-band effect pass.
 - [x] Completed reusable retained scrolling and unified skin ownership.
     - [x] Public `Scrollbar` exposes a typed range, value, and event contract; `ScrollArea` is a one-child viewport with retained bars and `scroll_to_end` support.
     - [x] `TextArea` composes editable content with `ScrollArea`, including nested wheel delegation and stable viewport layout.

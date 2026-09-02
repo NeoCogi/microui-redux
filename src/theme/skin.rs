@@ -225,15 +225,6 @@ impl Default for WindowChromeSkin {
     }
 }
 
-/// Paint effects that are not themselves semantic role/state visuals.
-#[derive(Copy, Clone)]
-pub struct SkinEffects {
-    /// Accent used by the universal keyboard-focus outline.
-    pub focus_outline: Color,
-    /// Accent used by manager-owned active-window outlines.
-    pub window_activation: Color,
-}
-
 /// Complete resolved runtime skin installed with one matching atlas.
 ///
 /// A `Skin` contains only values consumed at runtime. Flat palettes and serialized authoring data
@@ -250,8 +241,6 @@ pub struct Skin {
     /// This prevents callers from temporarily or permanently pairing a new background with the
     /// foreground belonging to an unrelated state.
     visuals: RoleTable<StateTable<Visual>>,
-    /// Non-catalog focus and activation effects.
-    pub effects: SkinEffects,
     /// Window-title and caption-control arrangement.
     pub chrome: WindowChromeSkin,
 }
@@ -290,10 +279,6 @@ impl Skin {
                 thumb_size: 8,
             },
             visuals,
-            effects: SkinEffects {
-                focus_outline: palette.control_focus,
-                window_activation: palette.window_active,
-            },
             chrome: WindowChromeSkin::trailing_buttons(),
         }
     }
@@ -311,7 +296,7 @@ impl Skin {
         self.revision = SkinRevision::allocate();
     }
 
-    /// Replaces flat visual fallbacks and related effects from one authored palette.
+    /// Replaces flat visual fallbacks from one authored palette.
     ///
     /// This operation is intended for builders and live skin editors. It compiles the palette
     /// immediately into the resolved catalog rather than retaining the palette as shadow state.
@@ -320,8 +305,6 @@ impl Skin {
         // values. Callers that need different frame geometry can update that typed visual after.
         let frame_insets = self.frame_insets();
         self.visuals = visuals_from_flat_palette(frame_insets, &palette);
-        self.effects.focus_outline = palette.control_focus;
-        self.effects.window_activation = palette.window_active;
         self.chrome.set_backdrop_color(palette.title_background);
     }
 

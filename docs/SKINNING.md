@@ -35,13 +35,12 @@ switching themes cannot gradually accumulate fonts, icons, or artwork.
 
 | Type | Responsibility |
 | --- | --- |
-| `Skin` | One resolved value containing `metrics`, `visuals`, `effects`, and `chrome`. |
+| `Skin` | One resolved value containing metrics, complete visuals, and chrome policy. |
 | `SkinMetrics` | Layout, spacing, window inset, border, title, scrollbar, and thumb geometry. |
 | `Skin::visual` | Resolves one complete `Visual { patch, foreground }` for a role and state. |
 | `AppearanceRole` | Closed semantic UI-part domain such as `Button`, `TextInput`, or `WindowFrame`. |
 | `VisualState` | Closed interaction domain: normal, hover, press, focus combinations, and disabled. |
 | `StateTable<T>` | Exhaustive state-indexed generic storage with one concrete `T`. |
-| `SkinEffects` | Focus outline and active-window accents that are not role/state backgrounds. |
 | `WindowChromeSkin` | Data recipe for title alignment, caption placement, sizing, and backdrop. |
 | `FontRef` / `IconRef` | Stable semantic or named references resolved against the active bundle. |
 | `SkinBundle` | Validated atomic ownership of one skin and its exact atlas. |
@@ -70,8 +69,8 @@ context.set_skin(skin);
 ```
 
 The runtime retains only complete `Skin` values. `FlatPalette` is construction input for flat skins,
-and `Skin::apply_flat_palette` deliberately regenerates the complete flat visual catalog and related
-effects. It does not reinterpret or partially recolor an image-backed theme. JSON themes likewise
+and `Skin::apply_flat_palette` deliberately regenerates the complete flat visual catalog. It does
+not reinterpret or partially recolor an image-backed theme. JSON themes likewise
 compile their flat fallbacks first and then replace explicitly authored states with PNG visuals.
 
 ## Stable resources

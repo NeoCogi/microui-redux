@@ -51,7 +51,7 @@ pub use loader::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};
 pub use palette::FlatPalette;
 pub use resources::ResourceCatalog;
 pub use roles::{AppearanceRole, VisualState};
-pub use skin::{CaptionButtonSide, CaptionButtonsSkin, Skin, SkinEffects, SkinMetrics, TitleBackdropSkin, WindowChromeSkin, WindowTitleAlignment};
+pub use skin::{CaptionButtonSide, CaptionButtonsSkin, Skin, SkinMetrics, TitleBackdropSkin, WindowChromeSkin, WindowTitleAlignment};
 pub(crate) use skin::SkinRevision;
 pub use tables::StateTable;
 pub(crate) use tables::RoleTable;

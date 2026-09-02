@@ -482,8 +482,6 @@ impl ThemeDefinition {
         validate_non_negative("window_content", "skin.metrics.window_content_insets", skin.metrics.window_content_insets)?;
         validate_non_negative("window_frame", "skin.metrics.window_border", skin.metrics.window_border)?;
         skin.replace_flat_visuals(frame_insets, &palette);
-        skin.effects.focus_outline = palette.control_focus;
-        skin.effects.window_activation = palette.window_active;
         skin.chrome.set_backdrop_color(palette.title_background);
         for role in AppearanceRole::ALL {
             let Some(document) = self.appearances.get(role) else {
@@ -1482,12 +1480,6 @@ mod tests {
         assert_eq!(
             (checked_hovered_text.r, checked_hovered_text.g, checked_hovered_text.b, checked_hovered_text.a),
             (255, 255, 255, 255)
-        );
-        let focus = loaded.bundle().skin().effects.focus_outline;
-        assert_eq!(
-            (focus.r, focus.g, focus.b, focus.a),
-            (0, 0, 0, 255),
-            "period control focus must preserve black combo and slider frames"
         );
         let slider_normal = loaded.bundle().skin().visual(AppearanceRole::SliderTrack, VisualState::Normal).patch;
         let slider_focused = loaded.bundle().skin().visual(AppearanceRole::SliderTrack, VisualState::Focused).patch;

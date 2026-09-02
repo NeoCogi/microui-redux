@@ -815,32 +815,38 @@ fn tab_focused_builtins_share_windows_activation_and_arrow_adjustment() {
 }
 
 #[test]
-fn active_window_and_only_its_remembered_widget_use_skin_focus_accents() {
+fn active_window_and_only_its_remembered_widget_use_role_state_visuals() {
     // Preserve one atlas identity across backend construction and the customized Skin so the
     // focus-color assertions cannot accidentally rely on globally meaningful resource slots.
     let atlas = test_atlas();
     let mut style = test_skin(&atlas);
-    style.effects.focus_outline = color(7, 17, 29, 255);
-    style.effects.window_activation = color(31, 47, 61, 255);
+    let widget_focus = color(7, 17, 29, 255);
+    let window_activation = color(31, 47, 61, 255);
     let active_frame = NinePatch::framed(
         style.visual(AppearanceRole::WindowFrame, VisualState::Normal).patch.insets,
-        style.effects.window_activation,
+        window_activation,
         None,
     );
     replace_skin_patches(&mut style, AppearanceRole::WindowFrameActive, StateTable::filled(active_frame));
-    let window_activation = style.effects.window_activation;
     replace_skin_patches(
         &mut style,
         AppearanceRole::WindowTitleActive,
         StateTable::filled(NinePatch::solid(window_activation)),
     );
+    replace_skin_patch(&mut style, AppearanceRole::GenericFrame, VisualState::Focused, NinePatch::solid(widget_focus));
+    replace_skin_patch(
+        &mut style,
+        AppearanceRole::GenericFrame,
+        VisualState::HoveredFocused,
+        NinePatch::solid(widget_focus),
+    );
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
     ctx.set_skin(style.clone());
 
-    let (_, first_node) = OrderedProbe::create(WidgetOption::NONE);
+    let (_, first_node) = OrderedProbe::create(WidgetOption::FRAME);
     let first_id = first_node.id();
-    let (_, second_node) = OrderedProbe::create(WidgetOption::NONE);
+    let (_, second_node) = OrderedProbe::create(WidgetOption::FRAME);
     let second_id = second_node.id();
     let first = ctx.ui().create_window(Window::new("first", rect(10, 10, 140, 100), first_node));
     let second = ctx.ui().create_window(Window::new("second", rect(220, 10, 140, 100), second_node));
@@ -862,12 +868,8 @@ fn active_window_and_only_its_remembered_widget_use_skin_focus_accents() {
     log.clear();
     ctx.frame(frame_info(dimensions)).render_ui().unwrap();
     let events = log.snapshot();
-    let widget_focus = atlas_quads_with_color(&events, style.effects.focus_outline);
-    assert_eq!(
-        widget_focus.len(),
-        8,
-        "one inside-aligned widget outline has eight visible nine-patch border cells"
-    );
+    let widget_focus = atlas_quads_with_color(&events, widget_focus);
+    assert_eq!(widget_focus.len(), 1, "only the focused role/state patch should provide the active widget cue");
     assert!(
         widget_focus.iter().all(|event| {
             let RenderEvent::AtlasQuad(vertices) = event else { unreachable!() };
@@ -876,7 +878,7 @@ fn active_window_and_only_its_remembered_widget_use_skin_focus_accents() {
         "the inactive second runtime must not expose its remembered focus"
     );
 
-    let window_focus = atlas_quads_with_color(&events, style.effects.window_activation);
+    let window_focus = atlas_quads_with_color(&events, window_activation);
     assert_eq!(
         window_focus.len(),
         9,
@@ -1306,18 +1308,16 @@ fn window_and_container_backgrounds_ignore_hover_state_artwork() {
 }
 
 #[test]
-fn tab_focused_disclosure_uses_focus_fill_in_addition_to_the_shared_outline() {
+fn tab_focused_disclosure_uses_only_its_focused_role_state_visual() {
     // Resolve the customized palette from the exact atlas moved into the recording backend.
     let atlas = test_atlas();
     let mut style = test_skin(&atlas);
-    style.effects.focus_outline = color(67, 83, 101, 255);
-    style.effects.window_activation = color(109, 127, 149, 255);
-    let focus_outline = style.effects.focus_outline;
+    let focused_fill = color(67, 83, 101, 255);
     replace_skin_patch(
         &mut style,
         AppearanceRole::DisclosureHeader,
         VisualState::Focused,
-        NinePatch::solid(focus_outline),
+        NinePatch::solid(focused_fill),
     );
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
@@ -1336,11 +1336,11 @@ fn tab_focused_disclosure_uses_focus_fill_in_addition_to_the_shared_outline() {
     log.clear();
     ctx.frame(frame_info(dimensions)).render_ui().unwrap();
     let events = log.snapshot();
-    let focus_quads = atlas_quads_with_color(&events, style.effects.focus_outline);
+    let focus_quads = atlas_quads_with_color(&events, focused_fill);
     assert_eq!(
         focus_quads.len(),
-        9,
-        "the disclosure row fill plus the eight-cell retained outline must use one focus color"
+        1,
+        "focus must paint the disclosure's selected row once without a universal outer frame"
     );
 }
 

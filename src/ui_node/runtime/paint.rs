@@ -32,36 +32,8 @@
 
 use super::*;
 
-/// Deferred focus-outline geometry captured while painting one retained widget tree.
-///
-/// The outline is emitted only after the complete tree, including custom rendering, so later
-/// descendants and siblings cannot cover the current keyboard target inside the same root.
-#[derive(Copy, Clone)]
-struct FocusIndicator {
-    /// Focused widget's complete outer allocation in screen coordinates.
-    rect: Recti,
-    /// Traversal-derived screen clip that prevents the outline escaping scroll or parent clips.
-    clip: Recti,
-    /// Context Skin accent captured for the focused node.
-    color: crate::Color,
-    /// Inside-aligned stroke width shared with ordinary Skin-owned frames.
-    width: i32,
-}
-
-impl FocusIndicator {
-    /// Records the final focus outline after every ordinary and custom operation in the tree.
-    fn record(self, display_list: &mut DisplayList) {
-        // Transparent accents intentionally disable the visual without changing focus routing.
-        if self.color.a == 0 || self.rect.width <= 0 || self.rect.height <= 0 {
-            return;
-        }
-        let mut painter = crate::render::Painter::screen_space(display_list, self.clip);
-        painter.stroke_rect(self.rect, self.width.max(1), self.color);
-    }
-}
-
 impl UiRuntime {
-    /// Paints one persistent root and records at most one scope-visible focus outline last.
+    /// Paints one persistent root using the focus state selected by the owning keyboard scope.
     pub(crate) fn paint_tree_root(
         &mut self,
         root: &mut Node,
@@ -76,7 +48,9 @@ impl UiRuntime {
         // surface may present it. This prevents passive windows and menu-suspended widgets from
         // showing simultaneous carets, fills, or outlines. Activation remains available to custom
         // widget paint code but does not rewrite the semantic state of enabled descendants.
-        if let Some(indicator) = self.paint_node_ref(
+        // Focus is an ordinary VisualState input. Each widget or container selects its semantic
+        // role, so traversal has no second paint pass and no widget-independent focus decoration.
+        self.paint_node_ref(
             root,
             self.root_transform,
             display_list,
@@ -85,9 +59,7 @@ impl UiRuntime {
             focus_visible,
             window_active,
             root_enabled,
-        ) {
-            indicator.record(display_list);
-        }
+        );
     }
 
     /// Paints one already-borrowed node and descendants.
@@ -101,7 +73,7 @@ impl UiRuntime {
         focus_visible: bool,
         window_active: bool,
         ancestors_enabled: bool,
-    ) -> Option<FocusIndicator> {
+    ) {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.paints += 1);
         // Resolve the same outer/content geometry used for input and update before recording paint.
@@ -136,15 +108,6 @@ impl UiRuntime {
             .unwrap_or_else(|| Recti::new(content_rect.x, content_rect.y, 0, 0));
         let screen_content_rect = content_rect.translated(screen_origin);
         let screen_content_clip = content_clip.translated(screen_origin);
-        let mut focus_indicator = focused.then_some(FocusIndicator {
-            rect: screen_rect,
-            clip: screen_clip,
-            color: style.effects.focus_outline,
-            width: frame_role
-                .map(|role| style.visual(role, crate::VisualState::Normal).patch.insets.maximum_component())
-                .unwrap_or(1)
-                .max(1),
-        });
         {
             // Limit the mutable display-list borrow to this widget call before custom/child output.
             let mut widget_ctx = crate::WidgetPaintCtx::new_with_content_geometry(
@@ -178,7 +141,9 @@ impl UiRuntime {
                     .iter_mut()
                     .filter(|child| node_is_visible(child) && child.intersects_clip(child_transform))
                 {
-                    if let Some(child_focus) = self.paint_node_ref(
+                    // Descendants resolve their own role and focus state through the same single
+                    // traversal; no presentation value bubbles back to an out-of-band renderer.
+                    self.paint_node_ref(
                         child,
                         child_transform,
                         display_list,
@@ -187,14 +152,9 @@ impl UiRuntime {
                         focus_visible,
                         window_active,
                         enabled,
-                    ) {
-                        // Focus identity is singular by invariant. Prefer a descendant defensively
-                        // if externally mutated state ever exposes both an ancestor and child.
-                        focus_indicator = Some(child_focus);
-                    }
+                    );
                 }
             });
         }
-        focus_indicator
     }
 }

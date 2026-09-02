@@ -226,10 +226,9 @@ identity from the retained forest.
 
 The manager projects that same routing decision into paint. Only the current keyboard surface
 receives a visible focused state; inactive runtimes preserve their target without drawing duplicate
-carets, fills, or outlines. Retained traversal defers one `SkinEffects::focus_outline` widget outline until
-the complete tree, including custom-render barriers, has recorded. The active owner window uses
-`SkinEffects::window_activation` for its title and framed outer outline. During menu navigation the menu
-selection replaces the suspended widget cue while the owning window remains visibly active.
+carets or fills. Each widget paints the focused state of its semantic role during the ordinary tree
+pass, while the active owner window selects its active title and frame roles. During menu navigation
+the menu selection replaces the suspended widget cue while the owning window remains visibly active.
 
 A fullscreen application surface remains an ordinary independent window, not a special surface
 kind. Give its `Window` a content clip policy, put the root in the desired fixed layer, remove its

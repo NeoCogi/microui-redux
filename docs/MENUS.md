@@ -187,10 +187,9 @@ The complete visuals for `MenuTitle`, `MenuTitleOpen`, `MenuItem`, and
 state. `MenuPopup` supplies the separator color. A theme can therefore pair a dark selected PNG or
 flat highlight with a light hovered/focused foreground without changing ordinary menu text.
 The `MenuBar` and `MenuPopup` visuals fill the persistent bar and popup surfaces. Menu surfaces
-receive the same context skin as window chrome and retained widgets and paint it directly.
-`SkinEffects::focus_outline` marks the current
-keyboard-selected heading or row, and `SkinEffects::window_activation` continues to mark the owning window while menu scope
-suspends its application widget cue.
+receive the same context skin as window chrome and retained widgets and paint it directly. The
+current keyboard-selected heading or row uses its focused role/state visual, and active window roles
+continue to mark the owner while menu scope suspends its application widget cue.
 
 Keyboard navigation is intrinsic to menu surfaces, but mnemonics and shortcut dispatch remain
 outside the menu component. Shortcut hints are presentation only, and applications still own

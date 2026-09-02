@@ -82,12 +82,10 @@ ordinary roots. Each root's runtime keeps its focused ID while inactive; modal d
 intrinsic menus retain their narrower keyboard scopes instead of participating in the cycle.
 
 Paint exposes focus only for the manager-selected keyboard surface even though every window runtime
-retains its own target. `SkinEffects::focus_outline` marks selected controls such as disclosure rows and
-menus and records one clipped, inside-aligned outline around the focused widget after its complete
-ordinary, child, and custom-render output. The outline reuses the widest frame inset with a minimum
-of one pixel and does
-not affect measurement or hit geometry. `SkinEffects::window_activation` marks the active title and
-outlines an active framed window. Deactivated windows retain their remembered widget focus and
+retains its own target. Focused controls, disclosure rows, and menus resolve the focused state of
+their own semantic role; there is no widget-independent outline pass or hidden frame geometry.
+Active titles and framed windows likewise select their explicit active roles. Deactivated windows
+retain their remembered widget focus and
 enabled client presentation while their frame and title select passive chrome roles. Only an
 explicit `WindowOption::DISABLED` resolves the chrome, intrinsic menu, client backgrounds, child
 appearances, text, and icons through the theme's `disabled` state.
