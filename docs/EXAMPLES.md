@@ -13,9 +13,9 @@
 - [`demo-full`](../examples/demo-full.rs) combines retained widgets, per-window File/View/Help
   menus, dialogs, custom drawing, external textures, and custom backend rendering. Its menu shows
   grouped and disabled commands, shortcut hints, a live checked item, radio choices in a cascading
-  View > Log Spacing submenu, a View > Theme radio submenu for Default Style, Windows 3.11,
+  View > Log Spacing submenu, a View > Theme radio submenu for Default Skin, Windows 3.11,
   Windows 95, and Mac OS 9, and typed
-  item submission events into the file dialog, log, and style state. A titleless fullscreen family
+  item submission events into the file dialog, log, and skin state. A titleless fullscreen family
   root at layer 0 renders a perspective X-Y grid beneath its content-clipped floating child windows.
   The grid root owns the Grid/Help menu, which records and handles above the complete child family;
   its private menu-popup nodes stack in the transient band derived from that layer-0 root. The child
@@ -55,7 +55,7 @@ surfaces stay out of Tab order, while the Suzanne viewport remains a Tab stop be
 arrow-key orbiting and text-input W/S zoom. This keeps example-specific interaction consistent with
 the same focus contract as built-in widgets.
 
-The full demo's live Style editor exposes `focus` and `window focus` independently. The former
+The full demo's live Skin Editor exposes `focus` and `window focus` independently. The former
 updates focused control fills, menu selection, and widget outlines; the latter updates the active
 window title and frame. Every other example inherits their Windows-blue defaults without requiring
 widget-specific focus painting.

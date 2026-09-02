@@ -13,8 +13,8 @@ popup payload, a temporary menu tree, or a separate controller. Logical `KeyEven
 persistent retained focus, wrapping Tab traversal, Ctrl+F6 window cycling, shared control actions,
 and F10/Alt menu navigation provide one Windows-style keyboard contract across windows, widgets,
 and examples.
-Explicit `Style::focus_color` and `Style::window_focus_color` accents make its sole active widget
-and window scope visible without exposing remembered focus in inactive windows.
+Explicit `SkinEffects::focus_outline` and `SkinEffects::window_activation` accents make its sole
+active widget and window scope visible without exposing remembered focus in inactive windows.
 
 > **Alpha status:** `0.8.0-alpha.6` is the current alpha of the breaking retained-API
 > redesign. The 0.8 line is not API-compatible with 0.7 and may continue to evolve before the
@@ -99,6 +99,7 @@ body without changing their screen-space geometry.
 - [Rendering and backend integration](docs/RENDER.md)
 - [Backend frames and custom rendering](docs/BACKENDS.md)
 - [Fonts and typography](docs/TYPOGRAPHY.md)
+- [Concrete skin architecture](docs/SKINNING.md)
 - [JSON themes and bundled classic examples](docs/THEMES.md)
 - [Examples and demos](docs/EXAMPLES.md)
 - [Cargo features](docs/FEATURES.md)

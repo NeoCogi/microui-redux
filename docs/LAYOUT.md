@@ -53,7 +53,7 @@ place it in a content, fixed, or flexible track.
 - Handle-bearing built-in leaf and container constructors return a weak `TypedWidgetHandle<W>` plus one completed owning `Node`. The stateless `Custom::create` exception returns a `Custom` runtime for mounting through `Node::widget`, `Node::custom_render`, or `Node::typed_custom_render`. Concrete container constructors consume child nodes.
 - Every direction is a configuration of one `Linear` widget. Linear and Grid independently invoke the common scalar track resolver, so both apply identical content/fixed/flex, spacing, rounding, and overflow arithmetic without either container being implemented through the other.
 - `LinearCrossSize` gives every direction the same shared-line choices: desired content, stretching across exact allocation, or an exact fixed cross extent. `LinearDirection` combines axis and leading edge.
-- Negative desired extents are normalized to zero at the node boundary. A desired zero remains zero; generic containers do not substitute Style-owned fallback cells.
+- Negative desired extents are normalized to zero at the node boundary. A desired zero remains zero; generic containers do not substitute Skin-owned fallback cells.
 
 Built-in leaves and containers are mutated through their typed widget handles between commits. After programmatic state/topology changes, call `update_ui` even when no input is pending so layout is synchronized before paint. Feed raw input through methods such as `mousemove`, `mousedown`, `scroll`, `key`, and `text`; calls are queued without coalescing. `Context::key` accepts one backend-normalized `KeyEvent` containing logical identity, pressed/released state, the complete modifier snapshot, and repeat state. Printable key transitions remain distinct from `text`, which is the authoritative channel for composed UTF-8 input. A widget receives the current event as `Option<&UiInputEvent>`, while `WidgetUpdateCtx::{mouse_buttons,modifiers}` exposes held state after that event was applied.
 
@@ -82,11 +82,11 @@ ordinary roots. Each root's runtime keeps its focused ID while inactive; modal d
 intrinsic menus retain their narrower keyboard scopes instead of participating in the cycle.
 
 Paint exposes focus only for the manager-selected keyboard surface even though every window runtime
-retains its own target. `Style::focus_color` fills selected controls such as disclosure rows and
+retains its own target. `SkinEffects::focus_outline` marks selected controls such as disclosure rows and
 menus and records one clipped, inside-aligned outline around the focused widget after its complete
 ordinary, child, and custom-render output. The outline reuses the widest frame inset with a minimum
 of one pixel and does
-not affect measurement or hit geometry. `Style::window_focus_color` fills the active title and
+not affect measurement or hit geometry. `SkinEffects::window_activation` marks the active title and
 outlines an active framed window. Deactivated windows retain their remembered widget focus and
 enabled client presentation while their frame and title select passive chrome roles. Only an
 explicit `WindowOption::DISABLED` resolves the chrome, intrinsic menu, client backgrounds, child

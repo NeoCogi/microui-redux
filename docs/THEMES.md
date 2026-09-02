@@ -2,10 +2,11 @@
 
 The `theme-json` feature is enabled by default. It adds `Context::load_theme_file`, which reads one
 strict, versioned JSON definition and bakes each referenced PNG into the theme's immutable atlas.
-The returned `LoadedTheme` contains that rebuilt resource atlas and its complete matching `Style`;
-install both with `context.set_theme(&theme)`. Loading does not change the active renderer, so
-several themes can be prepared before the user selects one. Selection uploads the replacement
-atlas first and publishes the Style only after that backend transaction succeeds.
+The returned `LoadedTheme` owns a validated `SkinBundle`: one rebuilt resource atlas and its
+complete matching `Skin`. Install both with `context.set_theme(&theme)`. Loading does not change
+the active renderer, so several themes can be prepared before the user selects one. Selection
+uploads the replacement atlas first and publishes the bundle only after that backend transaction
+succeeds.
 
 All PNG paths are relative to the JSON file. Repeated state entries that resolve to the same path
 share one decoded atlas region; their source insets, destination insets, and tints remain
@@ -22,8 +23,8 @@ artwork authored for this project; their directory READMEs identify the GTK, pla
 and gallery references used for visual research and explicitly document that no third-party theme
 files were copied.
 
-`demo-full` loads the Default Style and every bundled file once at startup. Choose them from
-`View > Theme`; each selection installs a pristine editable copy, so the existing Style Editor can
+`demo-full` loads the Default Skin and every bundled file once at startup. Choose them from
+`View > Theme`; each selection installs a pristine editable copy, so the existing Skin Editor can
 modify it without changing the stored base theme. The example requires the `theme-json` feature and
 the theme directories must remain available beside the repository sources at runtime.
 
@@ -42,7 +43,7 @@ the theme directories must remain available beside the repository sources at run
     "heading": { "path": "body.ttf", "size": 18 },
     "mono": { "path": "mono.ttf", "size": 14 }
   },
-  "style": {
+  "skin": {
     "padding": 4,
     "window_content_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
     "spacing": 4,
@@ -77,17 +78,21 @@ the theme directories must remain available beside the repository sources at run
 
 The optional `fonts` object is all-or-nothing. When present, it declares atlas texture dimensions
 and exact file/size recipes for the five semantic roles: `body`, `small`, `title`, `heading`, and
-`mono`. Paths are relative to the JSON file. Loading copies the current atlas's named icons into a
+`mono`. Paths are relative to the JSON file. Loading copies the application catalog's named icons into a
 fresh atlas of the requested size, rasterizes these declared fonts, packs the unique state PNGs,
-and binds the resulting IDs into the theme Style. Without a font recipe, an artwork-bearing theme
-reuses the current atlas dimensions and repacks its existing icons and baked glyphs before adding
-the PNG regions. A flat palette-only theme reuses the current atlas allocation exactly. The
-bundled classic themes all provide explicit font recipes and dimensions.
+and binds the resulting capabilities into the theme bundle. Without a font recipe, an
+artwork-bearing theme reuses the application resource catalog's atlas dimensions and repacks its
+icons and baked glyphs before adding the PNG regions. A flat palette-only theme reuses that source
+atlas allocation exactly. Every load starts from the immutable `ResourceCatalog` captured by
+`Context::new`, not from the currently selected theme. The bundled classic themes all provide
+explicit font recipes and dimensions.
 
-Atlas-scoped IDs are intentionally concrete capabilities. A widget configured with
-`FontChoice::Id` from the preceding atlas cannot survive a theme switch; use a semantic `FontRole`
-for theme-controlled text. Custom rendering code that caches raw atlas UV coordinates must refresh
-those coordinates when installing a different atlas.
+Atlas-scoped IDs are intentionally concrete capabilities and are not retained by widgets.
+Use `FontRef::role(FontRole::Heading)` for theme-controlled typography or create a checked named
+reference with `context.resource_catalog().font_ref("caption")` for application typography copied
+into every derived atlas. `IconRef` follows the same semantic/named model. Custom rendering code
+that caches raw atlas UV coordinates must refresh those coordinates after installing another
+bundle.
 
 An appearance or state may be omitted. Every omitted state keeps its own flat-color fallback; it
 does not borrow another state's PNG. A state may set `foreground` without a PNG to recolor its text
@@ -100,9 +105,9 @@ the role's destination insets. Source insets must be non-negative and opposing v
 inside the PNG. Destination insets may be larger than a runtime control; the renderer reduces
 opposing sides proportionally for tiny destinations.
 
-## Style fields
+## Skin fields
 
-The optional `style` object accepts these integer metrics:
+The optional `skin` object accepts these integer metrics:
 
 - `default_cell_width`
 - `padding`
@@ -124,10 +129,28 @@ The optional `colors` object accepts RGBA byte arrays under these keys:
 - `scrollbar_track`, `scrollbar_thumb`, `focus`, `window_focus`
 - `menu_foreground`, `menu_background`
 
-These colors construct the complete flat appearance and foreground fallback catalogs before any
-per-state PNG or `foreground` override is installed. `Style::foreground(role, state)` and the
-public `ForegroundCatalog` provide the same concrete enum-indexed lookup and mutation model as
-background appearances; no erased or string-keyed payload participates at paint time.
+These colors construct one complete `VisualCatalog` before any per-state PNG or `foreground`
+override is installed. Each `AppearanceRole`/`VisualState` cell is one concrete
+`Visual { patch, foreground }`; background and foreground cannot drift through parallel catalogs,
+and no erased or string-keyed payload participates at runtime.
+
+## Inheritance
+
+A document may set `"extends": "../base/theme.json"`. Parent paths, font paths, and PNG paths are
+resolved relative to the exact document that declares them. The child name becomes the loaded
+theme name. A child-supplied `fonts` object replaces the complete inherited font recipe because the
+five semantic entries and atlas dimensions form one unit.
+
+The `skin` object merges field by field. Appearance roles merge independently; within a role,
+`insets` and each visual state merge independently; within a state, `png`, `source_insets`, `tint`,
+and `foreground` merge independently. The more-derived present value wins and an omitted value
+preserves its parent. There is no JSON `null` removal operation in schema version 1.
+
+The loader rejects unknown document fields, unknown skin/palette fields, unknown appearance names,
+unknown state fields, cycles, chains deeper than 32 documents, unsupported schema versions, and
+invalid names before constructing an atlas. The fully merged compiler input contains typed
+`AppearanceRole` tables and fully resolved paths; the runtime bundle retains no inheritance graph
+or string-keyed role map.
 
 ## Loading and selecting
 
@@ -139,9 +162,10 @@ fn select<B: RendererBackend, State: 'static>(context: &mut Context<B, State>, t
 }
 ```
 
-`LoadedTheme::from_style` can capture the initial flat atlas/style pair so a selector can return to
-the default appearance after choosing a file theme. Ordinary Style Editor changes continue to use
-`Context::set_style`; they are valid while they retain IDs from the currently installed atlas.
+Capture `context.skin_bundle().clone()` in `LoadedTheme::new("Default Skin", bundle)` when a
+selector needs to return to the initial flat appearance after choosing a file theme. Ordinary Skin
+Editor changes clone `context.skin()` and use `Context::set_skin`; image-backed visual edits must
+continue to belong to the currently active atlas.
 
 ## Appearance roles
 
@@ -183,7 +207,7 @@ children.
 
 ## Window borders and caption controls
 
-`style.window_border` is the window's structural border thickness. Its four values drive client
+`skin.window_border` is the window's structural border thickness. Its four values drive client
 layout and the right/bottom one-axis resize hit regions. `window_frame.insets` and
 `dialog_frame.insets` instead control the fixed visual corner span for their respective
 three-by-three artwork; each active role is normalized to its corresponding passive role's visual
@@ -193,15 +217,15 @@ reserving 23 pixels around either client. The bottom-right two-axis region remai
 input, but themes may leave `window_resize_grip` transparent when the frame corner itself is the
 complete visible affordance.
 
-`style.window_content_insets` is a separate four-edge inset around the application body. Root
+`skin.window_content_insets` is a separate four-edge inset around the application body. Root
 geometry applies it after the frame, title, and menu bar have been allocated, so it never narrows
 the menubar and never changes ordinary widget padding. The bundled Windows and Mac themes set all
-four edges to zero; the default flat Style retains a five-pixel body inset.
+four edges to zero; the default flat Skin retains a five-pixel body inset.
 `WindowOption::NO_PADDING` overrides the metric with zero for an individual root.
 
 Application-authored popup windows use the `menu_popup` appearance for both their structural
 client inset and their outer frame paint. This keeps combo/list popups aligned with themed menu
-panels instead of borrowing ordinary window L-corners or `style.window_border`; compact menu
+panels instead of borrowing ordinary window L-corners or `skin.window_border`; compact menu
 popups already paint the same role as their complete manager-owned panel.
 
 Window caption controls are enabled explicitly through `WindowOption::MINIMIZE_BUTTON` and
@@ -210,17 +234,19 @@ is present. Caption and resize roles receive `hovered` and `pressed` states from
 pointer capture just like widgets. A press dragged away from its originating caption button is no
 longer painted pressed and does not activate on release.
 
-`style.window_chrome_layout` selects concrete platform geometry without changing the semantic
+`skin.window_chrome_layout` selects concrete platform geometry without changing the semantic
 caption roles. `trailing_buttons` preserves the ordinary left-aligned title and places every
 caption control at the trailing edge. `classic_mac` centers the title, places a compact close box
 at the leading edge, places compact zoom/windowshade controls at the trailing edge, and omits those
 faces from passive titles. Classic Mac caption PNGs are complete faces, so this layout does not
-overlay the generic procedural glyphs used by flat and Windows-oriented styles.
+overlay the generic procedural glyphs used by flat and Windows-oriented skins. The JSON enum is
+compiled once into a concrete `WindowChromeSkin` data recipe; manager code does not branch on a
+theme or platform mode.
 
 The optional caption-glyph roles paint centered image artwork inside their corresponding button
 face. If a glyph role is transparent or omitted, the renderer uses its deterministic procedural
 fallback. This lets classic themes provide period-specific triangle controls and pressed offsets
-without forcing every flat application style to ship additional images.
+without forcing every flat application skin to ship additional images.
 
 Minimize hides the retained window and emits `WindowEvent::Minimized`; the same `WindowHandle` can
 be shown again. Maximize saves the exact normal outer rectangle, tracks the complete inherited

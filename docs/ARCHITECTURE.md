@@ -13,8 +13,13 @@
 - **Widget**: the common update/paint contract. A leaf additionally implements `LeafWidget` for intrinsic measurement; a branch implements `ContainerWidget` for child-aware measurement and placement. Concrete widgets combine semantic values, interaction state, native event ports, and runtime phases; `*Parameters` are only one-shot initialization.
 - **Node**: the non-cloneable owner of one concrete leaf or container runtime. Leaf storage is erased to `Rc<RefCell<dyn LeafWidget>>`; container storage erases to `Rc<RefCell<dyn ContainerWidget>>`. Applications and coordinating widgets may retain a weak `TypedWidgetHandle<W>` without affecting node lifetime. A `Node` receives private process-unique identity when constructed and transfers exactly once into a window, an application popup, or an opaque `Children` collection; attached nodes cannot be detached or reparented.
 - **Rendering**: widgets obtain a local `Painter` from `WidgetPaintCtx`; retained traversal owns the internal display list, and Context's private executor submits it through one exclusively borrowed `RendererBackend::Frame`. The portable target supports drawables up to 8192x8192 and geometry up to four maximum drawable spans beyond the viewport; see the [render subsystem guide](RENDER.md#supported-coordinate-domain) for the complete coordinate contract and integration API.
-- **Typography**: atlases can bake multiple named fonts and sizes. `Style` resolves semantic roles (`body`, `small`, `title`, `heading`, `mono`) through `FontRole`, while text-bearing `*Parameters` select a per-widget font with `.font(...)`.
-- **Style overrides**: every retained node can supply a `Style` in place of its inherited style. A container passes that style to its descendants until another node replaces it. The same effective value drives measurement, placement, input localization, update, and paint.
+- **Typography**: atlases can bake multiple named fonts and sizes. `Skin` resolves semantic roles
+  (`body`, `small`, `title`, `heading`, `mono`) through stable `FontRef` values, while text-bearing
+  `*Parameters` select a per-widget font with `.font(...)`.
+- **Skin overrides**: every retained node can supply a complete `Skin` in place of its inherited
+  skin. A container passes that value to its descendants until another node replaces it. The same
+  effective value drives measurement, placement, input localization, update, and paint. See the
+  [skin architecture](SKINNING.md) for its concrete tables and ownership boundaries.
 - **Application components**: application state may coordinate multiple retained windows and
   widgets behind a typed semantic API. `FileDialog` owns dialog behavior; a `Window` construction
   value transfers its body and optional declarative `MenuBar` together. Each `MenuItemHandle`
@@ -43,32 +48,37 @@ mutate leaves and containers through weak
 `Context::update_ui(...)` or subscriber-driven contexts through `Context::update_ui_state(...)`,
 and paint with `Context::frame(FrameInfo).render_ui()?`.
 
-Local styles can be installed while building a node or changed later through its typed widget
+Local skins can be installed while building a node or changed later through its typed widget
 handle:
 
 ```rust
-let mut section_style = ctx.style().clone();
-section_style.spacing = 8;
-section_style.padding = 6;
+let section_skin = ctx.skin().clone().with_metrics(|metrics| {
+    metrics.spacing = 8;
+    metrics.padding = 6;
+});
 
 let (submit, submit_node) = Button::create(ButtonParameters::new("Submit"));
 let (_, section) = Linear::create(LinearParameters::vertical([
     LinearItem::content(submit_node),
 ]));
-let section = section.with_style_override(section_style);
+let section = section.with_skin_override(section_skin.clone());
 
-// The button inherits section_style. After mounting, it can replace that style through its handle.
-let mut submit_style = section_style;
-submit_style.colors[ControlColor::Button as usize] = color(55, 90, 160, 255);
-submit.try_set_style_override(submit_style);
-submit.try_clear_style_override();
+// The button inherits section_skin. After mounting, its handle can replace the complete value.
+let mut submit_skin = section_skin;
+submit_skin.visuals.set_foreground(
+    AppearanceRole::Button,
+    VisualState::Normal,
+    color(55, 90, 160, 255),
+);
+submit.try_set_skin_override(submit_skin);
+submit.try_clear_skin_override();
 ```
 
-An override is a complete `Style`, so derive it from `*Context::style()` or from the intended
-container style when only a few fields need to differ. As with other layout-affecting handle
+An override is a complete `Skin`, so derive it from `Context::skin()` or from the intended
+container skin when only a few fields need to differ. As with other layout-affecting handle
 mutations, call `Context::update_ui` before painting. Custom widgets can inspect the effective
-value through `MeasureCtx::style`, `ContainerLayoutCtx::style`, `WidgetUpdateCtx::style`, and
-`WidgetPaintCtx::style`.
+value through `MeasureCtx::skin`, `ContainerLayoutCtx::skin`, `WidgetUpdateCtx::skin`, and
+`WidgetPaintCtx::skin`.
 
 Window and dialog creation consume one complete `Window` and return a non-owning `WindowHandle`;
 popup creation consumes one persistent application `Node` and returns the distinct non-owning
@@ -230,9 +240,9 @@ identity from the retained forest.
 
 The manager projects that same routing decision into paint. Only the current keyboard surface
 receives a visible focused state; inactive runtimes preserve their target without drawing duplicate
-carets, fills, or outlines. Retained traversal defers one `Style::focus_color` widget outline until
+carets, fills, or outlines. Retained traversal defers one `SkinEffects::focus_outline` widget outline until
 the complete tree, including custom-render barriers, has recorded. The active owner window uses
-`Style::window_focus_color` for its title and framed outer outline. During menu navigation the menu
+`SkinEffects::window_activation` for its title and framed outer outline. During menu navigation the menu
 selection replaces the suspended widget cue while the owning window remains visibly active.
 
 A fullscreen application surface remains an ordinary independent window, not a special surface
@@ -269,7 +279,7 @@ order, then applies the window-owned content inset only to the remaining applica
 Descendants accumulate clipping ancestors, but their authoritative rectangles stay in screen
 coordinates. `ChildWindowClip::None`, the default, preserves the inherited viewport clip while
 keeping the same content/children/overlay order. `NO_PADDING` removes only the window-owned content
-inset; descendant widgets still use the complete `Style`, including ordinary control and container
+inset; descendant widgets still use the complete `Skin`, including ordinary control and container
 padding.
 
 `demo-full` applies this exact recipe to a menu-bearing perspective X-Y grid family root with

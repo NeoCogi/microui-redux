@@ -176,16 +176,16 @@ suspended; closing the menu restores the exact persistent widget focus. Any non-
 pending Alt tap, allowing combinations such as Alt+Down to continue to a focused combo. The menu
 also consumes Ctrl+F6 window-cycle chords; window cycling resumes only after the menu scope closes.
 
-## Style and current scope
+## Skin and current scope
 
-The foreground catalog entries for `MenuTitle`, `MenuTitleOpen`, `MenuItem`, and
+The `VisualCatalog` entries for `MenuTitle`, `MenuTitleOpen`, `MenuItem`, and
 `MenuItemSelected` color menu labels, item text, marks, and arrows in the row's exact interaction
 state. `MenuPopup` supplies the separator color. A theme can therefore pair a dark selected PNG or
 flat highlight with a light hovered/focused foreground without changing ordinary menu text.
-`Style::menu_background` fills the persistent bar and popup surfaces. Menu surfaces receive the
-resolved owning window style and paint directly; because they are not widget nodes, they do not run
-a separate menu-node style cascade. `Style::focus_color` fills the current keyboard-selected
-heading or row, and `Style::window_focus_color` continues to mark the owning window while menu scope
+The `MenuBar` and `MenuPopup` visuals fill the persistent bar and popup surfaces. Menu surfaces
+receive the resolved owning-window skin and paint directly; because they are not widget nodes, they
+do not run a separate menu-node skin cascade. `SkinEffects::focus_outline` marks the current
+keyboard-selected heading or row, and `SkinEffects::window_activation` continues to mark the owning window while menu scope
 suspends its application widget cue.
 
 Keyboard navigation is intrinsic to menu surfaces, but mnemonics and shortcut dispatch remain

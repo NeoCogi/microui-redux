@@ -1,8 +1,13 @@
 # Fonts and typography
 
 - Atlas building supports multiple baked fonts and sizes through `atlas::builder::FontAsset`, and the same config can drive both runtime atlas construction and offline/prebuilt atlas export.
-- `Context::new(...)` constructs its `Style` directly from the conventional atlas font keys `body`, `small`, `title`, `heading`, and `mono`, plus the built-in semantic icon keys. To customize it, clone `context.style()`, change scalar fields, and pass the complete value to `Context::set_style(...)`; no placeholder IDs or rebinding pass exists.
-- Text-bearing widget Parameters expose `.font(FontChoice)`, so you can either select a semantic role (`FontRole::Heading.into()`) or a concrete baked font ID (`atlas.font_id("caption").unwrap().into()`).
+- `Context::new(...)` constructs its default `SkinBundle` from the conventional atlas font keys
+  `body`, `small`, `title`, `heading`, and `mono`, plus the built-in semantic icon keys. To customize
+  it, clone `context.skin()`, edit its concrete fields, and pass the complete value to
+  `Context::set_skin(...)`.
+- Text-bearing widget parameters expose `.font(FontRef)`. Select a semantic role with
+  `FontRole::Heading.into()`, or create a checked allocation-independent named reference with
+  `context.resource_catalog().font_ref("caption")`.
 - Font sizes are selected by choosing another baked font variant, not by scaling one bitmap font at runtime.
 - `examples/demo-full` uses this directly: `NORMAL.ttf` for control/body text, `BOLD.ttf` for window titles, and `CONSOLE.ttf` for the log window’s input/output text.
 
@@ -42,12 +47,14 @@ Every atlas, including a fontless atlas prepared before Context construction, ha
 white tile named `white` for solid geometry; no resource depends on a numeric table position.
 `AtlasHandle::try_from` validates dimensions, decoded pixels, unique names and glyphs, font
 metrics, the mandatory underscore entries, every glyph/icon rectangle, and the opaque white tile
-before returning a handle. `Style::from_atlas` and `ThemeIcons::from_atlas` separately enforce the
-standard UI's `body` and semantic-icon naming policy.
+before returning a handle. `Skin::from_atlas` and `SkinBundle::new` enforce the standard UI's
+semantic font/icon naming policy and validate that image visuals belong to the paired atlas.
 
 `FontId` and `IconId` are opaque capabilities scoped to one runtime atlas allocation. Cloning an
 `AtlasHandle` preserves their owner, while loading identical source metadata again creates a
 different owner. A renderer rejects foreign font and icon IDs during display-list preflight.
+Retained widget state stores `FontRef` and `IconRef` instead; they resolve through the active bundle
+when measurement or paint needs the short-lived capability.
 
 ```rust
 use microui_redux::{atlas::builder, prelude::*};

@@ -31,7 +31,7 @@ Each layer has one responsibility:
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| `Painter` | Local-to-screen translation, operation recording, scoped clip intersection, solid-shape tessellation | Backend state, frame lifecycle, atlas lookup, input, style policy |
+| `Painter` | Local-to-screen translation, operation recording, scoped clip intersection, solid-shape tessellation | Backend state, frame lifecycle, atlas lookup, input, skin policy |
 | Internal display list | Ordered operations, operation clips, owned text, custom-render keys, solid triangles, reusable recording storage | Execution, backend access, textures |
 | Context render executor | Unique backend ownership, atlas expansion, final clipping, texture lifetime, display-list execution, reusable execution scratch | Public standalone submission, widget input, widget layout, mutable drawing state |
 | `RendererBackend` | Persistent GPU/software and texture resources | UI input, widget state, clipping decisions |
@@ -163,7 +163,7 @@ impl Widget for PaintedSwatch {
 impl LeafWidget for PaintedSwatch {
     fn measure(
         &self,
-        _style: &Style,
+        _skin: &Skin,
         _atlas: &AtlasHandle,
         _constraints: Constraints,
     ) -> Dimensioni {
@@ -185,9 +185,9 @@ The main primitives are:
 | `fill_polygon` | Tessellated solid polygon |
 | `with_clip` | Child painter with an intersected local clip |
 
-Style-aware decisions stay in widgets. `Painter` records colors, fonts, and
+Skin-aware decisions stay in widgets. `Painter` records colors, fonts, and
 geometry that the caller has already selected; it does not inspect hover,
-focus, input, or the active `Style`.
+focus, input, or the active `Skin`.
 
 ### Text
 
