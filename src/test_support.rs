@@ -31,7 +31,10 @@
 //! Shared fixtures, renderer recordings, and no-op helpers used by unit tests.
 
 use crate::render::{FrameError, FrameInfo, RendererBackend, RendererFrame, TextureError, Vertex};
-use crate::{AtlasHandle, AtlasSource, AtlasUploadError, CharEntry, FontEntry, Recti, SourceFormat, Skin, TextureId, Vec2i};
+use crate::{
+    AppearanceRole, AtlasHandle, AtlasSource, AtlasUploadError, CharEntry, Color, FontEntry, NinePatch, Recti, Skin, SourceFormat, StateTable, TextureId,
+    Vec2i, Visual, VisualState,
+};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -201,6 +204,42 @@ pub(crate) fn test_skin(atlas: &AtlasHandle) -> Skin {
     // Tests must retain and pass this same handle allocation; reconstructing identical metadata is
     // intentionally a different ownership domain after atlas IDs become scoped.
     Skin::from_atlas(atlas)
+}
+
+/// Replaces every background patch for one role while retaining its test fixture foregrounds.
+pub(crate) fn replace_skin_patches(skin: &mut Skin, role: AppearanceRole, patches: StateTable<NinePatch>) {
+    // Tests often isolate geometry or rendering with a synthetic patch table. Reconstruct complete
+    // Visual values here so production code keeps one atomic background/foreground mutation API.
+    let visuals = StateTable::new(std::array::from_fn(|index| {
+        let state = VisualState::ALL[index];
+        Visual::new(patches[state], skin.visual(role, state).foreground)
+    }));
+    skin.set_role_visuals(role, visuals);
+}
+
+/// Replaces one background patch while retaining that test fixture state's foreground.
+pub(crate) fn replace_skin_patch(skin: &mut Skin, role: AppearanceRole, state: VisualState, patch: NinePatch) {
+    // Resolve both halves before the replacement, then publish a complete Visual in one operation.
+    let foreground = skin.visual(role, state).foreground;
+    skin.set_visual(role, state, Visual::new(patch, foreground));
+}
+
+/// Replaces every foreground for one role while retaining its test fixture background patches.
+pub(crate) fn replace_skin_foregrounds(skin: &mut Skin, role: AppearanceRole, foregrounds: StateTable<Color>) {
+    // Color-focused assertions do not need to repeat unrelated patch construction, but the helper
+    // still crosses the production boundary using total, concrete Visual values.
+    let visuals = StateTable::new(std::array::from_fn(|index| {
+        let state = VisualState::ALL[index];
+        Visual::new(skin.visual(role, state).patch, foregrounds[state])
+    }));
+    skin.set_role_visuals(role, visuals);
+}
+
+/// Replaces one foreground while retaining that test fixture state's background patch.
+pub(crate) fn replace_skin_foreground(skin: &mut Skin, role: AppearanceRole, state: VisualState, foreground: Color) {
+    // Publish the retained patch and new color together to exercise the same invariant as clients.
+    let patch = skin.visual(role, state).patch;
+    skin.set_visual(role, state, Visual::new(patch, foreground));
 }
 
 pub(crate) struct NoopRenderer {

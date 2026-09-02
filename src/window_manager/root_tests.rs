@@ -30,7 +30,10 @@
 
 use super::*;
 
-use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, test_atlas, test_skin};
+use crate::test_support::{
+    AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, replace_skin_foreground, replace_skin_foregrounds, replace_skin_patch,
+    replace_skin_patches, test_atlas, test_skin,
+};
 use crate::{
     color, rect, AppearanceRole, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Combo, ComboParameters, ComboSubmitted,
     Custom, Color, CustomParameters, Constraints, Context, DecimalPrecision, Dimensioni, Disclosure, DisclosureParameters, Ui, Grid, GridParameters, Key,
@@ -214,7 +217,7 @@ impl crate::LeafWidget for CompleteSkinMeasureProbe {
         // Foreground color is paint-only for built-ins. Observing it here proves the complete skin
         // revision covers every value visible to a custom widget's public measurement contract.
         self.measures.set(self.measures.get() + 1);
-        Dimensioni::new(i32::from(style.foreground(AppearanceRole::MenuPopup, VisualState::Normal).r).max(1), 10)
+        Dimensioni::new(i32::from(style.visual(AppearanceRole::MenuPopup, VisualState::Normal).foreground.r).max(1), 10)
     }
 }
 
@@ -820,14 +823,16 @@ fn active_window_and_only_its_remembered_widget_use_skin_focus_accents() {
     style.effects.focus_outline = color(7, 17, 29, 255);
     style.effects.window_activation = color(31, 47, 61, 255);
     let active_frame = NinePatch::framed(
-        style.appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets,
+        style.visual(AppearanceRole::WindowFrame, VisualState::Normal).patch.insets,
         style.effects.window_activation,
         None,
     );
-    style.visuals.set_patches(AppearanceRole::WindowFrameActive, StateTable::filled(active_frame));
-    style.visuals.set_patches(
+    replace_skin_patches(&mut style, AppearanceRole::WindowFrameActive, StateTable::filled(active_frame));
+    let window_activation = style.effects.window_activation;
+    replace_skin_patches(
+        &mut style,
         AppearanceRole::WindowTitleActive,
-        StateTable::filled(NinePatch::solid(style.effects.window_activation)),
+        StateTable::filled(NinePatch::solid(window_activation)),
     );
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
@@ -895,12 +900,16 @@ fn modal_dialog_uses_its_own_active_frame_role() {
     let window_frame_color = color(11, 37, 71, 255);
     let dialog_frame_color = color(83, 109, 149, 255);
     let mut style = test_skin(&atlas);
-    style
-        .visuals
-        .set_patches(AppearanceRole::WindowFrameActive, StateTable::filled(NinePatch::solid(window_frame_color)));
-    style
-        .visuals
-        .set_patches(AppearanceRole::DialogFrameActive, StateTable::filled(NinePatch::solid(dialog_frame_color)));
+    replace_skin_patches(
+        &mut style,
+        AppearanceRole::WindowFrameActive,
+        StateTable::filled(NinePatch::solid(window_frame_color)),
+    );
+    replace_skin_patches(
+        &mut style,
+        AppearanceRole::DialogFrameActive,
+        StateTable::filled(NinePatch::solid(dialog_frame_color)),
+    );
 
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
@@ -947,16 +956,20 @@ fn deactivated_window_keeps_enabled_child_widget_appearance() {
     let mut style = test_skin(&atlas);
     let mut button_foreground = StateTable::filled(enabled_text_color);
     button_foreground.set(VisualState::Disabled, disabled_text_color);
-    style.visuals.set_foregrounds(AppearanceRole::Button, button_foreground);
-    style
-        .visuals
-        .set_patches(AppearanceRole::WindowFrame, StateTable::filled(NinePatch::solid(passive_window_color)));
-    style
-        .visuals
-        .set_patches(AppearanceRole::WindowFrameActive, StateTable::filled(NinePatch::solid(active_window_color)));
+    replace_skin_foregrounds(&mut style, AppearanceRole::Button, button_foreground);
+    replace_skin_patches(
+        &mut style,
+        AppearanceRole::WindowFrame,
+        StateTable::filled(NinePatch::solid(passive_window_color)),
+    );
+    replace_skin_patches(
+        &mut style,
+        AppearanceRole::WindowFrameActive,
+        StateTable::filled(NinePatch::solid(active_window_color)),
+    );
     let mut button = StateTable::filled(NinePatch::solid(enabled_control_color));
     button.set(VisualState::Disabled, NinePatch::solid(disabled_control_color));
-    style.visuals.set_patches(AppearanceRole::Button, button);
+    replace_skin_patches(&mut style, AppearanceRole::Button, button);
 
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
@@ -1014,7 +1027,7 @@ fn external_widget_images_use_color_preserving_white_tint() {
     let mut style = ctx.skin().clone();
     // Reproduce the classic themes' black control text. This formerly multiplied every external
     // image channel by zero even though the same texture was correct under the light default text.
-    style.visuals.set_foregrounds(AppearanceRole::Button, StateTable::filled(color(0, 0, 0, 255)));
+    replace_skin_foregrounds(&mut style, AppearanceRole::Button, StateTable::filled(color(0, 0, 0, 255)));
     ctx.set_skin(style);
     let texture = ctx.load_image_rgba(2, 2, &[255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255]);
     let (_, image_button) = Button::create(ButtonParameters::with_image(
@@ -1059,31 +1072,38 @@ fn disabled_window_propagates_disabled_presentation_and_rejects_input() {
     let disabled_control_text_color = color(227, 233, 239, 255);
     let mut style = test_skin(&atlas);
 
-    style
-        .visuals
-        .set_patch(AppearanceRole::WindowFrame, VisualState::Disabled, NinePatch::solid(disabled_frame_color));
-    style.visuals.set_patch(
+    replace_skin_patch(
+        &mut style,
+        AppearanceRole::WindowFrame,
+        VisualState::Disabled,
+        NinePatch::solid(disabled_frame_color),
+    );
+    replace_skin_patch(
+        &mut style,
         AppearanceRole::WindowFrameActive,
         VisualState::Disabled,
         NinePatch::solid(forbidden_active_frame_color),
     );
-    style.visuals.set_patch(
+    replace_skin_patch(
+        &mut style,
         AppearanceRole::WindowCloseButton,
         VisualState::Disabled,
         NinePatch::solid(disabled_caption_color),
     );
-    style
-        .visuals
-        .set_patch(AppearanceRole::MenuBar, VisualState::Disabled, NinePatch::solid(disabled_menu_color));
-    style
-        .visuals
-        .set_foreground(AppearanceRole::MenuTitle, VisualState::Disabled, disabled_menu_text_color);
-    style
-        .visuals
-        .set_patch(AppearanceRole::Checkbox, VisualState::Disabled, NinePatch::solid(disabled_control_color));
-    style
-        .visuals
-        .set_foreground(AppearanceRole::Checkbox, VisualState::Disabled, disabled_control_text_color);
+    replace_skin_patch(
+        &mut style,
+        AppearanceRole::MenuBar,
+        VisualState::Disabled,
+        NinePatch::solid(disabled_menu_color),
+    );
+    replace_skin_foreground(&mut style, AppearanceRole::MenuTitle, VisualState::Disabled, disabled_menu_text_color);
+    replace_skin_patch(
+        &mut style,
+        AppearanceRole::Checkbox,
+        VisualState::Disabled,
+        NinePatch::solid(disabled_control_color),
+    );
+    replace_skin_foreground(&mut style, AppearanceRole::Checkbox, VisualState::Disabled, disabled_control_text_color);
 
     let (checkbox, checkbox_node) = Checkbox::create(CheckboxParameters::new("disabled child", false));
     let checkbox_id = checkbox_node.id();
@@ -1239,13 +1259,13 @@ fn window_and_container_backgrounds_ignore_hover_state_artwork() {
     let mut window = StateTable::filled(NinePatch::framed(insets, border, Some(window_normal)));
     window.set(VisualState::Hovered, NinePatch::framed(insets, border, Some(window_hover)));
     window.set(VisualState::Pressed, NinePatch::framed(insets, border, Some(window_hover)));
-    style.visuals.set_patches(AppearanceRole::WindowFrame, window);
-    style.visuals.set_patches(AppearanceRole::WindowFrameActive, window);
+    replace_skin_patches(&mut style, AppearanceRole::WindowFrame, window);
+    replace_skin_patches(&mut style, AppearanceRole::WindowFrameActive, window);
 
     let mut panel = StateTable::filled(NinePatch::framed(insets, border, Some(panel_normal)));
     panel.set(VisualState::Hovered, NinePatch::framed(insets, border, Some(panel_hover)));
     panel.set(VisualState::Pressed, NinePatch::framed(insets, border, Some(panel_hover)));
-    style.visuals.set_patches(AppearanceRole::Panel, panel);
+    replace_skin_patches(&mut style, AppearanceRole::Panel, panel);
 
     let (_, content) = ScrollArea::create(ScrollAreaParameters::new(
         ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL,
@@ -1292,10 +1312,12 @@ fn tab_focused_disclosure_uses_focus_fill_in_addition_to_the_shared_outline() {
     let mut style = test_skin(&atlas);
     style.effects.focus_outline = color(67, 83, 101, 255);
     style.effects.window_activation = color(109, 127, 149, 255);
-    style.visuals.set_patch(
+    let focus_outline = style.effects.focus_outline;
+    replace_skin_patch(
+        &mut style,
         AppearanceRole::DisclosureHeader,
         VisualState::Focused,
-        NinePatch::solid(style.effects.focus_outline),
+        NinePatch::solid(focus_outline),
     );
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
@@ -1373,9 +1395,9 @@ fn global_skin_revision_invalidates_measurements_lazily_in_hidden_surfaces() {
     // complete Skin revision; revealing later must not revive the earlier generation's entry.
     ctx.ui().set_window_visible(&window, false).unwrap();
     let mut replacement = ctx.skin().clone();
-    let mut foreground = replacement.foreground(AppearanceRole::MenuPopup, VisualState::Normal);
+    let mut foreground = replacement.visual(AppearanceRole::MenuPopup, VisualState::Normal).foreground;
     foreground.r = foreground.r.wrapping_add(1);
-    replacement.visuals.set_foreground(AppearanceRole::MenuPopup, VisualState::Normal, foreground);
+    replace_skin_foreground(&mut replacement, AppearanceRole::MenuPopup, VisualState::Normal, foreground);
     ctx.set_skin(replacement);
     ctx.update_ui(dimensions);
     assert_eq!(measures.get(), warmed, "hidden widget trees must not be traversed during the style commit");
@@ -2130,7 +2152,7 @@ fn combo_popup_choice_hover_resolves_the_list_item_hovered_focused_appearance() 
     item_appearance.set(VisualState::Hovered, NinePatch::solid(hovered_color));
     item_appearance.set(VisualState::Focused, NinePatch::solid(focused_color));
     item_appearance.set(VisualState::HoveredFocused, NinePatch::solid(hovered_focused_color));
-    style.visuals.set_patches(AppearanceRole::ListItem, item_appearance);
+    replace_skin_patches(&mut style, AppearanceRole::ListItem, item_appearance);
     let (_, item_node) = ListItem::create(ListItemParameters::new("Apple"));
     let item_id = item_node.id();
     let (_, popup_body) = Linear::create(LinearParameters::vertical([item_node]));
@@ -3367,8 +3389,8 @@ fn right_bottom_and_corner_resize_only_their_declared_axes_with_thick_borders() 
     let mut style = test_skin(&atlas);
     let insets = crate::SliceInsets::new(3, 4, 5, 6);
     let frame = StateTable::filled(NinePatch::framed(insets, color(10, 20, 30, 255), Some(color(40, 50, 60, 255))));
-    style.visuals.set_patches(AppearanceRole::WindowFrame, frame);
-    style.visuals.set_patches(AppearanceRole::WindowFrameActive, frame);
+    replace_skin_patches(&mut style, AppearanceRole::WindowFrame, frame);
+    replace_skin_patches(&mut style, AppearanceRole::WindowFrameActive, frame);
     // Structural resize thickness is independent from the frame artwork's fixed corner span.
     style.metrics.window_border = insets;
     let grip_size = style.metrics.scrollbar_size;
@@ -3641,7 +3663,7 @@ fn declarative_menu_popups_follow_heading_and_submenu_edges_when_the_window_move
     // Both popup levels use MenuPopup as their sole shell and place compact rows directly inside
     // it. Root padding and WindowFrame must not create a second inset at either menu depth.
     let popup_rows = ctx.debug_active_menu_row_rects();
-    let border = ctx.skin().appearance(AppearanceRole::MenuPopup, VisualState::Normal).insets.left;
+    let border = ctx.skin().visual(AppearanceRole::MenuPopup, VisualState::Normal).patch.insets.left;
     for (popup, rows) in open_popups.iter().zip(&popup_rows) {
         let first = rows.first().expect("each declared test menu must contain a row");
         let last = rows.last().unwrap();
@@ -3875,18 +3897,10 @@ fn outside_widget_press_clears_closed_menu_heading_hover() {
     let title_focused = color(131, 149, 167, 255);
     let title_open = color(181, 197, 211, 255);
     let mut style = test_skin(&atlas);
-    style
-        .visuals
-        .set_patch(AppearanceRole::MenuTitle, VisualState::Normal, NinePatch::solid(title_normal));
-    style
-        .visuals
-        .set_patch(AppearanceRole::MenuTitle, VisualState::Hovered, NinePatch::solid(title_hovered));
-    style
-        .visuals
-        .set_patch(AppearanceRole::MenuTitle, VisualState::Focused, NinePatch::solid(title_focused));
-    style
-        .visuals
-        .set_patch(AppearanceRole::MenuTitleOpen, VisualState::Normal, NinePatch::solid(title_open));
+    replace_skin_patch(&mut style, AppearanceRole::MenuTitle, VisualState::Normal, NinePatch::solid(title_normal));
+    replace_skin_patch(&mut style, AppearanceRole::MenuTitle, VisualState::Hovered, NinePatch::solid(title_hovered));
+    replace_skin_patch(&mut style, AppearanceRole::MenuTitle, VisualState::Focused, NinePatch::solid(title_focused));
+    replace_skin_patch(&mut style, AppearanceRole::MenuTitleOpen, VisualState::Normal, NinePatch::solid(title_open));
 
     let (_, action) = MenuItem::create(MenuItemParameters::new("Action"));
     let (_, button) = Button::create(ButtonParameters::new("Outside target"));
@@ -4539,7 +4553,8 @@ fn application_popup_uses_the_semantic_popup_frame_instead_of_window_border_chro
     let popup_fill = color(211, 213, 217, 255);
     style.metrics.window_border = crate::SliceInsets::uniform(7);
     style.metrics.window_content_insets = crate::SliceInsets::ZERO;
-    style.visuals.set_patches(
+    replace_skin_patches(
+        &mut style,
         AppearanceRole::MenuPopup,
         StateTable::filled(NinePatch::framed(popup_insets, popup_border, Some(popup_fill))),
     );

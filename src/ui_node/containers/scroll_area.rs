@@ -1043,7 +1043,8 @@ mod tests {
             metrics.scrollbar_size = 10;
         });
         let frame_insets = crate::SliceInsets::uniform(3);
-        style.visuals.set_patches(
+        crate::test_support::replace_skin_patches(
+            &mut style,
             crate::AppearanceRole::Panel,
             crate::StateTable::filled(crate::NinePatch::framed(
                 frame_insets,

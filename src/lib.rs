@@ -134,10 +134,9 @@
 //! ordinary windows while preserving each window's focused widget. F10 or an unchorded Alt tap
 //! transfers routing temporarily to the owning window's intrinsic menu without discarding
 //! application widget focus.
-//! Only the current keyboard scope paints that remembered focus. The resolved visual catalog
-//! selects focused control and menu states, [`SkinEffects::focus_outline`] supplies the final
-//! clipped widget outline, and [`SkinEffects::window_activation`] supplies the active title and
-//! framed-window accent.
+//! Only the current keyboard scope paints that remembered focus. Each semantic role and
+//! interaction state resolves one complete [`Visual`] containing both background art and its
+//! matching foreground. Additional focus and active-window accents remain resolved skin effects.
 //!
 //! # Text encoding and glyph coverage
 //!
@@ -282,9 +281,8 @@ pub mod prelude {
     };
     pub use crate::math::{expand_rect, rect, vec2};
     pub use crate::theme::{
-        AppearanceRole, CaptionButtonSide, CaptionButtonsSkin, Color, FlatPalette, FontRef, FontRole, IconRef, IconRole, ResourceCatalog, RoleTable, Skin,
-        SkinBundle, SkinEffects, SkinMetrics, StateTable, StatefulVisual, TitleBackdropSkin, Visual, VisualCatalog, VisualState, WindowChromeSkin,
-        WindowTitleAlignment, color,
+        AppearanceRole, CaptionButtonSide, CaptionButtonsSkin, Color, FlatPalette, FontRef, FontRole, IconRef, IconRole, ResourceCatalog, Skin, SkinBundle,
+        SkinEffects, SkinMetrics, StateTable, TitleBackdropSkin, Visual, VisualState, WindowChromeSkin, WindowTitleAlignment, color,
     };
     #[cfg(feature = "theme-json")]
     pub use crate::theme::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};
@@ -316,9 +314,8 @@ pub use input::{Key, KeyEvent, KeyState, Modifiers, MouseButton};
 pub use math::{expand_rect, rect, vec2};
 pub use render::{AtlasUploadError, NinePatch, NinePatchCell, NinePatchCells, NinePatchContent, NinePatchImage, SliceInsets, TextureError, TextureId};
 pub use theme::{
-    AppearanceRole, CaptionButtonSide, CaptionButtonsSkin, Color, FlatPalette, FontRef, FontRole, IconRef, IconRole, ResourceCatalog, RoleTable, Skin,
-    SkinBundle, SkinEffects, SkinMetrics, StateTable, StatefulVisual, TitleBackdropSkin, Visual, VisualCatalog, VisualState, WindowChromeSkin,
-    WindowTitleAlignment, color,
+    AppearanceRole, CaptionButtonSide, CaptionButtonsSkin, Color, FlatPalette, FontRef, FontRole, IconRef, IconRole, ResourceCatalog, Skin, SkinBundle,
+    SkinEffects, SkinMetrics, StateTable, TitleBackdropSkin, Visual, VisualState, WindowChromeSkin, WindowTitleAlignment, color,
 };
 #[cfg(feature = "theme-json")]
 pub use theme::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};

@@ -50,7 +50,7 @@ pub(crate) fn frame_geometry(outer: Recti, role: Option<AppearanceRole>, style: 
     // A non-framed node uses zero insets. A framed node uses its semantic normal-state geometry;
     // every interaction state for one role is required to preserve those destination insets.
     let insets = role
-        .map(|role| style.appearance(role, VisualState::Normal).insets.normalized())
+        .map(|role| style.visual(role, VisualState::Normal).patch.insets.normalized())
         .unwrap_or(SliceInsets::ZERO);
     frame_geometry_with_insets(outer, insets)
 }
@@ -156,12 +156,12 @@ mod tests {
     use super::*;
     use crate::{Color, color};
     use crate::render::DisplayList;
-    use crate::test_support::{test_atlas, test_skin};
+    use crate::test_support::{replace_skin_patches, test_atlas, test_skin};
 
     /// Replaces the generic frame role used by the frame geometry under test.
     fn with_frame(mut style: Skin, patch: NinePatch) -> Skin {
         // Tests mutate the same concrete catalog entry that production generic framing resolves.
-        style.visuals.set_patches(crate::AppearanceRole::GenericFrame, crate::StateTable::filled(patch));
+        replace_skin_patches(&mut style, crate::AppearanceRole::GenericFrame, crate::StateTable::filled(patch));
         style
     }
 

@@ -38,7 +38,7 @@ use microui_redux::prelude::{
 };
 use microui_redux::{
     color, rect, AppearanceRole, AtlasHandle, AtlasSource, AtlasUploadError, CaptionButtonSide, CharEntry, Constraints, Context, Disclosure,
-    DisclosureParameters, FontEntry, FontRef, FontRole, Grid, GridParameters, IconRef, IconRole, ImageError, Linear, LinearParameters, RoleTable, ScrollArea,
+    DisclosureParameters, FontEntry, FontRef, FontRole, Grid, GridParameters, IconRef, IconRole, ImageError, Linear, LinearParameters, ScrollArea,
     ScrollAreaOption, ScrollAreaParameters, Skin, SkinBundle, SourceFormat, StateTable, SurfaceMutationError, TextureError, TextureId, VisualState,
     WindowChromeSkin, WindowTitleAlignment,
 };
@@ -146,19 +146,26 @@ fn context() -> Context<TestBackend> {
     context_with_state()
 }
 
-/// Verifies external code can traverse and mutate the exhaustive typed role/state tables.
+/// Verifies external code replaces complete typed visuals through the exhaustive state table.
 #[test]
-fn downstream_skin_tables_are_concrete_and_exhaustive() {
-    // Closed enums and their generic tables expose total iteration and mutation without string
-    // keys, heterogeneous values, missing cells, or erased payloads.
-    let mut states = StateTable::filled(0_u8);
-    states.set(VisualState::Focused, 7);
-    let mut roles = RoleTable::filled(states);
-    roles.set(AppearanceRole::Button, StateTable::filled(11));
-    assert_eq!(roles.iter().count(), AppearanceRole::COUNT);
-    assert_eq!(roles[AppearanceRole::Button].iter().count(), VisualState::COUNT);
-    assert_eq!(roles[AppearanceRole::Button][VisualState::PressedFocused], 11);
-    assert_eq!(roles[AppearanceRole::TextInput][VisualState::Focused], 7);
+fn downstream_skin_visuals_are_concrete_and_exhaustive() {
+    // The role catalog is an implementation detail. A client reads and replaces complete Visual
+    // values, while StateTable makes a bulk role replacement total without erased payloads.
+    let context = context();
+    let mut skin = context.skin().clone();
+    let original = skin.visual(AppearanceRole::Button, VisualState::Focused);
+    let mut changed = original;
+    changed.foreground = color(17, 29, 43, 255);
+    let mut states = StateTable::filled(original);
+    states.set(VisualState::Focused, changed);
+    skin.set_role_visuals(AppearanceRole::Button, states);
+
+    assert_eq!(states.iter().count(), VisualState::COUNT);
+    assert_eq!(skin.visual(AppearanceRole::Button, VisualState::Focused).foreground.r, 17);
+    assert_eq!(
+        skin.visual(AppearanceRole::Button, VisualState::PressedFocused).foreground.r,
+        original.foreground.r
+    );
 }
 
 /// Verifies stable named resources and one atomic bundle remain the only atlas replacement path.

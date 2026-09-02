@@ -182,7 +182,7 @@ also consumes Ctrl+F6 window-cycle chords; window cycling resumes only after the
 
 ## Skin and current scope
 
-The `VisualCatalog` entries for `MenuTitle`, `MenuTitleOpen`, `MenuItem`, and
+The complete visuals for `MenuTitle`, `MenuTitleOpen`, `MenuItem`, and
 `MenuItemSelected` color menu labels, item text, marks, and arrows in the row's exact interaction
 state. `MenuPopup` supplies the separator color. A theme can therefore pair a dark selected PNG or
 flat highlight with a light hovered/focused foreground without changing ordinary menu text.

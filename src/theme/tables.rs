@@ -76,27 +76,27 @@ impl<T> Index<VisualState> for StateTable<T> {
 /// Cloning a table shares its fixed storage. Mutating one role detaches that storage, retaining
 /// ordinary value semantics without a hash map, string lookup, or typeless extension mechanism.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RoleTable<T> {
+pub(crate) struct RoleTable<T> {
     /// Role values stored in [`AppearanceRole`] declaration order.
     values: Arc<[T; AppearanceRole::COUNT]>,
 }
 
 impl<T> RoleTable<T> {
     /// Builds a complete table by calling `make` once for every concrete role.
-    pub fn from_fn(mut make: impl FnMut(AppearanceRole) -> T) -> Self {
+    pub(crate) fn from_fn(mut make: impl FnMut(AppearanceRole) -> T) -> Self {
         // Mapping through ALL couples construction to the same declaration order used by lookup.
         let values = std::array::from_fn(|index| make(AppearanceRole::ALL[index]));
         Self { values: Arc::new(values) }
     }
 
     /// Returns a shared reference to the value for `role`.
-    pub fn get(&self, role: AppearanceRole) -> &T {
+    pub(crate) fn get(&self, role: AppearanceRole) -> &T {
         // AppearanceRole is a closed contiguous enum generated with the table length.
         &self.values[role.index()]
     }
 
     /// Replaces exactly one role while preserving copy-on-write value semantics.
-    pub fn set(&mut self, role: AppearanceRole, value: T)
+    pub(crate) fn set(&mut self, role: AppearanceRole, value: T)
     where
         T: Clone,
     {
@@ -105,7 +105,7 @@ impl<T> RoleTable<T> {
     }
 
     /// Iterates over every value in appearance-role order.
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = &T> {
+    pub(crate) fn iter(&self) -> impl ExactSizeIterator<Item = &T> {
         // The fixed array provides allocation-free ordered traversal.
         self.values.iter()
     }
@@ -113,7 +113,7 @@ impl<T> RoleTable<T> {
 
 impl<T: Clone> RoleTable<T> {
     /// Creates a complete table by cloning one value into every role.
-    pub fn filled(value: T) -> Self {
+    pub(crate) fn filled(value: T) -> Self {
         // Construction through `from_fn` keeps the role-order invariant in one implementation.
         Self::from_fn(|_| value.clone())
     }

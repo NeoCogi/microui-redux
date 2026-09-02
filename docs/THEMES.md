@@ -129,7 +129,7 @@ The optional `colors` object accepts RGBA byte arrays under these keys:
 - `scrollbar_track`, `scrollbar_thumb`, `focus`, `window_focus`
 - `menu_foreground`, `menu_background`
 
-These colors construct one complete `VisualCatalog` before any per-state PNG or `foreground`
+These colors construct Skin's complete visual table before any per-state PNG or `foreground`
 override is installed. Each `AppearanceRole`/`VisualState` cell is one concrete
 `Visual { patch, foreground }`; background and foreground cannot drift through parallel catalogs,
 and no erased or string-keyed payload participates at runtime.

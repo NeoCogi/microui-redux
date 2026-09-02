@@ -37,10 +37,10 @@ switching themes cannot gradually accumulate fonts, icons, or artwork.
 | --- | --- |
 | `Skin` | One resolved value containing `metrics`, `visuals`, `effects`, and `chrome`. |
 | `SkinMetrics` | Layout, spacing, window inset, border, title, scrollbar, and thumb geometry. |
-| `VisualCatalog` | One complete `Visual { patch, foreground }` for every role and state. |
+| `Skin::visual` | Resolves one complete `Visual { patch, foreground }` for a role and state. |
 | `AppearanceRole` | Closed semantic UI-part domain such as `Button`, `TextInput`, or `WindowFrame`. |
 | `VisualState` | Closed interaction domain: normal, hover, press, focus combinations, and disabled. |
-| `RoleTable<T>` / `StateTable<T>` | Exhaustive enum-indexed generic storage with one concrete `T`. |
+| `StateTable<T>` | Exhaustive state-indexed generic storage with one concrete `T`. |
 | `SkinEffects` | Focus outline and active-window accents that are not role/state backgrounds. |
 | `WindowChromeSkin` | Data recipe for title alignment, caption placement, sizing, and backdrop. |
 | `FontRef` / `IconRef` | Stable semantic or named references resolved against the active bundle. |
@@ -56,14 +56,15 @@ Start from a skin whose atlas ownership is known, mutate its concrete fields, an
 completed value:
 
 ```rust,ignore
-use microui_redux::{color, AppearanceRole, VisualState};
+use microui_redux::{color, AppearanceRole, Visual, VisualState};
 
 let mut skin = context.skin().clone();
 skin.metrics.padding = 8;
-skin.visuals.set_foreground(
+let focused_button = skin.visual(AppearanceRole::Button, VisualState::Focused);
+skin.set_visual(
     AppearanceRole::Button,
     VisualState::Focused,
-    color(255, 255, 255, 255),
+    Visual::new(focused_button.patch, color(255, 255, 255, 255)),
 );
 context.set_skin(skin);
 ```

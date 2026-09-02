@@ -42,7 +42,7 @@ mod skin;
 mod tables;
 mod typography;
 
-pub use appearance::{StatefulVisual, Visual, VisualCatalog};
+pub use appearance::Visual;
 pub use bundle::SkinBundle;
 pub use crate::render::{Color, color};
 pub use icons::{IconRef, IconRole};
@@ -53,5 +53,6 @@ pub use resources::ResourceCatalog;
 pub use roles::{AppearanceRole, VisualState};
 pub use skin::{CaptionButtonSide, CaptionButtonsSkin, Skin, SkinEffects, SkinMetrics, TitleBackdropSkin, WindowChromeSkin, WindowTitleAlignment};
 pub(crate) use skin::SkinRevision;
-pub use tables::{RoleTable, StateTable};
+pub use tables::StateTable;
+pub(crate) use tables::RoleTable;
 pub use typography::{FontRef, FontRole};

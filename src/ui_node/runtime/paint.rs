@@ -127,7 +127,7 @@ impl UiRuntime {
                 visual_state
             };
             let mut painter = crate::render::Painter::screen_space(display_list, screen_clip);
-            crate::ui_node::frame::paint_internal_frame(&mut painter, screen_rect, style.appearance(role, frame_state));
+            crate::ui_node::frame::paint_internal_frame(&mut painter, screen_rect, style.visual(role, frame_state).patch);
         }
         let child_transform = parent_transform.push(node.state.layout);
         let local_clip = screen_clip.relative_to(screen_origin);
@@ -141,7 +141,7 @@ impl UiRuntime {
             clip: screen_clip,
             color: style.effects.focus_outline,
             width: frame_role
-                .map(|role| style.appearance(role, crate::VisualState::Normal).insets.maximum_component())
+                .map(|role| style.visual(role, crate::VisualState::Normal).patch.insets.maximum_component())
                 .unwrap_or(1)
                 .max(1),
         });

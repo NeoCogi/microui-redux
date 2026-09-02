@@ -458,7 +458,7 @@ impl<'a> WidgetPaintCtx<'a> {
     pub(crate) fn draw_appearance_state(&mut self, role: AppearanceRole, state: VisualState, rect: Recti) -> Option<Recti> {
         // Menu rows and selected list items own semantic state beyond the widget-wide interaction
         // snapshot. They still resolve the same typed catalog and checked nine-patch geometry.
-        let patch = self.common.style.appearance(role, state);
+        let patch = self.common.style.visual(role, state).patch;
         let mut painter = self.painter();
         crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch)
     }
@@ -475,7 +475,7 @@ impl<'a> WidgetPaintCtx<'a> {
         // Zero destination insets collapse all eight outer cells. Flat patches retain their center
         // cell and image patches sample only their center source, preserving the old unframed fill
         // contract without introducing a second theme asset vocabulary.
-        let patch = self.common.style.appearance(role, state).with_insets(crate::SliceInsets::ZERO);
+        let patch = self.common.style.visual(role, state).patch.with_insets(crate::SliceInsets::ZERO);
         let mut painter = self.painter();
         let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch);
     }
@@ -483,14 +483,14 @@ impl<'a> WidgetPaintCtx<'a> {
     /// Resolves a role foreground using this widget's complete interaction state.
     pub(crate) fn foreground(&self, role: AppearanceRole) -> Color {
         // visual_state gives explicit disabling precedence over retained hover, focus, and press.
-        self.common.style.foreground(role, self.visual_state())
+        self.common.style.visual(role, self.visual_state()).foreground
     }
 
     /// Resolves a role foreground using a composite control's explicit interaction state.
     pub(crate) fn foreground_state(&self, role: AppearanceRole, state: VisualState) -> Color {
         // The composite owns this exact typed state; window activation affects chrome roles and
         // focus visibility rather than rewriting enabled widget presentation.
-        self.common.style.foreground(role, state)
+        self.common.style.visual(role, state).foreground
     }
 
     /// Draws aligned control text using the foreground for one semantic appearance role.

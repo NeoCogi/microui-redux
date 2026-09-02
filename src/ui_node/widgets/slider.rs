@@ -792,9 +792,10 @@ mod tests {
         // A borderless ten-pixel thumb records one unambiguous fill rectangle at the computed x.
         style.metrics.thumb_size = 10;
         let frame = style
-            .appearance(crate::AppearanceRole::SliderThumb, crate::VisualState::Normal)
+            .visual(crate::AppearanceRole::SliderThumb, crate::VisualState::Normal)
+            .patch
             .with_insets(crate::SliceInsets::ZERO);
-        style.visuals.set_patches(crate::AppearanceRole::SliderThumb, crate::StateTable::filled(frame));
+        crate::test_support::replace_skin_patches(&mut style, crate::AppearanceRole::SliderThumb, crate::StateTable::filled(frame));
         let mut slider =
             SliderBuilder::create_widget(SliderParameters::new(Real::MAX / 2.0, 0.0, Real::MAX).expect("a maximum finite range span must remain usable"));
         let bounds = rect(0, 0, 100, 20);

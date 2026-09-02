@@ -266,7 +266,7 @@ impl RootFrameKind {
         // directly define both the visible black outline and the content rectangle behind it.
         match self {
             Self::Window | Self::Dialog => style.metrics.window_border.normalized(),
-            Self::Popup => style.appearance(AppearanceRole::MenuPopup, VisualState::Normal).insets.normalized(),
+            Self::Popup => style.visual(AppearanceRole::MenuPopup, VisualState::Normal).patch.insets.normalized(),
         }
     }
 }
@@ -638,9 +638,9 @@ fn root_frame_patch(style: &Skin, frame_kind: RootFrameKind, active: bool, state
         RootFrameKind::Dialog => (AppearanceRole::DialogFrame, AppearanceRole::DialogFrameActive),
         RootFrameKind::Popup => (AppearanceRole::MenuPopup, AppearanceRole::MenuPopup),
     };
-    let visual_insets = style.appearance(passive_role, VisualState::Normal).insets;
+    let visual_insets = style.visual(passive_role, VisualState::Normal).patch.insets;
     let role = if active { active_role } else { passive_role };
-    style.appearance(role, state).with_insets(visual_insets)
+    style.visual(role, state).patch.with_insets(visual_insets)
 }
 
 /// Records the frame or plain background that must appear behind application content.
@@ -714,12 +714,12 @@ pub(super) fn record_root_overlay(
         let _ = crate::ui_node::frame::paint_internal_frame(
             &mut painter,
             title,
-            style.appearance(role, chrome_state(visual.part_state(RootChromePart::Title))),
+            style.visual(role, chrome_state(visual.part_state(RootChromePart::Title))).patch,
         );
         let text = root_title_text_rect(title, geometry, &style.chrome);
         if text.width > 0 && text.height > 0 {
             let state = chrome_state(visual.part_state(RootChromePart::Title));
-            let color = style.foreground(role, state);
+            let color = style.visual(role, state).foreground;
             let options = match style.chrome.title_alignment {
                 WindowTitleAlignment::Leading => crate::WidgetOption::NONE,
                 WindowTitleAlignment::Centered => crate::WidgetOption::ALIGN_CENTER,
@@ -761,7 +761,7 @@ pub(super) fn record_root_overlay(
         // A disabled window exposes no resize action, so omit its grip instead of inventing a
         // disabled rectangle when a classic theme deliberately uses transparent normal artwork.
         let state = chrome_state(visual.part_state(RootChromePart::Resize(RootResizeAxis::Both)));
-        let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, grip, style.appearance(AppearanceRole::WindowResizeGrip, state));
+        let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, grip, style.visual(AppearanceRole::WindowResizeGrip, state).patch);
     }
 }
 
@@ -795,7 +795,7 @@ fn paint_caption_button(
     } else {
         VisualState::Normal
     };
-    let Some(content) = crate::ui_node::frame::paint_internal_frame(painter, rect, style.appearance(role, state)) else {
+    let Some(content) = crate::ui_node::frame::paint_internal_frame(painter, rect, style.visual(role, state).patch) else {
         return;
     };
     if !style.chrome.captions.draw_separate_glyphs {
@@ -803,7 +803,7 @@ fn paint_caption_button(
         // separate semantic glyph layer without coupling that choice to any other chrome behavior.
         return;
     }
-    let glyph = style.appearance(glyph_role, state);
+    let glyph = style.visual(glyph_role, state).patch;
     if glyph.is_visible() {
         // Image glyphs retain their authored pixel dimensions and are centered in the button's
         // usable content instead of stretching to fill it. A visible flat glyph still receives the
@@ -824,7 +824,7 @@ fn paint_caption_button(
         let _ = crate::ui_node::frame::paint_internal_frame(painter, glyph_rect, glyph.with_insets(crate::SliceInsets::ZERO));
         return;
     }
-    let color = style.foreground(role, state);
+    let color = style.visual(role, state).foreground;
     match button {
         RootCaptionButton::Close => {
             // Close retains the atlas icon already required by every Skin and test atlas.

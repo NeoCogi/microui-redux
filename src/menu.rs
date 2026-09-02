@@ -880,7 +880,7 @@ fn layout_popup(rows: &[MenuSlot], style: &Skin, atlas: &AtlasHandle, mut slots:
     // second WindowFrame. Measure raw glyph maxima because control text supplies its own padding.
     slots.clear();
     slots.reserve(rows.len());
-    let panel_insets = style.appearance(AppearanceRole::MenuPopup, VisualState::Normal).insets.normalized();
+    let panel_insets = style.visual(AppearanceRole::MenuPopup, VisualState::Normal).patch.insets.normalized();
     let padding = style.metrics.padding.max(1);
     let mut label_width = 0_i32;
     let mut trailing_width = 0_i32;

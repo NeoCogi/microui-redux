@@ -109,7 +109,8 @@ mod tests {
         let foreign_atlas = crate::test_support::test_atlas();
         let mut skin = Skin::from_atlas(&local_atlas);
         let foreign_icon = IconRole::Close.resolve(&foreign_atlas);
-        skin.visuals.set_patches(
+        crate::test_support::replace_skin_patches(
+            &mut skin,
             AppearanceRole::Button,
             StateTable::filled(NinePatch::image(
                 SliceInsets::ZERO,

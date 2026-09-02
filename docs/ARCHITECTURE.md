@@ -55,11 +55,9 @@ let mut skin = ctx.skin().clone().with_metrics(|metrics| {
     metrics.spacing = 8;
     metrics.padding = 6;
 });
-skin.visuals.set_foreground(
-    AppearanceRole::Button,
-    VisualState::Normal,
-    color(55, 90, 160, 255),
-);
+let mut button = skin.visual(AppearanceRole::Button, VisualState::Normal);
+button.foreground = color(55, 90, 160, 255);
+skin.set_visual(AppearanceRole::Button, VisualState::Normal, button);
 ctx.set_skin(skin);
 ```
 

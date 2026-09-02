@@ -224,7 +224,7 @@ impl DisclosureHeader {
         let content = Dimensioni::new(content_width, content_height);
         // A header frame is internal to this child, so preferred size must include its inset here.
         let frame = if self.opt.intersects(WidgetOption::FRAME) {
-            style.appearance(AppearanceRole::Button, VisualState::Normal).insets.normalized()
+            style.visual(AppearanceRole::Button, VisualState::Normal).patch.insets.normalized()
         } else {
             crate::SliceInsets::ZERO
         };
