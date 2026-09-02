@@ -39,8 +39,8 @@ use microui_redux::prelude::{
 use microui_redux::{
     color, rect, AppearanceRole, AtlasHandle, AtlasSource, AtlasUploadError, CaptionButtonSide, CharEntry, Constraints, Context, Disclosure,
     DisclosureParameters, FontEntry, FontRef, FontRole, Grid, GridParameters, IconRef, IconRole, ImageError, Linear, LinearParameters, RoleTable, ScrollArea,
-    ScrollAreaOption, ScrollAreaParameters, Skin, SkinBundle, SkinPatch, SourceFormat, StateTable, SurfaceMutationError, TextureError, TextureId, VisualPatch,
-    VisualState, WindowChromeSkin, WindowTitleAlignment,
+    ScrollAreaOption, ScrollAreaParameters, Skin, SkinBundle, SourceFormat, StateTable, SurfaceMutationError, TextureError, TextureId, VisualState,
+    WindowChromeSkin, WindowTitleAlignment,
 };
 
 struct TestBackend {
@@ -146,20 +146,9 @@ fn context() -> Context<TestBackend> {
     context_with_state()
 }
 
-/// Converts a public color value into a tuple suitable for exact downstream assertions.
-fn color_channels(value: microui_redux::Color) -> (u8, u8, u8, u8) {
-    // Keep this adapter in the integration crate so the contract does not depend on private test
-    // helpers or require Color to implement equality solely for test convenience.
-    (value.r, value.g, value.b, value.a)
-}
-
-/// Verifies external code can traverse exhaustive typed tables and layer concrete skin patches.
+/// Verifies external code can traverse and mutate the exhaustive typed role/state tables.
 #[test]
-fn downstream_skin_tables_and_patches_are_concrete_and_deterministic() {
-    let context = context();
-    let base = context.skin().clone();
-    let original_hovered = base.foreground(AppearanceRole::Button, VisualState::Hovered);
-
+fn downstream_skin_tables_are_concrete_and_exhaustive() {
     // Closed enums and their generic tables expose total iteration and mutation without string
     // keys, heterogeneous values, missing cells, or erased payloads.
     let mut states = StateTable::filled(0_u8);
@@ -170,37 +159,6 @@ fn downstream_skin_tables_and_patches_are_concrete_and_deterministic() {
     assert_eq!(roles[AppearanceRole::Button].iter().count(), VisualState::COUNT);
     assert_eq!(roles[AppearanceRole::Button][VisualState::PressedFocused], 11);
     assert_eq!(roles[AppearanceRole::TextInput][VisualState::Focused], 7);
-
-    // Patches mirror the resolved Skin shape. A later present value wins, while an omitted later
-    // value preserves the earlier layer and every unmentioned resolved value remains unchanged.
-    let first_foreground = color(10, 20, 30, 255);
-    let later_patch_color = color(40, 50, 60, 255);
-    let mut first = SkinPatch::default();
-    first.metrics.padding = Some(8);
-    first.metrics.spacing = Some(6);
-    first
-        .visuals
-        .set(AppearanceRole::Button, VisualState::Focused, VisualPatch::foreground(first_foreground));
-    let mut later = SkinPatch::default();
-    later.metrics.padding = Some(13);
-    later.visuals.set(
-        AppearanceRole::Button,
-        VisualState::Focused,
-        VisualPatch::patch(microui_redux::NinePatch::solid(later_patch_color)),
-    );
-    first.merge_later(&later);
-    let resolved = base.patched(&first);
-
-    assert_eq!(resolved.metrics.padding, 13);
-    assert_eq!(resolved.metrics.spacing, 6);
-    assert_eq!(
-        color_channels(resolved.foreground(AppearanceRole::Button, VisualState::Focused)),
-        color_channels(first_foreground)
-    );
-    assert_eq!(
-        color_channels(resolved.foreground(AppearanceRole::Button, VisualState::Hovered)),
-        color_channels(original_hovered)
-    );
 }
 
 /// Verifies stable named resources and one atomic bundle remain the only atlas replacement path.

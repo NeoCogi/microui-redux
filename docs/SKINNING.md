@@ -44,52 +44,34 @@ switching themes cannot gradually accumulate fonts, icons, or artwork.
 | `SkinEffects` | Focus outline and active-window accents that are not role/state backgrounds. |
 | `WindowChromeSkin` | Data recipe for title alignment, caption placement, sizing, and backdrop. |
 | `FontRef` / `IconRef` | Stable semantic or named references resolved against the active bundle. |
-| `SkinPatch` | Sparse typed authoring edit with deterministic later-present-value precedence. |
 | `SkinBundle` | Validated atomic ownership of one skin and its exact atlas. |
 
 The generic tables provide code sharing without erasing types. Both enum domains expose `ALL` and
 `COUNT`; lookup is total, and a new role or state must participate in the complete table contract.
 Paint resolves one `Visual`, keeping a state's artwork and foreground adjacent.
 
-## Programmatic construction and layering
+## Programmatic construction
 
-Start from a skin whose atlas ownership is known, then mutate grouped concrete fields or apply a
-typed patch:
+Start from a skin whose atlas ownership is known, mutate its concrete fields, and install the
+completed value:
 
 ```rust,ignore
-use microui_redux::{
-    color, AppearanceRole, SkinPatch, VisualPatch, VisualState,
-};
-
-let mut patch = SkinPatch::default();
-patch.metrics.padding = Some(8);
-patch.visuals.set(
-    AppearanceRole::Button,
-    VisualState::Focused,
-    VisualPatch::foreground(color(255, 255, 255, 255)),
-);
+use microui_redux::{color, AppearanceRole, VisualState};
 
 let mut skin = context.skin().clone();
-skin.apply_patch(&patch);
+skin.metrics.padding = 8;
+skin.visuals.set_foreground(
+    AppearanceRole::Button,
+    VisualState::Focused,
+    color(255, 255, 255, 255),
+);
 context.set_skin(skin);
 ```
 
-Every patch leaf is an `Option<ConcreteType>`. `None` preserves the destination; `Some(value)`
-replaces it. `SkinPatch::merge_later` uses that rule at every leaf, so merging a layer stack and
-applying layers in order have identical results. Window chrome is replaced as a complete recipe
-because its alignment and caption-bank geometry are interdependent.
-
-`FlatPalette` is compiler/editor input, not retained shadow state. `Skin::apply_flat_palette`
-immediately regenerates the resolved visual catalog and related effects when constructing a flat
-skin. A live editor working over an image theme instead uses
-`SkinPatch::from_flat_palette_transition`: it changes only affected flat cells, foregrounds, and
-effects. When an affected visual is image-backed, that one role/state becomes its exact flat palette
-equivalent because a named color cannot exactly rewrite a multicolor PNG; unrelated image visuals
-remain intact. A reversible editor regenerates this palette patch from its pristine selected skin,
-original palette, and current palette snapshot rather than merging event deltas; returning a value
-to its baseline then restores the original image. Independent metric or application layers can still
-merge normally. JSON palette fields use full flat construction first, before authored PNG states
-replace individual visuals.
+The runtime retains only complete `Skin` values. `FlatPalette` is construction input for flat skins,
+and `Skin::apply_flat_palette` deliberately regenerates the complete flat visual catalog and related
+effects. It does not reinterpret or partially recolor an image-backed theme. JSON themes likewise
+compile their flat fallbacks first and then replace explicitly authored states with PNG visuals.
 
 ## Stable resources
 

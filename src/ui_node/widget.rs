@@ -109,8 +109,7 @@ impl<W: ?Sized> WidgetStorage<W> {
 
     /// Resolves this widget's complete effective skin from local and inherited values.
     pub(crate) fn resolve_skin(&self, inherited: &Skin) -> Skin {
-        // Overrides replace rather than partially shadow the inherited value; sparse composition
-        // belongs to SkinPatch before a complete Skin is installed on retained state.
+        // Overrides replace rather than partially shadow the inherited complete value.
         self.skin_override.clone().unwrap_or_else(|| inherited.clone())
     }
 

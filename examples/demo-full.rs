@@ -1474,16 +1474,12 @@ struct State {
     combo_item_submitted: [WidgetEventPortHandle<ListItemSubmitted>; 4],
     style_color_swatch_states: [TypedWidgetHandle<ColorSwatch>; 16],
     window_info_value_states: [TypedWidgetHandle<ListItem>; 3],
-    /// Fully resolved editable skin published after the base and current patch are combined.
+    /// Complete application-owned skin published after an accepted color or metric edit.
     style: Skin,
-    /// Pristine selected skin from which the editor resolves its current concrete patch.
-    style_base: Skin,
-    /// Current typed palette and metric edits applied over `style_base`.
-    style_patch: SkinPatch,
     /// Atlas-independent flat authoring value used only by the demo's live skin editor.
     ///
-    /// Each slider event compiles the complete baseline-to-current difference into `style_patch`;
-    /// the palette is never installed in Context as a second runtime color source.
+    /// Accepted slider events compile this value directly into `style`; image themes reject those
+    /// events and therefore retain their authored PNG visuals without another style representation.
     style_palette: FlatPalette,
     /// Whether the editable style differs from the last value published to the Context.
     ///
@@ -1736,10 +1732,8 @@ impl State {
             )
             .font(FontRole::Body.into()),
         );
-        // Begin with an editable copy of the ordinary atlas-derived default selection.
-        let style_base = themes.selected_skin().clone();
-        let style = style_base.clone();
-        let style_patch = SkinPatch::default();
+        // Begin with an application-owned copy of the ordinary atlas-derived default selection.
+        let style = themes.selected_skin().clone();
         let style_palette = FlatPalette::default();
         let (demo_content, demo_node) = root_content();
         let (style_content, style_node) = root_content();
@@ -2024,8 +2018,6 @@ impl State {
             style_color_swatch_states,
             window_info_value_states,
             style,
-            style_base,
-            style_patch,
             style_palette,
             style_dirty: false,
             themes,
@@ -2165,22 +2157,21 @@ impl State {
             2 => color.b = value,
             _ => color.a = value,
         }
-        // Recreate the complete palette layer from the pristine base so returning every channel to
-        // its baseline removes the override and restores any image-backed theme visual.
-        self.rebuild_style_patch_from_palette();
+        // The handler is reachable only for the programmatic flat theme. Compile the complete
+        // authoring value directly into the one application-owned resolved Skin.
+        self.style.apply_flat_palette(self.style_palette);
         self.style_dirty = true;
     }
 
     fn style_value_changed(&mut self, index: &usize, event: &SliderChanged) {
         match index {
-            0 => self.style_patch.metrics.padding = Some(event.value as i32),
-            1 => self.style_patch.metrics.spacing = Some(event.value as i32),
-            2 => self.style_patch.metrics.title_height = Some(event.value as i32),
-            3 => self.style_patch.metrics.thumb_size = Some(event.value as i32),
-            4 => self.style_patch.metrics.scrollbar_size = Some(event.value as i32),
+            0 => self.style.metrics.padding = event.value as i32,
+            1 => self.style.metrics.spacing = event.value as i32,
+            2 => self.style.metrics.title_height = event.value as i32,
+            3 => self.style.metrics.thumb_size = event.value as i32,
+            4 => self.style.metrics.scrollbar_size = event.value as i32,
             _ => unreachable!("style value slider index is bounded by construction"),
         }
-        self.rebuild_style_from_patch();
         self.style_dirty = true;
     }
 
@@ -2390,8 +2381,7 @@ impl State {
             .menu_item_mut(&self.menu_compact_spacing)
             .expect("compact-spacing menu item unavailable")
             .mark = MenuItemMark::Radio(!comfortable);
-        self.style_patch.metrics.spacing = Some(spacing);
-        self.rebuild_style_from_patch();
+        self.style.metrics.spacing = spacing;
         self.style_dirty = true;
         set_slider_value(&self.style_value_slider_states[1], spacing as Real);
         self.write_log(if comfortable {
@@ -2408,12 +2398,10 @@ impl State {
         for (item, candidate) in self.theme_menu_items.iter().zip(DemoTheme::ALL) {
             context.menu_item_mut(item).expect("theme menu item unavailable").mark = MenuItemMark::Radio(candidate == selection);
         }
-        self.style_base = self.themes.select(selection);
-        self.style_patch = SkinPatch::default();
-        self.rebuild_style_from_patch();
+        self.style = self.themes.select(selection);
         self.style_palette = FlatPalette::default();
         self.style_dirty = true;
-        // The Skin Editor edits this new copy rather than stale values from the preceding theme.
+        // The controls now project from this complete replacement rather than from stale values.
         self.sync_skin_controls_from_skin();
         self.write_log(format!("Selected theme: {}", selection.label()).as_str());
     }
@@ -2519,24 +2507,6 @@ impl State {
         set_slider_value(&self.style_value_slider_states[2], self.style.metrics.title_height as Real);
         set_slider_value(&self.style_value_slider_states[3], self.style.metrics.thumb_size as Real);
         set_slider_value(&self.style_value_slider_states[4], self.style.metrics.scrollbar_size as Real);
-    }
-
-    /// Rebuilds the editable skin from its pristine selected base and current typed patch.
-    fn rebuild_style_from_patch(&mut self) {
-        // Re-resolving from the base prevents discarded intermediate values from becoming another
-        // source of truth. SkinPatch owns deterministic later-present-value precedence throughout.
-        self.style = self.style_base.clone().patched(&self.style_patch);
-    }
-
-    /// Replaces the palette portion of the current patch while preserving live metric edits.
-    fn rebuild_style_patch_from_palette(&mut self) {
-        // Metrics are edited by independent controls and are already an exact snapshot. Rebuild the
-        // remaining groups from the original palette to the current authoring value, then compose
-        // that complete typed patch over the pristine selected theme.
-        let metrics = self.style_patch.metrics;
-        self.style_patch = SkinPatch::from_flat_palette_transition(&self.style_base, FlatPalette::default(), self.style_palette);
-        self.style_patch.metrics = metrics;
-        self.rebuild_style_from_patch();
     }
 
     fn write_log(&mut self, text: &str) {
