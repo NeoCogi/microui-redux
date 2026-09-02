@@ -776,8 +776,8 @@ struct VisualOverrideDocument {
 impl VisualOverrideDocument {
     /// Anchors this state's optional image path to the one containing theme document.
     fn resolve_path(&mut self, directory: &Path) {
-        // Content colors and solid patches own no filesystem state. The closed patch enum routes
-        // path handling only to the image variant that can legally contain a path.
+        // Content colors and resource-free flat patches own no filesystem state. The closed patch
+        // enum routes path handling only to the image variant that can legally contain a path.
         if let Some(patch) = &mut self.patch {
             patch.resolve_path(directory);
         }
@@ -786,7 +786,7 @@ impl VisualOverrideDocument {
 
 /// Concrete source for an authored visual patch.
 ///
-/// Tagging the alternatives makes image-only fields structurally unavailable to solid patches.
+/// Tagging the alternatives makes image-only fields structurally unavailable to flat patches.
 /// A state that omits `patch` retains its exact family/state fallback instead of manufacturing an
 /// empty image recipe.
 #[derive(Deserialize)]
@@ -796,6 +796,13 @@ enum PatchDocument {
     Solid {
         /// RGBA color covering the complete patch while role insets retain layout geometry.
         color: Color,
+    },
+    /// A resource-free three-by-three patch with one border and one center color.
+    Framed {
+        /// RGBA color painted into every fixed edge and corner cell.
+        border: Color,
+        /// RGBA color painted into the stretchable center cell.
+        center: Color,
     },
     /// One PNG divided into a typed three-by-three image patch.
     Image {
@@ -809,7 +816,7 @@ enum PatchDocument {
 }
 
 impl PatchDocument {
-    /// Anchors an image patch path while leaving a solid patch unchanged.
+    /// Anchors an image patch path while leaving resource-free flat patches unchanged.
     fn resolve_path(&mut self, directory: &Path) {
         // Path ownership belongs to the concrete image variant, so no independent fields can fall
         // out of sync while the document advances from decoding to atlas construction.
@@ -830,6 +837,7 @@ impl PatchDocument {
         // source slicing, tinting, and capability lookup to the image alternative.
         match self {
             Self::Solid { color } => Ok(NinePatch::new(destination_insets, NinePatchCells::all(NinePatchCell::color(*color)))),
+            Self::Framed { border, center } => Ok(NinePatch::framed(destination_insets, *border, Some(*center))),
             Self::Image { path, source_insets, tint } => {
                 let source_insets = source_insets.unwrap_or(destination_insets);
                 let icon = *images.get(path).expect("every declared theme image must have one baked atlas capability");
@@ -1172,12 +1180,12 @@ mod tests {
         }
     }
 
-    /// Verifies the earlier Windows theme remains a distinct definition with period title artwork.
+    /// Verifies the earlier Windows theme keeps its period title colors inside black frames.
     #[test]
-    fn bundled_windows_311_theme_uses_white_and_blue_title_images() {
+    fn bundled_windows_311_theme_draws_black_framed_white_and_blue_titles() {
         let (loaded, images) = install_bundled_theme("themes/windows-3.11/theme.json");
         assert_eq!(loaded.name(), "Windows 3.11 for Workgroups");
-        assert_eq!(images, 13, "only complete role-state artwork is baked into the theme atlas");
+        assert_eq!(images, 12, "only referenced role-state artwork is baked into the theme atlas");
         let insets = loaded.bundle().skin().chrome(ChromeRole::WindowFrame, ChromeState::Base).patch.insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (23, 23, 23, 23));
         let border = loaded.bundle().skin().metrics.window_border;
@@ -1221,18 +1229,23 @@ mod tests {
                 if matches!(cells.top, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (0, 0, 0, 255))
                     && matches!(cells.center, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (255, 255, 255, 255))
         ));
-        assert!(matches!(
-            loaded.bundle().skin().chrome(ChromeRole::Title, ChromeState::Base).patch.content,
-            crate::NinePatchContent::Image { .. }
-        ));
-        assert!(matches!(
-            loaded.bundle().skin().chrome(ChromeRole::Title, ChromeState::Active).patch.content,
-            crate::NinePatchContent::Image { .. }
-        ));
-        assert!(matches!(
-            loaded.bundle().skin().chrome(ChromeRole::Title, ChromeState::Disabled).patch.content,
-            crate::NinePatchContent::Image { .. }
-        ));
+        // The outer Windows frame already supplies the title's top, left, and right black edges.
+        // The title patch contributes only the missing one-pixel bottom edge, avoiding a doubled
+        // line where the two patches meet while leaving themes without framed titles unchanged.
+        for (state, expected_center) in [
+            (ChromeState::Base, (255, 255, 255, 255)),
+            (ChromeState::Active, (0, 0, 170, 255)),
+            (ChromeState::Disabled, (255, 255, 255, 255)),
+        ] {
+            let patch = loaded.bundle().skin().chrome(ChromeRole::Title, state).patch;
+            assert_eq!((patch.insets.left, patch.insets.top, patch.insets.right, patch.insets.bottom), (0, 0, 0, 1));
+            assert!(matches!(
+                patch.content,
+                crate::NinePatchContent::Flat { cells }
+                    if matches!(cells.top, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (0, 0, 0, 255))
+                        && matches!(cells.center, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == expected_center)
+            ));
+        }
         // Base Windows 3.11 titles are white and require black text, while active blue titles use
         // white text. Pointer interaction is not a representable chrome state.
         let base = loaded.bundle().skin().chrome(ChromeRole::Title, ChromeState::Base).content_color;

@@ -126,11 +126,14 @@ retain the fallback color. This makes partial themes predictable and lets a them
 where they add value.
 
 The optional `patch` is a tagged, closed choice. `{ "type": "solid", "color": [...] }` supplies a
-flat RGBA patch, while `{ "type": "image", "path": "...", "source_insets": {...}, "tint": [...] }`
-supplies an atlas-backed three-by-three patch. `source_insets` and `tint` exist only on the image
-variant, so the schema cannot represent an image path without an image patch or attach slicing
-metadata to a solid color. Image paths are relative to the JSON file; omitted image tint is opaque
-white, and omitted source insets reuse the role's destination `insets`.
+flat RGBA patch; `{ "type": "framed", "border": [...], "center": [...] }` supplies a resource-free
+three-by-three color patch; and `{ "type": "image", "path": "...", "source_insets": {...},
+"tint": [...] }` supplies an atlas-backed three-by-three patch. A framed patch paints `border` into
+all eight fixed cells and `center` into the stretchable middle cell using the role's destination
+`insets`. `source_insets` and `tint` exist only on the image variant, so the schema cannot represent
+an image path without an image patch or attach slicing metadata to a color patch. Image paths are
+relative to the JSON file; omitted image tint is opaque white, and omitted source insets reuse the
+role's destination `insets`.
 
 `insets` controls destination layout and stretching. `source_insets` divides the PNG and defaults to
 the role's destination insets. Source insets must be non-negative and opposing values must fit
