@@ -59,46 +59,46 @@ when measurement or paint needs the short-lived capability.
 ```rust
 use microui_redux::{atlas::builder, prelude::*};
 
-const ICONS: &[builder::IconAsset<'static>] = &[
-    builder::IconAsset { name: "close", path: "assets/CLOSE.png" },
-    builder::IconAsset { name: "expand", path: "assets/PLUS.png" },
-    builder::IconAsset { name: "collapse", path: "assets/MINUS.png" },
-    builder::IconAsset { name: "check", path: "assets/CHECK.png" },
-    builder::IconAsset { name: "expand_down", path: "assets/EXPAND_DOWN.png" },
-    builder::IconAsset { name: "open_folder", path: "assets/OPEN_FOLDER_16.png" },
-    builder::IconAsset { name: "closed_folder", path: "assets/CLOSED_FOLDER_16.png" },
-    builder::IconAsset { name: "file", path: "assets/FILE_16.png" },
+let icons = vec![
+    builder::IconAsset { name: "close".into(), path: "assets/CLOSE.png".into() },
+    builder::IconAsset { name: "expand".into(), path: "assets/PLUS.png".into() },
+    builder::IconAsset { name: "collapse".into(), path: "assets/MINUS.png".into() },
+    builder::IconAsset { name: "check".into(), path: "assets/CHECK.png".into() },
+    builder::IconAsset { name: "expand_down".into(), path: "assets/EXPAND_DOWN.png".into() },
+    builder::IconAsset { name: "open_folder".into(), path: "assets/OPEN_FOLDER_16.png".into() },
+    builder::IconAsset { name: "closed_folder".into(), path: "assets/CLOSED_FOLDER_16.png".into() },
+    builder::IconAsset { name: "file".into(), path: "assets/FILE_16.png".into() },
 ];
 
-const FONTS: &[builder::FontAsset<'static>] = &[
+let fonts = vec![
     builder::FontAsset {
-        name: "body",
-        path: "assets/NORMAL.ttf",
+        name: "body".into(),
+        path: "assets/NORMAL.ttf".into(),
         size: 12,
     },
     builder::FontAsset {
-        name: "small",
-        path: "assets/NORMAL.ttf",
+        name: "small".into(),
+        path: "assets/NORMAL.ttf".into(),
         size: 10,
     },
     builder::FontAsset {
-        name: "title",
-        path: "assets/BOLD.ttf",
+        name: "title".into(),
+        path: "assets/BOLD.ttf".into(),
         size: 12,
     },
     builder::FontAsset {
-        name: "heading",
-        path: "assets/NORMAL.ttf",
+        name: "heading".into(),
+        path: "assets/NORMAL.ttf".into(),
         size: 18,
     },
     builder::FontAsset {
-        name: "mono",
-        path: "assets/CONSOLE.ttf",
+        name: "mono".into(),
+        path: "assets/CONSOLE.ttf".into(),
         size: 14,
     },
     builder::FontAsset {
-        name: "calculator-display",
-        path: "assets/CONSOLE.ttf",
+        name: "calculator-display".into(),
+        path: "assets/CONSOLE.ttf".into(),
         size: 28,
     },
 ];
@@ -107,8 +107,8 @@ let config = builder::Config {
     texture_width: 512,
     texture_height: 256,
     white_icon: "assets/WHITE.png".into(),
-    icons: ICONS,
-    fonts: FONTS,
+    icons,
+    fonts,
 };
 
 let (_title, title_node) = TextBlock::create(

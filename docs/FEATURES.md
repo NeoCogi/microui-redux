@@ -2,8 +2,8 @@
 
 - `builder` *(default)* – enables the runtime atlas builder and PNG decoding helpers used by the examples.
 - `png_source` – accepts static PNG-compressed serialized atlases and `ImageSource::Png { .. }`; pixels are decoded to RGBA and pass the same strict atlas validation as raw sources before a handle is returned. Animated PNGs are rejected.
-- `theme-json` *(default)* – enables strict versioned JSON theme loading and relative per-state PNG
-  assets. It includes `png_source`; repeated references to one resolved image path share one
+- `theme-json` *(default)* – enables strict versioned JSON theme loading and relative per-state
+  image patches. It includes `png_source`; repeated references to one resolved image path share one
   Context-owned texture upload.
 - `save-to-rust` *(default)* – enables `AtlasHandle::to_rust_files` to emit the current atlas as Rust code for embedding.
 - `prebuilt-atlas` – opt-in example atlas embedding; without it, examples build their atlas at runtime.

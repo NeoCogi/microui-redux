@@ -711,26 +711,23 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         }
     }
 
-    /// Loads a versioned JSON theme and bakes every assigned PNG into its immutable atlas.
+    /// Loads a versioned JSON theme and bakes every assigned image patch into its immutable atlas.
     ///
-    /// Relative image paths are resolved against the JSON file's directory. Missing PNG entries
+    /// Relative image paths are resolved against the JSON file's directory. Missing patch entries
     /// remain concrete flat-color patches derived from the document's palette. Successfully
-    /// Each unique PNG path becomes one atlas region, allowing callers to retain several
+    /// Each unique image path becomes one atlas region, allowing callers to retain several
     /// [`LoadedTheme`] values and switch their complete skin bundles safely.
     ///
     /// # Errors
     ///
     /// Returns [`ThemeLoadError`] for definition I/O, strict JSON schema errors, invalid role or
-    /// slice data, font/artwork atlas construction, or PNG decoding. Loading never mutates the live
+    /// slice data, font/artwork atlas construction, or image decoding. Loading never mutates the live
     /// backend; only a later [`Context::set_theme`] uploads the completed atlas transactionally.
     #[cfg(feature = "theme-json")]
     pub fn load_theme_file(&mut self, path: impl AsRef<Path>) -> Result<LoadedTheme, ThemeLoadError> {
-        // Build theme typography and state artwork without mutating the live renderer. This lets
-        // applications preload several bundles and choose one later without repeated file I/O.
-        let definition = crate::theme::loader::ThemeDefinition::read(path.as_ref())?;
-        let theme_atlas = definition.build_atlas(self.resource_catalog.atlas())?;
-        let base = Skin::from_atlas(theme_atlas.atlas());
-        definition.install(theme_atlas, base)
+        // The loader owns every construction stage and returns only the complete immutable bundle.
+        // Applications can preload several values and choose one later without repeated file I/O.
+        crate::theme::loader::load(path.as_ref(), self.resource_catalog.atlas())
     }
 }
 
@@ -1043,23 +1040,34 @@ mod theme_tests {
                             "enabled": { "normal": { "patch": { "type": "image", "path": "button.png" } } }
                         },
                         "checkbox": {
-                            "enabled": { "normal": { "patch": { "type": "image", "path": "missing.png" } } }
+                            "enabled": { "normal": { "patch": { "type": "image", "path": "absent.png" } } }
                         }
                     }
                 }
             }"#,
         )
         .expect("fixture JSON must be writable");
-        let (backend, log) = recording_backend(test_atlas());
+        // Leave enough atlas capacity that the fixture reaches asset I/O before packing can fail;
+        // this isolates the intended missing-file error while retaining CPU-local rollback.
+        let source = crate::atlas::builder::Builder::from_atlas_with_size(&test_atlas(), 64, 64)
+            .expect("expanded fixture resources must fit")
+            .build()
+            .expect("expanded fixture atlas must validate");
+        let (backend, log) = recording_backend(source);
         let mut context = Context::<_>::new(backend);
         log.clear();
 
         let error = match context.load_theme_file(directory.path().join("theme.json")) {
-            Ok(_) => panic!("missing second PNG must fail installation"),
+            Ok(_) => panic!("missing second image must fail atlas construction"),
             Err(error) => error,
         };
 
-        assert!(matches!(error, ThemeLoadError::ImageRead { path, .. } if path.ends_with("missing.png")));
+        assert!(matches!(
+            error,
+            ThemeLoadError::AtlasBuild {
+                source: crate::atlas::builder::BuilderError::Asset { source },
+            } if source.kind() == std::io::ErrorKind::NotFound && source.to_string().contains("absent.png")
+        ));
         assert!(
             log.snapshot().is_empty(),
             "theme decoding and atlas construction must remain CPU-local until selection"

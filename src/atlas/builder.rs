@@ -45,7 +45,7 @@ use std::{
     fmt::{Display, Formatter},
     fs::File,
     io::{self, Read},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 /// Incrementally constructs an atlas by packing fonts and named bitmap icons.
@@ -95,7 +95,7 @@ pub enum BuilderError {
     /// An icon asset could be read but could not be decoded as a supported static image.
     Image {
         /// Path of the invalid icon asset.
-        path: String,
+        path: PathBuf,
         /// Concrete image validation or decoding failure.
         source: ImageError,
     },
@@ -113,7 +113,7 @@ impl Display for BuilderError {
         // path that its lower-level source cannot know.
         match self {
             Self::Atlas { source } => Display::fmt(source, formatter),
-            Self::Image { path, source } => write!(formatter, "cannot decode icon asset `{path}`: {source}"),
+            Self::Image { path, source } => write!(formatter, "cannot decode icon asset `{}`: {source}", path.display()),
             Self::Asset { source } => Display::fmt(source, formatter),
         }
     }
@@ -147,42 +147,42 @@ impl From<io::Error> for BuilderError {
     }
 }
 
-#[derive(Clone)]
 /// Configuration for constructing an atlas from disk assets.
-pub struct FontAsset<'a> {
+#[derive(Clone)]
+pub struct FontAsset {
     /// Stable font key stored in the atlas font table.
-    pub name: &'a str,
-    /// Path to the source font file.
-    pub path: &'a str,
+    pub name: String,
+    /// Owned path to the source font file.
+    pub path: PathBuf,
     /// Pixel size baked into the atlas.
     pub size: usize,
 }
 
-#[derive(Clone)]
 /// Named bitmap icon included in a constructed atlas.
-pub struct IconAsset<'a> {
+#[derive(Clone)]
+pub struct IconAsset {
     /// Stable icon key stored in the atlas icon table.
-    pub name: &'a str,
-    /// Path to the source PNG file.
-    pub path: &'a str,
+    pub name: String,
+    /// Owned path to the source PNG file.
+    pub path: PathBuf,
 }
 
-/// Configuration for constructing an atlas from disk assets.
-pub struct Config<'a> {
+/// Owned configuration for constructing an atlas from disk assets.
+pub struct Config {
     /// Width of the atlas texture in pixels.
     pub texture_width: usize,
     /// Height of the atlas texture in pixels.
     pub texture_height: usize,
     /// Path to the solid white icon.
-    pub white_icon: String,
+    pub white_icon: PathBuf,
     /// Named semantic or application icons packed after the white rendering tile.
-    pub icons: &'a [IconAsset<'a>],
+    pub icons: Vec<IconAsset>,
     /// Fonts baked into the atlas for the printable ASCII range.
     ///
     /// A standard Context atlas must include the `body` key. The optional conventional keys
     /// `small`, `title`, `heading`, and `mono` populate their corresponding skin roles; missing
     /// optional roles use `body`.
-    pub fonts: &'a [FontAsset<'a>],
+    pub fonts: Vec<FontAsset>,
 }
 
 impl Builder {
@@ -207,12 +207,12 @@ impl Builder {
             replacement_font_ids: Vec::new(),
         };
 
-        builder.add_icon_named("white", &config.white_icon)?;
-        for icon in config.icons {
-            builder.add_icon_named(icon.name, icon.path)?;
+        builder.add_icon_named("white", config.white_icon.as_path())?;
+        for icon in &config.icons {
+            builder.add_icon_named(icon.name.as_str(), icon.path.as_path())?;
         }
-        for font in config.fonts {
-            builder.add_font_named(font.name, font.path, font.size)?;
+        for font in &config.fonts {
+            builder.add_font_named(font.name.as_str(), font.path.as_path(), font.size)?;
         }
 
         Ok(builder)
@@ -365,7 +365,7 @@ impl Builder {
     ///
     /// Returns an error when the PNG exceeds the builder input limit, cannot be read or decoded, its
     /// dimensions cannot be packed, or its normalized pixels are inconsistent.
-    pub fn add_icon(&mut self, path: &str) -> Result<IconId, BuilderError> {
+    pub fn add_icon(&mut self, path: &Path) -> Result<IconId, BuilderError> {
         let name = Self::format_path(path);
         self.add_icon_named(&name, path)
     }
@@ -379,7 +379,7 @@ impl Builder {
     ///
     /// Returns an error when the PNG exceeds the builder input limit, cannot be read or decoded, its
     /// dimensions cannot be packed, or its normalized pixels are inconsistent.
-    pub fn add_icon_named(&mut self, name: &str, path: &str) -> Result<IconId, BuilderError> {
+    pub fn add_icon_named(&mut self, name: &str, path: &Path) -> Result<IconId, BuilderError> {
         if self.candidate.icons.iter().any(|(existing, _)| existing == name) {
             // Preserve the documented file-I/O boundary: a duplicate name is known entirely from
             // candidate metadata and must not attempt to open an irrelevant path.
@@ -393,7 +393,7 @@ impl Builder {
     ///
     /// File-backed and atlas-copy insertion share this boundary so duplicate checks, transactional
     /// packing, candidate metadata, and stable identity handling cannot diverge.
-    pub(crate) fn add_icon_pixels_named(&mut self, name: &str, width: usize, height: usize, pixels: &[Color4b]) -> Result<IconId, BuilderError> {
+    fn add_icon_pixels_named(&mut self, name: &str, width: usize, height: usize, pixels: &[Color4b]) -> Result<IconId, BuilderError> {
         // New artwork receives a new logical identity. Atlas-copy paths use the private helper
         // below with the source ID instead.
         self.add_icon_pixels_with_id(name, IconId::allocate(), width, height, pixels)
@@ -420,7 +420,7 @@ impl Builder {
     ///
     /// Returns an error when `size` is outside `1..=i32::MAX`, the font exceeds the builder input
     /// limit or cannot be read/parsed, or any glyph cannot fit the remaining texture space.
-    pub fn add_font(&mut self, path: &str, size: usize) -> Result<FontId, BuilderError> {
+    pub fn add_font(&mut self, path: &Path, size: usize) -> Result<FontId, BuilderError> {
         let name = format!("{}-{}", Self::format_path(path), size);
         self.add_font_named(name.as_str(), path, size)
     }
@@ -435,7 +435,7 @@ impl Builder {
     ///
     /// Returns an error when `size` is outside `1..=i32::MAX`, the font exceeds the builder input
     /// limit or cannot be read/parsed, or any glyph cannot fit the remaining texture space.
-    pub fn add_font_named(&mut self, name: &str, path: &str, size: usize) -> Result<FontId, BuilderError> {
+    pub fn add_font_named(&mut self, name: &str, path: &Path, size: usize) -> Result<FontId, BuilderError> {
         if self.candidate.fonts.iter().any(|(existing, _)| existing == name) {
             // A repeated key is an input error, not a second resource that should consume texture
             // space. Check it before size validation and file I/O to keep failure transactional.
@@ -556,18 +556,18 @@ impl Builder {
     }
 
     /// Loads an icon image from disk and normalizes it to RGBA pixels.
-    fn load_icon(path: &str) -> Result<(usize, usize, Vec<Color4b>), BuilderError> {
+    fn load_icon(path: &Path) -> Result<(usize, usize, Vec<Color4b>), BuilderError> {
         let bytes = Self::read_asset_file(path)?;
         // ImageError already owns the precise format/storage classification. Add only the asset
         // path at this boundary instead of converting it through an unrelated io::Error kind.
-        load_image_bytes(ImageSource::Png { bytes: bytes.as_slice() }).map_err(|source| BuilderError::Image { path: path.to_string(), source })
+        load_image_bytes(ImageSource::Png { bytes: bytes.as_slice() }).map_err(|source| BuilderError::Image { path: path.to_path_buf(), source })
     }
 
     /// Reads one builder asset while bounding compressed images and font files before allocation.
-    fn read_asset_file(path: &str) -> Result<Vec<u8>, BuilderError> {
-        let file = File::open(path).map_err(|source| io::Error::new(source.kind(), format!("Cannot open asset file `{path}`: {source}")))?;
+    fn read_asset_file(path: &Path) -> Result<Vec<u8>, BuilderError> {
+        let file = File::open(path).map_err(|source| io::Error::new(source.kind(), format!("Cannot open asset file `{}`: {source}", path.display())))?;
         Self::read_bounded(file, MAX_DECODED_RGBA_BYTES)
-            .map_err(|source| io::Error::new(source.kind(), format!("Cannot read asset file `{path}`: {source}")).into())
+            .map_err(|source| io::Error::new(source.kind(), format!("Cannot read asset file `{}`: {source}", path.display())).into())
     }
 
     /// Reads at most `maximum_bytes + 1` bytes and rejects a source that crosses that boundary.
@@ -657,28 +657,19 @@ impl Builder {
     }
 
     /// Loads and parses a font file using `fontdue`.
-    fn load_font(path: &str) -> Result<RasterFont, BuilderError> {
+    fn load_font(path: &Path) -> Result<RasterFont, BuilderError> {
         let data = Self::read_asset_file(path)?;
-        let font =
-            RasterFont::from_bytes(data, FontSettings::default()).map_err(|error| io::Error::other(format!("Cannot parse font asset `{path}`: {error}")))?;
+        let font = RasterFont::from_bytes(data, FontSettings::default())
+            .map_err(|error| io::Error::other(format!("Cannot parse font asset `{}`: {error}", path.display())))?;
         Ok(font)
     }
 
-    /// Returns the final path segment, preserving the original value when it is not valid UTF-8.
-    fn strip_path_to_file(path: &str) -> String {
-        let p = Path::new(path);
-        p.file_name().and_then(|n| n.to_str()).unwrap_or(path).to_string()
-    }
-
-    /// Removes a file extension from a path-like string.
-    fn strip_extension(path: &str) -> String {
-        let p = Path::new(path);
-        p.with_extension("").to_str().unwrap_or(path).to_string()
-    }
-
     /// Converts an asset path into the stable atlas key used for generated sources.
-    fn format_path(path: &str) -> String {
-        Self::strip_extension(&Self::strip_path_to_file(path))
+    fn format_path(path: &Path) -> String {
+        // A caller needing an exact resource key uses the named insertion API. The convenience API
+        // derives a readable key from the final path component without requiring platform paths to
+        // be representable as UTF-8.
+        path.file_stem().unwrap_or_else(|| path.as_os_str()).to_string_lossy().into_owned()
     }
 
     /// Validates and consumes the populated builder, returning an immutable [`AtlasHandle`].
@@ -709,9 +700,9 @@ mod tests {
         let config = Config {
             texture_width: 32,
             texture_height: 32,
-            white_icon: String::from(WHITE_PATH),
-            icons: &[],
-            fonts: &[],
+            white_icon: WHITE_PATH.into(),
+            icons: Vec::new(),
+            fonts: Vec::new(),
         };
 
         let atlas = Builder::from_config(&config)
@@ -725,17 +716,17 @@ mod tests {
     /// Verifies invalid dimensions fail before the builder reads any configured asset path.
     #[test]
     fn config_validates_dimensions_before_allocating_or_loading_assets() {
-        let fonts = [FontAsset {
-            name: "body",
-            path: "path-that-must-not-be-read",
+        let fonts = vec![FontAsset {
+            name: "body".into(),
+            path: "path-that-must-not-be-read".into(),
             size: 10,
         }];
         let config = Config {
             texture_width: 0,
             texture_height: 32,
-            white_icon: String::from("path-that-must-not-be-read"),
-            icons: &[],
-            fonts: &fonts,
+            white_icon: "path-that-must-not-be-read".into(),
+            icons: Vec::new(),
+            fonts,
         };
 
         let error = Builder::from_config(&config).err().expect("zero width must be rejected before asset loading");
@@ -754,7 +745,7 @@ mod tests {
     /// Verifies successful file I/O followed by invalid PNG bytes retains ImageError and the path.
     #[test]
     fn invalid_icon_bytes_use_the_composed_image_error_variant() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
+        let path = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"));
         let error = Builder::load_icon(path).expect_err("Cargo.toml bytes cannot decode as a PNG icon");
 
         assert!(matches!(
@@ -770,17 +761,17 @@ mod tests {
     /// Verifies unrepresentable rasterization sizes fail concretely before fontdue reads the font.
     #[test]
     fn font_size_is_bounded_by_runtime_metadata_coordinates() {
-        let fonts = [FontAsset {
-            name: "body",
-            path: "path-that-must-not-be-read",
+        let fonts = vec![FontAsset {
+            name: "body".into(),
+            path: "path-that-must-not-be-read".into(),
             size: i32::MAX as usize + 1,
         }];
         let config = Config {
             texture_width: 32,
             texture_height: 32,
-            white_icon: String::from(WHITE_PATH),
-            icons: &[],
-            fonts: &fonts,
+            white_icon: WHITE_PATH.into(),
+            icons: Vec::new(),
+            fonts,
         };
 
         let error = Builder::from_config(&config).err().expect("oversized font must fail before file loading");
@@ -795,15 +786,19 @@ mod tests {
     /// Verifies builder output crosses the shared opaque-white validation boundary.
     #[test]
     fn build_rejects_a_non_white_image_assigned_to_the_white_role() {
-        let fonts = [FontAsset { name: "body", path: FONT_PATH, size: 10 }];
+        let fonts = vec![FontAsset {
+            name: "body".into(),
+            path: FONT_PATH.into(),
+            size: 10,
+        }];
         let config = Config {
             texture_width: 512,
             texture_height: 256,
             // The close glyph is a valid PNG and packs successfully, but it is not a solid opaque
             // white tile. Reaching build isolates structural validation from asset I/O and packing.
-            white_icon: String::from(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/CLOSE.png")),
-            icons: &[],
-            fonts: &fonts,
+            white_icon: concat!(env!("CARGO_MANIFEST_DIR"), "/assets/CLOSE.png").into(),
+            icons: Vec::new(),
+            fonts,
         };
         let builder = Builder::from_config(&config).expect("non-white fixture assets must still load and pack");
 
@@ -819,19 +814,23 @@ mod tests {
     /// Verifies capabilities returned during construction retain the finalized atlas owner.
     #[test]
     fn builder_resource_ids_remain_valid_after_finalization() {
-        let fonts = [FontAsset { name: "body", path: FONT_PATH, size: 10 }];
+        let fonts = vec![FontAsset {
+            name: "body".into(),
+            path: FONT_PATH.into(),
+            size: 10,
+        }];
         let config = Config {
             texture_width: 512,
             texture_height: 256,
-            white_icon: String::from(WHITE_PATH),
-            icons: &[],
-            fonts: &fonts,
+            white_icon: WHITE_PATH.into(),
+            icons: Vec::new(),
+            fonts,
         };
         let mut builder = Builder::from_config(&config).expect("fixture assets must build an atlas");
 
         // These IDs are minted before build moves the candidate into its validated shared handle.
-        let icon = builder.add_icon_named("extra", WHITE_PATH).expect("extra icon must fit");
-        let font = builder.add_font_named("extra", FONT_PATH, 8).expect("extra font must fit");
+        let icon = builder.add_icon_named("extra", Path::new(WHITE_PATH)).expect("extra icon must fit");
+        let font = builder.add_font_named("extra", Path::new(FONT_PATH), 8).expect("extra font must fit");
         let atlas = builder.build().expect("builder output must pass shared atlas validation");
 
         assert!(atlas.contains_icon(icon));
@@ -844,14 +843,21 @@ mod tests {
     /// source fonts with the caller's explicitly added set.
     #[test]
     fn atlas_icon_copy_rebuilds_fonts_without_losing_semantic_images() {
-        let fonts = [FontAsset { name: "body", path: FONT_PATH, size: 10 }];
-        let icons = [IconAsset { name: "file", path: FILE_ICON_PATH }];
+        let fonts = vec![FontAsset {
+            name: "body".into(),
+            path: FONT_PATH.into(),
+            size: 10,
+        }];
+        let icons = vec![IconAsset {
+            name: "file".into(),
+            path: FILE_ICON_PATH.into(),
+        }];
         let config = Config {
             texture_width: 512,
             texture_height: 256,
-            white_icon: String::from(WHITE_PATH),
-            icons: &icons,
-            fonts: &fonts,
+            white_icon: WHITE_PATH.into(),
+            icons,
+            fonts,
         };
         let source = Builder::from_config(&config)
             .expect("source atlas assets must pack")
@@ -862,7 +868,7 @@ mod tests {
 
         let mut replacement = Builder::from_atlas_icons(&source).expect("validated source icons must copy");
         replacement
-            .add_font_named("body", FONT_PATH, 14)
+            .add_font_named("body", Path::new(FONT_PATH), 14)
             .expect("replacement body font must fit beside copied icons");
         let replacement = replacement.build().expect("replacement atlas must validate");
 
@@ -941,20 +947,24 @@ mod tests {
     /// Verifies semantic font replacement retains unrelated application typography by name.
     #[test]
     fn selective_font_copy_replaces_roles_without_dropping_application_fonts() {
-        let fonts = [
-            FontAsset { name: "body", path: FONT_PATH, size: 10 },
+        let fonts = vec![
             FontAsset {
-                name: "application-code",
-                path: FONT_PATH,
+                name: "body".into(),
+                path: FONT_PATH.into(),
+                size: 10,
+            },
+            FontAsset {
+                name: "application-code".into(),
+                path: FONT_PATH.into(),
                 size: 8,
             },
         ];
         let config = Config {
             texture_width: 512,
             texture_height: 256,
-            white_icon: String::from(WHITE_PATH),
-            icons: &[],
-            fonts: &fonts,
+            white_icon: WHITE_PATH.into(),
+            icons: Vec::new(),
+            fonts,
         };
         let source = Builder::from_config(&config)
             .expect("source typography must fit the fixture atlas")
@@ -965,7 +975,7 @@ mod tests {
         let mut replacement =
             Builder::from_atlas_with_size_excluding_fonts(&source, 512, 256, &["body"]).expect("the application font must copy without the replaced body role");
         replacement
-            .add_font_named("body", FONT_PATH, 14)
+            .add_font_named("body", Path::new(FONT_PATH), 14)
             .expect("the replacement body recipe must fit beside the application font");
         let replacement = replacement.build().expect("selectively rebuilt atlas must validate");
 
@@ -988,18 +998,22 @@ mod tests {
     /// path, so they neither mask as I/O failures nor consume atlas space.
     #[test]
     fn duplicate_names_fail_before_asset_io() {
-        let fonts = [FontAsset { name: "body", path: FONT_PATH, size: 10 }];
+        let fonts = vec![FontAsset {
+            name: "body".into(),
+            path: FONT_PATH.into(),
+            size: 10,
+        }];
         let config = Config {
             texture_width: 512,
             texture_height: 256,
-            white_icon: String::from(WHITE_PATH),
-            icons: &[],
-            fonts: &fonts,
+            white_icon: WHITE_PATH.into(),
+            icons: Vec::new(),
+            fonts,
         };
         let mut builder = Builder::from_config(&config).expect("fixture assets must build an atlas candidate");
 
         let icon_error = builder
-            .add_icon_named("white", "path-that-must-not-be-read")
+            .add_icon_named("white", Path::new("path-that-must-not-be-read"))
             .expect_err("the existing white key must be rejected");
         assert!(matches!(
             icon_error,
@@ -1009,7 +1023,7 @@ mod tests {
         ));
 
         let font_error = builder
-            .add_font_named("body", "path-that-must-not-be-read", 0)
+            .add_font_named("body", Path::new("path-that-must-not-be-read"), 0)
             .expect_err("the existing body key must be rejected");
         assert!(matches!(
             font_error,
@@ -1038,16 +1052,16 @@ mod tests {
         let config = Config {
             texture_width: 64,
             texture_height: 32,
-            white_icon: String::from(WHITE_PATH),
-            icons: &[],
-            fonts: &[],
+            white_icon: WHITE_PATH.into(),
+            icons: Vec::new(),
+            fonts: Vec::new(),
         };
         let mut attempted = Builder::from_config(&config).expect("small fixture atlas must contain its white tile");
         let mut untouched = Builder::from_config(&config).expect("control atlas must contain its white tile");
         let pixels_before = attempted.candidate.pixels.clone();
 
         let error = attempted
-            .add_font_named("too-large", FONT_PATH, 10)
+            .add_font_named("too-large", Path::new(FONT_PATH), 10)
             .expect_err("printable ASCII must not fit beside the white tile");
         assert!(matches!(&error, BuilderError::Asset { .. }));
         assert!(
@@ -1067,10 +1081,10 @@ mod tests {
         // Identical placement of a subsequent real asset proves the cloned planning packer was not
         // published when the font failed after reserving earlier glyphs.
         attempted
-            .add_icon_named("after-failure", FILE_ICON_PATH)
+            .add_icon_named("after-failure", Path::new(FILE_ICON_PATH))
             .expect("control icon must fit after failed font");
         untouched
-            .add_icon_named("after-failure", FILE_ICON_PATH)
+            .add_icon_named("after-failure", Path::new(FILE_ICON_PATH))
             .expect("control icon must fit in untouched builder");
         let attempted_rect = attempted.candidate.icons.last().unwrap().1.rect;
         let untouched_rect = untouched.candidate.icons.last().unwrap().1.rect;

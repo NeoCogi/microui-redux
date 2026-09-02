@@ -47,7 +47,7 @@ use crate::{
         AtlasHandle,
         builder::{Builder, BuilderError},
     },
-    Color, IconId, ImageError, ImageSource, NinePatch, NinePatchCell, NinePatchCells, NinePatchImage, SliceInsets,
+    Color, IconId, NinePatch, NinePatchCell, NinePatchCells, NinePatchImage, SliceInsets,
 };
 
 /// Theme-file schema version understood by this crate release.
@@ -131,34 +131,15 @@ pub enum ThemeLoadError {
         /// Optional image dimensions used for source-bound validation.
         image_size: Option<(i32, i32)>,
     },
-    /// A PNG referenced by the JSON definition could not be read.
-    ImageRead {
-        /// Fully resolved path relative to the definition file.
-        path: PathBuf,
-        /// Concrete filesystem failure.
-        source: io::Error,
-    },
-    /// A referenced PNG could not be decoded under the shared image policy.
-    ImageDecode {
-        /// Fully resolved image path.
-        path: PathBuf,
-        /// Concrete image-layer diagnostic.
-        source: ImageError,
-    },
-    /// The theme's fonts or state artwork could not be packed or structurally finalized.
+    /// The theme's fonts or image artwork could not be read, decoded, packed, or finalized.
     AtlasBuild {
         /// Concrete atlas-builder failure retaining its asset or validation classification.
         source: BuilderError,
     },
-    /// A resolved font asset path cannot be represented by the string-based atlas builder API.
-    FontPathNotUtf8 {
-        /// Fully resolved path containing non-UTF-8 platform bytes.
-        path: PathBuf,
-    },
 }
 
 impl fmt::Display for ThemeLoadError {
-    /// Formats each failure with the relevant document, appearance, or PNG path.
+    /// Formats each failure with the relevant document, appearance, or nested asset diagnostic.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Keep classifications visible in text while retaining structured sources for callers.
         match self {
@@ -179,10 +160,7 @@ impl fmt::Display for ThemeLoadError {
                 }
                 Ok(())
             }
-            Self::ImageRead { path, source } => write!(formatter, "failed to read theme PNG {}: {source}", path.display()),
-            Self::ImageDecode { path, source } => write!(formatter, "failed to decode theme PNG {}: {source}", path.display()),
             Self::AtlasBuild { source } => write!(formatter, "failed to build theme resource atlas: {source}"),
-            Self::FontPathNotUtf8 { path } => write!(formatter, "theme font path is not valid UTF-8: {}", path.display()),
         }
     }
 }
@@ -192,34 +170,24 @@ impl Error for ThemeLoadError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         // Schema and inset errors are fully represented by their own fields and have no lower cause.
         match self {
-            Self::DefinitionRead { source, .. } | Self::ImageRead { source, .. } => Some(source),
+            Self::DefinitionRead { source, .. } => Some(source),
             Self::DefinitionJson { source, .. } => Some(source),
-            Self::ImageDecode { source, .. } => Some(source),
             Self::AtlasBuild { source } => Some(source),
-            Self::UnsupportedSchema { .. } | Self::EmptyName | Self::InvalidInsets { .. } | Self::FontPathNotUtf8 { .. } => None,
+            Self::UnsupportedSchema { .. } | Self::EmptyName | Self::InvalidInsets { .. } => None,
         }
     }
 }
 
-/// One fully constructed theme atlas and the capabilities assigned to unique PNG paths.
+/// One fully constructed theme atlas and the capabilities assigned to unique image paths.
 ///
 /// Keeping this intermediate concrete prevents installation from rediscovering numeric icon slots
 /// or decoding files a second time. It is private because only a matching [`ThemeDefinition`] may
 /// translate these construction capabilities into semantic appearances.
-pub(crate) struct ThemeAtlas {
+struct ThemeAtlas {
     /// Immutable pixels and metadata ready for renderer installation.
     atlas: AtlasHandle,
     /// Fully resolved image paths mapped to their atlas-owned icon capabilities.
     images: BTreeMap<PathBuf, IconId>,
-}
-
-impl ThemeAtlas {
-    /// Borrows the immutable atlas used to construct the matching base [`Skin`].
-    pub(crate) fn atlas(&self) -> &AtlasHandle {
-        // Installation consumes this intermediate later; exposing only a shared handle here keeps
-        // the path-to-capability table inseparable from the atlas that minted its IDs.
-        &self.atlas
-    }
 }
 
 /// Strict syntax tree and compiler input for exactly one self-contained JSON theme file.
@@ -229,7 +197,7 @@ impl ThemeAtlas {
 /// has one source directory and one unambiguous effect.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct ThemeDefinition {
+struct ThemeDefinition {
     /// Version selecting the exact schema contract.
     schema_version: u32,
     /// Human-readable selector label for the loaded theme.
@@ -284,7 +252,7 @@ impl AppearanceCatalogDocument {
 
 impl ThemeDefinition {
     /// Reads, validates, and anchors every asset in one JSON theme definition.
-    pub(crate) fn read(path: &Path) -> Result<Self, ThemeLoadError> {
+    fn read(path: &Path) -> Result<Self, ThemeLoadError> {
         // The file path is retained verbatim in diagnostics. Its lexical parent is sufficient to
         // anchor assets because one document is now their only possible owner.
         let bytes = fs::read(path).map_err(|source| ThemeLoadError::DefinitionRead { path: path.to_path_buf(), source })?;
@@ -339,7 +307,7 @@ impl ThemeDefinition {
     /// Every unique image-patch source is packed once beside fonts and icons. A completely flat document
     /// without a font recipe can reuse the base allocation exactly; adding artwork without new
     /// fonts repacks existing glyph bitmaps so the original font files are not required.
-    pub(crate) fn build_atlas(&self, base: &AtlasHandle) -> Result<ThemeAtlas, ThemeLoadError> {
+    fn build_atlas(&self, base: &AtlasHandle) -> Result<ThemeAtlas, ThemeLoadError> {
         let image_paths = self.image_paths();
         if self.fonts.is_none() && image_paths.is_empty() {
             // No atlas-visible resource changes are requested, so preserving pointer identity also
@@ -348,17 +316,6 @@ impl ThemeDefinition {
                 atlas: base.clone(),
                 images: BTreeMap::new(),
             });
-        }
-
-        let mut decoded_images = Vec::with_capacity(image_paths.len());
-        for path in image_paths {
-            // Validate the complete file set before atlas packing. A missing or malformed later
-            // asset therefore retains its precise path classification even when a compact base
-            // atlas would also be too small for an artwork-only rebuild.
-            let bytes = fs::read(path.as_path()).map_err(|source| ThemeLoadError::ImageRead { path: path.clone(), source })?;
-            let (image_width, image_height, pixels) = crate::load_image_bytes(ImageSource::Png { bytes: bytes.as_slice() })
-                .map_err(|source| ThemeLoadError::ImageDecode { path: path.clone(), source })?;
-            decoded_images.push((path, image_width, image_height, pixels));
         }
 
         let (width, height) = self
@@ -380,20 +337,18 @@ impl ThemeDefinition {
 
         if let Some(fonts) = &self.fonts {
             for (role, font) in fonts.entries() {
-                let path = font.path.clone();
-                let path_text = path.to_str().ok_or_else(|| ThemeLoadError::FontPathNotUtf8 { path: path.clone() })?;
                 builder
-                    .add_font_named(role.atlas_name(), path_text, font.size)
+                    .add_font_named(role.atlas_name(), font.path.as_path(), font.size)
                     .map_err(|source| ThemeLoadError::AtlasBuild { source })?;
             }
         }
 
         let mut images = BTreeMap::new();
-        for (index, (path, image_width, image_height, pixels)) in decoded_images.into_iter().enumerate() {
-            // The opaque internal name is deterministic, while semantic lookup retains the fully
-            // resolved PathBuf and each appearance retains its own slice and tint metadata.
+        for (index, path) in image_paths.into_iter().enumerate() {
+            // Builder owns bounded file I/O, PNG decoding, transactional packing, and typed image
+            // diagnostics. The loader supplies only a deterministic private resource name.
             let icon = builder
-                .add_icon_pixels_named(format!("@microui-theme-image/{index}").as_str(), image_width, image_height, pixels.as_slice())
+                .add_icon_named(format!("@microui-theme-image/{index}").as_str(), path.as_path())
                 .map_err(|source| ThemeLoadError::AtlasBuild { source })?;
             images.insert(path, icon);
         }
@@ -403,11 +358,11 @@ impl ThemeDefinition {
     }
 
     /// Resolves flat fallbacks and binds explicitly supplied image patches to baked atlas regions.
-    pub(crate) fn install(self, theme_atlas: ThemeAtlas, mut skin: Skin) -> Result<LoadedTheme, ThemeLoadError> {
+    fn install(self, theme_atlas: ThemeAtlas) -> Result<LoadedTheme, ThemeLoadError> {
         let ThemeAtlas { atlas, images } = theme_atlas;
-        // Installation may only bind appearance icons onto a Skin created for this exact atlas;
-        // enforcing that here prevents a LoadedTheme from ever containing mixed resources.
-        assert!(skin.belongs_to(&atlas), "theme base skin contains image capabilities from another atlas");
+        // Constructing the fallback here makes a mismatched atlas/skin pair unrepresentable inside
+        // the loader rather than asserting that a multi-stage caller supplied the matching value.
+        let mut skin = Skin::from_atlas(&atlas);
         // Apply palette and metric overrides before constructing fallbacks, so every omitted patch
         // state reflects the JSON theme's own flat colors rather than the built-in default palette.
         skin.metrics = self.skin.metrics;
@@ -457,7 +412,7 @@ impl ThemeDefinition {
         Ok(LoadedTheme::new(self.name, SkinBundle::new(atlas, skin)))
     }
 
-    /// Returns every fully resolved PNG path in deterministic deduplicated order.
+    /// Returns every fully resolved image path in deterministic deduplicated order.
     fn image_paths(&self) -> BTreeSet<PathBuf> {
         // Image patch variants retain independent slicing/tint metadata, while one path set is
         // sufficient for immutable pixel packing. BTreeSet also stabilizes generated atlas names.
@@ -484,6 +439,19 @@ impl ThemeDefinition {
         }
         paths
     }
+}
+
+/// Reads and compiles one self-contained JSON theme against the stable application resource atlas.
+///
+/// This is the loader module's only entry point. Definition parsing, path anchoring, atlas
+/// construction, and visual installation remain private stages that cannot be called out of order
+/// or supplied with mismatched intermediate values.
+pub(crate) fn load(path: &Path, base: &AtlasHandle) -> Result<LoadedTheme, ThemeLoadError> {
+    // The complete operation is CPU-local and immutable. Context uploads the returned bundle only
+    // when the application explicitly selects it through `set_theme`.
+    let definition = ThemeDefinition::read(path)?;
+    let atlas = definition.build_atlas(base)?;
+    definition.install(atlas)
 }
 
 /// Selects and validates the destination geometry shared by every state of one role.
@@ -928,13 +896,14 @@ mod tests {
     fn install_bundled_theme(relative_path: &str) -> (LoadedTheme, usize) {
         // Resolve from the Cargo manifest so tests remain independent of the process working dir.
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(relative_path);
-        let definition = ThemeDefinition::read(path.as_path()).expect("bundled theme JSON must remain valid");
-        let theme_atlas = definition.build_atlas(&test_atlas()).expect("bundled theme resource atlas must build");
-        let image_count = theme_atlas.images.len();
-        let style = Skin::from_atlas(theme_atlas.atlas());
-        let loaded = definition
-            .install(theme_atlas, style)
-            .expect("bundled theme PNGs must install from baked regions");
+        let loaded = load(path.as_path(), &test_atlas()).expect("bundled theme must load through the complete entry point");
+        let image_count = loaded
+            .bundle()
+            .atlas()
+            .clone_icon_table()
+            .iter()
+            .filter(|(name, _)| name.starts_with("@microui-theme-image/"))
+            .count();
         (loaded, image_count)
     }
 
@@ -962,8 +931,7 @@ mod tests {
         .expect("test definition must match the strict schema");
         let atlas = test_atlas();
         let theme_atlas = document.build_atlas(&atlas).expect("flat theme must retain the base atlas");
-        let style = Skin::from_atlas(theme_atlas.atlas());
-        let loaded = document.install(theme_atlas, style).expect("flat-only theme must install");
+        let loaded = document.install(theme_atlas).expect("flat-only theme must install");
 
         let normal = loaded
             .bundle()
@@ -1015,8 +983,7 @@ mod tests {
         .expect("content-color-only states must match the strict schema");
         let atlas = test_atlas();
         let theme_atlas = document.build_atlas(&atlas).expect("content-color-only theme must retain the base atlas");
-        let style = Skin::from_atlas(theme_atlas.atlas());
-        let loaded = document.install(theme_atlas, style).expect("content-color-only theme must install");
+        let loaded = document.install(theme_atlas).expect("content-color-only theme must install");
 
         let normal = loaded.bundle().skin().menu(MenuRole::Item, MenuState::Normal).content_color;
         let hovered = loaded.bundle().skin().menu(MenuRole::Item, MenuState::Hovered).content_color;
@@ -1046,10 +1013,9 @@ mod tests {
         .expect("solid patch must match the strict tagged schema");
         let base = test_atlas();
         let theme_atlas = document.build_atlas(&base).expect("solid patch must not require atlas work");
-        assert!(theme_atlas.atlas().ptr_eq(&base));
+        assert!(theme_atlas.atlas.ptr_eq(&base));
         assert!(theme_atlas.images.is_empty());
-        let style = Skin::from_atlas(theme_atlas.atlas());
-        let loaded = document.install(theme_atlas, style).expect("solid patch must install");
+        let loaded = document.install(theme_atlas).expect("solid patch must install");
         let patch = loaded.bundle().skin().surface(SurfaceRole::Panel, SurfaceState::Normal).patch;
 
         assert_eq!((patch.insets.left, patch.insets.top, patch.insets.right, patch.insets.bottom), (2, 3, 4, 5));

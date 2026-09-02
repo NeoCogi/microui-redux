@@ -58,70 +58,80 @@ use std::fs;
 
 #[cfg(all(not(feature = "prebuilt-atlas"), not(feature = "external-atlas"), feature = "builder"))]
 use microui_redux::atlas::builder;
-
 #[cfg(all(not(feature = "prebuilt-atlas"), not(feature = "external-atlas"), feature = "builder"))]
-pub fn atlas_config() -> builder::Config<'static> {
-    const ICONS: &[builder::IconAsset<'static>] = &[
-        builder::IconAsset { name: "close", path: "assets/CLOSE.png" },
-        builder::IconAsset { name: "expand", path: "assets/PLUS.png" },
-        builder::IconAsset {
-            name: "collapse",
-            path: "assets/MINUS.png",
-        },
-        builder::IconAsset { name: "check", path: "assets/CHECK.png" },
-        builder::IconAsset {
-            name: "expand_down",
-            path: "assets/EXPAND_DOWN.png",
-        },
-        builder::IconAsset {
-            name: "open_folder",
-            path: "assets/OPEN_FOLDER_16.png",
-        },
-        builder::IconAsset {
-            name: "closed_folder",
-            path: "assets/CLOSED_FOLDER_16.png",
-        },
-        builder::IconAsset { name: "file", path: "assets/FILE_16.png" },
-    ];
-    const FONTS: &[builder::FontAsset<'static>] = &[
-        builder::FontAsset {
-            name: "body",
-            path: "assets/NORMAL.ttf",
-            size: 12,
-        },
-        builder::FontAsset {
-            name: "small",
-            path: "assets/NORMAL.ttf",
-            size: 10,
-        },
-        builder::FontAsset {
-            name: "title",
-            path: "assets/BOLD.ttf",
-            size: 12,
-        },
-        builder::FontAsset {
-            name: "heading",
-            path: "assets/NORMAL.ttf",
-            size: 18,
-        },
-        builder::FontAsset {
-            name: "mono",
-            path: "assets/CONSOLE.ttf",
-            size: 14,
-        },
-        builder::FontAsset {
-            name: "calculator-display",
-            path: "assets/CONSOLE.ttf",
-            size: 28,
-        },
-    ];
-
+pub fn atlas_config() -> builder::Config {
+    // Config owns its recipes and platform paths, so this factory returns one self-contained value
+    // without static borrowed arrays or UTF-8-only path storage.
     builder::Config {
         texture_height: 256,
         texture_width: 512,
-        white_icon: String::from("assets/WHITE.png"),
-        icons: ICONS,
-        fonts: FONTS,
+        white_icon: "assets/WHITE.png".into(),
+        icons: vec![
+            builder::IconAsset {
+                name: "close".into(),
+                path: "assets/CLOSE.png".into(),
+            },
+            builder::IconAsset {
+                name: "expand".into(),
+                path: "assets/PLUS.png".into(),
+            },
+            builder::IconAsset {
+                name: "collapse".into(),
+                path: "assets/MINUS.png".into(),
+            },
+            builder::IconAsset {
+                name: "check".into(),
+                path: "assets/CHECK.png".into(),
+            },
+            builder::IconAsset {
+                name: "expand_down".into(),
+                path: "assets/EXPAND_DOWN.png".into(),
+            },
+            builder::IconAsset {
+                name: "open_folder".into(),
+                path: "assets/OPEN_FOLDER_16.png".into(),
+            },
+            builder::IconAsset {
+                name: "closed_folder".into(),
+                path: "assets/CLOSED_FOLDER_16.png".into(),
+            },
+            builder::IconAsset {
+                name: "file".into(),
+                path: "assets/FILE_16.png".into(),
+            },
+        ],
+        fonts: vec![
+            builder::FontAsset {
+                name: "body".into(),
+                path: "assets/NORMAL.ttf".into(),
+                size: 12,
+            },
+            builder::FontAsset {
+                name: "small".into(),
+                path: "assets/NORMAL.ttf".into(),
+                size: 10,
+            },
+            builder::FontAsset {
+                name: "title".into(),
+                path: "assets/BOLD.ttf".into(),
+                size: 12,
+            },
+            builder::FontAsset {
+                name: "heading".into(),
+                path: "assets/NORMAL.ttf".into(),
+                size: 18,
+            },
+            builder::FontAsset {
+                name: "mono".into(),
+                path: "assets/CONSOLE.ttf".into(),
+                size: 14,
+            },
+            builder::FontAsset {
+                name: "calculator-display".into(),
+                path: "assets/CONSOLE.ttf".into(),
+                size: 28,
+            },
+        ],
     }
 }
 
