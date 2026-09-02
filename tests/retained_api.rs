@@ -158,12 +158,12 @@ fn downstream_skin_visuals_are_concrete_and_exhaustive() {
     let pressed = ControlState::Focused(PointerState::Pressed);
     let original = skin.control(ControlRole::Button, focused);
     let mut changed = original;
-    changed.foreground = color(17, 29, 43, 255);
+    changed.content_color = color(17, 29, 43, 255);
     skin.set_control(ControlRole::Button, focused, changed);
 
     assert_eq!(ControlState::ALL.len(), ControlState::COUNT);
-    assert_eq!(skin.control(ControlRole::Button, focused).foreground.r, 17);
-    assert_eq!(skin.control(ControlRole::Button, pressed).foreground.r, original.foreground.r);
+    assert_eq!(skin.control(ControlRole::Button, focused).content_color.r, 17);
+    assert_eq!(skin.control(ControlRole::Button, pressed).content_color.r, original.content_color.r);
 }
 
 /// Verifies exact resource IDs and one atomic bundle remain the typed replacement path.

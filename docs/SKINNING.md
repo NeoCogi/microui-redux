@@ -3,7 +3,7 @@
 Skinning has one resolved runtime model. Built-in widgets, manager-owned window chrome, JSON
 themes, and programmatic edits all use the same context-owned concrete `Skin` value. There is no
 property bag, `Any` payload, string-keyed runtime lookup, local override cascade, or parallel
-background and foreground model.
+patch and semantic-content-color model.
 
 ## Runtime ownership
 
@@ -37,7 +37,7 @@ switching themes cannot gradually accumulate fonts, icons, or artwork.
 | --- | --- |
 | `Skin` | One resolved value containing metrics, complete visuals, and chrome policy. |
 | `SkinMetrics` | Layout, spacing, window inset, border, title, scrollbar, and thumb geometry. |
-| `Skin::surface` / `control` / `menu` / `chrome` | Resolves one complete `Visual { patch, foreground }` in a concrete family. |
+| `Skin::surface` / `control` / `menu` / `chrome` | Resolves one complete `Visual { patch, content_color }` in a concrete family. |
 | `SurfaceRole` / `ControlRole` | Concrete structural and interactive widget-facing roles. |
 | `MenuRole` / `ChromeRole` | Concrete menu and manager-owned window-decoration roles. |
 | `SurfaceState` | Structural availability: normal or disabled. |
@@ -50,7 +50,7 @@ switching themes cannot gradually accumulate fonts, icons, or artwork.
 
 Each role and state enum exposes `ALL` and `COUNT`. The private catalog stores four concrete arrays,
 so lookup is total inside each family and code cannot pass menu-open state to a widget or pointer
-state to a window frame. Paint resolves one `Visual`, keeping a state's artwork and foreground
+state to a window frame. Paint resolves one `Visual`, keeping a state's artwork and content color
 adjacent without erased values or a universal role/state cross-product.
 
 ## Programmatic construction

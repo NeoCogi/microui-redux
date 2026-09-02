@@ -432,14 +432,14 @@ impl<'a> WidgetPaintCtx<'a> {
 
     /// Draws an atlas icon through a widget-local painter.
     pub(crate) fn draw_icon(&mut self, id: IconId, rect: Recti, color: Color) {
-        // Callers resolve a semantic foreground before reaching this primitive, so explicit image
+        // Callers resolve a semantic content color before reaching this primitive, so explicit image
         // tints and role-specific state colors are preserved exactly.
         self.painter().icon(id, rect, color);
     }
 
     /// Draws an external image through a widget-local painter without recoloring its source pixels.
     pub(crate) fn draw_image(&mut self, image: TextureId, rect: Recti) {
-        // External images are already complete RGBA artwork. A theme foreground is appropriate for
+        // External images are already complete RGBA artwork. A theme content color is appropriate for
         // monochrome atlas glyphs, but multiplying a photograph or colored texture by black turns
         // every nontransparent pixel black. Opaque white is the multiplicative identity and keeps
         // image presentation independent from the selected theme's text color.
@@ -495,22 +495,22 @@ impl<'a> WidgetPaintCtx<'a> {
         crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch)
     }
 
-    /// Resolves a control foreground using this widget's complete interaction state.
-    pub(crate) fn control_foreground(&self, role: ControlRole) -> Color {
+    /// Resolves a control content color using this widget's complete interaction state.
+    pub(crate) fn control_content_color(&self, role: ControlRole) -> Color {
         // ControlState gives disabling precedence and nests pointer state beneath focus ownership.
-        self.common.style.control(role, self.control_state()).foreground
+        self.common.style.control(role, self.control_state()).content_color
     }
 
-    /// Resolves a menu foreground using an explicit menu selection state.
-    pub(crate) fn menu_foreground(&self, role: MenuRole, state: MenuState) -> Color {
+    /// Resolves a menu content color using an explicit menu selection state.
+    pub(crate) fn menu_content_color(&self, role: MenuRole, state: MenuState) -> Color {
         // Composite menu panels own their exact open, pointer, and keyboard selection state.
-        self.common.style.menu(role, state).foreground
+        self.common.style.menu(role, state).content_color
     }
 
-    /// Draws aligned control text using the foreground for one concrete control role.
+    /// Draws aligned control text using the content color for one concrete control role.
     pub(crate) fn draw_control_text_with_font(&mut self, font: FontId, text: &str, rect: Recti, role: ControlRole, opt: WidgetOption) {
         // Resolve the same state as the adjacent appearance before mutable display-list recording.
-        let color = self.control_foreground(role);
+        let color = self.control_content_color(role);
         self.draw_control_text_color_with_font(font, text, rect, color, opt);
     }
 
@@ -522,7 +522,7 @@ impl<'a> WidgetPaintCtx<'a> {
     /// and glyph-placement rules. Keeping that variation here prevents each composite from
     /// duplicating the authoritative control-text geometry.
     pub(crate) fn draw_control_text_color_with_font(&mut self, font: FontId, text: &str, rect: Recti, color: Color, opt: WidgetOption) {
-        // Composite callers have already resolved an exact role/state foreground. This primitive
+        // Composite callers have already resolved an exact role/state content color. This primitive
         // owns only authoritative text geometry, clipping, and recording.
         let pos = control_text_position_with_font(self.common.style, self.common.atlas, font, text, rect, opt);
         let mut painter = self.painter();

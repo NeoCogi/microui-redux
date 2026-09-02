@@ -348,7 +348,7 @@ impl Combo {
         ctx.draw_control_text_with_font(font, self.label.as_str(), text_rect, ControlRole::Combo, self.opt);
 
         let indicator_content = ctx.draw_control(ControlRole::Button, indicator);
-        let icon_color = ctx.control_foreground(ControlRole::Combo);
+        let icon_color = ctx.control_content_color(ControlRole::Combo);
         if let Some(indicator_content) = indicator_content {
             ctx.draw_icon(indicator_id, indicator_content, icon_color);
         }

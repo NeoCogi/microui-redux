@@ -185,7 +185,7 @@ also consumes Ctrl+F6 window-cycle chords; window cycling resumes only after the
 The complete visuals for `MenuRole::Title` and `MenuRole::Item` color menu labels, item text,
 marks, and arrows in the row's exact interaction state. Checked and radio state affects only the
 independent marker glyph. `MenuPopup` supplies the separator color. A theme can pair a dark selected PNG or
-flat highlight with a light hovered/focused foreground without changing ordinary menu text.
+flat highlight with a light hovered/focused content color without changing ordinary menu text.
 The `MenuBar` and `MenuPopup` visuals fill the persistent bar and popup surfaces. Menu surfaces
 receive the same context skin as window chrome and retained widgets and paint it directly. The
 current keyboard-selected heading or row uses `MenuState::Focused`, an open title uses

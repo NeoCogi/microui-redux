@@ -5,30 +5,30 @@
 // modification, are permitted provided that the conditions in LICENSE are met.
 //
 
-//! Complete background and foreground values selected from the typed appearance catalog.
+//! Complete patch and semantic-content colors selected from the typed appearance catalog.
 
 use crate::{Color, NinePatch};
 
 /// Complete paint description selected for one semantic role and meaningful state.
 ///
-/// The background patch and its adjacent text or glyph color intentionally travel together.
+/// The patch and its adjacent text or glyph color intentionally travel together.
 /// Keeping them in one concrete value prevents independently mutated catalogs from describing two
 /// different states for the same control.
 #[derive(Copy, Clone)]
 pub struct Visual {
     /// Background, border, or image-backed nine-patch painted for the visual.
     pub patch: NinePatch,
-    /// Foreground color used for text and semantic glyphs over the patch.
+    /// Color used for text and semantic glyphs drawn over the patch.
     ///
     /// A transparent value naturally suppresses separately drawn semantic content when the patch
     /// already contains the control's complete label or symbol.
-    pub foreground: Color,
+    pub content_color: Color,
 }
 
 impl Visual {
-    /// Creates one complete visual from its background and foreground values.
-    pub const fn new(patch: NinePatch, foreground: Color) -> Self {
+    /// Creates one complete visual from its patch and semantic-content color.
+    pub const fn new(patch: NinePatch, content_color: Color) -> Self {
         // Requiring both halves at construction keeps a visual complete at every API boundary.
-        Self { patch, foreground }
+        Self { patch, content_color }
     }
 }

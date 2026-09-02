@@ -57,7 +57,7 @@ let mut skin = ctx.skin().clone().with_metrics(|metrics| {
 });
 let button_state = ControlState::Enabled(PointerState::Normal);
 let mut button = skin.control(ControlRole::Button, button_state);
-button.foreground = color(55, 90, 160, 255);
+button.content_color = color(55, 90, 160, 255);
 skin.set_control(ControlRole::Button, button_state, button);
 ctx.set_skin(skin);
 ```

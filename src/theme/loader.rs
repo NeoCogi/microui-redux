@@ -531,9 +531,9 @@ fn install_appearance<const N: usize, State: Copy>(
             set(skin, state, visual);
             continue;
         };
-        if let Some(foreground) = authored.foreground {
-            // Foreground and background remain one complete runtime value at the mutation boundary.
-            visual.foreground = foreground;
+        if let Some(content_color) = authored.content_color {
+            // The patch and semantic content color remain one complete runtime value at the mutation boundary.
+            visual.content_color = content_color;
         }
         if let Some(path) = &authored.png {
             let source_insets = authored.source_insets.unwrap_or(destination_insets);
@@ -840,7 +840,7 @@ impl ChromeAppearanceDocument {
 #[serde(default, deny_unknown_fields)]
 struct StateDocument {
     /// Optional text and semantic-glyph color for this exact role and state.
-    foreground: Option<Color>,
+    content_color: Option<Color>,
     /// PNG path relative to the containing JSON file; absence keeps the flat fallback.
     png: Option<PathBuf>,
     /// Source-space PNG slices; defaults to the role's destination insets.
@@ -992,31 +992,31 @@ mod tests {
 
     /// Verifies one state can replace text and glyph color without supplying background artwork.
     #[test]
-    fn state_foreground_override_does_not_require_a_png() {
+    fn state_content_color_override_does_not_require_a_png() {
         let document = ThemeDefinition::parse_for_test(
             r#"{
                 "schema_version": 1,
-                "name": "Foreground states",
+                "name": "Content-color states",
                 "skin": { "palette": { "menu_foreground": [1, 2, 3, 255] } },
                 "appearances": {
                     "menu": {
                         "item": {
-                            "hovered": { "foreground": [250, 251, 252, 255] },
-                            "disabled": { "foreground": [90, 91, 92, 255] }
+                            "hovered": { "content_color": [250, 251, 252, 255] },
+                            "disabled": { "content_color": [90, 91, 92, 255] }
                         }
                     }
                 }
             }"#,
         )
-        .expect("foreground-only states must match the strict schema");
+        .expect("content-color-only states must match the strict schema");
         let atlas = test_atlas();
-        let theme_atlas = document.build_atlas(&atlas).expect("foreground-only theme must retain the base atlas");
+        let theme_atlas = document.build_atlas(&atlas).expect("content-color-only theme must retain the base atlas");
         let style = Skin::from_atlas(theme_atlas.atlas());
-        let loaded = document.install(theme_atlas, style).expect("foreground-only theme must install");
+        let loaded = document.install(theme_atlas, style).expect("content-color-only theme must install");
 
-        let normal = loaded.bundle().skin().menu(MenuRole::Item, MenuState::Normal).foreground;
-        let hovered = loaded.bundle().skin().menu(MenuRole::Item, MenuState::Hovered).foreground;
-        let disabled = loaded.bundle().skin().menu(MenuRole::Item, MenuState::Disabled).foreground;
+        let normal = loaded.bundle().skin().menu(MenuRole::Item, MenuState::Normal).content_color;
+        let hovered = loaded.bundle().skin().menu(MenuRole::Item, MenuState::Hovered).content_color;
+        let disabled = loaded.bundle().skin().menu(MenuRole::Item, MenuState::Disabled).content_color;
         assert_eq!((normal.r, normal.g, normal.b, normal.a), (1, 2, 3, 255));
         assert_eq!((hovered.r, hovered.g, hovered.b, hovered.a), (250, 251, 252, 255));
         assert_eq!((disabled.r, disabled.g, disabled.b, disabled.a), (90, 91, 92, 255));
@@ -1134,8 +1134,8 @@ mod tests {
                 crate::NinePatchContent::Flat { cells }
                     if matches!(cells.center, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (0, 0, 128, 255))
             ));
-            let foreground = loaded.bundle().skin().control(ControlRole::Item, state).foreground;
-            assert_eq!((foreground.r, foreground.g, foreground.b, foreground.a), (255, 255, 255, 255));
+            let content_color = loaded.bundle().skin().control(ControlRole::Item, state).content_color;
+            assert_eq!((content_color.r, content_color.g, content_color.b, content_color.a), (255, 255, 255, 255));
         }
     }
 
@@ -1202,20 +1202,25 @@ mod tests {
         ));
         // Base Windows 3.11 titles are white and require black text, while active blue titles use
         // white text. Pointer interaction is not a representable chrome state.
-        let base = loaded.bundle().skin().chrome(ChromeRole::Title, ChromeState::Base).foreground;
-        let active = loaded.bundle().skin().chrome(ChromeRole::Title, ChromeState::Active).foreground;
+        let base = loaded.bundle().skin().chrome(ChromeRole::Title, ChromeState::Base).content_color;
+        let active = loaded.bundle().skin().chrome(ChromeRole::Title, ChromeState::Active).content_color;
         assert_eq!((base.r, base.g, base.b, base.a), (0, 0, 0, 255));
         assert_eq!((active.r, active.g, active.b, active.a), (255, 255, 255, 255));
-        let disabled_title = loaded.bundle().skin().chrome(ChromeRole::Title, ChromeState::Disabled).foreground;
+        let disabled_title = loaded.bundle().skin().chrome(ChromeRole::Title, ChromeState::Disabled).content_color;
         assert_eq!((disabled_title.r, disabled_title.g, disabled_title.b, disabled_title.a), (125, 125, 125, 255));
         let minimize = loaded
             .bundle()
             .skin()
             .control(ControlRole::MinimizeButton, ControlState::Enabled(PointerState::Normal));
         assert_eq!(
-            (minimize.foreground.r, minimize.foreground.g, minimize.foreground.b, minimize.foreground.a),
+            (
+                minimize.content_color.r,
+                minimize.content_color.g,
+                minimize.content_color.b,
+                minimize.content_color.a
+            ),
             (0, 0, 0, 255),
-            "the caption control's foreground drives its manager-owned semantic symbol"
+            "the caption control's content color drives its manager-owned semantic symbol"
         );
         // Disabling must preserve the raised caption face authored by the theme. Letting these
         // roles fall back to their flat palette appearance would combine a one-pixel black frame
@@ -1234,7 +1239,7 @@ mod tests {
                     if normal.icon == disabled.icon
             ));
         }
-        let selected_text = loaded.bundle().skin().menu(MenuRole::Item, MenuState::Hovered).foreground;
+        let selected_text = loaded.bundle().skin().menu(MenuRole::Item, MenuState::Hovered).content_color;
         assert_eq!((selected_text.r, selected_text.g, selected_text.b, selected_text.a), (255, 255, 255, 255));
         let slider_normal = loaded
             .bundle()
@@ -1264,8 +1269,8 @@ mod tests {
                 loaded.bundle().skin().control(ControlRole::Item, state).patch.content,
                 crate::NinePatchContent::Image { .. }
             ));
-            let foreground = loaded.bundle().skin().control(ControlRole::Item, state).foreground;
-            assert_eq!((foreground.r, foreground.g, foreground.b, foreground.a), (255, 255, 255, 255));
+            let content_color = loaded.bundle().skin().control(ControlRole::Item, state).content_color;
+            assert_eq!((content_color.r, content_color.g, content_color.b, content_color.a), (255, 255, 255, 255));
         }
     }
 
@@ -1314,7 +1319,7 @@ mod tests {
         ));
 
         // Complete Mac caption faces suppress the manager-owned semantic symbol through their
-        // ordinary transparent foreground. Pressed artwork remains a distinct image for feedback.
+        // ordinary transparent content color. Pressed artwork remains a distinct image for feedback.
         let close_visual = loaded
             .bundle()
             .skin()
@@ -1323,8 +1328,8 @@ mod tests {
             .bundle()
             .skin()
             .control(ControlRole::CloseButton, ControlState::Enabled(PointerState::Pressed));
-        assert_eq!(close_visual.foreground.a, 0);
-        assert_eq!(close_pressed_visual.foreground.a, 0);
+        assert_eq!(close_visual.content_color.a, 0);
+        assert_eq!(close_pressed_visual.content_color.a, 0);
         let (crate::NinePatchContent::Image { image: close_image }, crate::NinePatchContent::Image { image: pressed_image }) =
             (close_visual.patch.content, close_pressed_visual.patch.content)
         else {
@@ -1334,7 +1339,7 @@ mod tests {
         assert_eq!((close_size.width, close_size.height), (12, 12));
         assert_ne!(close_image.icon, pressed_image.icon);
 
-        // Platinum popup selection uses black image-backed rows with white foreground text, while
+        // Platinum popup selection uses black image-backed rows with white content text, while
         // the popup itself retains its authored thick black and beveled frame.
         let menu_popup = loaded.bundle().skin().menu(MenuRole::Popup, MenuState::Normal).patch;
         let crate::NinePatchContent::Image { image: menu_popup_image } = menu_popup.content else {
@@ -1342,15 +1347,15 @@ mod tests {
         };
         let menu_popup_size = loaded.bundle().atlas().get_icon_size(menu_popup_image.icon);
         assert_eq!((menu_popup_size.width, menu_popup_size.height), (7, 7));
-        let selected_text = loaded.bundle().skin().menu(MenuRole::Item, MenuState::Hovered).foreground;
+        let selected_text = loaded.bundle().skin().menu(MenuRole::Item, MenuState::Hovered).content_color;
         assert_eq!((selected_text.r, selected_text.g, selected_text.b, selected_text.a), (255, 255, 255, 255));
         for state in [ControlState::Focused(PointerState::Normal), ControlState::Focused(PointerState::Hovered)] {
             assert!(matches!(
                 loaded.bundle().skin().control(ControlRole::Item, state).patch.content,
                 crate::NinePatchContent::Image { .. }
             ));
-            let foreground = loaded.bundle().skin().control(ControlRole::Item, state).foreground;
-            assert_eq!((foreground.r, foreground.g, foreground.b, foreground.a), (255, 255, 255, 255));
+            let content_color = loaded.bundle().skin().control(ControlRole::Item, state).content_color;
+            assert_eq!((content_color.r, content_color.g, content_color.b, content_color.a), (255, 255, 255, 255));
         }
     }
 }

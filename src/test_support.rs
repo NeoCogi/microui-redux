@@ -206,74 +206,74 @@ pub(crate) fn test_skin(atlas: &AtlasHandle) -> Skin {
     Skin::from_atlas(atlas)
 }
 
-/// Replaces every structural-surface patch while retaining fixture foregrounds.
+/// Replaces every structural-surface patch while retaining fixture content colors.
 pub(crate) fn replace_surface_patches(skin: &mut Skin, role: SurfaceRole, mut patch: impl FnMut(SurfaceState) -> NinePatch) {
     // Iterate the exact surface state domain and publish complete visuals one slot at a time.
     for state in SurfaceState::ALL {
-        skin.set_surface(role, state, Visual::new(patch(state), skin.surface(role, state).foreground));
+        skin.set_surface(role, state, Visual::new(patch(state), skin.surface(role, state).content_color));
     }
 }
 
-/// Replaces every control patch while retaining fixture foregrounds.
+/// Replaces every control patch while retaining fixture content colors.
 pub(crate) fn replace_control_patches(skin: &mut Skin, role: ControlRole, mut patch: impl FnMut(ControlState) -> NinePatch) {
     // Tests express state differences through a typed closure instead of rebuilding a generic table.
     for state in ControlState::ALL {
-        skin.set_control(role, state, Visual::new(patch(state), skin.control(role, state).foreground));
+        skin.set_control(role, state, Visual::new(patch(state), skin.control(role, state).content_color));
     }
 }
 
-/// Replaces one control patch while retaining that state's foreground.
+/// Replaces one control patch while retaining that state's content color.
 pub(crate) fn replace_control_patch(skin: &mut Skin, role: ControlRole, state: ControlState, patch: NinePatch) {
     // Resolve both halves before publishing one complete control visual.
-    skin.set_control(role, state, Visual::new(patch, skin.control(role, state).foreground));
+    skin.set_control(role, state, Visual::new(patch, skin.control(role, state).content_color));
 }
 
-/// Replaces every menu patch while retaining fixture foregrounds.
+/// Replaces every menu patch while retaining fixture content colors.
 pub(crate) fn replace_menu_patches(skin: &mut Skin, role: MenuRole, mut patch: impl FnMut(MenuState) -> NinePatch) {
     // Iterate only menu states, including Open, without manufacturing control combinations.
     for state in MenuState::ALL {
-        skin.set_menu(role, state, Visual::new(patch(state), skin.menu(role, state).foreground));
+        skin.set_menu(role, state, Visual::new(patch(state), skin.menu(role, state).content_color));
     }
 }
 
-/// Replaces one menu patch while retaining that state's foreground.
+/// Replaces one menu patch while retaining that state's content color.
 pub(crate) fn replace_menu_patch(skin: &mut Skin, role: MenuRole, state: MenuState, patch: NinePatch) {
     // Resolve both halves before publishing one complete menu visual.
-    skin.set_menu(role, state, Visual::new(patch, skin.menu(role, state).foreground));
+    skin.set_menu(role, state, Visual::new(patch, skin.menu(role, state).content_color));
 }
 
-/// Replaces every chrome patch while retaining fixture foregrounds.
+/// Replaces every chrome patch while retaining fixture content colors.
 pub(crate) fn replace_chrome_patches(skin: &mut Skin, role: ChromeRole, mut patch: impl FnMut(ChromeState) -> NinePatch) {
     // Activation-driven tests describe only base, active, and disabled chrome values.
     for state in ChromeState::ALL {
-        skin.set_chrome(role, state, Visual::new(patch(state), skin.chrome(role, state).foreground));
+        skin.set_chrome(role, state, Visual::new(patch(state), skin.chrome(role, state).content_color));
     }
 }
 
-/// Replaces one chrome patch while retaining that state's foreground.
+/// Replaces one chrome patch while retaining that state's content color.
 pub(crate) fn replace_chrome_patch(skin: &mut Skin, role: ChromeRole, state: ChromeState, patch: NinePatch) {
     // Resolve both halves before publishing one complete chrome visual.
-    skin.set_chrome(role, state, Visual::new(patch, skin.chrome(role, state).foreground));
+    skin.set_chrome(role, state, Visual::new(patch, skin.chrome(role, state).content_color));
 }
 
-/// Replaces every control foreground while retaining fixture patches.
-pub(crate) fn replace_control_foregrounds(skin: &mut Skin, role: ControlRole, mut foreground: impl FnMut(ControlState) -> Color) {
+/// Replaces every control content color while retaining fixture patches.
+pub(crate) fn replace_control_content_colors(skin: &mut Skin, role: ControlRole, mut content_color: impl FnMut(ControlState) -> Color) {
     // Color-focused tests still cross the production boundary with complete Visual values.
     for state in ControlState::ALL {
-        skin.set_control(role, state, Visual::new(skin.control(role, state).patch, foreground(state)));
+        skin.set_control(role, state, Visual::new(skin.control(role, state).patch, content_color(state)));
     }
 }
 
-/// Replaces one control foreground while retaining that state's patch.
-pub(crate) fn replace_control_foreground(skin: &mut Skin, role: ControlRole, state: ControlState, foreground: Color) {
+/// Replaces one control content color while retaining that state's patch.
+pub(crate) fn replace_control_content_color(skin: &mut Skin, role: ControlRole, state: ControlState, content_color: Color) {
     // Publish the retained patch and new control color together.
-    skin.set_control(role, state, Visual::new(skin.control(role, state).patch, foreground));
+    skin.set_control(role, state, Visual::new(skin.control(role, state).patch, content_color));
 }
 
-/// Replaces one menu foreground while retaining that state's patch.
-pub(crate) fn replace_menu_foreground(skin: &mut Skin, role: MenuRole, state: MenuState, foreground: Color) {
+/// Replaces one menu content color while retaining that state's patch.
+pub(crate) fn replace_menu_content_color(skin: &mut Skin, role: MenuRole, state: MenuState, content_color: Color) {
     // Publish the retained patch and new menu color together.
-    skin.set_menu(role, state, Visual::new(skin.menu(role, state).patch, foreground));
+    skin.set_menu(role, state, Visual::new(skin.menu(role, state).patch, content_color));
 }
 
 pub(crate) struct NoopRenderer {

@@ -283,11 +283,11 @@ pub struct Skin {
     revision: SkinRevision,
     /// Layout and widget geometry values.
     pub metrics: SkinMetrics,
-    /// Complete background and foreground visuals stored in their semantic state families.
+    /// Complete patch and content-color visuals stored in their semantic state families.
     ///
     /// Storage stays private so every public read and replacement crosses the API as one `Visual`.
-    /// This prevents callers from temporarily or permanently pairing a new background with the
-    /// foreground belonging to an unrelated state.
+    /// This prevents callers from temporarily or permanently pairing a new patch with the content
+    /// color belonging to an unrelated state.
     appearances: AppearanceCatalog,
     /// Concrete font identities selected once for every semantic typography role.
     ///
@@ -399,7 +399,7 @@ impl Skin {
 
     /// Replaces one complete structural surface visual.
     pub fn set_surface(&mut self, role: SurfaceRole, state: SurfaceState, visual: Visual) {
-        // Patch and foreground cross the mutation boundary together as one complete value.
+        // Patch and content color cross the mutation boundary together as one complete value.
         self.appearances.set_surface(role, state, visual);
     }
 
@@ -411,7 +411,7 @@ impl Skin {
 
     /// Replaces one complete interactive control visual.
     pub fn set_control(&mut self, role: ControlRole, state: ControlState, visual: Visual) {
-        // Patch and foreground cross the mutation boundary together as one complete value.
+        // Patch and content color cross the mutation boundary together as one complete value.
         self.appearances.set_control(role, state, visual);
     }
 
@@ -423,7 +423,7 @@ impl Skin {
 
     /// Replaces one complete menu visual.
     pub fn set_menu(&mut self, role: MenuRole, state: MenuState, visual: Visual) {
-        // Patch and foreground cross the mutation boundary together as one complete value.
+        // Patch and content color cross the mutation boundary together as one complete value.
         self.appearances.set_menu(role, state, visual);
     }
 
@@ -435,7 +435,7 @@ impl Skin {
 
     /// Replaces one complete manager-owned window chrome visual.
     pub fn set_chrome(&mut self, role: ChromeRole, state: ChromeState, visual: Visual) {
-        // Patch and foreground cross the mutation boundary together as one complete value.
+        // Patch and content color cross the mutation boundary together as one complete value.
         self.appearances.set_chrome(role, state, visual);
     }
 

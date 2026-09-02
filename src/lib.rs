@@ -136,7 +136,7 @@
 //! application widget focus.
 //! Only the current keyboard scope paints that remembered focus. Each semantic role and
 //! interaction state resolves one complete [`Visual`] containing both background art and its
-//! matching foreground. Focus and window activation therefore select ordinary role/state visuals
+//! matching semantic-content color. Focus and window activation therefore select ordinary role/state visuals
 //! instead of adding a second widget-independent paint effect.
 //!
 //! # Text encoding and glyph coverage

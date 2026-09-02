@@ -75,7 +75,7 @@ the theme directories must remain available beside the repository sources at run
             "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }
           },
           "hovered": { "png": "button-hovered.png" },
-          "pressed": { "png": "button-pressed.png", "foreground": [255, 255, 255, 255] }
+          "pressed": { "png": "button-pressed.png", "content_color": [255, 255, 255, 255] }
         },
         "focused": {
           "normal": { "png": "button-focused.png" },
@@ -108,8 +108,8 @@ that caches raw atlas UV coordinates must refresh those coordinates after instal
 bundle.
 
 An appearance or state may be omitted. Every omitted state keeps its own flat-color fallback; it
-does not borrow another state's PNG. A state may set `foreground` without a PNG to recolor its text
-and semantic glyphs over that fallback. Conversely, a PNG state may omit `foreground` and retain
+does not borrow another state's PNG. A state may set `content_color` without a PNG to recolor its
+text and semantic glyphs over that fallback. Conversely, a PNG state may omit `content_color` and retain
 the fallback color. This makes partial themes predictable and lets a theme use images only where
 they add value.
 
@@ -143,9 +143,9 @@ is the concrete `FlatPalette` and accepts RGBA byte arrays under these keys:
 - `selection_background`, `selection_foreground`, `window_active`
 - `menu_foreground`, `menu_background`
 
-These colors construct Skin's complete family catalogs before any per-state PNG or `foreground`
-override is installed. Each family role/state cell is one concrete `Visual { patch, foreground }`;
-background and foreground cannot drift through parallel catalogs, and no erased or string-keyed
+These colors construct Skin's complete family catalogs before any per-state PNG or `content_color`
+override is installed. Each family role/state cell is one concrete `Visual { patch, content_color }`;
+patches and content colors cannot drift through parallel catalogs, and no erased or string-keyed
 payload participates at runtime.
 
 The optional `skin.window_chrome` object is the concrete `WindowChromeSkin` recipe. It accepts
@@ -212,7 +212,7 @@ own domains rather than being encoded as duplicate role names.
 body and border resolve the normal appearance while the pointer moves across them. Losing
 top-level activation selects the `base` state of `chrome.window_frame`, `chrome.dialog_frame`, and
 `chrome.title` but does not rewrite enabled child widgets. A disabled widget or subtree
-resolves `disabled` independently of activation; its foreground uses `disabled_foreground` (or
+resolves `disabled` independently of activation; its content color uses `disabled_foreground` (or
 `disabled_title_foreground` for chrome), and omitted PNG states use
 `disabled_background` as their flat fallback. The ordinary frame pair and modal dialog pair also
 use normal center artwork for the application body even when a resize edge is hovered or captured.
@@ -258,15 +258,15 @@ from manager-owned pointer capture just like widgets. A press dragged away from 
 caption button is no longer painted pressed and does not activate on release.
 
 The manager draws each caption control's close, minimize, maximize, or restore symbol using that
-control state's `foreground`. Image-backed caption faces that already contain their complete symbol
-set `foreground` alpha to zero. There are no separate caption-glyph roles or window-chrome switch,
+control state's `content_color`. Image-backed caption faces that already contain their complete symbol
+set `content_color` alpha to zero. There are no separate caption-glyph roles or window-chrome switch,
 so the same role/state visual fully describes each control without special handling in the loader.
 
 `skin.window_chrome` supplies exact platform geometry without a loader-owned preset enum. A
 conventional theme may omit it and receive leading text with trailing caption buttons. The bundled
 Mac theme directly selects centered text, a compact leading close box, trailing
 zoom/windowshade controls, and an active-title backdrop. Its caption PNGs are complete faces, so
-these states use a transparent foreground and do not show an additional manager-owned symbol. The
+these states use a transparent content color and do not show an additional manager-owned symbol. The
 manager consumes only the concrete `WindowChromeSkin` fields and never branches on a theme or
 platform mode.
 

@@ -172,7 +172,7 @@ impl TextBlock {
         let color = ctx
             .skin()
             .surface(SurfaceRole::GenericFrame, SurfaceState::from_enabled(ctx.enabled()))
-            .foreground;
+            .content_color;
         let line_height = ctx.atlas().get_font_height(font) as i32;
         let baseline = ctx.atlas().get_font_baseline(font);
         let max_width = if self.wrap == TextWrap::Word { bounds.width.max(1) } else { i32::MAX / 4 };

@@ -718,7 +718,7 @@ impl MenuSurface {
                     let text = text_region(row, self.geometry.marker_width);
                     // Text, marks, and shortcut hints resolve the same semantic role and exact
                     // interaction state as the row background.
-                    let color = ctx.menu_foreground(role, state);
+                    let color = ctx.menu_content_color(role, state);
                     paint_item_marker(&mut ctx, marker, item.parameters.mark, color);
                     let font = style.resolve_font(ctx.atlas(), &item.parameters.font);
                     // Both strings share one clip so control padding is applied exactly once.
@@ -737,7 +737,7 @@ impl MenuSurface {
                     // Bar headings use their full slot; popup branches reserve the marker gutter.
                     let text = if self.popup { text_region(row, self.geometry.marker_width) } else { row };
                     let font = style.resolve_font(ctx.atlas(), &FontRef::Role(FontRole::Body));
-                    let color = ctx.menu_foreground(role, state);
+                    let color = ctx.menu_content_color(role, state);
                     ctx.draw_control_text_color_with_font(font, label, text, color, WidgetOption::NONE);
                     if self.popup {
                         paint_submenu_arrow(&mut ctx, text, color);
@@ -1012,7 +1012,7 @@ fn paint_submenu_arrow(ctx: &mut WidgetPaintCtx<'_>, bounds: Recti, color: Color
 
 /// Paints one centered subdued separator rule.
 fn paint_separator(ctx: &mut WidgetPaintCtx<'_>, row: Recti) {
-    // Keep horizontal breathing room and derive low contrast from the menu foreground.
+    // Keep horizontal breathing room and derive low contrast from the menu content color.
     let padding = ctx.skin().metrics.padding.max(1);
     let rule = Recti::new(
         row.x.saturating_add(padding),
@@ -1020,7 +1020,7 @@ fn paint_separator(ctx: &mut WidgetPaintCtx<'_>, row: Recti) {
         row.width.saturating_sub(padding.saturating_mul(2)).max(0),
         1,
     );
-    let mut color = ctx.menu_foreground(MenuRole::Popup, MenuState::Normal);
+    let mut color = ctx.menu_content_color(MenuRole::Popup, MenuState::Normal);
     color.a = ((u16::from(color.a) * 45) / 100).max(1) as u8;
     ctx.draw_rect(rule, color);
 }

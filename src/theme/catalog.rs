@@ -134,11 +134,11 @@ fn flat_surface_visual(frame_insets: SliceInsets, palette: &FlatPalette, role: S
         (SurfaceRole::Panel, SurfaceState::Normal) => NinePatch::framed(frame_insets, palette.border, Some(palette.panel_background)),
         (SurfaceRole::Panel, SurfaceState::Disabled) => NinePatch::framed(frame_insets, palette.border, Some(palette.disabled_background)),
     };
-    let foreground = match state {
+    let content_color = match state {
         SurfaceState::Normal => palette.text,
         SurfaceState::Disabled => palette.disabled_foreground,
     };
-    Visual::new(patch, foreground)
+    Visual::new(patch, content_color)
 }
 
 /// Resolves one interactive control from its concrete role and nested control state.
@@ -183,9 +183,9 @@ fn flat_control_visual(frame_insets: SliceInsets, palette: &FlatPalette, role: C
             ControlState::Enabled(_) | ControlState::Focused(_) => NinePatch::solid(palette.scrollbar_thumb),
         },
     };
-    // Foreground selection is separate from patch grouping because item selection and caption
+    // Content-color selection is separate from patch grouping because item selection and caption
     // symbols have explicit contrast policies that ordinary controls do not share.
-    let foreground = match role {
+    let content_color = match role {
         ControlRole::Item => match state {
             ControlState::Disabled => palette.disabled_foreground,
             ControlState::Enabled(PointerState::Normal) => palette.text,
@@ -201,7 +201,7 @@ fn flat_control_visual(frame_insets: SliceInsets, palette: &FlatPalette, role: C
             ControlState::Enabled(_) | ControlState::Focused(_) => palette.text,
         },
     };
-    Visual::new(patch, foreground)
+    Visual::new(patch, content_color)
 }
 
 /// Resolves one menu surface or entry from the menu-specific state domain.
@@ -227,12 +227,12 @@ fn flat_menu_visual(frame_insets: SliceInsets, palette: &FlatPalette, role: Menu
             _ => NinePatch::framed(frame_insets, palette.border, Some(palette.menu_background)),
         },
     };
-    let foreground = match state {
+    let content_color = match state {
         MenuState::Disabled => palette.disabled_foreground,
         _ if selected && matches!(role, MenuRole::Title | MenuRole::Item) => palette.selection_foreground,
         _ => palette.menu_foreground,
     };
-    Visual::new(patch, foreground)
+    Visual::new(patch, content_color)
 }
 
 /// Resolves one window-chrome visual from activation and availability only.
@@ -251,13 +251,13 @@ fn flat_chrome_visual(frame_insets: SliceInsets, palette: &FlatPalette, role: Ch
             ChromeState::Disabled => NinePatch::solid(palette.title_background),
         },
     };
-    let foreground = match (role, state) {
+    let content_color = match (role, state) {
         (ChromeRole::Title, ChromeState::Disabled) => palette.disabled_title_foreground,
         (ChromeRole::Title, ChromeState::Base | ChromeState::Active) => palette.title_foreground,
         (_, ChromeState::Disabled) => palette.disabled_foreground,
         (_, ChromeState::Base | ChromeState::Active) => palette.text,
     };
-    Visual::new(patch, foreground)
+    Visual::new(patch, content_color)
 }
 
 #[cfg(test)]
@@ -280,8 +280,8 @@ mod tests {
         let state = ControlState::Focused(PointerState::Pressed);
         changed.set_control(ControlRole::Button, state, replacement);
 
-        assert_ne!(original.control(ControlRole::Button, state).foreground.r, 10);
-        assert_eq!(changed.control(ControlRole::Button, state).foreground.r, 10);
+        assert_ne!(original.control(ControlRole::Button, state).content_color.r, 10);
+        assert_eq!(changed.control(ControlRole::Button, state).content_color.r, 10);
     }
 
     /// Verifies a dark control-focus accent cannot darken an independently selected item.
@@ -311,6 +311,6 @@ mod tests {
             crate::NinePatchContent::Flat { cells }
                 if matches!(cells.center, crate::NinePatchCell::Color { color } if channels(color) == (0, 0, 170, 255))
         ));
-        assert_eq!(channels(item.foreground), (255, 255, 255, 255));
+        assert_eq!(channels(item.content_color), (255, 255, 255, 255));
     }
 }

@@ -9,7 +9,7 @@ subtle rather than using a modern control glow. Combo popup rows use the period 
 white text for pointer hover and keyboard focus, including focused pointer states, while the raised header
 retains independent pressed and keyboard-focused artwork.
 Activation selects the blue or white title and the corresponding frame state without recoloring the
-client hierarchy. Disabled foreground, background, and button artwork remains a separate explicit
+client hierarchy. Disabled content color, background, and button artwork remains a separate explicit
 state rather than an inference from which window currently owns activation.
 
 The visual research reference was the
@@ -30,6 +30,6 @@ Modal dialogs instead use a uniform four-pixel outer frame: black in the base st
 Menu bars and popup interiors are white, popup shells use a solid two-pixel black frame instead of
 window bevels, and highlighted rows pair the `#0000AA` selection with white state-specific foregrounds.
 Caption controls use the manager-owned close, minimize, maximize, and restore symbols colored by
-each button state's foreground. Their raised and pressed faces remain ordinary control appearance
+each button state's content color. Their raised and pressed faces remain ordinary control appearance
 artwork; no caption-only overlay role enters the theme schema. No reference asset was copied or
 transformed.

@@ -164,7 +164,7 @@ impl Checkbox {
         if checked {
             // The check glyph is the complete persistent-state cue; the surrounding square remains
             // governed only by its ordinary pointer, keyboard, and disabled interaction state.
-            let color = ctx.control_foreground(ControlRole::Checkbox);
+            let color = ctx.control_content_color(ControlRole::Checkbox);
             if let Some(box_content) = box_content {
                 let check = ctx.skin().resolve_icon_role(ctx.atlas(), crate::IconRole::Check);
                 ctx.draw_icon(check, box_content, color);

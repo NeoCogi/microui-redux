@@ -116,7 +116,7 @@ indexed_role! {
         WindowFrame,
         /// Modal-dialog outer frame and body.
         DialogFrame,
-        /// Window title background and foreground.
+        /// Window title patch and semantic-content color.
         Title,
     }
 }

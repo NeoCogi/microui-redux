@@ -33,9 +33,9 @@ use crate::{ChromeRole, ChromeState, ControlRole, ControlState, MenuRole, MenuSt
 use super::*;
 
 use crate::test_support::{
-    AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, replace_chrome_patch, replace_chrome_patches, replace_control_foreground,
-    replace_control_foregrounds, replace_control_patch, replace_control_patches, replace_menu_foreground, replace_menu_patch, replace_menu_patches, test_atlas,
-    replace_surface_patches, test_skin,
+    AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, replace_chrome_patch, replace_chrome_patches, replace_control_content_color,
+    replace_control_content_colors, replace_control_patch, replace_control_patches, replace_menu_content_color, replace_menu_patch, replace_menu_patches,
+    test_atlas, replace_surface_patches, test_skin,
 };
 use crate::{
     color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Combo, ComboParameters, ComboSubmitted, Custom, Color,
@@ -220,7 +220,7 @@ impl crate::LeafWidget for CompleteSkinMeasureProbe {
         // Foreground color is paint-only for built-ins. Observing it here proves the complete skin
         // revision covers every value visible to a custom widget's public measurement contract.
         self.measures.set(self.measures.get() + 1);
-        Dimensioni::new(i32::from(style.menu(MenuRole::Popup, MenuState::Normal).foreground.r).max(1), 10)
+        Dimensioni::new(i32::from(style.menu(MenuRole::Popup, MenuState::Normal).content_color.r).max(1), 10)
     }
 }
 
@@ -949,7 +949,7 @@ fn deactivated_window_keeps_enabled_child_widget_appearance() {
     let enabled_text_color = color(199, 211, 223, 255);
     let disabled_text_color = color(227, 233, 239, 255);
     let mut style = test_skin(&atlas);
-    replace_control_foregrounds(&mut style, ControlRole::Button, |state| {
+    replace_control_content_colors(&mut style, ControlRole::Button, |state| {
         if state == ControlState::Disabled {
             disabled_text_color
         } else {
@@ -1018,7 +1018,7 @@ fn deactivated_window_keeps_enabled_child_widget_appearance() {
     assert!(atlas_quads_with_color(&events, disabled_text_color).is_empty());
 }
 
-/// Verifies theme foreground colors cannot recolor complete external image artwork.
+/// Verifies theme content colors cannot recolor complete external image artwork.
 #[test]
 fn external_widget_images_use_color_preserving_white_tint() {
     let atlas = test_atlas();
@@ -1027,7 +1027,7 @@ fn external_widget_images_use_color_preserving_white_tint() {
     let mut style = ctx.skin().clone();
     // Reproduce the classic themes' black control text. This formerly multiplied every external
     // image channel by zero even though the same texture was correct under the light default text.
-    replace_control_foregrounds(&mut style, ControlRole::Button, |_| color(0, 0, 0, 255));
+    replace_control_content_colors(&mut style, ControlRole::Button, |_| color(0, 0, 0, 255));
     ctx.set_skin(style);
     let texture = ctx.load_image_rgba(2, 2, &[255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255]);
     let (_, image_button) = Button::create(ButtonParameters::with_image(
@@ -1052,7 +1052,7 @@ fn external_widget_images_use_color_preserving_white_tint() {
         .expect("image button must submit its external texture");
     assert!(
         image.iter().all(|vertex| vertex.color == [255, 255, 255, 255]),
-        "external images must use the multiplicative identity tint regardless of theme foreground"
+        "external images must use the multiplicative identity tint regardless of theme content color"
     );
 }
 
@@ -1091,14 +1091,14 @@ fn disabled_window_propagates_disabled_presentation_and_rejects_input() {
         NinePatch::solid(disabled_caption_color),
     );
     replace_menu_patch(&mut style, MenuRole::Bar, MenuState::Disabled, NinePatch::solid(disabled_menu_color));
-    replace_menu_foreground(&mut style, MenuRole::Title, MenuState::Disabled, disabled_menu_text_color);
+    replace_menu_content_color(&mut style, MenuRole::Title, MenuState::Disabled, disabled_menu_text_color);
     replace_control_patch(
         &mut style,
         ControlRole::Checkbox,
         ControlState::Disabled,
         NinePatch::solid(disabled_control_color),
     );
-    replace_control_foreground(&mut style, ControlRole::Checkbox, ControlState::Disabled, disabled_control_text_color);
+    replace_control_content_color(&mut style, ControlRole::Checkbox, ControlState::Disabled, disabled_control_text_color);
 
     let (checkbox, checkbox_node) = Checkbox::create(CheckboxParameters::new("disabled child", false));
     let checkbox_id = checkbox_node.id();
@@ -1372,9 +1372,9 @@ fn global_skin_revision_invalidates_measurements_lazily_in_hidden_surfaces() {
     // complete Skin revision; revealing later must not revive the earlier generation's entry.
     ctx.ui().set_window_visible(&window, false).unwrap();
     let mut replacement = ctx.skin().clone();
-    let mut foreground = replacement.menu(MenuRole::Popup, MenuState::Normal).foreground;
-    foreground.r = foreground.r.wrapping_add(1);
-    replace_menu_foreground(&mut replacement, MenuRole::Popup, MenuState::Normal, foreground);
+    let mut content_color = replacement.menu(MenuRole::Popup, MenuState::Normal).content_color;
+    content_color.r = content_color.r.wrapping_add(1);
+    replace_menu_content_color(&mut replacement, MenuRole::Popup, MenuState::Normal, content_color);
     ctx.set_skin(replacement);
     ctx.update_ui(dimensions);
     assert_eq!(measures.get(), warmed, "hidden widget trees must not be traversed during the style commit");

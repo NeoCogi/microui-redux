@@ -207,7 +207,7 @@ impl ListItem {
             let consumed = icon_width.saturating_add(padding.saturating_mul(2));
             text_rect.x = text_rect.x.saturating_add(consumed);
             text_rect.width = text_rect.width.saturating_sub(consumed).max(0);
-            let color = ctx.control_foreground(ControlRole::Item);
+            let color = ctx.control_content_color(ControlRole::Item);
             ctx.draw_icon(icon, icon_rect, color);
         }
 

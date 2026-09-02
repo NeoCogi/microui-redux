@@ -701,7 +701,7 @@ pub(super) fn record_root_overlay(
         let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, title, style.chrome(ChromeRole::Title, chrome_state).patch);
         let text = root_title_text_rect(title, geometry, &style.window_chrome);
         if text.width > 0 && text.height > 0 {
-            let color = style.chrome(ChromeRole::Title, chrome_state).foreground;
+            let color = style.chrome(ChromeRole::Title, chrome_state).content_color;
             let options = match style.window_chrome.title_alignment {
                 WindowTitleAlignment::Leading => crate::WidgetOption::NONE,
                 WindowTitleAlignment::Centered => crate::WidgetOption::ALIGN_CENTER,
@@ -778,7 +778,7 @@ fn paint_caption_button(
     let Some(content) = crate::ui_node::frame::paint_internal_frame(painter, rect, appearance.patch) else {
         return;
     };
-    let color = appearance.foreground;
+    let color = appearance.content_color;
     match button {
         RootCaptionButton::Close => {
             // Close retains the atlas icon already required by every Skin and test atlas.
@@ -845,19 +845,19 @@ mod tests {
         assert_eq!(width_pressed.part_pointer_state(right), PointerState::Pressed);
     }
 
-    /// Verifies caption symbols use the control foreground instead of a second appearance role.
+    /// Verifies caption symbols use the control content color instead of a second appearance role.
     #[test]
-    fn transparent_caption_foreground_suppresses_the_manager_owned_symbol() {
+    fn transparent_caption_content_color_suppresses_the_manager_owned_symbol() {
         let atlas = crate::test_support::test_atlas();
         let opaque = crate::test_support::test_skin(&atlas);
         let state = ControlState::Enabled(PointerState::Normal);
         let mut complete_face = opaque.clone();
         let mut visual = complete_face.control(ControlRole::CloseButton, state);
-        visual.foreground.a = 0;
+        visual.content_color.a = 0;
         complete_face.set_control(ControlRole::CloseButton, state, visual);
 
         let record_count = |style: &Skin| {
-            // Paint the same face through the production helper. Only the ordinary foreground
+            // Paint the same face through the production helper. Only the ordinary content color
             // channel differs, so the opaque result must contain exactly one additional icon op.
             let mut display_list = crate::render::DisplayList::default();
             let mut painter = Painter::screen_space(&mut display_list, Recti::new(0, 0, 32, 32));

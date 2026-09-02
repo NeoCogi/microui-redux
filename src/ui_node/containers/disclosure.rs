@@ -280,12 +280,12 @@ impl Widget for DisclosureHeader {
         }
 
         // Reserve a square icon cell from row height, then paint text in the remaining rectangle.
-        let foreground_role = if self.variant == DisclosureVariant::Header && self.opt.intersects(WidgetOption::FRAME) {
+        let content_role = if self.variant == DisclosureVariant::Header && self.opt.intersects(WidgetOption::FRAME) {
             ControlRole::Button
         } else {
             ControlRole::Item
         };
-        let text_color = ctx.control_foreground(foreground_role);
+        let text_color = ctx.control_content_color(content_role);
         let icon = if expanded {
             ctx.skin().resolve_icon_role(ctx.atlas(), crate::IconRole::Collapse)
         } else {
@@ -297,7 +297,7 @@ impl Widget for DisclosureHeader {
         // text_x = row_x + text_offset; text_width = row_width - text_offset.
         let text_rect = Recti::new(row.x.saturating_add(offset), row.y, row.width.saturating_sub(offset), row.height);
         let body_font = ctx.skin().resolve_font_role(ctx.atlas(), crate::FontRole::Body);
-        ctx.draw_control_text_with_font(body_font, &self.label, text_rect, foreground_role, self.opt);
+        ctx.draw_control_text_with_font(body_font, &self.label, text_rect, content_role, self.opt);
     }
 
     // Framing belongs to the header sub-rectangle, not the complete descendant allocation.

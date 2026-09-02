@@ -216,7 +216,7 @@ impl Button {
                     ctx.draw_control_text_with_font(font, label, placement.text, ControlRole::Button, self.opt);
                 }
                 if let (Some(icon), Some(visual)) = (icon_id, placement.visual) {
-                    let color = ctx.control_foreground(ControlRole::Button);
+                    let color = ctx.control_content_color(ControlRole::Button);
                     ctx.draw_icon(icon, visual, color);
                 }
             }
@@ -228,7 +228,7 @@ impl Button {
                 }
                 if let (Some(image), Some(visual)) = (*image, placement.visual) {
                     // External image pixels carry their own color; the adjacent label alone uses
-                    // the stateful Button foreground selected by the active theme.
+                    // the stateful Button content color selected by the active theme.
                     ctx.draw_image(image, visual);
                 }
             }
@@ -244,7 +244,7 @@ impl Button {
                 }
                 if let (Some(image), Some(visual)) = (*image, placement.visual) {
                     // Scaling changes only destination geometry; it must not introduce a theme
-                    // foreground tint that destroys the source image's RGB channels.
+                    // content-color tint that destroys the source image's RGB channels.
                     ctx.draw_image(image, visual);
                 }
             }
