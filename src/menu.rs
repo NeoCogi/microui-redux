@@ -504,11 +504,18 @@ impl MenuSurface {
         self.rect.contains_point(point) && self.clip.contains_point(point)
     }
 
+    /// Clears only pointer hover while retaining any active press capture.
+    pub(crate) fn clear_pointer_hover(&mut self) {
+        // The manager resets menu hover before routing every pointer event because a persistent bar
+        // does not receive events aimed at the application body that shares its root surface.
+        self.hovered_slot = None;
+    }
+
     /// Clears hover and capture without changing the forest-derived open highlight.
     pub(crate) fn clear_pointer_targets(&mut self) {
         // Open state is synchronized separately from active forest edges and must survive ordinary
         // hover loss until the manager commits a different popup path.
-        self.hovered_slot = None;
+        self.clear_pointer_hover();
         self.captured = false;
     }
 

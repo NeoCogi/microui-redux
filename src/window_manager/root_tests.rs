@@ -3866,6 +3866,67 @@ fn active_menu_path_hot_tracks_headings_and_submenu_siblings_without_outside_hov
     assert_eq!(ctx.debug_active_popup_names(), ["menu hover Edit Menu"]);
 }
 
+/// Verifies an outside widget press clears every transient state from the former menu heading.
+#[test]
+fn outside_widget_press_clears_closed_menu_heading_hover() {
+    let atlas = test_atlas();
+    let title_normal = color(41, 53, 67, 255);
+    let title_hovered = color(79, 97, 113, 255);
+    let title_focused = color(131, 149, 167, 255);
+    let title_open = color(181, 197, 211, 255);
+    let mut style = test_skin(&atlas);
+    style
+        .visuals
+        .set_patch(AppearanceRole::MenuTitle, VisualState::Normal, NinePatch::solid(title_normal));
+    style
+        .visuals
+        .set_patch(AppearanceRole::MenuTitle, VisualState::Hovered, NinePatch::solid(title_hovered));
+    style
+        .visuals
+        .set_patch(AppearanceRole::MenuTitle, VisualState::Focused, NinePatch::solid(title_focused));
+    style
+        .visuals
+        .set_patch(AppearanceRole::MenuTitleOpen, VisualState::Normal, NinePatch::solid(title_open));
+
+    let (_, action) = MenuItem::create(MenuItemParameters::new("Action"));
+    let (_, button) = Button::create(ButtonParameters::new("Outside target"));
+    let button_id = button.id();
+    let (backend, log) = recording_backend(atlas);
+    let dimensions = Dimensioni::new(320, 240);
+    let mut ctx = Context::<_>::new(backend);
+    ctx.set_skin(style);
+    let root = ctx
+        .ui()
+        .create_window(Window::new("menu hover reset", rect(20, 20, 220, 160), button).menu_bar(MenuBar::new([Menu::new("File").item(action)])));
+    ctx.update_ui(dimensions);
+
+    let heading = ctx.debug_menu_anchor_rects(root.id()).unwrap()[0].unwrap();
+    let heading_point = Vec2i::new(heading.x + heading.width / 2, heading.y + heading.height / 2);
+    ctx.mousedown(heading_point.x, heading_point.y, MouseButton::LEFT);
+    ctx.mouseup(heading_point.x, heading_point.y, MouseButton::LEFT);
+    ctx.update_ui(dimensions);
+    assert_eq!(ctx.debug_active_popup_names(), ["menu hover reset File Menu"]);
+
+    // Selecting a popup row establishes menu hover before the pointer leaves for a normal widget.
+    let row = ctx.debug_active_menu_row_rects()[0][0];
+    ctx.mousemove(row.x + row.width / 2, row.y + row.height / 2);
+    ctx.update_ui(dimensions);
+    let outside = ctx.debug_root_node_rect(root.id(), button_id).unwrap();
+    let outside_point = Vec2i::new(outside.x + outside.width / 2, outside.y + outside.height / 2);
+    ctx.mousedown(outside_point.x, outside_point.y, MouseButton::LEFT);
+    ctx.mouseup(outside_point.x, outside_point.y, MouseButton::LEFT);
+    ctx.update_ui(dimensions);
+    assert!(ctx.debug_active_popup_names().is_empty());
+
+    log.clear();
+    ctx.frame(frame_info(dimensions)).render_ui().unwrap();
+    let events = log.snapshot();
+    assert!(!atlas_quads_with_color(&events, title_normal).is_empty());
+    assert!(atlas_quads_with_color(&events, title_hovered).is_empty());
+    assert!(atlas_quads_with_color(&events, title_focused).is_empty());
+    assert!(atlas_quads_with_color(&events, title_open).is_empty());
+}
+
 /// Verifies that choosing a sibling submenu removes every deeper popup from the old branch.
 #[test]
 fn opening_sibling_submenu_replaces_the_complete_descendant_suffix() {

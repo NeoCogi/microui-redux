@@ -2054,6 +2054,23 @@ impl WindowManager {
         }
     }
 
+    /// Clears cached menu hover before one topmost surface receives the current pointer event.
+    fn clear_menu_pointer_hover(&mut self) {
+        // Menu bars share their root key with application content, so ordinary widget routing cannot
+        // tell the bar that the pointer left it. Clear every compact surface first; routing below
+        // restores hover only on the menu that actually owns the event without revoking capture.
+        for node in &mut self.surfaces.nodes {
+            if let Some(root) = node.root_mut()
+                && let Some(bar) = root.menu_bar.as_mut()
+            {
+                bar.clear_pointer_hover();
+            }
+            if let Some(menu) = node.surface.body.menu_mut() {
+                menu.clear_pointer_hover();
+            }
+        }
+    }
+
     /// Commits one exclusive root-chrome hover target for stateful caption and resize painting.
     fn update_chrome_hover(&mut self, surface: Option<SurfaceKey>, point: Vec2i) {
         // Clear every root first because input selection is topmost and exclusive. A popup or menu
@@ -2756,8 +2773,10 @@ impl WindowManager {
             .and_then(|surface| self.surfaces.owning_root(surface))
             .is_some_and(|owner| active_window_before_press == Some(owner));
         if event.is_pointer() {
-            // Hover is paint state even when no button is pressed or the selected chrome region
-            // ultimately lets the event fall through to application content.
+            // Hover is exclusive paint state even when no button is pressed or the selected chrome
+            // region ultimately lets the event fall through to application content. Persistent menu
+            // bars need an explicit reset because their root may instead route this event to a widget.
+            self.clear_menu_pointer_hover();
             self.update_chrome_hover(interactive_hover, input.mouse_pos);
         }
         if matches!(event, UiInputEvent::MouseDown { .. })
