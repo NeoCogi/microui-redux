@@ -243,9 +243,8 @@ fn flat_chrome_visual(frame_insets: SliceInsets, palette: &FlatPalette, role: Ch
     // own enabled, focus, and pointer states independently of the active window.
     let patch = match role {
         ChromeRole::WindowFrame | ChromeRole::DialogFrame => match state {
-            ChromeState::Base => NinePatch::framed(frame_insets, palette.border, Some(palette.window_background)),
-            ChromeState::Active => NinePatch::framed(frame_insets.at_least(1), palette.window_active, Some(palette.window_background)),
-            ChromeState::Disabled => NinePatch::framed(frame_insets, palette.border, Some(palette.disabled_background)),
+            ChromeState::Base | ChromeState::Disabled => NinePatch::framed(frame_insets, palette.border, None),
+            ChromeState::Active => NinePatch::framed(frame_insets.at_least(1), palette.window_active, None),
         },
         ChromeRole::Title => match state {
             ChromeState::Base => NinePatch::solid(palette.title_background),
@@ -304,6 +303,16 @@ mod tests {
                 patch.content,
                 crate::NinePatchContent::Flat { cells }
                     if matches!(cells.center, crate::NinePatchCell::Color { color } if channels(color) == expected)
+            ));
+        }
+
+        // Flat chrome fallbacks contain border cells only. The runtime applies the same rule to
+        // authored image patches by omitting their center during the decorative overlay pass.
+        for state in ChromeState::ALL {
+            let patch = visuals.chrome(ChromeRole::WindowFrame, state).patch;
+            assert!(matches!(
+                patch.content,
+                crate::NinePatchContent::Flat { cells } if matches!(cells.center, crate::NinePatchCell::Empty)
             ));
         }
     }

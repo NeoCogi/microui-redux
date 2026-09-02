@@ -28,14 +28,14 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-use crate::{ChromeRole, ChromeState, ControlRole, ControlState, MenuRole, MenuState, PointerState, SurfaceRole};
+use crate::{ChromeRole, ChromeState, ControlRole, ControlState, MenuRole, MenuState, PointerState, SurfaceRole, SurfaceState};
 
 use super::*;
 
 use crate::test_support::{
     AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, replace_chrome_patch, replace_chrome_patches, replace_control_content_color,
     replace_control_content_colors, replace_control_patch, replace_control_patches, replace_menu_content_color, replace_menu_patch, replace_menu_patches,
-    test_atlas, replace_surface_patches, test_skin,
+    replace_surface_patch, replace_surface_patches, test_atlas, test_skin,
 };
 use crate::{
     color, rect, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Combo, ComboParameters, ComboSubmitted, Custom, Color,
@@ -896,14 +896,25 @@ fn active_window_and_only_its_remembered_widget_use_role_state_visuals() {
 /// Verifies modal presentation selects dialog frame roles without restyling ordinary windows.
 #[test]
 fn modal_dialog_uses_its_own_active_frame_role() {
-    // Use unique solid body colors so the background pass proves the selected semantic role even
-    // when a frame has no visible edge cells. The title and retained content use unrelated colors.
+    // Use unique border colors so the overlay pass proves the selected decorative role. Window
+    // and dialog bodies now share SurfaceRole::Window and cannot conceal an incorrect frame role.
     let atlas = test_atlas();
     let window_frame_color = color(11, 37, 71, 255);
     let dialog_frame_color = color(83, 109, 149, 255);
     let mut style = test_skin(&atlas);
-    replace_chrome_patch(&mut style, ChromeRole::WindowFrame, ChromeState::Active, NinePatch::solid(window_frame_color));
-    replace_chrome_patch(&mut style, ChromeRole::DialogFrame, ChromeState::Active, NinePatch::solid(dialog_frame_color));
+    let frame_insets = crate::SliceInsets::uniform(2);
+    replace_chrome_patch(
+        &mut style,
+        ChromeRole::WindowFrame,
+        ChromeState::Active,
+        NinePatch::framed(frame_insets, window_frame_color, None),
+    );
+    replace_chrome_patch(
+        &mut style,
+        ChromeRole::DialogFrame,
+        ChromeState::Active,
+        NinePatch::framed(frame_insets, dialog_frame_color, None),
+    );
 
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
@@ -957,11 +968,12 @@ fn deactivated_window_keeps_enabled_child_widget_appearance() {
         }
     });
     replace_chrome_patches(&mut style, ChromeRole::WindowFrame, |state| {
-        NinePatch::solid(if state == ChromeState::Active {
+        let border = if state == ChromeState::Active {
             active_window_color
         } else {
             base_window_color
-        })
+        };
+        NinePatch::framed(crate::SliceInsets::uniform(2), border, None)
     });
     replace_control_patches(&mut style, ControlRole::Button, |state| {
         NinePatch::solid(if state == ControlState::Disabled {
@@ -1063,6 +1075,7 @@ fn disabled_window_propagates_disabled_presentation_and_rejects_input() {
     // proves that disabling reaches base chrome, the intrinsic menu, and the widget tree rather
     // than being inferred from whichever surface happens to lack activation or keyboard focus.
     let atlas = test_atlas();
+    let disabled_surface_color = color(7, 13, 19, 255);
     let disabled_frame_color = color(17, 29, 43, 255);
     let forbidden_active_frame_color = color(53, 67, 83, 255);
     let disabled_caption_color = color(97, 109, 127, 255);
@@ -1072,17 +1085,23 @@ fn disabled_window_propagates_disabled_presentation_and_rejects_input() {
     let disabled_control_text_color = color(227, 233, 239, 255);
     let mut style = test_skin(&atlas);
 
+    replace_surface_patch(
+        &mut style,
+        SurfaceRole::Window,
+        SurfaceState::Disabled,
+        NinePatch::solid(disabled_surface_color),
+    );
     replace_chrome_patch(
         &mut style,
         ChromeRole::WindowFrame,
         ChromeState::Disabled,
-        NinePatch::solid(disabled_frame_color),
+        NinePatch::framed(crate::SliceInsets::uniform(2), disabled_frame_color, None),
     );
     replace_chrome_patch(
         &mut style,
         ChromeRole::WindowFrame,
         ChromeState::Active,
-        NinePatch::solid(forbidden_active_frame_color),
+        NinePatch::framed(crate::SliceInsets::uniform(2), forbidden_active_frame_color, None),
     );
     replace_control_patch(
         &mut style,
@@ -1121,6 +1140,7 @@ fn disabled_window_propagates_disabled_presentation_and_rejects_input() {
     ctx.frame(frame_info(dimensions)).render_ui().unwrap();
     let events = log.snapshot();
     for expected in [
+        disabled_surface_color,
         disabled_frame_color,
         disabled_caption_color,
         disabled_menu_color,
@@ -1239,15 +1259,15 @@ fn disabled_parent_disables_child_windows_but_not_its_modal_dialog() {
 /// Verifies pointer location cannot recolor base window and structural container backgrounds.
 #[test]
 fn window_and_container_backgrounds_use_noninteractive_state_families() {
-    // Chrome and structural surfaces have no hover or pressed state to select. Pointer movement
-    // can therefore affect the resize control without changing either background by construction.
+    // Structural surfaces have no hover or pressed state to select. Pointer movement can therefore
+    // affect the independently interactive resize control without changing either background.
     let atlas = test_atlas();
     let mut style = test_skin(&atlas);
     let insets = crate::SliceInsets::uniform(2);
     let border = color(17, 19, 23, 255);
     let window_normal = color(31, 37, 41, 255);
     let panel_normal = color(59, 61, 67, 255);
-    replace_chrome_patches(&mut style, ChromeRole::WindowFrame, |_| NinePatch::framed(insets, border, Some(window_normal)));
+    replace_surface_patches(&mut style, SurfaceRole::Window, |_| NinePatch::solid(window_normal));
     replace_surface_patches(&mut style, SurfaceRole::Panel, |_| NinePatch::framed(insets, border, Some(panel_normal)));
 
     let (_, content) = ScrollArea::create(ScrollAreaParameters::new(
@@ -1282,6 +1302,46 @@ fn window_and_container_backgrounds_use_noninteractive_state_families() {
     ctx.frame(frame_info(dimensions)).render_ui().unwrap();
     let events = log.snapshot();
     assert!(!atlas_quads_with_color(&events, window_normal).is_empty());
+}
+
+/// Verifies decorative frame centers cannot override the independently themed window surface.
+#[test]
+fn window_surface_fills_below_decorative_frame_without_painting_its_center() {
+    let atlas = test_atlas();
+    let surface_color = color(17, 31, 47, 255);
+    let frame_color = color(61, 79, 101, 255);
+    let forbidden_frame_center = color(127, 149, 173, 255);
+    let mut style = test_skin(&atlas);
+    replace_surface_patches(&mut style, SurfaceRole::Window, |_| NinePatch::solid(surface_color));
+    replace_chrome_patches(&mut style, ChromeRole::WindowFrame, |_| {
+        // A flat center reproduces the semantic conflict exposed by an image-backed nine-patch:
+        // it is valid patch data but must be discarded when the role is used as outer decoration.
+        NinePatch::framed(crate::SliceInsets::uniform(3), frame_color, Some(forbidden_frame_center))
+    });
+
+    let (backend, log) = recording_backend(atlas);
+    let mut ctx = Context::<_>::new(backend);
+    ctx.set_skin(style);
+    let root = ctx.ui().create_window(Window::new("separate surface", rect(30, 25, 150, 100), empty_content()));
+    ctx.ui().set_window_options(&root, WindowOption::FRAME | WindowOption::NO_TITLE).unwrap();
+    let dimensions = Dimensioni::new(240, 170);
+    ctx.update_ui(dimensions);
+
+    log.clear();
+    ctx.frame(frame_info(dimensions)).render_ui().unwrap();
+    let events = log.snapshot();
+    assert!(
+        !atlas_quads_with_color(&events, surface_color).is_empty(),
+        "the window surface must fill the root below its content"
+    );
+    assert!(
+        !atlas_quads_with_color(&events, frame_color).is_empty(),
+        "the outer frame must retain its visible decoration"
+    );
+    assert!(
+        atlas_quads_with_color(&events, forbidden_frame_center).is_empty(),
+        "the decorative frame center must never act as a second window background"
+    );
 }
 
 #[test]

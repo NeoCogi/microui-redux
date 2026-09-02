@@ -214,6 +214,12 @@ pub(crate) fn replace_surface_patches(skin: &mut Skin, role: SurfaceRole, mut pa
     }
 }
 
+/// Replaces one structural-surface patch while retaining that state's content color.
+pub(crate) fn replace_surface_patch(skin: &mut Skin, role: SurfaceRole, state: SurfaceState, patch: NinePatch) {
+    // Resolve both halves before publishing one complete surface visual.
+    skin.set_surface(role, state, Visual::new(patch, skin.surface(role, state).content_color));
+}
+
 /// Replaces every control patch while retaining fixture content colors.
 pub(crate) fn replace_control_patches(skin: &mut Skin, role: ControlRole, mut patch: impl FnMut(ControlState) -> NinePatch) {
     // Tests express state differences through a typed closure instead of rebuilding a generic table.

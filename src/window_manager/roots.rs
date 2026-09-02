@@ -2994,15 +2994,7 @@ impl WindowManager {
             } else {
                 RootFrameKind::Window
             };
-            record_root_background(
-                &mut self.display_list,
-                node.surface.clip,
-                node.surface.rect,
-                style,
-                frame_kind,
-                window_active,
-                window_enabled,
-            );
+            record_root_background(&mut self.display_list, node.surface.clip, node.surface.rect, style, frame_kind, window_enabled);
             node.surface.body.paint(
                 &mut self.display_list,
                 style,
@@ -3096,7 +3088,6 @@ impl WindowManager {
                 node.surface.rect,
                 style,
                 RootFrameKind::Popup,
-                false,
                 popup_enabled,
             );
             node.surface.body.paint(

@@ -238,10 +238,10 @@ top-level activation selects the `base` state of `chrome.window_frame`, `chrome.
 `chrome.title` but does not rewrite enabled child widgets. A disabled widget or subtree
 resolves `disabled` independently of activation; its content color uses `disabled_foreground` (or
 `disabled_title_foreground` for chrome), and omitted patch states use
-`disabled_background` as their flat fallback. The ordinary frame pair and modal dialog pair also
-use normal center artwork for the application body even when a resize edge is hovered or captured.
-Interactive descendants, resize borders, caption controls, and the title remain free to resolve
-their own hover and pressed states while enabled.
+`disabled_background` as their flat fallback. The window surface remains in its normal state when
+activation changes and selects disabled only when the complete root is disabled. Interactive
+descendants, resize borders, caption controls, and the title remain free to resolve their own hover
+and pressed states while enabled.
 
 `WindowOption::DISABLED` is the explicit whole-window counterpart. It keeps the root visible and
 keeps its retained update traversal running, but resolves the disabled frame/title states, intrinsic
@@ -262,7 +262,9 @@ authority. Keeping the values separate permits a four-pixel Windows 3.11 edge to
 L-shaped ordinary-window corner while a modal dialog uses a uniform four-pixel outline, without
 reserving 23 pixels around either client. The bottom-right two-axis region remains larger for easy
 input, but themes may leave `control.resize_grip` transparent when the frame corner itself is the
-complete visible affordance.
+complete visible affordance. Frame patches contribute only their eight outer cells; their center is
+never a second background source. `surface.window` fills the complete root below that decoration,
+including transparent frame pixels and any space exposed by `window_content_insets`.
 
 `skin.window_content_insets` is a separate four-edge inset around the application body. Root
 geometry applies it after the frame, title, and menu bar have been allocated, so it never narrows

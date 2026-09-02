@@ -35,7 +35,7 @@
 //! display list. The retained [`crate::Node`] stored for a window therefore represents only the
 //! application-authored content tree.
 
-use crate::{ChromeRole, ChromeState, ControlRole, ControlState, MenuRole, MenuState, PointerState};
+use crate::{ChromeRole, ChromeState, ControlRole, ControlState, MenuRole, MenuState, PointerState, SurfaceRole, SurfaceState};
 
 use std::fmt;
 
@@ -647,27 +647,41 @@ fn root_frame_patch(style: &Skin, frame_kind: RootFrameKind, active: bool, enabl
     }
 }
 
-/// Records the frame or plain background that must appear behind application content.
+/// Resolves the noninteractive fill painted below one complete root surface.
+fn root_background_patch(style: &Skin, frame_kind: RootFrameKind, enabled: bool) -> crate::NinePatch {
+    // Ordinary windows and modal dialogs share the window surface because both consume the same
+    // client-area palette value. Popup windows remain menu surfaces: their menu patch supplies the
+    // structural inset as well as the fill shared with compact popup menus.
+    let patch = match frame_kind {
+        RootFrameKind::Window | RootFrameKind::Dialog => {
+            let state = if enabled { SurfaceState::Normal } else { SurfaceState::Disabled };
+            style.surface(SurfaceRole::Window, state).patch
+        }
+        RootFrameKind::Popup => {
+            let state = if enabled { MenuState::Normal } else { MenuState::Disabled };
+            style.menu(MenuRole::Popup, state).patch
+        }
+    };
+
+    // Root background painting needs only the stretchable center. Flattening destination insets
+    // also covers transparent pixels below decorative frame artwork without drawing a second edge.
+    patch.with_insets(crate::SliceInsets::ZERO)
+}
+
+/// Records the semantic root surface that must appear behind application content and chrome.
 pub(super) fn record_root_background(
     display_list: &mut crate::render::DisplayList,
     viewport: Recti,
     rect: Recti,
     style: &Skin,
     frame_kind: RootFrameKind,
-    active_frame: bool,
     enabled: bool,
 ) {
     // Chrome uses a screen-space painter because it is outside the retained application tree.
     let mut painter = Painter::screen_space(display_list, viewport);
-    // Record only the stretchable center below application content. Framed roots repeat their
-    // eight edge cells in the overlay pass, avoiding duplicate border work while still protecting
-    // chrome from overflowing descendants. Unframed roots use this same center-only body path.
-    // Pointer interaction belongs to the frame edge and title controls, not the application body.
-    // Resolve enabled bodies from Normal so merely crossing a resize edge or transferring
-    // activation cannot recolor the complete window interior. Explicit root disabling selects the
-    // shared Disabled state, including its flat fallback center when no PNG was supplied.
-    let patch = root_frame_patch(style, frame_kind, active_frame && enabled, enabled).with_insets(crate::SliceInsets::ZERO);
-    let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch);
+    // Pointer interaction and activation belong to chrome, not the application background.
+    // Explicit root disabling is the only transition that selects another surface state.
+    let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, rect, root_background_patch(style, frame_kind, enabled));
 }
 
 /// Records the frame border, title, and resize visuals that must appear above child content.
@@ -692,9 +706,9 @@ pub(super) fn record_root_overlay(
     let chrome_active = active && enabled;
     let chrome_state = ChromeState::from_window(enabled, chrome_active);
     if options.intersects(WindowOption::FRAME) {
-        // Background recording already filled the framed interior before application content. Draw
-        // only the border again in the overlay pass so an unclipped child may extend beyond the
-        // parent body without covering parent-owned frame chrome.
+        // The semantic surface already filled the root before application content. Draw only the
+        // frame's eight decorative cells here so its image center can never become a hidden second
+        // source of window background color.
         painter.nine_patch(outer, root_frame_patch(style, frame_kind, chrome_active, enabled).without_center());
     }
     if let Some(title) = geometry.title {
