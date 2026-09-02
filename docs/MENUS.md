@@ -182,9 +182,9 @@ also consumes Ctrl+F6 window-cycle chords; window cycling resumes only after the
 
 ## Skin and current scope
 
-The complete visuals for `MenuTitle`, `MenuTitleOpen`, `MenuItem`, and
-`MenuItemSelected` color menu labels, item text, marks, and arrows in the row's exact interaction
-state. `MenuPopup` supplies the separator color. A theme can therefore pair a dark selected PNG or
+The complete visuals for `MenuTitle`, `MenuTitleOpen`, and `MenuItem` color menu labels, item text,
+marks, and arrows in the row's exact interaction state. Checked and radio state affects only the
+independent marker glyph. `MenuPopup` supplies the separator color. A theme can pair a dark selected PNG or
 flat highlight with a light hovered/focused foreground without changing ordinary menu text.
 The `MenuBar` and `MenuPopup` visuals fill the persistent bar and popup surfaces. Menu surfaces
 receive the same context skin as window chrome and retained widgets and paint it directly. The

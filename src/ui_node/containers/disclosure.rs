@@ -267,17 +267,17 @@ impl Widget for DisclosureHeader {
                     // rather than asking retained traversal to inset the disclosure container.
                     row = ctx.draw_appearance(AppearanceRole::Button, row).unwrap_or_default();
                 } else {
-                    ctx.draw_appearance_center(AppearanceRole::DisclosureHeader, row);
+                    ctx.draw_appearance_center(AppearanceRole::Item, row);
                 }
             }
-            DisclosureVariant::Tree => ctx.draw_appearance_center(AppearanceRole::DisclosureHeader, row),
+            DisclosureVariant::Tree => ctx.draw_appearance_center(AppearanceRole::Item, row),
         }
 
         // Reserve a square icon cell from row height, then paint text in the remaining rectangle.
         let foreground_role = if self.variant == DisclosureVariant::Header && self.opt.intersects(WidgetOption::FRAME) {
             AppearanceRole::Button
         } else {
-            AppearanceRole::DisclosureHeader
+            AppearanceRole::Item
         };
         let text_color = ctx.foreground(foreground_role);
         let icon = if expanded {

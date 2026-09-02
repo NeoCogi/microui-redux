@@ -32,7 +32,7 @@ the theme directories must remain available beside the repository sources at run
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "name": "Example",
   "fonts": {
     "texture_width": 512,
@@ -148,7 +148,7 @@ five semantic entries and atlas dimensions form one unit.
 The `skin` object merges field by field. Appearance roles merge independently; within a role,
 `insets` and each visual state merge independently; within a state, `png`, `source_insets`, `tint`,
 and `foreground` merge independently. The more-derived present value wins and an omitted value
-preserves its parent. There is no JSON `null` removal operation in schema version 1.
+preserves its parent. There is no JSON `null` removal operation in schema version 2.
 
 The loader rejects unknown document fields, unknown skin/palette fields, unknown appearance names,
 unknown state fields, cycles, chains deeper than 32 documents, unsupported schema versions, and
@@ -177,11 +177,9 @@ flat skin while continuing to permit concrete metric changes for image-backed th
 
 The `appearances` object accepts the following exact keys:
 
-- `generic_frame`, `panel`, `button`, `checkbox`, `checkbox_checked`, `text_input`
-- `list_item`, `list_item_selected`, `combo`, `slider_track`, `slider_thumb`
-- `scrollbar_track`, `scrollbar_thumb`, `disclosure_header`
-- `menu_bar`, `menu_title`, `menu_title_open`, `menu_popup`, `menu_item`,
-  `menu_item_selected`
+- `generic_frame`, `panel`, `button`, `checkbox`, `text_input`, `item`
+- `combo`, `slider_track`, `slider_thumb`, `scrollbar_track`, `scrollbar_thumb`
+- `menu_bar`, `menu_title`, `menu_title_open`, `menu_popup`, `menu_item`
 - `window_frame`, `window_frame_active`, `dialog_frame`, `dialog_frame_active`
 - `window_title`, `window_title_active`
 - `window_close_button`, `window_minimize_button`, `window_maximize_button`,

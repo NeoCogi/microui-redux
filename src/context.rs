@@ -1034,7 +1034,7 @@ mod theme_tests {
         fs::write(
             directory.path().join("theme.json"),
             r#"{
-                "schema_version": 1,
+                "schema_version": 2,
                 "name": "Rollback",
                 "appearances": {
                     "button": {
@@ -1112,7 +1112,7 @@ mod theme_tests {
         fs::write(
             directory.path().join("first.json"),
             r#"{
-                "schema_version": 1,
+                "schema_version": 2,
                 "name": "First",
                 "appearances": { "button": { "normal": { "png": "first.png" } } }
             }"#,
@@ -1121,7 +1121,7 @@ mod theme_tests {
         fs::write(
             directory.path().join("second.json"),
             r#"{
-                "schema_version": 1,
+                "schema_version": 2,
                 "name": "Second",
                 "appearances": { "checkbox": { "normal": { "png": "second.png" } } }
             }"#,

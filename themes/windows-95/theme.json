@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "name": "Windows 95",
   "fonts": {
     "texture_width": 512,
@@ -74,16 +74,6 @@
       "pressed_focused": { "png": "pressed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
       "disabled": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }, "tint": [160, 160, 160, 255] }
     },
-    "checkbox_checked": {
-      "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
-      "normal": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-      "hovered": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-      "pressed": { "png": "pressed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-      "focused": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-      "hovered_focused": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-      "pressed_focused": { "png": "pressed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-      "disabled": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }, "tint": [160, 160, 160, 255] }
-    },
     "text_input": {
       "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
       "normal": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
@@ -93,16 +83,6 @@
       "hovered_focused": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
       "pressed_focused": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
       "disabled": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }, "tint": [160, 160, 160, 255] }
-    },
-    "disclosure_header": {
-      "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
-      "normal": { "foreground": [0, 0, 0, 255] },
-      "hovered": { "foreground": [0, 0, 0, 255] },
-      "pressed": { "foreground": [0, 0, 0, 255] },
-      "focused": { "foreground": [255, 255, 255, 255] },
-      "hovered_focused": { "foreground": [255, 255, 255, 255] },
-      "pressed_focused": { "foreground": [0, 0, 0, 255] },
-      "disabled": { "foreground": [128, 128, 128, 255] }
     },
     "combo": {
       "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },

@@ -186,7 +186,7 @@ impl ListItem {
         let bounds = ctx.local_rect();
 
         // The default normal role is transparent; image themes may still provide ordinary row art.
-        ctx.draw_appearance_center(AppearanceRole::ListItem, bounds);
+        ctx.draw_appearance_center(AppearanceRole::Item, bounds);
 
         let mut text_rect = bounds;
         if let Some(icon) = &self.icon {
@@ -205,13 +205,13 @@ impl ListItem {
             let consumed = icon_width.saturating_add(padding.saturating_mul(2));
             text_rect.x = text_rect.x.saturating_add(consumed);
             text_rect.width = text_rect.width.saturating_sub(consumed).max(0);
-            let color = ctx.foreground(AppearanceRole::ListItem);
+            let color = ctx.foreground(AppearanceRole::Item);
             ctx.draw_icon(icon, icon_rect, color);
         }
 
         if !self.label.is_empty() {
             let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
-            ctx.draw_control_text_with_font(font, &self.label, text_rect, AppearanceRole::ListItem, self.opt);
+            ctx.draw_control_text_with_font(font, &self.label, text_rect, AppearanceRole::Item, self.opt);
         }
     }
 }

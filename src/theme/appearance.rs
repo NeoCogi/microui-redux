@@ -74,12 +74,9 @@ pub(crate) fn visuals_from_flat_palette(frame_insets: SliceInsets, palette: &Fla
     };
 
     let foregrounds_for = |role| match role {
-        AppearanceRole::ListItem | AppearanceRole::DisclosureHeader => interactive_foregrounds(text, palette.disabled_foreground),
-        AppearanceRole::MenuTitle | AppearanceRole::MenuItem | AppearanceRole::MenuItemSelected => {
-            interactive_foregrounds(palette.menu_foreground, palette.disabled_foreground)
-        }
+        AppearanceRole::Item => interactive_foregrounds(text, palette.disabled_foreground),
+        AppearanceRole::MenuTitle | AppearanceRole::MenuItem => interactive_foregrounds(palette.menu_foreground, palette.disabled_foreground),
         AppearanceRole::MenuTitleOpen => selected_foregrounds(palette.disabled_foreground),
-        AppearanceRole::ListItemSelected => selected_foregrounds(palette.disabled_foreground),
         AppearanceRole::MenuBar | AppearanceRole::MenuPopup => menu_foregrounds,
         AppearanceRole::WindowTitle
         | AppearanceRole::WindowTitleActive
@@ -151,10 +148,8 @@ pub(crate) fn visuals_from_flat_palette(frame_insets: SliceInsets, palette: &Fla
     );
     assign(AppearanceRole::Button, button);
     assign(AppearanceRole::Checkbox, input);
-    assign(AppearanceRole::CheckboxChecked, input);
     assign(AppearanceRole::TextInput, input);
-    assign(AppearanceRole::ListItem, highlight);
-    assign(AppearanceRole::ListItemSelected, selected);
+    assign(AppearanceRole::Item, highlight);
     assign(AppearanceRole::Combo, button);
     assign(AppearanceRole::SliderTrack, input);
     assign(AppearanceRole::SliderThumb, button);
@@ -166,7 +161,6 @@ pub(crate) fn visuals_from_flat_palette(frame_insets: SliceInsets, palette: &Fla
         AppearanceRole::ScrollbarThumb,
         with_disabled(StateTable::filled(solid(palette.scrollbar_thumb)), solid(palette.disabled_background)),
     );
-    assign(AppearanceRole::DisclosureHeader, highlight);
     assign(
         AppearanceRole::MenuBar,
         with_disabled(StateTable::filled(solid(palette.menu_background)), solid(palette.disabled_background)),
@@ -178,9 +172,6 @@ pub(crate) fn visuals_from_flat_palette(frame_insets: SliceInsets, palette: &Fla
         with_disabled(StateTable::filled(framed(palette.menu_background)), framed(palette.disabled_background)),
     );
     assign(AppearanceRole::MenuItem, highlight);
-    // Marker state and interaction state are independent, so a checked row is not permanently
-    // highlighted merely because its marker is visible.
-    assign(AppearanceRole::MenuItemSelected, highlight);
 
     let active_window = StateTable::filled(NinePatch::framed(
         frame_insets.at_least(1),
@@ -249,7 +240,7 @@ mod tests {
         // semantic role/state mapping responsible for focused tree and list rows.
         let visuals = visuals_from_flat_palette(SliceInsets::uniform(1), &palette);
         let control = visuals[AppearanceRole::Button][VisualState::Focused];
-        let item = visuals[AppearanceRole::ListItem][VisualState::Focused];
+        let item = visuals[AppearanceRole::Item][VisualState::Focused];
 
         assert!(matches!(
             control.patch.content,

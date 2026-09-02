@@ -82,16 +82,12 @@ indexed_enum! {
         Panel => "panel",
         /// Ordinary command button or button-like list box.
         Button => "button",
-        /// Unchecked checkbox square.
+        /// Checkbox square; checked state is represented by the independently painted check glyph.
         Checkbox => "checkbox",
-        /// Checked checkbox square.
-        CheckboxChecked => "checkbox_checked",
         /// Single-line, multiline, or numeric text input background.
         TextInput => "text_input",
-        /// Unselected list row.
-        ListItem => "list_item",
-        /// Semantically selected list row.
-        ListItemSelected => "list_item_selected",
+        /// Generic item or tree row whose interaction state supplies transient selection.
+        Item => "item",
         /// Combo-box header.
         Combo => "combo",
         /// Slider background track.
@@ -102,8 +98,6 @@ indexed_enum! {
         ScrollbarTrack => "scrollbar_track",
         /// Scrollbar movable thumb.
         ScrollbarThumb => "scrollbar_thumb",
-        /// Disclosure header or tree row.
-        DisclosureHeader => "disclosure_header",
         /// Menu bar spanning a window.
         MenuBar => "menu_bar",
         /// Menu-bar title that does not own an open popup.
@@ -114,8 +108,6 @@ indexed_enum! {
         MenuPopup => "menu_popup",
         /// Ordinary menu item row.
         MenuItem => "menu_item",
-        /// Checked or radio-selected menu item row.
-        MenuItemSelected => "menu_item_selected",
         /// Passive window outer frame and body.
         WindowFrame => "window_frame",
         /// Active window outer frame and body.

@@ -48,7 +48,7 @@ use crate::{
 };
 
 /// Theme-file schema version understood by this crate release.
-pub const THEME_SCHEMA_VERSION: u32 = 1;
+pub const THEME_SCHEMA_VERSION: u32 = 2;
 
 /// Maximum number of parent documents resolved for one loaded theme.
 ///
@@ -1072,7 +1072,7 @@ mod tests {
     fn omitted_png_states_use_theme_flat_colors() {
         let document = ThemeDefinition::parse_for_test(
             r#"{
-                "schema_version": 1,
+                "schema_version": 2,
                 "name": "Flat only",
                 "skin": {
                     "colors": {
@@ -1118,7 +1118,7 @@ mod tests {
     fn state_foreground_override_does_not_require_a_png() {
         let document = ThemeDefinition::parse_for_test(
             r#"{
-                "schema_version": 1,
+                "schema_version": 2,
                 "name": "Foreground states",
                 "skin": { "colors": { "menu_foreground": [1, 2, 3, 255] } },
                 "appearances": {
@@ -1146,11 +1146,30 @@ mod tests {
     /// Verifies the strict schema rejects misspelled fields instead of silently ignoring them.
     #[test]
     fn unknown_json_fields_are_rejected() {
-        let error = match ThemeDefinition::parse_for_test(r#"{ "schema_version": 1, "name": "Broken", "appearences": {} }"#) {
+        let error = match ThemeDefinition::parse_for_test(r#"{ "schema_version": 2, "name": "Broken", "appearences": {} }"#) {
             Ok(_) => panic!("misspelled root field must be rejected"),
             Err(error) => error,
         };
         assert!(error.to_string().contains("unknown field `appearences`"));
+    }
+
+    /// Verifies the role and palette vocabulary change rejects the previous schema outright.
+    #[test]
+    fn previous_theme_schema_is_not_accepted_as_a_compatibility_format() {
+        let error = match ThemeDefinition::parse_for_test(r#"{ "schema_version": 1, "name": "Legacy" }"#) {
+            Ok(_) => panic!("schema version one must not enter the version-two compiler"),
+            Err(error) => error,
+        };
+
+        // A single exact version keeps parsing deterministic; no alias or migration layer can
+        // silently reinterpret the removed palette fields and redundant appearance roles.
+        assert!(matches!(
+            error,
+            ThemeLoadError::UnsupportedSchema {
+                expected: THEME_SCHEMA_VERSION,
+                actual: 1,
+            }
+        ));
     }
 
     /// Verifies inheritance merges typed fields while retaining each layer's asset directory.
@@ -1164,7 +1183,7 @@ mod tests {
         fs::write(
             parent_directory.join("theme.json"),
             r#"{
-                "schema_version": 1,
+                "schema_version": 2,
                 "name": "Parent",
                 "skin": {
                     "padding": 3,
@@ -1181,7 +1200,7 @@ mod tests {
         fs::write(
             child_directory.join("theme.json"),
             r#"{
-                "schema_version": 1,
+                "schema_version": 2,
                 "name": "Child",
                 "extends": "../parent/theme.json",
                 "skin": {
@@ -1231,8 +1250,8 @@ mod tests {
         let root = tempfile::tempdir().expect("temporary cycle directory must be available");
         let first = root.path().join("first.json");
         let second = root.path().join("second.json");
-        fs::write(first.as_path(), r#"{ "schema_version": 1, "name": "First", "extends": "second.json" }"#).expect("first cycle document must be writable");
-        fs::write(second.as_path(), r#"{ "schema_version": 1, "name": "Second", "extends": "first.json" }"#).expect("second cycle document must be writable");
+        fs::write(first.as_path(), r#"{ "schema_version": 2, "name": "First", "extends": "second.json" }"#).expect("first cycle document must be writable");
+        fs::write(second.as_path(), r#"{ "schema_version": 2, "name": "Second", "extends": "first.json" }"#).expect("second cycle document must be writable");
 
         let error = match ThemeDefinition::read(first.as_path()) {
             Ok(_) => panic!("cyclic inheritance must fail before a definition is returned"),
@@ -1251,13 +1270,13 @@ mod tests {
         fs::write(
             parent.as_path(),
             r#"{
-                "schema_version": 1,
+                "schema_version": 2,
                 "name": "Parent",
                 "appearances": { "buton": {} }
             }"#,
         )
         .expect("invalid parent document must be writable");
-        fs::write(child.as_path(), r#"{ "schema_version": 1, "name": "Child", "extends": "parent.json" }"#).expect("child document must be writable");
+        fs::write(child.as_path(), r#"{ "schema_version": 2, "name": "Child", "extends": "parent.json" }"#).expect("child document must be writable");
 
         let error = match ThemeDefinition::read(child.as_path()) {
             Ok(_) => panic!("unknown parent appearance must fail during typed source resolution"),
@@ -1273,7 +1292,7 @@ mod tests {
     fn font_catalog_requires_every_semantic_role() {
         let error = match ThemeDefinition::parse_for_test(
             r#"{
-                "schema_version": 1,
+                "schema_version": 2,
                 "name": "Incomplete fonts",
                 "fonts": {
                     "texture_width": 512,
@@ -1321,13 +1340,13 @@ mod tests {
             crate::NinePatchContent::Image { .. }
         ));
         for state in [VisualState::Focused, VisualState::HoveredFocused] {
-            let disclosure = loaded.bundle().skin().visual(AppearanceRole::DisclosureHeader, state).patch;
+            let disclosure = loaded.bundle().skin().visual(AppearanceRole::Item, state).patch;
             assert!(matches!(
                 disclosure.content,
                 crate::NinePatchContent::Flat { cells }
                     if matches!(cells.center, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (0, 0, 128, 255))
             ));
-            let foreground = loaded.bundle().skin().visual(AppearanceRole::DisclosureHeader, state).foreground;
+            let foreground = loaded.bundle().skin().visual(AppearanceRole::Item, state).foreground;
             assert_eq!((foreground.r, foreground.g, foreground.b, foreground.a), (255, 255, 255, 255));
         }
     }
@@ -1445,42 +1464,6 @@ mod tests {
         }
         let selected_text = loaded.bundle().skin().visual(AppearanceRole::MenuItem, VisualState::Hovered).foreground;
         assert_eq!((selected_text.r, selected_text.g, selected_text.b, selected_text.a), (255, 255, 255, 255));
-        for state in [VisualState::Focused, VisualState::HoveredFocused] {
-            assert!(matches!(
-                loaded.bundle().skin().visual(AppearanceRole::DisclosureHeader, state).patch.content,
-                crate::NinePatchContent::Image { .. }
-            ));
-            let foreground = loaded.bundle().skin().visual(AppearanceRole::DisclosureHeader, state).foreground;
-            assert_eq!((foreground.r, foreground.g, foreground.b, foreground.a), (255, 255, 255, 255));
-        }
-        // Checked menu rows retain their marker without becoming permanently highlighted. The
-        // normal patch must therefore remain transparent over the white popup panel, while an
-        // actual hover still selects the authored blue bitmap and contrasting white foreground.
-        let checked_normal = loaded.bundle().skin().visual(AppearanceRole::MenuItemSelected, VisualState::Normal).patch;
-        assert!(matches!(
-            checked_normal.content,
-            crate::NinePatchContent::Flat { cells }
-                if matches!(cells.center, crate::NinePatchCell::Empty)
-        ));
-        assert!(matches!(
-            loaded
-                .bundle()
-                .skin()
-                .visual(AppearanceRole::MenuItemSelected, VisualState::Hovered)
-                .patch
-                .content,
-            crate::NinePatchContent::Image { .. }
-        ));
-        let checked_normal_text = loaded.bundle().skin().visual(AppearanceRole::MenuItemSelected, VisualState::Normal).foreground;
-        let checked_hovered_text = loaded.bundle().skin().visual(AppearanceRole::MenuItemSelected, VisualState::Hovered).foreground;
-        assert_eq!(
-            (checked_normal_text.r, checked_normal_text.g, checked_normal_text.b, checked_normal_text.a),
-            (0, 0, 0, 255)
-        );
-        assert_eq!(
-            (checked_hovered_text.r, checked_hovered_text.g, checked_hovered_text.b, checked_hovered_text.a),
-            (255, 255, 255, 255)
-        );
         let slider_normal = loaded.bundle().skin().visual(AppearanceRole::SliderTrack, VisualState::Normal).patch;
         let slider_focused = loaded.bundle().skin().visual(AppearanceRole::SliderTrack, VisualState::Focused).patch;
         assert!(matches!(
@@ -1495,13 +1478,13 @@ mod tests {
             VisualState::HoveredFocused,
             VisualState::PressedFocused,
         ] {
-            // Combo popup choices are ordinary retained ListItems. Their complete interactive
-            // state ladder must therefore carry both blue selection art and contrasting text.
+            // Combo popup choices and tree rows share the semantic Item visual. Its complete
+            // interaction ladder carries both blue selection art and contrasting text.
             assert!(matches!(
-                loaded.bundle().skin().visual(AppearanceRole::ListItem, state).patch.content,
+                loaded.bundle().skin().visual(AppearanceRole::Item, state).patch.content,
                 crate::NinePatchContent::Image { .. }
             ));
-            let foreground = loaded.bundle().skin().visual(AppearanceRole::ListItem, state).foreground;
+            let foreground = loaded.bundle().skin().visual(AppearanceRole::Item, state).foreground;
             assert_eq!((foreground.r, foreground.g, foreground.b, foreground.a), (255, 255, 255, 255));
         }
     }
@@ -1580,10 +1563,10 @@ mod tests {
         assert_eq!((selected_text.r, selected_text.g, selected_text.b, selected_text.a), (255, 255, 255, 255));
         for state in [VisualState::Focused, VisualState::HoveredFocused] {
             assert!(matches!(
-                loaded.bundle().skin().visual(AppearanceRole::DisclosureHeader, state).patch.content,
+                loaded.bundle().skin().visual(AppearanceRole::Item, state).patch.content,
                 crate::NinePatchContent::Image { .. }
             ));
-            let foreground = loaded.bundle().skin().visual(AppearanceRole::DisclosureHeader, state).foreground;
+            let foreground = loaded.bundle().skin().visual(AppearanceRole::Item, state).foreground;
             assert_eq!((foreground.r, foreground.g, foreground.b, foreground.a), (255, 255, 255, 255));
         }
     }

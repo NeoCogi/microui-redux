@@ -1313,12 +1313,7 @@ fn tab_focused_disclosure_uses_only_its_focused_role_state_visual() {
     let atlas = test_atlas();
     let mut style = test_skin(&atlas);
     let focused_fill = color(67, 83, 101, 255);
-    replace_skin_patch(
-        &mut style,
-        AppearanceRole::DisclosureHeader,
-        VisualState::Focused,
-        NinePatch::solid(focused_fill),
-    );
+    replace_skin_patch(&mut style, AppearanceRole::Item, VisualState::Focused, NinePatch::solid(focused_fill));
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
     ctx.set_skin(style.clone());
@@ -2141,7 +2136,7 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
 
 /// Verifies a combo-style application popup combines its focused and hovered list-row state.
 #[test]
-fn combo_popup_choice_hover_resolves_the_list_item_hovered_focused_appearance() {
+fn combo_popup_choice_hover_resolves_the_item_hovered_focused_appearance() {
     let atlas = test_atlas();
     let mut style = test_skin(&atlas);
     let normal_color = color(17, 29, 43, 255);
@@ -2152,7 +2147,7 @@ fn combo_popup_choice_hover_resolves_the_list_item_hovered_focused_appearance() 
     item_appearance.set(VisualState::Hovered, NinePatch::solid(hovered_color));
     item_appearance.set(VisualState::Focused, NinePatch::solid(focused_color));
     item_appearance.set(VisualState::HoveredFocused, NinePatch::solid(hovered_focused_color));
-    replace_skin_patches(&mut style, AppearanceRole::ListItem, item_appearance);
+    replace_skin_patches(&mut style, AppearanceRole::Item, item_appearance);
     let (_, item_node) = ListItem::create(ListItemParameters::new("Apple"));
     let item_id = item_node.id();
     let (_, popup_body) = Linear::create(LinearParameters::vertical([item_node]));
@@ -2176,7 +2171,7 @@ fn combo_popup_choice_hover_resolves_the_list_item_hovered_focused_appearance() 
         .expect("open combo choice must receive committed geometry");
 
     // Opening an application popup focuses its first Tab stop. Moving onto that same choice must
-    // select ListItem's combined state rather than Combo header art or the global focus fallback.
+    // select Item's combined state rather than Combo header art or a separate focus fallback.
     ctx.mousemove(item_rect.x + item_rect.width / 2, item_rect.y + item_rect.height / 2);
     ctx.update_ui(dimensions);
     log.clear();

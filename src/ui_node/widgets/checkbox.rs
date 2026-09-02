@@ -158,10 +158,11 @@ impl Checkbox {
     fn paint_widget(&self, checked: bool, ctx: &mut WidgetPaintCtx<'_>) {
         let bounds = ctx.local_rect();
         let box_rect = rect(bounds.x, bounds.y, bounds.height, bounds.height);
-        let role = if checked { AppearanceRole::CheckboxChecked } else { AppearanceRole::Checkbox };
-        let box_content = ctx.draw_appearance(role, box_rect);
+        let box_content = ctx.draw_appearance(AppearanceRole::Checkbox, box_rect);
         if checked {
-            let color = ctx.foreground(role);
+            // The check glyph is the complete persistent-state cue; the surrounding square remains
+            // governed only by its ordinary pointer, keyboard, and disabled interaction state.
+            let color = ctx.foreground(AppearanceRole::Checkbox);
             if let Some(box_content) = box_content {
                 ctx.draw_icon(crate::IconRole::Check.resolve(ctx.atlas()), box_content, color);
             }
@@ -169,7 +170,7 @@ impl Checkbox {
         let text_rect = rect(bounds.x + box_rect.width, bounds.y, bounds.width - box_rect.width, bounds.height);
         if !self.label.is_empty() {
             let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
-            ctx.draw_control_text_with_font(font, &self.label, text_rect, role, self.opt);
+            ctx.draw_control_text_with_font(font, &self.label, text_rect, AppearanceRole::Checkbox, self.opt);
         }
     }
 }

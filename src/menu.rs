@@ -710,12 +710,9 @@ impl MenuSurface {
                     let hovered = self.hovered_slot == Some(slot);
                     let focused = self.keyboard_slot == Some(slot);
                     let state = VisualState::from_interaction(enabled && item.parameters.enabled, hovered, focused, self.captured && hovered);
-                    let selected = matches!(item.parameters.mark, MenuItemMark::Checked(true) | MenuItemMark::Radio(true));
-                    let role = if selected {
-                        AppearanceRole::MenuItemSelected
-                    } else {
-                        AppearanceRole::MenuItem
-                    };
+                    // Check and radio state already has a dedicated marker glyph. Keeping the row
+                    // on MenuItem prevents persistent marker data from overriding interaction art.
+                    let role = AppearanceRole::MenuItem;
                     let _ = ctx.draw_appearance_state(role, state, row);
                     let marker = Recti::new(row.x, row.y, self.geometry.marker_width.max(0), row.height);
                     let text = text_region(row, self.geometry.marker_width);

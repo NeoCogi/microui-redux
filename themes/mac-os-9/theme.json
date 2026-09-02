@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "name": "Mac OS 9",
   "fonts": {
     "texture_width": 512,
@@ -77,16 +77,6 @@
       "pressed_focused": { "png": "pressed-focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } },
       "disabled": { "png": "disabled.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } }
     },
-    "checkbox_checked": {
-      "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
-      "normal": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-      "hovered": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-      "pressed": { "png": "pressed.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } },
-      "focused": { "png": "recessed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-      "hovered_focused": { "png": "recessed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-      "pressed_focused": { "png": "pressed-focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } },
-      "disabled": { "png": "disabled.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } }
-    },
     "text_input": {
       "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
       "normal": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
@@ -97,16 +87,7 @@
       "pressed_focused": { "png": "recessed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
       "disabled": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [221, 221, 221, 255] }
     },
-    "list_item_selected": {
-      "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
-      "normal": { "png": "menu-selection.png", "foreground": [255, 255, 255, 255] },
-      "hovered": { "png": "menu-selection.png", "foreground": [255, 255, 255, 255] },
-      "pressed": { "png": "menu-selection.png", "foreground": [255, 255, 255, 255] },
-      "focused": { "png": "menu-selection.png", "foreground": [255, 255, 255, 255] },
-      "hovered_focused": { "png": "menu-selection.png", "foreground": [255, 255, 255, 255] },
-      "pressed_focused": { "png": "menu-selection.png", "foreground": [255, 255, 255, 255] }
-    },
-    "disclosure_header": {
+    "item": {
       "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
       "normal": { "foreground": [0, 0, 0, 255] },
       "hovered": { "foreground": [0, 0, 0, 255] },
@@ -183,15 +164,6 @@
     },
     "menu_item": {
       "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
-      "hovered": { "png": "menu-selection.png", "foreground": [255, 255, 255, 255] },
-      "pressed": { "png": "menu-selection.png", "foreground": [255, 255, 255, 255] },
-      "focused": { "png": "menu-selection.png", "foreground": [255, 255, 255, 255] },
-      "hovered_focused": { "png": "menu-selection.png", "foreground": [255, 255, 255, 255] },
-      "pressed_focused": { "png": "menu-selection.png", "foreground": [255, 255, 255, 255] }
-    },
-    "menu_item_selected": {
-      "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
-      "normal": { "png": "menu-selection.png", "foreground": [255, 255, 255, 255] },
       "hovered": { "png": "menu-selection.png", "foreground": [255, 255, 255, 255] },
       "pressed": { "png": "menu-selection.png", "foreground": [255, 255, 255, 255] },
       "focused": { "png": "menu-selection.png", "foreground": [255, 255, 255, 255] },
