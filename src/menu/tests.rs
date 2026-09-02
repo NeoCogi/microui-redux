@@ -78,7 +78,7 @@ fn popup_text_region_separates_labels_from_shortcuts_and_submenu_arrows() {
     let branch_region = text_region(branch_row, layout.marker_width);
     let branch_size = atlas.get_text_size(item_font, "aaaaaa");
     let branch_position = control_text_position_with_font(&style, &atlas, item_font, "aaaaaa", branch_region, WidgetOption::NONE);
-    let arrow_size = atlas.get_icon_size(crate::IconRole::Expand.resolve(&atlas));
+    let arrow_size = atlas.get_icon_size(style.resolve_icon_role(&atlas, crate::IconRole::Expand));
     let arrow = trailing_rect(branch_region, arrow_size, padding);
     let branch_right = branch_position.x + branch_size.width;
     assert_eq!((item_region.x, item_region.width), (branch_region.x, branch_region.width));

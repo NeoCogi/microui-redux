@@ -28,9 +28,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-//! Stable semantic and named font references for retained UI state.
-
-use std::sync::Arc;
+//! Stable semantic and exact font references for retained UI state.
 
 use crate::atlas::{AtlasHandle, FontId};
 
@@ -56,6 +54,22 @@ impl FontRole {
     /// Every semantic font role in declaration order.
     pub const ALL: [Self; 5] = [Self::Body, Self::Small, Self::Title, Self::Heading, Self::Mono];
 
+    /// Number of semantic font roles stored by a complete skin.
+    pub const COUNT: usize = Self::ALL.len();
+
+    /// Returns this role's position in the skin's resolved font table.
+    pub(crate) const fn index(self) -> usize {
+        // Spell positions out so enum declaration changes cannot silently alter the private table
+        // contract through a numeric cast.
+        match self {
+            Self::Body => 0,
+            Self::Small => 1,
+            Self::Title => 2,
+            Self::Heading => 3,
+            Self::Mono => 4,
+        }
+    }
+
     /// Returns the conventional atlas font name resolved by [`Skin::from_atlas`].
     pub const fn atlas_name(self) -> &'static str {
         // Exhaustive matching keeps the typed role catalog and atlas spellings synchronized when
@@ -72,16 +86,15 @@ impl FontRole {
 
 /// Stable reference to a font used by retained UI state.
 ///
-/// Unlike [`FontId`], this value does not belong to one atlas allocation. A retained widget can
-/// therefore keep it while the active skin and atlas are replaced together. Semantic roles let a
-/// skin choose its standard typography, while named references address application fonts copied
-/// into every derived theme atlas.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+/// Semantic roles select concrete IDs already resolved by the active skin. Named application fonts
+/// carry their exact stable [`FontId`] from [`crate::ResourceCatalog`], eliminating retained names
+/// and repeated atlas scans from layout.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum FontRef {
     /// Resolves through one standard semantic font role.
     Role(FontRole),
-    /// Resolves one exact atlas font name owned by the application resource catalog.
-    Named(Arc<str>),
+    /// Resolves one exact application-owned font by its stable baked identity.
+    Named(FontId),
 }
 
 impl Default for FontRef {
@@ -95,7 +108,7 @@ impl Default for FontRef {
 impl From<FontRole> for FontRef {
     /// Converts a semantic role without resolving it against the current atlas.
     fn from(role: FontRole) -> Self {
-        // Preserve the role so a later skin replacement can select its corresponding font.
+        // Preserve the role so a later skin replacement can select its resolved concrete font.
         Self::Role(role)
     }
 }
@@ -108,27 +121,27 @@ impl FontRef {
         Self::Role(role)
     }
 
-    /// Creates a stable reference to one exact atlas font name.
-    pub fn named(name: impl Into<Arc<str>>) -> Self {
-        let name = name.into();
-        // Empty names cannot identify atlas entries and would postpone an obvious configuration
-        // error until layout. Reject them at the retained-state construction boundary instead.
-        assert!(!name.is_empty(), "font reference name must not be empty");
-        Self::Named(name)
+    /// Creates a stable reference to one exact named font identity.
+    pub const fn named(font: FontId) -> Self {
+        // The application resource catalog has already validated name membership before returning
+        // this ID, so retained widget construction needs no string or fallible lookup.
+        Self::Named(font)
     }
 
-    /// Resolves this stable reference into a capability owned by `atlas`.
+    /// Resolves this stable reference into a font identity contained by `atlas`.
     ///
     /// # Panics
     ///
-    /// Panics when a named font is absent or when the atlas violates the required `body` font
-    /// contract used for optional semantic-role fallback.
+    /// Panics when the exact or semantic font identity is absent from `atlas`.
     pub fn resolve(&self, skin: &Skin, atlas: &AtlasHandle) -> FontId {
-        // Skin owns semantic selection policy; exact names bypass roles but still resolve only at
-        // the short-lived layout or paint boundary where the matching atlas is available.
+        // Skin owns the compiled semantic table; exact references bypass roles but still validate
+        // against the atlas paired with the active skin.
         match self {
             Self::Role(role) => skin.resolve_font_role(atlas, *role),
-            Self::Named(name) => atlas.font_id(name).unwrap_or_else(|| panic!("atlas does not contain referenced font `{name}`")),
+            Self::Named(font) => {
+                assert!(atlas.contains_font(*font), "font ID does not belong to the active skin atlas: {font:?}");
+                *font
+            }
         }
     }
 }

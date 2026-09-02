@@ -298,7 +298,7 @@ impl Combo {
         } else {
             text_size(style, atlas, &self.font, self.label.as_str()).width
         };
-        let indicator = atlas.get_icon_size(crate::IconRole::ExpandDown.resolve(atlas));
+        let indicator = atlas.get_icon_size(style.resolve_icon_role(atlas, crate::IconRole::ExpandDown));
         let width = padding.saturating_mul(3).saturating_add(text_w.max(0)).saturating_add(indicator.width.max(0));
         let height = content_height(style, atlas, &self.font, indicator.height);
         Dimensioni::new(width, height)
@@ -335,7 +335,7 @@ impl Combo {
     /// Paints the combo header from already-committed retained state.
     fn paint_widget(&self, ctx: &mut WidgetPaintCtx<'_>) {
         let header = ctx.local_rect();
-        let indicator_id = crate::IconRole::ExpandDown.resolve(ctx.atlas());
+        let indicator_id = ctx.skin().resolve_icon_role(ctx.atlas(), crate::IconRole::ExpandDown);
         let indicator_size = ctx.atlas().get_icon_size(indicator_id);
         let indicator_x = header.x + header.width - indicator_size.width;
         let indicator_y = header.y + ((header.height - indicator_size.height) / 2).max(0);

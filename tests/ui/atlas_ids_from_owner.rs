@@ -1,10 +1,10 @@
-//! Font and icon IDs are obtained from one concrete runtime atlas owner.
+//! Font and icon IDs are obtained from validated runtime atlas resources.
 
 use microui_redux::{AtlasHandle, FontId, IconId};
 
 #[allow(dead_code)]
 fn resolve_owned_ids(atlas: &AtlasHandle) -> Option<(FontId, IconId)> {
-    // Both IDs carry the atlas provenance supplied by their public lookup boundary.
+    // Both opaque IDs carry the logical resource identity supplied by public lookup.
     Some((atlas.font_id("body")?, atlas.icon_id("white")?))
 }
 

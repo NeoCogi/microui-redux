@@ -35,10 +35,10 @@ use super::{IconRole, Skin};
 
 /// One resolved [`Skin`] paired with the exact immutable [`AtlasHandle`] it uses.
 ///
-/// Image-backed nine patches still contain low-level [`crate::IconId`] capabilities because the
-/// renderer needs exact atlas rectangles. Keeping the skin and atlas behind this single concrete
-/// value prevents callers and retained runtime owners from replacing either half independently.
-/// Stable [`crate::FontRef`] and [`crate::IconRef`] values resolve through this same pair.
+/// Image-backed nine patches and semantic resource tables contain stable typed IDs that the paired
+/// atlas must contain. Keeping the skin and atlas behind this single concrete value prevents
+/// callers and retained runtime owners from replacing either half independently. Exact
+/// [`crate::FontRef`] and [`crate::IconRef`] values validate through this same pair.
 #[derive(Clone)]
 pub struct SkinBundle {
     /// Immutable pixels, font metrics, and icon rectangles used by the paired skin.
@@ -52,18 +52,17 @@ impl SkinBundle {
     ///
     /// # Panics
     ///
-    /// Panics when the atlas lacks a required semantic resource or an image-backed skin visual
-    /// contains a capability minted by another atlas allocation.
+    /// Panics when the atlas lacks any semantic or image resource identity retained by the skin.
     pub fn new(atlas: AtlasHandle, mut skin: Skin) -> Self {
-        // Validate stable semantic resource names even though they are resolved lazily. This keeps
-        // a successfully constructed bundle total for every built-in measure and paint operation.
+        // Validate the already-resolved semantic IDs. This keeps a successfully constructed bundle
+        // total for every built-in measure and paint operation without repeating name lookup.
         let _ = skin.resolve_font_role(&atlas, crate::FontRole::Body);
         for role in IconRole::ALL {
-            let _ = role.resolve(&atlas);
+            let _ = skin.resolve_icon_role(&atlas, role);
         }
-        // Image visuals are the only allocation-bound values retained inside Skin after stable
-        // font/icon references replaced widget-owned IDs.
-        assert!(skin.belongs_to(&atlas), "skin contains image capabilities from another atlas");
+        // Semantic tables and image visuals all use stable resource IDs. The full ownership check
+        // also covers optional font roles already resolved to their concrete fallback.
+        assert!(skin.belongs_to(&atlas), "skin contains resource identities absent from its atlas");
         // Bundle construction publishes a completed concrete skin value. Give that value a fresh
         // identity so retained caches need no partial field fingerprint or atlas-pointer key.
         skin.refresh_revision();
@@ -101,14 +100,14 @@ mod tests {
     use super::*;
     use crate::{Color, ControlRole, IconRole, NinePatch, NinePatchImage, SliceInsets};
 
-    /// Verifies the pair rejects the only allocation-bound value still retained by a skin.
+    /// Verifies the pair rejects an image identity absent from the paired atlas.
     #[test]
-    #[should_panic(expected = "skin contains image capabilities from another atlas")]
+    #[should_panic(expected = "skin contains resource identities absent from its atlas")]
     fn bundle_rejects_foreign_image_visuals() {
         let local_atlas = crate::test_support::test_atlas();
         let foreign_atlas = crate::test_support::test_atlas();
         let mut skin = Skin::from_atlas(&local_atlas);
-        let foreign_icon = IconRole::Close.resolve(&foreign_atlas);
+        let foreign_icon = Skin::from_atlas(&foreign_atlas).resolve_icon_role(&foreign_atlas, IconRole::Close);
         crate::test_support::replace_control_patches(&mut skin, ControlRole::Button, |_| {
             NinePatch::image(
                 SliceInsets::ZERO,

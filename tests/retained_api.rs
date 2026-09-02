@@ -166,7 +166,7 @@ fn downstream_skin_visuals_are_concrete_and_exhaustive() {
     assert_eq!(skin.control(ControlRole::Button, pressed).foreground.r, original.foreground.r);
 }
 
-/// Verifies stable named resources and one atomic bundle remain the only atlas replacement path.
+/// Verifies exact resource IDs and one atomic bundle remain the typed replacement path.
 #[test]
 fn downstream_resources_bundle_and_chrome_form_one_typed_runtime_value() {
     let mut context = context();
@@ -174,6 +174,8 @@ fn downstream_resources_bundle_and_chrome_form_one_typed_runtime_value() {
     let close = context.resource_catalog().icon_ref("close").expect("close must be in the application catalog");
     assert!(context.resource_catalog().font_ref("missing-font").is_none());
     assert!(context.resource_catalog().icon_ref("missing-icon").is_none());
+    assert_eq!(body.resolve(context.skin(), &context.atlas()), context.atlas().font_id("body").unwrap());
+    assert_eq!(close.resolve(context.skin(), &context.atlas()), context.atlas().icon_id("close").unwrap());
 
     // Build a separately allocated atlas/skin pair and describe manager-owned chrome with one
     // concrete data recipe. Installing the bundle uploads and publishes both halves together.
@@ -190,15 +192,12 @@ fn downstream_resources_bundle_and_chrome_form_one_typed_runtime_value() {
     assert_eq!(context.skin().metrics.padding, 19);
     assert_eq!(context.skin().window_chrome.title_alignment, WindowTitleAlignment::Centered);
     assert_eq!(context.skin().window_chrome.captions.close_side, CaptionButtonSide::Leading);
-    assert_eq!(body.resolve(context.skin(), &context.atlas()), context.atlas().font_id("body").unwrap());
-    assert_eq!(close.resolve(&context.atlas()), context.atlas().icon_id("close").unwrap());
-
-    // Semantic role references use the same late-resolution path and therefore also survive the
-    // replacement allocation without retaining its short-lived FontId or IconId capabilities.
+    // Semantic role references use IDs resolved once into the replacement skin and therefore share
+    // the same direct typed lookup path without retaining resource names.
     let body_role = FontRef::role(FontRole::Body);
     let close_role = IconRef::role(IconRole::Close);
     assert_eq!(body_role.resolve(context.skin(), &context.atlas()), context.atlas().font_id("body").unwrap());
-    assert_eq!(close_role.resolve(&context.atlas()), context.atlas().icon_id("close").unwrap());
+    assert_eq!(close_role.resolve(context.skin(), &context.atlas()), context.atlas().icon_id("close").unwrap());
 }
 
 struct FileDialogModel {

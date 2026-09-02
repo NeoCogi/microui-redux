@@ -289,9 +289,9 @@ mod tests {
 
     #[test]
     fn every_semantic_operation_owns_its_effective_clip() {
-        // Resource operations carry capabilities minted by one concrete atlas. The display-list
-        // test does not execute them, but using real capabilities keeps its setup identical to the
-        // production recording path and prevents typeless placeholder IDs from returning.
+        // Resource operations carry stable typed identities. The display-list test does not
+        // execute them, but using real identities keeps its setup identical to the production
+        // recording path and prevents typeless placeholder IDs from returning.
         let atlas = test_atlas();
         let font = atlas.font_id("body").unwrap();
         let icon = atlas.white_icon();

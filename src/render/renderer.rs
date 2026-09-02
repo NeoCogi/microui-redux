@@ -169,8 +169,8 @@ impl<B: RendererBackend> Renderer<B> {
         let id = RendererId::allocate();
         let atlas = backend.get_atlas();
         let atlas_dim = atlas.get_texture_dimension();
-        // Resolve the solid-rendering source by its required semantic name; no positional icon ID
-        // exists independently of this atlas allocation.
+        // Atlas finalization has already resolved the required white resource into a stable ID;
+        // cache only its allocation-specific rectangle for submission.
         let white_icon_rect = atlas.get_icon_rect(atlas.white_icon());
         let white_icon_min = Vec2f::new(white_icon_rect.x as f32, white_icon_rect.y as f32);
         let white_icon_extent = Vec2f::new(white_icon_rect.width as f32, white_icon_rect.height as f32);
@@ -232,7 +232,7 @@ impl<B: RendererBackend> Renderer<B> {
                     return Err(RenderError::UnknownIcon { id: *id, operation_index });
                 }
                 DrawKind::NinePatch { patch, .. } => {
-                    // Theme images are ordinary atlas capabilities. Validate their provenance just
+                    // Theme images are ordinary atlas resources. Validate exact membership just
                     // like standalone icons before a backend frame is acquired.
                     if let Some(image) = patch.image_content()
                         && !self.atlas.contains_icon(image.icon)
@@ -264,8 +264,9 @@ impl<B: RendererBackend> Renderer<B> {
     /// were never published. Once that transaction succeeds, resolving the required white icon and
     /// its normalized UV is infallible under the validated [`AtlasHandle`] contract.
     pub(crate) fn replace_atlas(&mut self, atlas: AtlasHandle) -> Result<(), super::backend::AtlasUploadError> {
-        // Do not re-upload a bundle that is already active. The pointer comparison is exact atlas
-        // identity rather than structural equality, matching FontId and IconId provenance.
+        // Do not re-upload a bundle that is already active. Atlas allocation identity remains
+        // distinct from stable resource identity because several derived atlases may contain the
+        // same FontId and IconId values.
         if self.atlas.ptr_eq(&atlas) {
             return Ok(());
         }

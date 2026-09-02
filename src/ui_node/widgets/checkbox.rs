@@ -145,7 +145,7 @@ impl Checkbox {
     /// Measures the checkbox square plus optional label.
     fn preferred_size(&self, style: &Skin, atlas: &AtlasHandle) -> Dimensioni {
         let padding = style.metrics.padding.max(0);
-        let check_icon = atlas.get_icon_size(crate::IconRole::Check.resolve(atlas));
+        let check_icon = atlas.get_icon_size(style.resolve_icon_role(atlas, crate::IconRole::Check));
         let height = content_height(style, atlas, &self.font, check_icon.height);
         let mut width = padding.saturating_mul(2).saturating_add(height.max(0));
         if !self.label.is_empty() {
@@ -166,7 +166,8 @@ impl Checkbox {
             // governed only by its ordinary pointer, keyboard, and disabled interaction state.
             let color = ctx.control_foreground(ControlRole::Checkbox);
             if let Some(box_content) = box_content {
-                ctx.draw_icon(crate::IconRole::Check.resolve(ctx.atlas()), box_content, color);
+                let check = ctx.skin().resolve_icon_role(ctx.atlas(), crate::IconRole::Check);
+                ctx.draw_icon(check, box_content, color);
             }
         }
         let text_rect = rect(bounds.x + box_rect.width, bounds.y, bounds.width - box_rect.width, bounds.height);

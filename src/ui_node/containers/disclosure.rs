@@ -212,8 +212,8 @@ impl DisclosureHeader {
         // Expansion changes only presentation state, not the header's retained allocation. Reserve
         // the component-wise maximum of both possible icons so toggling cannot clip a larger
         // collapse image or require a state-dependent measurement invalidation.
-        let expand_icon = atlas.get_icon_size(crate::IconRole::Expand.resolve(atlas));
-        let collapse_icon = atlas.get_icon_size(crate::IconRole::Collapse.resolve(atlas));
+        let expand_icon = atlas.get_icon_size(style.resolve_icon_role(atlas, crate::IconRole::Expand));
+        let collapse_icon = atlas.get_icon_size(style.resolve_icon_role(atlas, crate::IconRole::Collapse));
         let icon = Dimensioni::new(expand_icon.width.max(collapse_icon.width), expand_icon.height.max(collapse_icon.height));
         let text_width = if self.label.is_empty() {
             0
@@ -287,9 +287,9 @@ impl Widget for DisclosureHeader {
         };
         let text_color = ctx.control_foreground(foreground_role);
         let icon = if expanded {
-            crate::IconRole::Collapse.resolve(ctx.atlas())
+            ctx.skin().resolve_icon_role(ctx.atlas(), crate::IconRole::Collapse)
         } else {
-            crate::IconRole::Expand.resolve(ctx.atlas())
+            ctx.skin().resolve_icon_role(ctx.atlas(), crate::IconRole::Expand)
         };
         ctx.draw_icon(icon, Recti::new(row.x, row.y, row.height, row.height), text_color);
         // text_offset = row_height - padding.

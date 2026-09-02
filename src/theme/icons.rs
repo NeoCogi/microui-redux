@@ -28,11 +28,11 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-//! Stable semantic and named icon references for retained UI state.
-
-use std::sync::Arc;
+//! Stable semantic and exact icon references for retained UI state.
 
 use crate::atlas::{AtlasHandle, IconId};
+
+use super::Skin;
 
 /// Semantic icon roles required by built-in components.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -68,6 +68,25 @@ impl IconRole {
         Self::File,
     ];
 
+    /// Number of semantic icon roles stored by a complete skin.
+    pub const COUNT: usize = Self::ALL.len();
+
+    /// Returns this role's position in the skin's resolved icon table.
+    pub(crate) const fn index(self) -> usize {
+        // Exhaustive positions prevent declaration-order casts from silently changing persisted
+        // meaning if the enum is later reorganized for readability.
+        match self {
+            Self::Close => 0,
+            Self::Expand => 1,
+            Self::Collapse => 2,
+            Self::Check => 3,
+            Self::ExpandDown => 4,
+            Self::OpenFolder => 5,
+            Self::ClosedFolder => 6,
+            Self::File => 7,
+        }
+    }
+
     /// Returns the conventional atlas name for this semantic icon.
     pub const fn atlas_name(self) -> &'static str {
         // Exhaustive matching makes a newly added role choose its exact resource spelling before
@@ -83,39 +102,25 @@ impl IconRole {
             Self::File => "file",
         }
     }
-
-    /// Resolves this role into a capability minted by `atlas`.
-    ///
-    /// # Panics
-    ///
-    /// Panics with the missing role name when the required semantic icon is absent.
-    pub fn resolve(self, atlas: &AtlasHandle) -> IconId {
-        let name = self.atlas_name();
-        // Resolve exact lowercase names only; accepting historic aliases would preserve two public
-        // naming conventions and conceal malformed generated metadata.
-        atlas
-            .icon_id(name)
-            .unwrap_or_else(|| panic!("atlas does not contain required skin icon `{name}`"))
-    }
 }
 
 /// Stable reference to an icon used by retained UI state.
 ///
-/// The reference carries a semantic role or resource name rather than an allocation-bound
-/// [`IconId`]. It can consequently survive a complete skin/atlas replacement and resolve against
-/// the newly installed atlas during measurement or paint.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+/// Semantic roles are resolved once into the active skin, while an exact reference carries the
+/// atlas-baked [`IconId`] obtained from [`crate::ResourceCatalog`]. Both variants are small typed
+/// values and require no retained strings or name lookup during measurement and paint.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum IconRef {
-    /// Resolves through one required semantic icon role.
+    /// Selects one required semantic icon from the active skin.
     Role(IconRole),
-    /// Resolves one exact application-owned atlas icon name.
-    Named(Arc<str>),
+    /// Selects one exact application-owned resource by its stable baked identity.
+    Named(IconId),
 }
 
 impl From<IconRole> for IconRef {
     /// Converts a semantic role without binding it to the current atlas.
     fn from(role: IconRole) -> Self {
-        // Preserve the role so switching skins also switches the concrete icon capability.
+        // Preserve semantic intent so a skin can select its already-resolved concrete icon.
         Self::Role(role)
     }
 }
@@ -127,25 +132,26 @@ impl IconRef {
         Self::Role(role)
     }
 
-    /// Creates a stable reference to one exact atlas icon name.
-    pub fn named(name: impl Into<Arc<str>>) -> Self {
-        let name = name.into();
-        // Empty names are never valid atlas keys and should fail where retained state is built.
-        assert!(!name.is_empty(), "icon reference name must not be empty");
-        Self::Named(name)
+    /// Creates a stable reference to one exact named resource identity.
+    pub const fn named(icon: IconId) -> Self {
+        // ResourceCatalog performs the string lookup once and supplies the validated typed ID.
+        Self::Named(icon)
     }
 
-    /// Resolves this stable reference into a capability owned by `atlas`.
+    /// Resolves this stable reference into an icon identity contained by `atlas`.
     ///
     /// # Panics
     ///
-    /// Panics when the semantic or named icon is absent from `atlas`.
-    pub fn resolve(&self, atlas: &AtlasHandle) -> IconId {
-        // Resolution is deliberately late but concrete: retained data stores this typed enum, and
-        // renderer-facing code receives an ordinary IconId for only the active atlas.
+    /// Panics when the semantic or exact icon identity is absent from `atlas`.
+    pub fn resolve(&self, skin: &Skin, atlas: &AtlasHandle) -> IconId {
+        // Role resolution is a direct skin-array lookup. Exact resources keep their baked ID and
+        // verify that the selected derived atlas copied that logical resource.
         match self {
-            Self::Role(role) => role.resolve(atlas),
-            Self::Named(name) => atlas.icon_id(name).unwrap_or_else(|| panic!("atlas does not contain referenced icon `{name}`")),
+            Self::Role(role) => skin.resolve_icon_role(atlas, *role),
+            Self::Named(icon) => {
+                assert!(atlas.contains_icon(*icon), "icon ID does not belong to the active skin atlas: {icon:?}");
+                *icon
+            }
         }
     }
 }
@@ -155,7 +161,7 @@ mod tests {
     use super::*;
     use crate::{AtlasSource, CharEntry, FontEntry, Recti, SourceFormat, Vec2i};
 
-    /// Verifies semantic resolution is name-based and independent of table position.
+    /// Verifies semantic names are compiled once into IDs independent of table position.
     #[test]
     fn icon_roles_resolve_independent_of_slot_order() {
         let pixels = [0xFF, 0xFF, 0xFF, 0xFF];
@@ -200,11 +206,13 @@ mod tests {
         })
         .expect("semantic-icon fixture atlas must satisfy the complete atlas contract");
 
+        let skin = Skin::from_atlas(&atlas);
         for role in IconRole::ALL {
-            assert_eq!(role.resolve(&atlas), atlas.icon_id(role.atlas_name()).unwrap());
+            assert_eq!(skin.resolve_icon_role(&atlas, role), atlas.icon_id(role.atlas_name()).unwrap());
         }
 
-        let named = IconRef::named("close");
-        assert_eq!(named.resolve(&atlas), atlas.icon_id("close").unwrap());
+        let close = atlas.icon_id("close").unwrap();
+        let named = IconRef::named(close);
+        assert_eq!(named.resolve(&skin, &atlas), close);
     }
 }

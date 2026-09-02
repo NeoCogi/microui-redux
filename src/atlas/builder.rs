@@ -54,6 +54,12 @@ pub struct Builder {
     packer: Packer,
     /// Unvalidated atlas data finalized through the same boundary as serialized sources.
     candidate: AtlasCandidate,
+    /// Identities of copied fonts whose bitmap recipes are intentionally being replaced.
+    ///
+    /// The theme loader excludes only its fixed semantic font names. Retaining their concrete IDs
+    /// here lets the subsequent `add_font_named` call replace pixels and metrics without changing
+    /// the logical resource observed by retained widgets.
+    replacement_font_ids: Vec<(String, FontId)>,
 }
 
 /// One glyph whose rectangle has been reserved in a temporary packer but whose bitmap has not yet
@@ -198,6 +204,7 @@ impl Builder {
             candidate,
             // Atlas packing has one private one-pixel border/inter-rectangle policy.
             packer: Packer::new(config.texture_width as i32, config.texture_height as i32),
+            replacement_font_ids: Vec::new(),
         };
 
         builder.add_icon_named("white", &config.white_icon)?;
@@ -243,6 +250,9 @@ impl Builder {
             // Reconstruct packing state solely from concrete icon rectangles; font glyphs from the
             // source are intentionally not retained.
             packer: Packer::new(width as i32, height as i32),
+            // This constructor deliberately copies icons only. Fonts added by its public caller
+            // are new logical resources rather than replacements for omitted source entries.
+            replacement_font_ids: Vec::new(),
         };
         let source_pixels = atlas.pixels_clone();
         let source_width = atlas.width();
@@ -259,7 +269,7 @@ impl Builder {
                 let start = (top + row) * source_width + left;
                 pixels.extend_from_slice(&source_pixels[start..start + width]);
             }
-            builder.add_icon_pixels_named(name.as_str(), width, height, pixels.as_slice())?;
+            builder.add_icon_pixels_with_id(name.as_str(), icon, width, height, pixels.as_slice())?;
         }
         Ok(builder)
     }
@@ -268,7 +278,7 @@ impl Builder {
     ///
     /// Theme definitions that retain the application's typography still need a new immutable atlas
     /// when they add state artwork. Repacking both resource tables gives those themes room for new
-    /// bitmap tiles without requiring the original font files or weakening atlas-ID provenance.
+    /// bitmap tiles without requiring the original font files or changing resource identities.
     ///
     /// # Errors
     ///
@@ -299,8 +309,9 @@ impl Builder {
 
         for (name, source_font) in &atlas.0.fonts {
             if excluded_fonts.contains(&name.as_str()) {
-                // A later recipe will insert this same name. Omitting it now avoids a duplicate
-                // while every unrelated application font follows the normal exact-copy path.
+                // A later recipe will insert this same name. Preserve its identity separately so
+                // the replacement remains the same logical font despite new metrics and pixels.
+                builder.replacement_font_ids.push((name.clone(), source_font.id));
                 continue;
             }
             // HashMap traversal is intentionally normalized by Unicode scalar value. Stable copy
@@ -334,6 +345,9 @@ impl Builder {
             }
 
             let candidate = FontCandidate {
+                // Complete copies preserve the resource identity even if excluded fonts caused a
+                // different local table position in this derived atlas.
+                id: source_font.id,
                 line_size: source_font.line_size,
                 baseline: source_font.baseline,
                 font_size: source_font.font_size,
@@ -378,18 +392,26 @@ impl Builder {
     /// Adds one already-decoded icon tile under a stable name.
     ///
     /// File-backed and atlas-copy insertion share this boundary so duplicate checks, transactional
-    /// packing, candidate metadata, and capability provenance cannot diverge.
+    /// packing, candidate metadata, and stable identity handling cannot diverge.
     pub(crate) fn add_icon_pixels_named(&mut self, name: &str, width: usize, height: usize, pixels: &[Color4b]) -> Result<IconId, BuilderError> {
+        // New artwork receives a new logical identity. Atlas-copy paths use the private helper
+        // below with the source ID instead.
+        self.add_icon_pixels_with_id(name, IconId::allocate(), width, height, pixels)
+    }
+
+    /// Adds decoded icon pixels while preserving a caller-supplied logical resource identity.
+    fn add_icon_pixels_with_id(&mut self, name: &str, id: IconId, width: usize, height: usize, pixels: &[Color4b]) -> Result<IconId, BuilderError> {
         if self.candidate.icons.iter().any(|(existing, _)| existing == name) {
             // Name lookup would make one of two equal entries unreachable. Detect the conflict
             // before packing so a failed insertion has no side effects.
             return Err(AtlasError::DuplicateIconName { name: name.to_string() }.into());
         }
         let rect = self.add_tile(width, height, pixels)?;
-        let slot = self.candidate.icons.len();
-        self.candidate.icons.push((name.to_string(), Icon { rect }));
-        // The returned capability already belongs to the candidate moved through build.
-        Ok(IconId::new(self.candidate.id, slot))
+        debug_assert!(self.candidate.icons.iter().all(|(_, icon)| icon.id != id));
+        self.candidate.icons.push((name.to_string(), Icon { id, rect }));
+        // Return the exact identity stored in the candidate; finalization changes only its local
+        // lookup position, never the logical resource value.
+        Ok(id)
     }
 
     /// Adds the printable ASCII range of a font at the requested size and returns its [`FontId`].
@@ -476,6 +498,13 @@ impl Builder {
             .map(|m| m.ascent.round() as i32)
             .unwrap_or_else(|| i32::try_from(line_size).unwrap_or(i32::MAX));
         let font_candidate = FontCandidate {
+            // Replacing a copied semantic recipe reuses its ID. A genuinely new name receives a
+            // fresh identity, and a failed insertion never publishes either value in the builder.
+            id: self
+                .replacement_font_ids
+                .iter()
+                .find_map(|(replacement_name, id)| (replacement_name == name).then_some(*id))
+                .unwrap_or_else(FontId::allocate),
             line_size,
             baseline,
             font_size: size,
@@ -519,10 +548,11 @@ impl Builder {
             Self::copy_tile(&mut self.candidate.pixels, self.candidate.dimensions.width, glyph.rectangle, pixels);
         }
         self.packer = next_packer;
-        let slot = self.candidate.fonts.len();
+        let id = font_candidate.id;
+        debug_assert!(self.candidate.fonts.iter().all(|(_, font)| font.id != id));
         self.candidate.fonts.push((name.to_string(), font_candidate));
-        // The returned capability already belongs to the same candidate moved through build.
-        Ok(FontId::new(self.candidate.id, slot))
+        // The same ID is returned before build and later indexed by the immutable runtime atlas.
+        Ok(id)
     }
 
     /// Loads an icon image from disk and normalizes it to RGBA pixels.
@@ -659,7 +689,7 @@ impl Builder {
     /// assets violate the same structural contract enforced for serialized [`AtlasSource`] values.
     pub fn build(self) -> Result<AtlasHandle, BuilderError> {
         // Builder finalization shares the only AtlasHandle construction boundary and preserves the
-        // owner identity already copied into every ID returned by add_font or add_icon.
+        // logical identities already returned by add_font or add_icon.
         AtlasHandle::finish(self.candidate).map_err(BuilderError::from)
     }
 }
@@ -841,6 +871,7 @@ mod tests {
             ["white", "file"]
         );
         let replacement_file_rectangle = replacement.get_icon_rect(replacement.icon_id("file").unwrap());
+        assert_eq!(replacement.icon_id("file"), Some(source_file));
         assert_eq!(
             (
                 replacement_file_rectangle.x,
@@ -872,12 +903,39 @@ mod tests {
         let rebuilt = builder.build().expect("complete copied atlas must pass shared validation");
 
         let rebuilt_font = rebuilt.font_id("body").expect("copied body font name must survive");
+        assert_eq!(rebuilt_font, source_font, "a copied logical font must preserve its baked identity");
         assert_eq!(rebuilt.get_font_height(rebuilt_font), source.get_font_height(source_font));
         assert_eq!(rebuilt.get_font_baseline(rebuilt_font), source.get_font_baseline(source_font));
         assert!(rebuilt.get_char_entry(rebuilt_font, 'a').is_some());
         assert!(rebuilt.contains_icon(artwork));
         let artwork_size = rebuilt.get_icon_size(artwork);
         assert_eq!((artwork_size.width, artwork_size.height), (2, 2));
+    }
+
+    /// Verifies copied IDs are shared while separately authored theme artwork remains isolated.
+    #[test]
+    fn sibling_derived_atlases_do_not_alias_private_artwork_ids() {
+        let source = crate::test_support::test_atlas();
+        let pixels = [color4b(7, 8, 9, 255); 4];
+        let mut first = Builder::from_atlas_with_size(&source, 64, 64).expect("first derived atlas resources must fit");
+        let mut second = Builder::from_atlas_with_size(&source, 64, 64).expect("second derived atlas resources must fit");
+        let first_private = first
+            .add_icon_pixels_named("@theme/private", 2, 2, &pixels)
+            .expect("first private image must fit");
+        let second_private = second
+            .add_icon_pixels_named("@theme/private", 2, 2, &pixels)
+            .expect("second private image must fit");
+        let first = first.build().expect("first derived atlas must validate");
+        let second = second.build().expect("second derived atlas must validate");
+
+        // Equal private names and table positions do not imply equal resources. In contrast, every
+        // source icon was copied with its original ID and remains valid in both derived atlases.
+        assert_ne!(first_private, second_private);
+        assert!(!first.contains_icon(second_private));
+        assert!(!second.contains_icon(first_private));
+        let source_close = source.icon_id("close").expect("source must contain close");
+        assert!(first.contains_icon(source_close));
+        assert!(second.contains_icon(source_close));
     }
 
     /// Verifies semantic font replacement retains unrelated application typography by name.
@@ -902,6 +960,8 @@ mod tests {
             .expect("source typography must fit the fixture atlas")
             .build()
             .expect("source typography must satisfy atlas validation");
+        let source_body = source.font_id("body").expect("source body identity must exist");
+        let source_application = source.font_id("application-code").expect("source application identity must exist");
         let mut replacement =
             Builder::from_atlas_with_size_excluding_fonts(&source, 512, 256, &["body"]).expect("the application font must copy without the replaced body role");
         replacement
@@ -911,6 +971,16 @@ mod tests {
 
         assert_eq!(replacement.get_font_size(replacement.font_id("body").unwrap()), 14);
         assert_eq!(replacement.get_font_size(replacement.font_id("application-code").unwrap()), 8);
+        assert_eq!(
+            replacement.font_id("body"),
+            Some(source_body),
+            "recipe replacement must preserve logical identity"
+        );
+        assert_eq!(
+            replacement.font_id("application-code"),
+            Some(source_application),
+            "exact copies must preserve logical identity"
+        );
         assert_eq!(replacement.clone_font_table().len(), 2);
     }
 

@@ -105,7 +105,7 @@ impl TextboxParameters {
 
     /// Replaces the font used by the textbox.
     pub fn font(mut self, font: FontRef) -> Self {
-        // The editable buffer retains no allocation-bound typography capability.
+        // The editable buffer retains a typed semantic or exact ID reference, never a font name.
         self.font = font;
         self
     }

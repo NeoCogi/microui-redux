@@ -380,10 +380,10 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// Borrows the immutable application font and icon catalog captured at construction.
     ///
     /// Selecting another skin bundle never changes this value. Applications can therefore create
-    /// checked named [`crate::FontRef`] and [`crate::IconRef`] values here and keep them in retained
-    /// widget state across theme switches.
+    /// checked exact [`crate::FontRef`] and [`crate::IconRef`] values here and keep their typed IDs
+    /// in retained widget state across themes derived from this catalog.
     pub fn resource_catalog(&self) -> &ResourceCatalog {
-        // Expose stable named-resource lookup without exposing the catalog's source atlas itself.
+        // Expose one-time named lookup without exposing the catalog's source atlas itself.
         &self.resource_catalog
     }
 
@@ -587,7 +587,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     ///
     /// # Panics
     ///
-    /// Panics when an appearance-image capability belongs to another atlas allocation.
+    /// Panics when the skin contains any resource identity absent from the current atlas.
     pub fn set_skin(&mut self, skin: Skin) {
         // Re-pair the edited skin with the existing immutable atlas at the one validated boundary.
         // The renderer needs no upload because this operation cannot replace atlas pixels.

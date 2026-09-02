@@ -87,42 +87,28 @@ impl AtlasHandle {
 
     /// Returns a mapping from icon names to their identifiers.
     pub fn clone_icon_table(&self) -> Vec<(String, IconId)> {
-        // Every exported capability copies this atlas's provenance instead of exposing a slot.
-        self.0
-            .icons
-            .iter()
-            .enumerate()
-            .map(|(slot, icon)| (icon.0.clone(), IconId::new(self.0.id, slot)))
-            .collect()
+        // Copy the baked identity stored with each icon. A derived builder uses this exact value
+        // when repacking the pixels, so retained references need no name-based rebinding.
+        self.0.icons.iter().map(|(name, icon)| (name.clone(), icon.id)).collect()
     }
 
     /// Returns a mapping from font names to their identifiers.
     pub fn clone_font_table(&self) -> Vec<(String, FontId)> {
-        // Every exported capability copies this atlas's provenance instead of exposing a slot.
-        self.0
-            .fonts
-            .iter()
-            .enumerate()
-            .map(|(slot, font)| (font.0.clone(), FontId::new(self.0.id, slot)))
-            .collect()
+        // IDs are logical resource identities rather than positions in this particular table.
+        self.0.fonts.iter().map(|(name, font)| (name.clone(), font.id)).collect()
     }
 
     /// Looks up a font by its stored atlas name.
     pub fn font_id(&self, name: &str) -> Option<FontId> {
-        self.0
-            .fonts
-            .iter()
-            .enumerate()
-            .find_map(|(slot, (font_name, _))| (font_name == name).then_some(FontId::new(self.0.id, slot)))
+        // Names are accepted at resource-loading and catalog boundaries only; callers retain the
+        // returned typed identity instead of repeating this lookup during every layout pass.
+        self.0.fonts.iter().find_map(|(font_name, font)| (font_name == name).then_some(font.id))
     }
 
     /// Looks up an icon by its stored atlas name.
     pub fn icon_id(&self, name: &str) -> Option<IconId> {
-        self.0
-            .icons
-            .iter()
-            .enumerate()
-            .find_map(|(slot, (icon_name, _))| (icon_name == name).then_some(IconId::new(self.0.id, slot)))
+        // The stable ID is baked into the icon record and survives any derived-atlas copy.
+        self.0.icons.iter().find_map(|(icon_name, icon)| (icon_name == name).then_some(icon.id))
     }
 
     /// Returns the named opaque white tile used for solid rendering.
@@ -130,37 +116,46 @@ impl AtlasHandle {
     /// Every [`AtlasHandle`] has already validated the exact name, positive rectangle, and opaque
     /// white pixels, so this lookup cannot fail for a publicly constructible handle.
     pub fn white_icon(&self) -> IconId {
-        // Resolve by semantic name rather than relying on a positional global constant. The expect
-        // documents the internal post-validation invariant without exposing a fallible runtime API.
-        self.icon_id("white").expect("atlas must contain an icon named `white`")
+        // Finalization resolved the validated name once; solid drawing now carries only its typed
+        // identity through the renderer.
+        self.0.white_icon
     }
 
-    /// Reports whether `font` names a live table entry owned by this atlas allocation.
+    /// Reports whether this atlas contains the logical font resource.
     pub(crate) fn contains_font(&self, font: FontId) -> bool {
-        // Checking both provenance and bounds prevents same-slot IDs from another atlas aliasing.
-        font.atlas == self.0.id && font.slot < self.0.fonts.len()
+        // Membership is exact even when unrelated atlases happen to contain equal table lengths.
+        self.0.font_slots.contains_key(&font)
     }
 
-    /// Reports whether `icon` names a live table entry owned by this atlas allocation.
+    /// Reports whether this atlas contains the logical icon resource.
     pub(crate) fn contains_icon(&self, icon: IconId) -> bool {
-        // Checking both provenance and bounds prevents same-slot IDs from another atlas aliasing.
-        icon.atlas == self.0.id && icon.slot < self.0.icons.len()
+        // Theme-private images have distinct resource identities and therefore cannot alias the
+        // same local position in a sibling theme atlas.
+        self.0.icon_slots.contains_key(&icon)
     }
 
-    /// Resolves a font capability after enforcing atlas ownership and slot bounds.
+    /// Resolves a font identity through this atlas's immutable local index.
     fn font(&self, font: FontId) -> &Font {
-        // Centralizing this assertion ensures no public metrics path can accidentally index only by
-        // the local slot and silently accept a foreign capability.
-        assert!(self.contains_font(font), "font ID does not belong to this atlas: {font:?}");
-        &self.0.fonts[font.slot].1
+        // The atlas-local index decouples stable identity from ordering changes introduced while a
+        // theme replaces selected font recipes.
+        let slot = self
+            .0
+            .font_slots
+            .get(&font)
+            .unwrap_or_else(|| panic!("font ID does not belong to this atlas: {font:?}"));
+        &self.0.fonts[*slot].1
     }
 
-    /// Resolves an icon capability after enforcing atlas ownership and slot bounds.
+    /// Resolves an icon identity through this atlas's immutable local index.
     fn icon(&self, icon: IconId) -> &Icon {
-        // Centralizing this assertion gives direct atlas users the same non-aliasing guarantee as
-        // renderer preflight, while keeping ordinary metric getters allocation-free.
-        assert!(self.contains_icon(icon), "icon ID does not belong to this atlas: {icon:?}");
-        &self.0.icons[icon.slot].1
+        // Resolve through the immutable local index rather than trusting a numeric slot embedded
+        // in the public ID.
+        let slot = self
+            .0
+            .icon_slots
+            .get(&icon)
+            .unwrap_or_else(|| panic!("icon ID does not belong to this atlas: {icon:?}"));
+        &self.0.icons[*slot].1
     }
 
     /// Returns exact glyph metrics for the specified character, if available.
@@ -170,8 +165,7 @@ impl AtlasHandle {
     ///
     /// # Panics
     ///
-    /// Panics when `font` was minted by another atlas allocation or does not identify a live font
-    /// in this atlas.
+    /// Panics when this atlas does not contain the logical font resource.
     pub fn get_char_entry(&self, font: FontId, c: char) -> Option<CharEntry> {
         self.font(font).entries.get(&c).cloned()
     }
@@ -180,8 +174,7 @@ impl AtlasHandle {
     ///
     /// # Panics
     ///
-    /// Panics when `font` was minted by another atlas allocation or does not identify a live font
-    /// in this atlas.
+    /// Panics when this atlas does not contain the logical font resource.
     pub fn get_font_height(&self, font: FontId) -> usize {
         self.font(font).line_size
     }
@@ -190,8 +183,7 @@ impl AtlasHandle {
     ///
     /// # Panics
     ///
-    /// Panics when `font` was minted by another atlas allocation or does not identify a live font
-    /// in this atlas.
+    /// Panics when this atlas does not contain the logical font resource.
     pub fn get_font_baseline(&self, font: FontId) -> i32 {
         self.font(font).baseline
     }
@@ -200,8 +192,7 @@ impl AtlasHandle {
     ///
     /// # Panics
     ///
-    /// Panics when `font` was minted by another atlas allocation or does not identify a live font
-    /// in this atlas.
+    /// Panics when this atlas does not contain the logical font resource.
     pub fn get_font_size(&self, font: FontId) -> usize {
         self.font(font).font_size
     }
@@ -210,8 +201,7 @@ impl AtlasHandle {
     ///
     /// # Panics
     ///
-    /// Panics when `icon` was minted by another atlas allocation or does not identify a live icon
-    /// in this atlas.
+    /// Panics when this atlas does not contain the logical icon resource.
     pub fn get_icon_size(&self, icon: IconId) -> Dimensioni {
         let r = self.icon(icon).rect;
         Dimensioni::new(r.width, r.height)
@@ -221,8 +211,7 @@ impl AtlasHandle {
     ///
     /// # Panics
     ///
-    /// Panics when `icon` was minted by another atlas allocation or does not identify a live icon
-    /// in this atlas.
+    /// Panics when this atlas does not contain the logical icon resource.
     pub fn get_icon_rect(&self, icon: IconId) -> Recti {
         self.icon(icon).rect
     }
@@ -237,8 +226,8 @@ impl AtlasHandle {
     where
         F: FnMut(char, Vec2i, Recti, Recti, i32),
     {
-        // Validate atlas provenance once before the loop, then reuse the concrete font record for
-        // every glyph lookup and line metric.
+        // Validate logical-resource membership once before the loop, then reuse the concrete font
+        // record for every glyph lookup and line metric.
         let font = self.font(font);
         let mut dst = Recti { x: 0, y: 0, width: 0, height: 0 };
         let line_height = font.line_size as i128;
@@ -291,8 +280,7 @@ impl AtlasHandle {
     ///
     /// # Panics
     ///
-    /// Panics when `font` was minted by another atlas allocation or does not identify a live font
-    /// in this atlas.
+    /// Panics when this atlas does not contain the logical font resource.
     pub fn draw_string<DrawFunction: FnMut(char, Vec2i, Recti, Recti)>(&self, font: FontId, text: &str, origin: Vec2i, mut f: DrawFunction) {
         self.walk_glyphs(font, text, origin, |chr, advance, dst, src, _| f(chr, advance, dst, src));
     }
@@ -304,8 +292,7 @@ impl AtlasHandle {
     ///
     /// # Panics
     ///
-    /// Panics when `font` was minted by another atlas allocation or does not identify a live font
-    /// in this atlas.
+    /// Panics when this atlas does not contain the logical font resource.
     pub fn get_text_size(&self, font: FontId, text: &str) -> Dimensioni {
         let mut res = Dimensioni::new(0, 0);
         let line_height = self.get_font_height(font) as i32;
@@ -368,14 +355,15 @@ mod tests {
         .expect("runtime fixture atlas must pass structural validation")
     }
 
-    /// Verifies same-slot resource IDs are accepted only by their originating atlas allocation.
+    /// Verifies independently loaded resources remain distinct while handle clones share IDs.
     #[test]
-    fn resource_ids_are_bound_to_one_atlas_allocation() {
+    fn resource_ids_identify_logical_resources_instead_of_equal_table_positions() {
         let first = make_atlas();
         let first_clone = first.clone();
         let second = make_atlas();
 
-        // Independently loaded identical metadata has matching table positions but distinct owners.
+        // Independently loaded identical metadata describes different logical resource sets even
+        // though names and local table positions happen to match.
         let first_font = first.font_id("body").unwrap();
         let second_font = second.font_id("body").unwrap();
         let first_icon = first.white_icon();
@@ -383,7 +371,7 @@ mod tests {
         assert_ne!(first_font, second_font);
         assert_ne!(first_icon, second_icon);
 
-        // Clones share the exact immutable allocation and therefore accept equal capabilities.
+        // Clones expose the same logical resource records and therefore accept equal identities.
         assert_eq!(first_clone.font_id("body"), Some(first_font));
         assert_eq!(first_clone.white_icon(), first_icon);
         assert!(first_clone.contains_font(first_font));
@@ -391,12 +379,12 @@ mod tests {
         assert!(!second.contains_font(first_font));
         assert!(!second.contains_icon(first_icon));
 
-        // Table clones must stamp the same owner rather than exposing ownerless numeric slots.
+        // Table clones return the identities baked into their records, not ownerless positions.
         assert_eq!(first.clone_font_table(), vec![(String::from("body"), first_font)]);
         assert_eq!(first.clone_icon_table(), vec![(String::from("white"), first_icon)]);
     }
 
-    /// Verifies direct metric lookup rejects foreign capabilities instead of aliasing their slots.
+    /// Verifies direct lookup rejects absent resource identities instead of aliasing table slots.
     #[test]
     fn foreign_resource_lookup_panics_before_indexing_a_same_slot_entry() {
         let first = make_atlas();
@@ -405,7 +393,7 @@ mod tests {
         let foreign_icon = first.white_icon();
 
         // The central accessors use release assertions, so every direct lookup path rejects the
-        // foreign owner even though the second atlas has entries at both local slot zeroes.
+        // absent logical resource even though the second atlas has entries at both local slots.
         let font_result = std::panic::catch_unwind(|| second.get_font_size(foreign_font));
         let icon_result = std::panic::catch_unwind(|| second.get_icon_rect(foreign_icon));
         assert!(font_result.is_err());

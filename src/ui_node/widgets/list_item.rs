@@ -172,7 +172,7 @@ impl ListItem {
         let mut width = padding.saturating_mul(2);
         let mut visual_h = 0;
         if let Some(icon) = &self.icon {
-            let size = atlas.get_icon_size(icon.resolve(atlas));
+            let size = atlas.get_icon_size(icon.resolve(style, atlas));
             width = width.saturating_add(size.width.max(0)).saturating_add(padding);
             visual_h = size.height;
         }
@@ -192,7 +192,7 @@ impl ListItem {
 
         let mut text_rect = bounds;
         if let Some(icon) = &self.icon {
-            let icon = icon.resolve(ctx.atlas());
+            let icon = icon.resolve(ctx.skin(), ctx.atlas());
             // Icons consume the left padding + icon width before the text region starts.
             let padding = ctx.skin().metrics.padding.max(0);
             let icon_size = ctx.atlas().get_icon_size(icon);
@@ -296,7 +296,8 @@ mod tests {
         let atlas = test_atlas();
         let mut style = test_skin(&atlas);
         style.metrics.padding = i32::MAX;
-        let mut item = ListItemBuilder::create_widget(ListItemParameters::with_icon("item", IconRef::named("check")));
+        let check = atlas.icon_id("check").expect("test atlas must contain the exact check resource");
+        let mut item = ListItemBuilder::create_widget(ListItemParameters::with_icon("item", IconRef::named(check)));
         let bounds = rect(0, 0, 20, 20);
         let mut display_list = DisplayList::new();
         let mut ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut display_list, bounds, &style, &atlas, true, true, false, false, false, true);

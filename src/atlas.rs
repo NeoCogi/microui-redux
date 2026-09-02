@@ -52,6 +52,8 @@ pub struct CharEntry {
 
 /// Internal font record stored in the atlas.
 struct Font {
+    /// Stable identity preserved when this font is copied or replaced in a derived atlas.
+    id: FontId,
     /// Distance between text baselines in pixels.
     line_size: usize,
     /// Distance from the top of a line to its baseline.
@@ -70,6 +72,8 @@ struct Font {
 /// A vector deliberately preserves duplicate characters from serialized input. Converting to the
 /// runtime [`HashMap`] before validation would silently replace one duplicate with another.
 struct FontCandidate {
+    /// Stable identity published with this font after the candidate passes validation.
+    id: FontId,
     /// Distance between text baselines in pixels.
     line_size: usize,
     /// Distance from the top of a line to its baseline.
@@ -80,87 +84,65 @@ struct FontCandidate {
     entries: Vec<(char, CharEntry)>,
 }
 
-/// Concrete identity assigned once to one immutable runtime atlas.
+/// Opaque identity of one logical font resource.
 ///
-/// The wrapper keeps atlas provenance distinct from renderer and retained-object identities even
-/// though all of them share the same non-reusing process-wide allocator.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-#[repr(transparent)]
-struct AtlasId(
-    /// Shared process identity hidden behind the atlas-specific type boundary.
-    ProcessUniqueId,
-);
-
-impl AtlasId {
-    /// Allocates the owner identity retained by one newly constructed runtime atlas.
-    fn allocate() -> Self {
-        // Construction is the sole allocation boundary. Every FontId and IconId minted from this
-        // atlas copies the identity, so a local table slot is never accepted without provenance.
-        Self(ProcessUniqueId::allocate())
-    }
-}
-
-/// Opaque capability referencing one font in one concrete runtime atlas.
-///
-/// Passing an ID to metric or drawing methods on another [`AtlasHandle`] is an invariant violation
-/// and panics; renderer submission reports the same mistake as a typed render error during
-/// preflight.
+/// A builder preserves this identity when it copies or replaces the named font in a derived atlas.
+/// Retained UI state can consequently keep the ID across theme changes without retaining a name or
+/// depending on a table position. An unrelated atlas does not contain the identity and rejects it
+/// before accessing font data.
 ///
 /// IDs cannot be fabricated without an atlas owner. The diagnostic-matched
 /// `tests/ui/font_id_default.rs` contract test verifies the absence of a default constructor beside
 /// a passing fixture that obtains IDs from an [`AtlasHandle`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FontId {
-    /// Identity of the atlas that minted this capability.
-    atlas: AtlasId,
-    /// Font-table slot meaningful only within `atlas`.
-    slot: usize,
+    /// Non-reusing identity allocated when the logical resource first enters an atlas pipeline.
+    resource: ProcessUniqueId,
 }
 
 impl FontId {
-    /// Creates a font capability at the atlas construction or lookup boundary.
-    fn new(atlas: AtlasId, slot: usize) -> Self {
-        // Fields stay private so application code can obtain only validated slots from an atlas or
-        // from the builder that owns the future atlas.
-        Self { atlas, slot }
+    /// Allocates an identity for one newly introduced font resource.
+    fn allocate() -> Self {
+        // Atlas loading and successful builder insertion are the only allocation sites. Copying a
+        // resource carries this value forward rather than manufacturing replacement identities.
+        Self { resource: ProcessUniqueId::allocate() }
     }
 }
 
-/// Opaque capability referencing one bitmap icon in one concrete runtime atlas.
+/// Opaque identity of one logical bitmap icon resource.
 ///
-/// Passing an ID to rectangle or size methods on another [`AtlasHandle`] is an invariant violation
-/// and panics; renderer submission reports the same mistake as a typed render error during
-/// preflight.
+/// Atlas derivation preserves this value together with the named icon's pixels. Theme-private
+/// images receive fresh identities, so an image from one sibling theme cannot alias an unrelated
+/// image that happens to occupy the same table position in another atlas.
 ///
 /// IDs cannot be fabricated without an atlas owner. The diagnostic-matched
 /// `tests/ui/icon_id_default.rs` contract test verifies the absence of a default constructor beside
 /// a passing fixture that obtains IDs from an [`AtlasHandle`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IconId {
-    /// Identity of the atlas that minted this capability.
-    atlas: AtlasId,
-    /// Icon-table slot meaningful only within `atlas`.
-    slot: usize,
+    /// Non-reusing identity allocated when the logical resource first enters an atlas pipeline.
+    resource: ProcessUniqueId,
 }
 
 impl IconId {
-    /// Creates an icon capability at the atlas construction or lookup boundary.
-    fn new(atlas: AtlasId, slot: usize) -> Self {
-        // Fields stay private so numeric positions cannot be forged or reused with another atlas.
-        Self { atlas, slot }
+    /// Allocates an identity for one newly introduced icon resource.
+    fn allocate() -> Self {
+        // Keeping construction private prevents callers from forging identities. Atlas copies use
+        // the existing value stored beside the source icon instead of calling this constructor.
+        Self { resource: ProcessUniqueId::allocate() }
     }
 }
 
 /// Internal bitmap icon record stored in the atlas.
 struct Icon {
+    /// Stable identity preserved when this icon is copied into a derived atlas.
+    id: IconId,
     /// Rectangle occupied by the icon in atlas pixel coordinates.
     rect: Recti,
 }
 
 /// Structurally validated immutable atlas storage shared through [`AtlasHandle`].
 struct Atlas {
-    /// Process-unique provenance copied into every font and icon capability.
-    id: AtlasId,
     /// Width of the atlas texture in pixels.
     width: usize,
     /// Height of the atlas texture in pixels.
@@ -171,6 +153,15 @@ struct Atlas {
     fonts: Vec<(String, Font)>,
     /// Named icons available to widgets.
     icons: Vec<(String, Icon)>,
+    /// Required opaque-white rendering tile resolved once during finalization.
+    white_icon: IconId,
+    /// Local font-table positions keyed by stable logical identities.
+    ///
+    /// Derived atlases may reorder fonts while replacing semantic recipes, so the stable ID cannot
+    /// itself be treated as a local vector index.
+    font_slots: HashMap<FontId, usize>,
+    /// Local icon-table positions keyed by stable logical identities.
+    icon_slots: HashMap<IconId, usize>,
 }
 
 /// Owned atlas data that has not yet crossed the single validation boundary.
@@ -178,8 +169,6 @@ struct Atlas {
 /// Serialized sources and the build-time atlas builder both produce this concrete representation.
 /// Only atlas validation may convert it into the immutable runtime [`Atlas`].
 struct AtlasCandidate {
-    /// Process-unique provenance retained if finalization succeeds.
-    id: AtlasId,
     /// Prevalidated dimensions and allocation counts for the texture.
     dimensions: CheckedImageDimensions,
     /// Decoded RGBA pixels in row-major order.

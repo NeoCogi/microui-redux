@@ -828,13 +828,12 @@ fn texture_identifier_exhaustion_preserves_backend_and_tracking_state() {
     assert_eq!(create_calls.get(), 0);
 }
 
-/// Verifies atlas provenance prevents equal local font and icon slots from aliasing across
-/// otherwise identical atlas allocations.
+/// Verifies logical resource identities prevent equal local slots from aliasing across atlases.
 #[test]
 fn foreign_same_slot_font_and_icon_fail_before_frame_acquisition_without_poisoning_local_ids() {
-    // Reconstructing identical source metadata deliberately creates distinct ownership domains.
-    // The conventional font and white icon occupy the same local slots and expose identical
-    // metrics, leaving atlas provenance as the only distinction between each capability pair.
+    // Reconstructing identical source metadata deliberately creates distinct logical resources.
+    // The conventional font and white icon occupy equal local slots and expose identical metrics,
+    // leaving their stable IDs as the distinction between each pair.
     let foreign_atlas = make_atlas();
     let local_atlas = make_atlas();
     let foreign_font = foreign_atlas.font_id("body").unwrap();
@@ -853,8 +852,8 @@ fn foreign_same_slot_font_and_icon_fail_before_frame_acquisition_without_poisoni
 
     let (backend, log) = recording_backend(local_atlas.clone());
     let mut renderer = Renderer::new(backend);
-    // Confirm the handles retained by the renderer mint the same local capabilities captured
-    // above; the regression must reject only IDs from the separate atlas allocation.
+    // Confirm the renderer's atlas exposes the same local logical resources captured above; the
+    // regression must reject only IDs absent from that atlas.
     assert_eq!(renderer.atlas().font_id("body"), Some(local_font));
     assert_eq!(renderer.atlas().white_icon(), local_icon);
 

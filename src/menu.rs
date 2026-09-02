@@ -844,7 +844,7 @@ fn layout_bar(headings: &[MenuSlot], style: &Skin, atlas: &AtlasHandle, mut slot
     let padding = style.metrics.padding.max(1);
     let font_choice = FontRef::Role(FontRole::Body);
     let font = style.resolve_font(atlas, &font_choice);
-    let check = crate::IconRole::Check.resolve(atlas);
+    let check = style.resolve_icon_role(atlas, crate::IconRole::Check);
     let preferred_height = content_height(style, atlas, &font_choice, atlas.get_icon_size(check).height);
     let mut x = 0_i32;
     slots.reserve(headings.len());
@@ -895,7 +895,7 @@ fn layout_popup(rows: &[MenuSlot], style: &Skin, atlas: &AtlasHandle, mut slots:
                     style,
                     atlas,
                     &item.parameters.font,
-                    atlas.get_icon_size(crate::IconRole::Check.resolve(atlas)).height,
+                    atlas.get_icon_size(style.resolve_icon_role(atlas, crate::IconRole::Check)).height,
                 )
             }
             MenuSlot::Separator => style.metrics.spacing.max(3),
@@ -903,10 +903,12 @@ fn layout_popup(rows: &[MenuSlot], style: &Skin, atlas: &AtlasHandle, mut slots:
                 let font_choice = FontRef::Role(FontRole::Body);
                 let font = style.resolve_font(atlas, &font_choice);
                 label_width = label_width.max(atlas.get_text_size(font, label).width.max(0));
-                let arrow = atlas.get_icon_size(crate::IconRole::Expand.resolve(atlas));
+                let arrow = atlas.get_icon_size(style.resolve_icon_role(atlas, crate::IconRole::Expand));
                 trailing_width = trailing_width.max(arrow.width.max(0));
                 // Include arrow height as well as check height to avoid vertical glyph clipping.
-                let visual_height = arrow.height.max(atlas.get_icon_size(crate::IconRole::Check.resolve(atlas)).height);
+                let visual_height = arrow
+                    .height
+                    .max(atlas.get_icon_size(style.resolve_icon_role(atlas, crate::IconRole::Check)).height);
                 content_height(style, atlas, &font_choice, visual_height)
             }
         };
@@ -917,7 +919,7 @@ fn layout_popup(rows: &[MenuSlot], style: &Skin, atlas: &AtlasHandle, mut slots:
     let marker_width = if marker {
         // Radio marks use a drawn fallback, so reserve a usable column even if the check icon is empty.
         atlas
-            .get_icon_size(crate::IconRole::Check.resolve(atlas))
+            .get_icon_size(style.resolve_icon_role(atlas, crate::IconRole::Check))
             .width
             .max(MIN_MARKER_COLUMN_WIDTH)
             .saturating_add(padding)
@@ -972,7 +974,7 @@ fn paint_item_marker(ctx: &mut WidgetPaintCtx<'_>, bounds: Recti, mark: MenuItem
     match mark {
         MenuItemMark::None | MenuItemMark::Checked(false) | MenuItemMark::Radio(false) => {}
         MenuItemMark::Checked(true) => {
-            let icon_id = crate::IconRole::Check.resolve(ctx.atlas());
+            let icon_id = ctx.skin().resolve_icon_role(ctx.atlas(), crate::IconRole::Check);
             let size = ctx.atlas().get_icon_size(icon_id);
             ctx.draw_icon(icon_id, trailing_rect(bounds, size, 0), color);
         }
@@ -981,7 +983,7 @@ fn paint_item_marker(ctx: &mut WidgetPaintCtx<'_>, bounds: Recti, mark: MenuItem
             // excluding the leading gutter padding represented by the wider `bounds` rectangle.
             let check_width = ctx
                 .atlas()
-                .get_icon_size(crate::IconRole::Check.resolve(ctx.atlas()))
+                .get_icon_size(ctx.skin().resolve_icon_role(ctx.atlas(), crate::IconRole::Check))
                 .width
                 .max(MIN_MARKER_COLUMN_WIDTH);
             let available = check_width.min(bounds.height.max(0));
@@ -1002,7 +1004,7 @@ fn paint_item_marker(ctx: &mut WidgetPaintCtx<'_>, bounds: Recti, mark: MenuItem
 fn paint_submenu_arrow(ctx: &mut WidgetPaintCtx<'_>, bounds: Recti, color: Color) {
     // Align the glyph with the right padding used by right-aligned shortcut text.
     let style = ctx.skin().clone();
-    let icon_id = crate::IconRole::Expand.resolve(ctx.atlas());
+    let icon_id = ctx.skin().resolve_icon_role(ctx.atlas(), crate::IconRole::Expand);
     let size = ctx.atlas().get_icon_size(icon_id);
     let icon = trailing_rect(bounds, size, style.metrics.padding.max(1));
     ctx.draw_icon(icon_id, icon, color);

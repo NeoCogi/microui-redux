@@ -75,8 +75,8 @@ pub struct AtlasSource<'a> {
     ///
     /// Names must be unique and every rectangle must be positive and in bounds. An entry named
     /// `white` must exist and every pixel in its rectangle must be opaque white.
-    /// Context's private render executor resolves that atlas-owned capability by name when drawing
-    /// solid geometry; table position has no public meaning.
+    /// Atlas finalization resolves that name once into the stable typed identity used for solid
+    /// geometry; table position has no public meaning.
     pub icons: &'a [(&'a str, Recti)],
     /// Fonts baked into the atlas.
     ///
@@ -121,13 +121,20 @@ impl<'source> TryFrom<&AtlasSource<'source>> for AtlasHandle {
         let icons = source
             .icons
             .iter()
-            .map(|(name, rectangle)| (name.to_string(), Icon { rect: *rectangle }))
+            .map(|(name, rectangle)| {
+                // Serialized metadata introduces a fresh logical resource set. Runtime atlas
+                // derivation will preserve these IDs even when it repacks the corresponding pixels.
+                (name.to_string(), Icon { id: IconId::allocate(), rect: *rectangle })
+            })
             .collect();
         let fonts = source
             .fonts
             .iter()
             .map(|(name, font)| {
                 let candidate = FontCandidate {
+                    // The source name is a loading key, while this ID becomes the retained typed
+                    // identity used after construction.
+                    id: FontId::allocate(),
                     line_size: font.line_size,
                     baseline: font.baseline,
                     font_size: font.font_size,

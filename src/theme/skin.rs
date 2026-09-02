@@ -242,6 +242,13 @@ pub struct Skin {
     /// This prevents callers from temporarily or permanently pairing a new background with the
     /// foreground belonging to an unrelated state.
     appearances: AppearanceCatalog,
+    /// Concrete font identities selected once for every semantic typography role.
+    ///
+    /// Optional roles contain the required body ID when their conventional named resource is not
+    /// present, making runtime role lookup direct and total.
+    font_roles: [FontId; FontRole::COUNT],
+    /// Concrete icon identities selected once for every required semantic icon role.
+    icon_roles: [crate::IconId; IconRole::COUNT],
     /// Window-title and caption-control arrangement.
     pub window_chrome: WindowChromeSkin,
 }
@@ -256,12 +263,16 @@ impl Skin {
     ///
     /// Panics when `body` or any icon required by [`IconRole::ALL`] is absent.
     pub fn from_atlas(atlas: &AtlasHandle) -> Self {
-        // Validate standard names once at construction. The skin retains no allocation-bound font
-        // or icon IDs; concrete capabilities are minted only when active layout or paint needs one.
-        atlas.font_id(FontRole::Body.atlas_name()).expect("atlas does not contain required font `body`");
-        for role in IconRole::ALL {
-            role.resolve(atlas);
-        }
+        // Resolve names once at construction. Every retained value below is a stable resource ID,
+        // so layout and paint perform only typed table lookup against the selected atlas.
+        let body = atlas.font_id(FontRole::Body.atlas_name()).expect("atlas does not contain required font `body`");
+        let font_roles = FontRole::ALL.map(|role| atlas.font_id(role.atlas_name()).unwrap_or(body));
+        let icon_roles = IconRole::ALL.map(|role| {
+            let name = role.atlas_name();
+            atlas
+                .icon_id(name)
+                .unwrap_or_else(|| panic!("atlas does not contain required skin icon `{name}`"))
+        });
         let palette = FlatPalette::default();
         // Build complete visuals from the same concrete flat values stored below. JSON theme
         // loading follows this identical fallback constructor before replacing authored states.
@@ -280,6 +291,8 @@ impl Skin {
                 thumb_size: 8,
             },
             appearances,
+            font_roles,
+            icon_roles,
             window_chrome: WindowChromeSkin::trailing_buttons(),
         }
     }
@@ -320,15 +333,18 @@ impl Skin {
         self
     }
 
-    /// Reports whether every image-backed visual capability belongs to `atlas`.
+    /// Reports whether `atlas` contains every semantic and image resource used by this skin.
     pub(crate) fn belongs_to(&self, atlas: &AtlasHandle) -> bool {
-        // Retained widget resources are stable FontRef/IconRef values and therefore need no owner
-        // check. Only compiled image patches contain renderer-facing atlas capabilities.
-        self.appearances
-            .iter()
-            .map(|visual| visual.patch)
-            .filter_map(NinePatch::image_content)
-            .all(|image| atlas.contains_icon(image.icon))
+        // Semantic resource tables and image-backed appearances all carry stable IDs. Checking the
+        // complete concrete skin here prevents a bundle from publishing unresolved resources.
+        self.font_roles.iter().all(|font| atlas.contains_font(*font))
+            && self.icon_roles.iter().all(|icon| atlas.contains_icon(*icon))
+            && self
+                .appearances
+                .iter()
+                .map(|visual| visual.patch)
+                .filter_map(NinePatch::image_content)
+                .all(|image| atlas.contains_icon(image.icon))
     }
 
     /// Returns normalized structural frame insets shared by measurement and placement.
@@ -395,13 +411,23 @@ impl Skin {
 
     /// Returns the active atlas capability for one semantic font role.
     ///
-    /// Optional semantic names fall back to the required body font. This keeps compact atlases
-    /// useful without retaining IDs that become stale when the atlas is replaced.
+    /// Optional semantic names were mapped to the required body identity during construction, so
+    /// compact atlases remain useful without runtime name lookup.
     pub fn resolve_font_role(&self, atlas: &AtlasHandle, role: FontRole) -> FontId {
-        let body = atlas.font_id(FontRole::Body.atlas_name()).expect("atlas does not contain required font `body`");
-        // The role remains meaningful across themes even when a compact theme omits its dedicated
-        // font. Body is already proven to belong to this exact atlas allocation.
-        atlas.font_id(role.atlas_name()).unwrap_or(body)
+        let font = self.font_roles[role.index()];
+        // Bundle construction proves this invariant for installed skins. Retain the assertion for
+        // direct callers pairing a cloned Skin with an unrelated atlas.
+        assert!(atlas.contains_font(font), "semantic font ID does not belong to the supplied atlas: {font:?}");
+        font
+    }
+
+    /// Returns the active atlas identity for one semantic icon role.
+    pub fn resolve_icon_role(&self, atlas: &AtlasHandle, role: IconRole) -> crate::IconId {
+        let icon = self.icon_roles[role.index()];
+        // Required icon names were resolved exactly once in from_atlas; runtime only validates the
+        // concrete skin/atlas pairing before returning that typed value.
+        assert!(atlas.contains_icon(icon), "semantic icon ID does not belong to the supplied atlas: {icon:?}");
+        icon
     }
 
     /// Returns the active atlas capability for one stable retained font reference.
@@ -427,7 +453,7 @@ mod tests {
 
         assert_eq!(FontRef::from(FontRole::Heading), FontRef::role(FontRole::Heading));
         assert_eq!(FontRef::role(FontRole::Heading).resolve(&style, &atlas), heading);
-        assert_eq!(FontRef::named("heading").resolve(&style, &atlas), heading);
+        assert_eq!(FontRef::named(heading).resolve(&style, &atlas), heading);
     }
 
     /// Verifies one-pass skin construction resolves named roles and uses body for missing roles.
@@ -467,14 +493,14 @@ mod tests {
         let foreign_atlas = make_test_atlas(&[(FontRole::Body.atlas_name(), 12)]);
         let local = Skin::from_atlas(&local_atlas);
 
-        // Stable FontRef and IconRef values do not participate in atlas ownership. A compiled
-        // image patch remains the sole atlas-bound skin value and must still be rejected.
+        // Semantic IDs already belong to the local atlas. Replacing one compiled image with a
+        // foreign resource must make the otherwise complete skin fail the same predicate.
         let mut candidate = local;
         crate::test_support::replace_control_patches(&mut candidate, ControlRole::Button, |_| {
             NinePatch::image(
                 SliceInsets::ZERO,
                 crate::NinePatchImage::new(
-                    IconRole::Close.resolve(&foreign_atlas),
+                    Skin::from_atlas(&foreign_atlas).resolve_icon_role(&foreign_atlas, IconRole::Close),
                     SliceInsets::ZERO,
                     Color { r: 255, g: 255, b: 255, a: 255 },
                 ),

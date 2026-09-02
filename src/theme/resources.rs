@@ -38,7 +38,7 @@ use super::{FontRef, IconRef, SkinBundle};
 /// A [`crate::Context`] never replaces this catalog when it installs a [`SkinBundle`]. Theme
 /// loaders consequently rebuild from the same application-owned inputs every time instead of
 /// treating the previously selected theme's private artwork as new source material. Named
-/// references created here remain meaningful for every correctly derived theme bundle.
+/// exact IDs created here remain meaningful for every correctly derived theme bundle.
 #[derive(Clone)]
 pub struct ResourceCatalog {
     /// Original immutable atlas containing application fonts and icons but no later theme assets.
@@ -60,16 +60,16 @@ impl ResourceCatalog {
 
     /// Returns a stable named font reference when this catalog contains `name`.
     pub fn font_ref(&self, name: &str) -> Option<FontRef> {
-        // Validate the spelling now, but retain only the name. The short-lived concrete FontId is
-        // intentionally discarded because a derived theme owns a different atlas allocation.
-        self.atlas.font_id(name).map(|_| FontRef::named(name.to_owned()))
+        // Names stop at this catalog boundary. Derived atlases preserve the returned baked ID when
+        // they copy or replace the corresponding logical font resource.
+        self.atlas.font_id(name).map(FontRef::named)
     }
 
     /// Returns a stable named icon reference when this catalog contains `name`.
     pub fn icon_ref(&self, name: &str) -> Option<IconRef> {
-        // As with fonts, catalog membership is checked against the source allocation while the
-        // returned reference remains allocation-independent until measurement or paint.
-        self.atlas.icon_id(name).map(|_| IconRef::named(name.to_owned()))
+        // Retained widgets receive a small typed value; the source spelling and lookup table remain
+        // private loading concerns rather than leaking into measurement or paint.
+        self.atlas.icon_id(name).map(IconRef::named)
     }
 
     /// Builds the standard skin paired with this catalog's exact atlas.
@@ -86,8 +86,8 @@ impl ResourceCatalog {
     /// Borrows the pristine source atlas for internal deterministic theme derivation.
     #[cfg(feature = "theme-json")]
     pub(crate) fn atlas(&self) -> &AtlasHandle {
-        // Restrict raw source-atlas access to this crate so applications cannot accidentally draw
-        // its allocation-bound IDs after another bundle has become active.
+        // Restrict the pristine atlas to theme derivation so application code cannot bypass the
+        // active bundle merely because copied logical resource IDs remain valid in both atlases.
         &self.atlas
     }
 }
@@ -108,8 +108,28 @@ mod tests {
         let close = catalog.icon_ref("close").expect("the fixture catalog must expose its close icon");
 
         assert_eq!(body.resolve(bundle.skin(), bundle.atlas()), bundle.atlas().font_id("body").unwrap());
-        assert_eq!(close.resolve(bundle.atlas()), bundle.atlas().icon_id("close").unwrap());
+        assert_eq!(close.resolve(bundle.skin(), bundle.atlas()), bundle.atlas().icon_id("close").unwrap());
         assert!(catalog.font_ref("missing-font").is_none());
         assert!(catalog.icon_ref("missing-icon").is_none());
+    }
+
+    /// Verifies exact retained references survive repacking without returning to their names.
+    #[cfg(feature = "builder")]
+    #[test]
+    fn exact_references_resolve_in_an_atlas_derived_from_the_catalog() {
+        let source = crate::test_support::test_atlas();
+        let catalog = ResourceCatalog::new(source.clone());
+        let body = catalog.font_ref("body").expect("source catalog must contain body");
+        let close = catalog.icon_ref("close").expect("source catalog must contain close");
+        let derived = crate::atlas::builder::Builder::from_atlas_with_size(&source, 64, 64)
+            .expect("fixture resources must fit while repacking")
+            .build()
+            .expect("derived fixture atlas must validate");
+        let skin = crate::Skin::from_atlas(&derived);
+
+        // Resolution checks only stable typed membership. The retained references contain no
+        // spelling that could trigger another name-table scan.
+        assert_eq!(body.resolve(&skin, &derived), derived.font_id("body").unwrap());
+        assert_eq!(close.resolve(&skin, &derived), derived.icon_id("close").unwrap());
     }
 }

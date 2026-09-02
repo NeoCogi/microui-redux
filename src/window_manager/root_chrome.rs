@@ -782,7 +782,7 @@ fn paint_caption_button(
     match button {
         RootCaptionButton::Close => {
             // Close retains the atlas icon already required by every Skin and test atlas.
-            painter.icon(crate::IconRole::Close.resolve(atlas), content, color);
+            painter.icon(style.resolve_icon_role(atlas, crate::IconRole::Close), content, color);
         }
         RootCaptionButton::Minimize => {
             // A centered lower horizontal stroke supplies a deterministic flat fallback over either

@@ -424,7 +424,7 @@ impl LeafWidget for WidgetOption {
         let padding = style.metrics.padding.max(0);
         let vertical_pad = max(1, padding / 2);
         let font_height = atlas.get_font_height(style.resolve_font_role(atlas, crate::FontRole::Body)) as i32;
-        let icon_height = atlas.get_icon_size(crate::IconRole::ExpandDown.resolve(atlas)).height;
+        let icon_height = atlas.get_icon_size(style.resolve_icon_role(atlas, crate::IconRole::ExpandDown)).height;
         let content = max(font_height, icon_height).max(0);
         // Valid font metrics and application skin values may independently reach i32 limits;
         // preferred geometry clamps rather than wrapping before the parent applies constraints.

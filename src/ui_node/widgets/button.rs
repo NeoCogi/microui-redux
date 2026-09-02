@@ -179,7 +179,7 @@ impl Button {
     fn preferred_size_widget(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         match &self.content {
             ButtonContent::Text { label, icon } => {
-                let visual = icon.as_ref().map(|icon| atlas.get_icon_size(icon.resolve(atlas)));
+                let visual = icon.as_ref().map(|icon| atlas.get_icon_size(icon.resolve(style, atlas)));
                 inline_content_size(style, atlas, &self.font, label, visual)
             }
             ButtonContent::Image { label, image } => {
@@ -209,7 +209,7 @@ impl Button {
         match &self.content {
             ButtonContent::Text { label, icon } => {
                 // Text/icon buttons use atlas icon metrics when placing the inline visual.
-                let icon_id = icon.as_ref().map(|icon| icon.resolve(ctx.atlas()));
+                let icon_id = icon.as_ref().map(|icon| icon.resolve(ctx.skin(), ctx.atlas()));
                 let visual_size = icon_id.map(|icon| ctx.atlas().get_icon_size(icon));
                 let placement = place_inline_content(rect, ctx.skin(), label, visual_size);
                 if !label.is_empty() {

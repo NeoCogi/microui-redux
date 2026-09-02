@@ -487,8 +487,8 @@ impl ThemeDefinition {
             .unwrap_or_else(|| (base.width(), base.height()));
         let mut builder = if self.fonts.is_some() {
             // Explicit recipes replace the five semantic roles while unrelated application fonts
-            // and every icon survive from the stable source catalog. This keeps named FontRef
-            // values valid without retaining stale typography from an earlier theme.
+            // and every icon survive from the stable source catalog. Replaced fonts retain their
+            // baked IDs, keeping exact FontRef values valid without retained resource names.
             let semantic_font_names = FontRole::ALL.map(FontRole::atlas_name);
             Builder::from_atlas_with_size_excluding_fonts(base, width, height, &semantic_font_names)
         } else {

@@ -323,9 +323,8 @@ impl State {
 fn main() {
     let atlas = atlas_assets::load_atlas();
     let mut fw = Application::new(atlas, |_gl, ctx| {
-        // Retain the checked font name rather than an allocation-bound FontId. The reference will
-        // resolve against whichever complete skin bundle is active when the textbox is measured or
-        // painted, so this example remains valid across an atlas-bearing theme replacement.
+        // Resolve the application name once through the catalog. Derived theme atlases preserve
+        // this exact FontId when copying or replacing the display font.
         let display_font = ctx
             .resource_catalog()
             .font_ref(DISPLAY_FONT)
