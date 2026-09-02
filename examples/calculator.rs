@@ -322,13 +322,16 @@ impl State {
 
 fn main() {
     let atlas = atlas_assets::load_atlas();
-    let mut fw = Application::new(atlas.clone(), move |_gl, ctx| {
-        let display_font = atlas
-            .font_id(DISPLAY_FONT)
-            .expect("calculator display font should be baked into the example atlas");
-        let (display_state, display_runtime) = Textbox::create(
-            TextboxParameters::with_opt("0", WidgetOption::FRAME | WidgetOption::ALIGN_RIGHT | WidgetOption::NO_INTERACT).font(display_font.into()),
-        );
+    let mut fw = Application::new(atlas, |_gl, ctx| {
+        // Retain the checked font name rather than an allocation-bound FontId. The reference will
+        // resolve against whichever complete skin bundle is active when the textbox is measured or
+        // painted, so this example remains valid across an atlas-bearing theme replacement.
+        let display_font = ctx
+            .resource_catalog()
+            .font_ref(DISPLAY_FONT)
+            .expect("calculator display font should be baked into the application resource catalog");
+        let (display_state, display_runtime) =
+            Textbox::create(TextboxParameters::with_opt("0", WidgetOption::FRAME | WidgetOption::ALIGN_RIGHT | WidgetOption::NO_INTERACT).font(display_font));
         let mut buttons = [
             CalcButton::new("AC", Action::ClearAll),
             CalcButton::new("CE", Action::ClearEntry),
