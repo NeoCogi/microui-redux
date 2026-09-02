@@ -54,6 +54,8 @@
 //!
 //! The widget owns range state, input, events, and paint while its parent remains responsible for
 //! allocating the track. Shared geometry keeps paint, dragging, and track clicks consistent.
+use crate::{ControlRole};
+
 use std::{cell::RefCell, rc::Rc};
 
 use crate::math::{clamp_i64_to_i32, RectExt};
@@ -455,8 +457,8 @@ impl Widget for Scrollbar {
         // Hidden composite children never reach this phase, while mounted zero-range bars display a
         // full-length thumb that communicates the absence of overflow.
         let geometry = self.geometry(ctx.local_rect(), ctx.skin().metrics.thumb_size.max(0));
-        let _ = ctx.draw_appearance(AppearanceRole::ScrollbarTrack, geometry.track());
-        let _ = ctx.draw_appearance(AppearanceRole::ScrollbarThumb, geometry.thumb());
+        let _ = ctx.draw_appearance(AppearanceRole::Control(ControlRole::ScrollbarTrack), geometry.track());
+        let _ = ctx.draw_appearance(AppearanceRole::Control(ControlRole::ScrollbarThumb), geometry.thumb());
     }
 }
 

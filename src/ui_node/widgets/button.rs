@@ -33,6 +33,8 @@
 //! Buttons support text, arbitrary atlas icons, and external textures through one shared inline
 //! placement path.
 
+use crate::{ControlRole};
+
 use super::*;
 use std::{cell::RefCell, rc::Rc};
 
@@ -201,7 +203,7 @@ impl Button {
         if !self.opt.intersects(WidgetOption::FRAME) && widget_fill_visible(ctx, self.fill) {
             // Framed buttons are painted once by retained traversal across their complete outer
             // allocation. An unframed button asks for only the role's stretchable center payload.
-            ctx.draw_appearance_center(AppearanceRole::Button, rect);
+            ctx.draw_appearance_center(AppearanceRole::Control(ControlRole::Button), rect);
         }
         let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
         match &self.content {
@@ -211,10 +213,10 @@ impl Button {
                 let visual_size = icon_id.map(|icon| ctx.atlas().get_icon_size(icon));
                 let placement = place_inline_content(rect, ctx.skin(), label, visual_size);
                 if !label.is_empty() {
-                    ctx.draw_control_text_with_font(font, label, placement.text, AppearanceRole::Button, self.opt);
+                    ctx.draw_control_text_with_font(font, label, placement.text, AppearanceRole::Control(ControlRole::Button), self.opt);
                 }
                 if let (Some(icon), Some(visual)) = (icon_id, placement.visual) {
-                    let color = ctx.foreground(AppearanceRole::Button);
+                    let color = ctx.foreground(AppearanceRole::Control(ControlRole::Button));
                     ctx.draw_icon(icon, visual, color);
                 }
             }
@@ -222,7 +224,7 @@ impl Button {
                 let visual_size = image.map(TextureId::size);
                 let placement = place_inline_content(rect, ctx.skin(), label, visual_size);
                 if !label.is_empty() {
-                    ctx.draw_control_text_with_font(font, label, placement.text, AppearanceRole::Button, self.opt);
+                    ctx.draw_control_text_with_font(font, label, placement.text, AppearanceRole::Control(ControlRole::Button), self.opt);
                 }
                 if let (Some(image), Some(visual)) = (*image, placement.visual) {
                     // External image pixels carry their own color; the adjacent label alone uses
@@ -238,7 +240,7 @@ impl Button {
                     place_inline_content(rect, ctx.skin(), label, visual_size)
                 };
                 if !label.is_empty() {
-                    ctx.draw_control_text_with_font(font, label, placement.text, AppearanceRole::Button, self.opt);
+                    ctx.draw_control_text_with_font(font, label, placement.text, AppearanceRole::Control(ControlRole::Button), self.opt);
                 }
                 if let (Some(image), Some(visual)) = (*image, placement.visual) {
                     // Scaling changes only destination geometry; it must not introduce a theme
@@ -264,7 +266,7 @@ impl Widget for Button {
 
     fn frame_appearance_role(&self) -> AppearanceRole {
         // Buttons use one stateful role for their complete runtime-owned outer frame.
-        AppearanceRole::Button
+        AppearanceRole::Control(ControlRole::Button)
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {

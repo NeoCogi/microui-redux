@@ -99,7 +99,7 @@ impl SkinBundle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AppearanceRole, Color, IconRole, NinePatch, NinePatchImage, SliceInsets, StateTable};
+    use crate::{AppearanceRole, Color, ControlRole, IconRole, NinePatch, NinePatchImage, SliceInsets, StateTable};
 
     /// Verifies the pair rejects the only allocation-bound value still retained by a skin.
     #[test]
@@ -111,7 +111,7 @@ mod tests {
         let foreign_icon = IconRole::Close.resolve(&foreign_atlas);
         crate::test_support::replace_skin_patches(
             &mut skin,
-            AppearanceRole::Button,
+            AppearanceRole::Control(ControlRole::Button),
             StateTable::filled(NinePatch::image(
                 SliceInsets::ZERO,
                 NinePatchImage::new(foreign_icon, SliceInsets::ZERO, Color { r: 255, g: 255, b: 255, a: 255 }),

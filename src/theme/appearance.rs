@@ -7,6 +7,8 @@
 
 //! Unified background and foreground visuals for every semantic role and interaction state.
 
+use crate::{ChromeRole, ControlRole, MenuRole, SurfaceRole};
+
 use crate::{Color, FlatPalette, NinePatch, SliceInsets};
 
 use super::{AppearanceRole, RoleTable, StateTable, VisualState};
@@ -74,20 +76,22 @@ pub(crate) fn visuals_from_flat_palette(frame_insets: SliceInsets, palette: &Fla
     };
 
     let foregrounds_for = |role| match role {
-        AppearanceRole::Item => interactive_foregrounds(text, palette.disabled_foreground),
-        AppearanceRole::MenuTitle | AppearanceRole::MenuItem => interactive_foregrounds(palette.menu_foreground, palette.disabled_foreground),
-        AppearanceRole::MenuTitleOpen => selected_foregrounds(palette.disabled_foreground),
-        AppearanceRole::MenuBar | AppearanceRole::MenuPopup => menu_foregrounds,
-        AppearanceRole::WindowTitle
-        | AppearanceRole::WindowTitleActive
-        | AppearanceRole::WindowCloseButton
-        | AppearanceRole::WindowMinimizeButton
-        | AppearanceRole::WindowMaximizeButton
-        | AppearanceRole::WindowRestoreButton
-        | AppearanceRole::WindowCloseGlyph
-        | AppearanceRole::WindowMinimizeGlyph
-        | AppearanceRole::WindowMaximizeGlyph
-        | AppearanceRole::WindowRestoreGlyph => title_foregrounds,
+        AppearanceRole::Control(ControlRole::Item) => interactive_foregrounds(text, palette.disabled_foreground),
+        AppearanceRole::Menu(MenuRole::Title) | AppearanceRole::Menu(MenuRole::Item) => {
+            interactive_foregrounds(palette.menu_foreground, palette.disabled_foreground)
+        }
+        AppearanceRole::Menu(MenuRole::TitleOpen) => selected_foregrounds(palette.disabled_foreground),
+        AppearanceRole::Menu(MenuRole::Bar) | AppearanceRole::Menu(MenuRole::Popup) => menu_foregrounds,
+        AppearanceRole::Chrome(ChromeRole::Title)
+        | AppearanceRole::Chrome(ChromeRole::TitleActive)
+        | AppearanceRole::Chrome(ChromeRole::CloseButton)
+        | AppearanceRole::Chrome(ChromeRole::MinimizeButton)
+        | AppearanceRole::Chrome(ChromeRole::MaximizeButton)
+        | AppearanceRole::Chrome(ChromeRole::RestoreButton)
+        | AppearanceRole::Chrome(ChromeRole::CloseGlyph)
+        | AppearanceRole::Chrome(ChromeRole::MinimizeGlyph)
+        | AppearanceRole::Chrome(ChromeRole::MaximizeGlyph)
+        | AppearanceRole::Chrome(ChromeRole::RestoreGlyph) => title_foregrounds,
         _ => body_foregrounds,
     };
 
@@ -141,54 +145,57 @@ pub(crate) fn visuals_from_flat_palette(frame_insets: SliceInsets, palette: &Fla
     let mut catalog = RoleTable::filled(StateTable::filled(default));
     let mut assign = |role, patches| catalog.set(role, combine(patches, foregrounds_for(role)));
 
-    assign(AppearanceRole::GenericFrame, StateTable::filled(hollow));
+    assign(AppearanceRole::Surface(SurfaceRole::GenericFrame), StateTable::filled(hollow));
     assign(
-        AppearanceRole::Panel,
+        AppearanceRole::Surface(SurfaceRole::Panel),
         with_disabled(StateTable::filled(framed(palette.panel_background)), framed(palette.disabled_background)),
     );
-    assign(AppearanceRole::Button, button);
-    assign(AppearanceRole::Checkbox, input);
-    assign(AppearanceRole::TextInput, input);
-    assign(AppearanceRole::Item, highlight);
-    assign(AppearanceRole::Combo, button);
-    assign(AppearanceRole::SliderTrack, input);
-    assign(AppearanceRole::SliderThumb, button);
+    assign(AppearanceRole::Control(ControlRole::Button), button);
+    assign(AppearanceRole::Control(ControlRole::Checkbox), input);
+    assign(AppearanceRole::Control(ControlRole::TextInput), input);
+    assign(AppearanceRole::Control(ControlRole::Item), highlight);
+    assign(AppearanceRole::Control(ControlRole::Combo), button);
+    assign(AppearanceRole::Control(ControlRole::SliderTrack), input);
+    assign(AppearanceRole::Control(ControlRole::SliderThumb), button);
     assign(
-        AppearanceRole::ScrollbarTrack,
+        AppearanceRole::Control(ControlRole::ScrollbarTrack),
         with_disabled(StateTable::filled(solid(palette.scrollbar_track)), solid(palette.disabled_background)),
     );
     assign(
-        AppearanceRole::ScrollbarThumb,
+        AppearanceRole::Control(ControlRole::ScrollbarThumb),
         with_disabled(StateTable::filled(solid(palette.scrollbar_thumb)), solid(palette.disabled_background)),
     );
     assign(
-        AppearanceRole::MenuBar,
+        AppearanceRole::Menu(MenuRole::Bar),
         with_disabled(StateTable::filled(solid(palette.menu_background)), solid(palette.disabled_background)),
     );
-    assign(AppearanceRole::MenuTitle, highlight);
-    assign(AppearanceRole::MenuTitleOpen, selected);
+    assign(AppearanceRole::Menu(MenuRole::Title), highlight);
+    assign(AppearanceRole::Menu(MenuRole::TitleOpen), selected);
     assign(
-        AppearanceRole::MenuPopup,
+        AppearanceRole::Menu(MenuRole::Popup),
         with_disabled(StateTable::filled(framed(palette.menu_background)), framed(palette.disabled_background)),
     );
-    assign(AppearanceRole::MenuItem, highlight);
+    assign(AppearanceRole::Menu(MenuRole::Item), highlight);
 
     let active_window = StateTable::filled(NinePatch::framed(
         frame_insets.at_least(1),
         palette.window_active,
         Some(palette.window_background),
     ));
-    assign(AppearanceRole::WindowFrame, window);
-    assign(AppearanceRole::WindowFrameActive, active_window);
-    assign(AppearanceRole::DialogFrame, window);
-    assign(AppearanceRole::DialogFrameActive, active_window);
-    assign(AppearanceRole::WindowTitle, StateTable::filled(solid(palette.title_background)));
-    assign(AppearanceRole::WindowTitleActive, StateTable::filled(solid(palette.window_active)));
-    assign(AppearanceRole::WindowCloseButton, button);
-    assign(AppearanceRole::WindowMinimizeButton, button);
-    assign(AppearanceRole::WindowMaximizeButton, button);
-    assign(AppearanceRole::WindowRestoreButton, button);
-    assign(AppearanceRole::WindowResizeGrip, input);
+    assign(AppearanceRole::Chrome(ChromeRole::WindowFrame), window);
+    assign(AppearanceRole::Chrome(ChromeRole::WindowFrameActive), active_window);
+    assign(AppearanceRole::Chrome(ChromeRole::DialogFrame), window);
+    assign(AppearanceRole::Chrome(ChromeRole::DialogFrameActive), active_window);
+    assign(AppearanceRole::Chrome(ChromeRole::Title), StateTable::filled(solid(palette.title_background)));
+    assign(
+        AppearanceRole::Chrome(ChromeRole::TitleActive),
+        StateTable::filled(solid(palette.window_active)),
+    );
+    assign(AppearanceRole::Chrome(ChromeRole::CloseButton), button);
+    assign(AppearanceRole::Chrome(ChromeRole::MinimizeButton), button);
+    assign(AppearanceRole::Chrome(ChromeRole::MaximizeButton), button);
+    assign(AppearanceRole::Chrome(ChromeRole::RestoreButton), button);
+    assign(AppearanceRole::Chrome(ChromeRole::ResizeGrip), input);
     catalog
 }
 
@@ -210,20 +217,20 @@ mod tests {
         let replacement = Visual::new(NinePatch::solid(color(7, 8, 9, 255)), color(10, 11, 12, 255));
         let original = RoleTable::filled(StateTable::filled(normal));
         let mut changed = original.clone();
-        let mut button = *changed.get(AppearanceRole::Button);
+        let mut button = *changed.get(AppearanceRole::Control(ControlRole::Button));
         button.set(VisualState::Pressed, replacement);
-        changed.set(AppearanceRole::Button, button);
+        changed.set(AppearanceRole::Control(ControlRole::Button), button);
 
         assert_eq!(
-            channels(original[AppearanceRole::Button][VisualState::Pressed].foreground),
+            channels(original[AppearanceRole::Control(ControlRole::Button)][VisualState::Pressed].foreground),
             channels(normal.foreground)
         );
         assert_eq!(
-            channels(changed[AppearanceRole::Button][VisualState::Pressed].foreground),
+            channels(changed[AppearanceRole::Control(ControlRole::Button)][VisualState::Pressed].foreground),
             channels(replacement.foreground)
         );
         assert_eq!(
-            channels(changed[AppearanceRole::Button][VisualState::Normal].foreground),
+            channels(changed[AppearanceRole::Control(ControlRole::Button)][VisualState::Normal].foreground),
             channels(normal.foreground)
         );
     }
@@ -239,8 +246,8 @@ mod tests {
         // Compile once through the production fallback builder so the assertion covers the exact
         // semantic role/state mapping responsible for focused tree and list rows.
         let visuals = visuals_from_flat_palette(SliceInsets::uniform(1), &palette);
-        let control = visuals[AppearanceRole::Button][VisualState::Focused];
-        let item = visuals[AppearanceRole::Item][VisualState::Focused];
+        let control = visuals[AppearanceRole::Control(ControlRole::Button)][VisualState::Focused];
+        let item = visuals[AppearanceRole::Control(ControlRole::Item)][VisualState::Focused];
 
         assert!(matches!(
             control.patch.content,

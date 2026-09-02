@@ -56,6 +56,8 @@
 //! and deletion on valid Unicode scalar-value boundaries. Construction, programmatic replacement,
 //! and text input remove CR and LF so the stored value always matches the one-line measurement
 //! contract. Other characters absent from the selected atlas render through its fallback.
+use crate::{ControlRole};
+
 use crate::*;
 use crate::math::clamp_i64_to_i32;
 use std::{cell::RefCell, rc::Rc};
@@ -405,7 +407,7 @@ pub(crate) fn textbox_paint(ctx: &mut WidgetPaintCtx<'_>, buf: &str, cursor: usi
     let r = ctx.local_rect();
     if !opt.intersects(WidgetOption::FRAME) {
         // Runtime-owned framed editors already painted the complete input patch below this content.
-        ctx.draw_appearance_center(AppearanceRole::TextInput, r);
+        ctx.draw_appearance_center(AppearanceRole::Control(ControlRole::TextInput), r);
     }
 
     let metrics = font_line_metrics(font, ctx.atlas());
@@ -424,7 +426,7 @@ pub(crate) fn textbox_paint(ctx: &mut WidgetPaintCtx<'_>, buf: &str, cursor: usi
 
     if ctx.focused() {
         // Focused editing path clips text/caret to the textbox bounds.
-        let color = ctx.foreground(AppearanceRole::TextInput);
+        let color = ctx.foreground(AppearanceRole::Control(ControlRole::TextInput));
         let caret = caret_rect(clamp_i64_to_i32(i64::from(textx) + i64::from(caret_offset)), baseline_y, metrics, r);
         let mut painter = ctx.painter();
         painter.with_clip(r, |painter| {
@@ -432,7 +434,7 @@ pub(crate) fn textbox_paint(ctx: &mut WidgetPaintCtx<'_>, buf: &str, cursor: usi
             painter.fill_rect(caret, color);
         });
     } else {
-        ctx.draw_control_text_with_font(font, buf, r, AppearanceRole::TextInput, opt);
+        ctx.draw_control_text_with_font(font, buf, r, AppearanceRole::Control(ControlRole::TextInput), opt);
     }
 }
 
@@ -443,7 +445,7 @@ impl Widget for Textbox {
 
     fn frame_appearance_role(&self) -> AppearanceRole {
         // Single-line textboxes use the semantic input frame for every interaction state.
-        AppearanceRole::TextInput
+        AppearanceRole::Control(ControlRole::TextInput)
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {

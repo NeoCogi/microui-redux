@@ -35,6 +35,8 @@
 //! display list. The retained [`crate::Node`] stored for a window therefore represents only the
 //! application-authored content tree.
 
+use crate::{ChromeRole, MenuRole};
+
 use std::fmt;
 
 use crate::math::RectExt;
@@ -266,7 +268,11 @@ impl RootFrameKind {
         // directly define both the visible black outline and the content rectangle behind it.
         match self {
             Self::Window | Self::Dialog => style.metrics.window_border.normalized(),
-            Self::Popup => style.visual(AppearanceRole::MenuPopup, VisualState::Normal).patch.insets.normalized(),
+            Self::Popup => style
+                .visual(AppearanceRole::Menu(MenuRole::Popup), VisualState::Normal)
+                .patch
+                .insets
+                .normalized(),
         }
     }
 }
@@ -634,9 +640,15 @@ fn root_frame_patch(style: &Skin, frame_kind: RootFrameKind, active: bool, state
     // corners do not enlarge the client inset. Matching active visual insets still prevents focus
     // changes from moving or scaling the corner art itself.
     let (passive_role, active_role) = match frame_kind {
-        RootFrameKind::Window => (AppearanceRole::WindowFrame, AppearanceRole::WindowFrameActive),
-        RootFrameKind::Dialog => (AppearanceRole::DialogFrame, AppearanceRole::DialogFrameActive),
-        RootFrameKind::Popup => (AppearanceRole::MenuPopup, AppearanceRole::MenuPopup),
+        RootFrameKind::Window => (
+            AppearanceRole::Chrome(ChromeRole::WindowFrame),
+            AppearanceRole::Chrome(ChromeRole::WindowFrameActive),
+        ),
+        RootFrameKind::Dialog => (
+            AppearanceRole::Chrome(ChromeRole::DialogFrame),
+            AppearanceRole::Chrome(ChromeRole::DialogFrameActive),
+        ),
+        RootFrameKind::Popup => (AppearanceRole::Menu(MenuRole::Popup), AppearanceRole::Menu(MenuRole::Popup)),
     };
     let visual_insets = style.visual(passive_role, VisualState::Normal).patch.insets;
     let role = if active { active_role } else { passive_role };
@@ -707,9 +719,9 @@ pub(super) fn record_root_overlay(
     }
     if let Some(title) = geometry.title {
         let role = if chrome_active {
-            AppearanceRole::WindowTitleActive
+            AppearanceRole::Chrome(ChromeRole::TitleActive)
         } else {
-            AppearanceRole::WindowTitle
+            AppearanceRole::Chrome(ChromeRole::Title)
         };
         let _ = crate::ui_node::frame::paint_internal_frame(
             &mut painter,
@@ -761,7 +773,7 @@ pub(super) fn record_root_overlay(
         // A disabled window exposes no resize action, so omit its grip instead of inventing a
         // disabled rectangle when a classic theme deliberately uses transparent normal artwork.
         let state = chrome_state(visual.part_state(RootChromePart::Resize(RootResizeAxis::Both)));
-        let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, grip, style.visual(AppearanceRole::WindowResizeGrip, state).patch);
+        let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, grip, style.visual(AppearanceRole::Chrome(ChromeRole::ResizeGrip), state).patch);
     }
 }
 
@@ -777,16 +789,16 @@ fn paint_caption_button(
     visual: RootChromeVisualState,
 ) {
     let role = match button {
-        RootCaptionButton::Minimize => AppearanceRole::WindowMinimizeButton,
-        RootCaptionButton::Maximize if visual.maximized => AppearanceRole::WindowRestoreButton,
-        RootCaptionButton::Maximize => AppearanceRole::WindowMaximizeButton,
-        RootCaptionButton::Close => AppearanceRole::WindowCloseButton,
+        RootCaptionButton::Minimize => AppearanceRole::Chrome(ChromeRole::MinimizeButton),
+        RootCaptionButton::Maximize if visual.maximized => AppearanceRole::Chrome(ChromeRole::RestoreButton),
+        RootCaptionButton::Maximize => AppearanceRole::Chrome(ChromeRole::MaximizeButton),
+        RootCaptionButton::Close => AppearanceRole::Chrome(ChromeRole::CloseButton),
     };
     let glyph_role = match button {
-        RootCaptionButton::Minimize => AppearanceRole::WindowMinimizeGlyph,
-        RootCaptionButton::Maximize if visual.maximized => AppearanceRole::WindowRestoreGlyph,
-        RootCaptionButton::Maximize => AppearanceRole::WindowMaximizeGlyph,
-        RootCaptionButton::Close => AppearanceRole::WindowCloseGlyph,
+        RootCaptionButton::Minimize => AppearanceRole::Chrome(ChromeRole::MinimizeGlyph),
+        RootCaptionButton::Maximize if visual.maximized => AppearanceRole::Chrome(ChromeRole::RestoreGlyph),
+        RootCaptionButton::Maximize => AppearanceRole::Chrome(ChromeRole::MaximizeGlyph),
+        RootCaptionButton::Close => AppearanceRole::Chrome(ChromeRole::CloseGlyph),
     };
     let state = if !window_enabled {
         VisualState::Disabled

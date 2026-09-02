@@ -52,6 +52,8 @@
 //
 //! Resolved, structured, atlas-bound skin values used across the crate.
 
+use crate::SurfaceRole;
+
 use super::{appearance::visuals_from_flat_palette, AppearanceRole, Color, FlatPalette, FontRef, FontRole, IconRole, RoleTable, StateTable, Visual, VisualState};
 use crate::atlas::{AtlasHandle, FontId};
 use crate::render::{NinePatch, SliceInsets};
@@ -335,7 +337,10 @@ impl Skin {
     pub(crate) fn frame_insets(&self) -> SliceInsets {
         // NinePatch owns normalization so layout and renderer geometry cannot disagree on negative
         // application-provided style components.
-        self.visual(AppearanceRole::GenericFrame, VisualState::Normal).patch.insets.normalized()
+        self.visual(AppearanceRole::Surface(SurfaceRole::GenericFrame), VisualState::Normal)
+            .patch
+            .insets
+            .normalized()
     }
 
     /// Returns the complete visual assigned to one semantic role and interaction state.
@@ -396,6 +401,7 @@ impl Skin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ControlRole;
     use crate::test_support::test_atlas_with_font_sizes as make_test_atlas;
 
     /// Verifies semantic and named font references resolve through the active atlas.
@@ -452,7 +458,7 @@ mod tests {
         let mut candidate = local;
         crate::test_support::replace_skin_patches(
             &mut candidate,
-            AppearanceRole::Button,
+            AppearanceRole::Control(ControlRole::Button),
             crate::StateTable::filled(NinePatch::image(
                 SliceInsets::ZERO,
                 crate::NinePatchImage::new(
@@ -483,7 +489,7 @@ mod tests {
         let mut style = Skin::from_atlas(&atlas);
         crate::test_support::replace_skin_patches(
             &mut style,
-            AppearanceRole::GenericFrame,
+            AppearanceRole::Surface(SurfaceRole::GenericFrame),
             crate::StateTable::filled(NinePatch::framed(SliceInsets::new(-4, 2, -3, 5), Color { r: 10, g: 20, b: 30, a: 255 }, None)),
         );
         let insets = style.frame_insets();

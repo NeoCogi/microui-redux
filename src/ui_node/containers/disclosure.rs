@@ -28,6 +28,8 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
+use crate::{ControlRole};
+
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
@@ -224,7 +226,11 @@ impl DisclosureHeader {
         let content = Dimensioni::new(content_width, content_height);
         // A header frame is internal to this child, so preferred size must include its inset here.
         let frame = if self.opt.intersects(WidgetOption::FRAME) {
-            style.visual(AppearanceRole::Button, VisualState::Normal).patch.insets.normalized()
+            style
+                .visual(AppearanceRole::Control(ControlRole::Button), VisualState::Normal)
+                .patch
+                .insets
+                .normalized()
         } else {
             crate::SliceInsets::ZERO
         };
@@ -265,19 +271,19 @@ impl Widget for DisclosureHeader {
                 if self.opt.intersects(WidgetOption::FRAME) {
                     // The header owns this internal frame, so it resolves the complete button patch
                     // rather than asking retained traversal to inset the disclosure container.
-                    row = ctx.draw_appearance(AppearanceRole::Button, row).unwrap_or_default();
+                    row = ctx.draw_appearance(AppearanceRole::Control(ControlRole::Button), row).unwrap_or_default();
                 } else {
-                    ctx.draw_appearance_center(AppearanceRole::Item, row);
+                    ctx.draw_appearance_center(AppearanceRole::Control(ControlRole::Item), row);
                 }
             }
-            DisclosureVariant::Tree => ctx.draw_appearance_center(AppearanceRole::Item, row),
+            DisclosureVariant::Tree => ctx.draw_appearance_center(AppearanceRole::Control(ControlRole::Item), row),
         }
 
         // Reserve a square icon cell from row height, then paint text in the remaining rectangle.
         let foreground_role = if self.variant == DisclosureVariant::Header && self.opt.intersects(WidgetOption::FRAME) {
-            AppearanceRole::Button
+            AppearanceRole::Control(ControlRole::Button)
         } else {
-            AppearanceRole::Item
+            AppearanceRole::Control(ControlRole::Item)
         };
         let text_color = ctx.foreground(foreground_role);
         let icon = if expanded {

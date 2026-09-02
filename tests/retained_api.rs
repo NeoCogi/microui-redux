@@ -37,7 +37,7 @@ use microui_redux::prelude::{
     MenuItemSubmitted, Recti, TextBlock, TextBlockParameters, TypedWidgetHandle, Vec2i, Window,
 };
 use microui_redux::{
-    color, rect, AppearanceRole, AtlasHandle, AtlasSource, AtlasUploadError, CaptionButtonSide, CharEntry, Constraints, Context, Disclosure,
+    color, rect, AppearanceRole, AtlasHandle, AtlasSource, AtlasUploadError, CaptionButtonSide, CharEntry, Constraints, Context, ControlRole, Disclosure,
     DisclosureParameters, FontEntry, FontRef, FontRole, Grid, GridParameters, IconRef, IconRole, ImageError, Linear, LinearParameters, ScrollArea,
     ScrollAreaOption, ScrollAreaParameters, Skin, SkinBundle, SourceFormat, StateTable, SurfaceMutationError, TextureError, TextureId, VisualState,
     WindowChromeSkin, WindowTitleAlignment,
@@ -153,17 +153,19 @@ fn downstream_skin_visuals_are_concrete_and_exhaustive() {
     // values, while StateTable makes a bulk role replacement total without erased payloads.
     let context = context();
     let mut skin = context.skin().clone();
-    let original = skin.visual(AppearanceRole::Button, VisualState::Focused);
+    let original = skin.visual(AppearanceRole::Control(ControlRole::Button), VisualState::Focused);
     let mut changed = original;
     changed.foreground = color(17, 29, 43, 255);
     let mut states = StateTable::filled(original);
     states.set(VisualState::Focused, changed);
-    skin.set_role_visuals(AppearanceRole::Button, states);
+    skin.set_role_visuals(AppearanceRole::Control(ControlRole::Button), states);
 
     assert_eq!(states.iter().count(), VisualState::COUNT);
-    assert_eq!(skin.visual(AppearanceRole::Button, VisualState::Focused).foreground.r, 17);
+    assert_eq!(skin.visual(AppearanceRole::Control(ControlRole::Button), VisualState::Focused).foreground.r, 17);
     assert_eq!(
-        skin.visual(AppearanceRole::Button, VisualState::PressedFocused).foreground.r,
+        skin.visual(AppearanceRole::Control(ControlRole::Button), VisualState::PressedFocused)
+            .foreground
+            .r,
         original.foreground.r
     );
 }

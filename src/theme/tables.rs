@@ -132,6 +132,7 @@ impl<T> Index<AppearanceRole> for RoleTable<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ControlRole;
 
     /// Verifies state tables are total and independently mutable through typed indices.
     #[test]
@@ -149,10 +150,10 @@ mod tests {
     fn role_table_has_copy_on_write_value_semantics() {
         let original = RoleTable::filled(4_u8);
         let mut changed = original.clone();
-        changed.set(AppearanceRole::Button, 8);
+        changed.set(AppearanceRole::Control(ControlRole::Button), 8);
 
-        assert_eq!(original[AppearanceRole::Button], 4);
-        assert_eq!(changed[AppearanceRole::Button], 8);
+        assert_eq!(original[AppearanceRole::Control(ControlRole::Button)], 4);
+        assert_eq!(changed[AppearanceRole::Control(ControlRole::Button)], 8);
         assert_eq!(changed.iter().count(), AppearanceRole::COUNT);
     }
 }

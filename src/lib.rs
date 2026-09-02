@@ -282,8 +282,9 @@ pub mod prelude {
     };
     pub use crate::math::{expand_rect, rect, vec2};
     pub use crate::theme::{
-        AppearanceRole, CaptionButtonSide, CaptionButtonsSkin, Color, FlatPalette, FontRef, FontRole, IconRef, IconRole, ResourceCatalog, Skin, SkinBundle,
-        SkinMetrics, StateTable, TitleBackdropSkin, Visual, VisualState, WindowChromeSkin, WindowTitleAlignment, color,
+        AppearanceRole, CaptionButtonSide, CaptionButtonsSkin, ChromeRole, Color, ControlRole, FlatPalette, FontRef, FontRole, IconRef, IconRole, MenuRole,
+        ResourceCatalog, Skin, SkinBundle, SkinMetrics, StateTable, SurfaceRole, TitleBackdropSkin, Visual, VisualState, WindowChromeSkin,
+        WindowTitleAlignment, color,
     };
     #[cfg(feature = "theme-json")]
     pub use crate::theme::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};
@@ -315,8 +316,9 @@ pub use input::{Key, KeyEvent, KeyState, Modifiers, MouseButton};
 pub use math::{expand_rect, rect, vec2};
 pub use render::{AtlasUploadError, NinePatch, NinePatchCell, NinePatchCells, NinePatchContent, NinePatchImage, SliceInsets, TextureError, TextureId};
 pub use theme::{
-    AppearanceRole, CaptionButtonSide, CaptionButtonsSkin, Color, FlatPalette, FontRef, FontRole, IconRef, IconRole, ResourceCatalog, Skin, SkinBundle,
-    SkinMetrics, StateTable, TitleBackdropSkin, Visual, VisualState, WindowChromeSkin, WindowTitleAlignment, color,
+    AppearanceRole, CaptionButtonSide, CaptionButtonsSkin, ChromeRole, Color, ControlRole, FlatPalette, FontRef, FontRole, IconRef, IconRole, MenuRole,
+    ResourceCatalog, Skin, SkinBundle, SkinMetrics, StateTable, SurfaceRole, TitleBackdropSkin, Visual, VisualState, WindowChromeSkin, WindowTitleAlignment,
+    color,
 };
 #[cfg(feature = "theme-json")]
 pub use theme::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};

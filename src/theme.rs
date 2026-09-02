@@ -50,7 +50,7 @@ pub use icons::{IconRef, IconRole};
 pub use loader::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};
 pub use palette::FlatPalette;
 pub use resources::ResourceCatalog;
-pub use roles::{AppearanceRole, VisualState};
+pub use roles::{AppearanceRole, ChromeRole, ControlRole, MenuRole, SurfaceRole, VisualState};
 pub use skin::{CaptionButtonSide, CaptionButtonsSkin, Skin, SkinMetrics, TitleBackdropSkin, WindowChromeSkin, WindowTitleAlignment};
 pub(crate) use skin::SkinRevision;
 pub use tables::StateTable;

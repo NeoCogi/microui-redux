@@ -30,6 +30,8 @@
 
 //! Retained numeric-entry widget.
 
+use crate::{ControlRole};
+
 use crate::*;
 use std::{cell::RefCell, rc::Rc};
 
@@ -201,10 +203,10 @@ impl Number {
         let base = ctx.local_rect();
         if !self.opt.intersects(WidgetOption::FRAME) {
             // Unframed numeric editors retain the input role's center without structural borders.
-            ctx.draw_appearance_center(AppearanceRole::TextInput, base);
+            ctx.draw_appearance_center(AppearanceRole::Control(ControlRole::TextInput), base);
         }
         let label = number_label(self.value, self.precision);
-        ctx.draw_control_text_with_font(font, label.as_str(), base, AppearanceRole::TextInput, self.opt);
+        ctx.draw_control_text_with_font(font, label.as_str(), base, AppearanceRole::Control(ControlRole::TextInput), self.opt);
     }
 }
 
@@ -254,7 +256,7 @@ impl Widget for Number {
 
     fn frame_appearance_role(&self) -> AppearanceRole {
         // Numeric editing shares the single-line text-input background and border contract.
-        AppearanceRole::TextInput
+        AppearanceRole::Control(ControlRole::TextInput)
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {

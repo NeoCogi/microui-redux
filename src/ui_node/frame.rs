@@ -154,6 +154,7 @@ fn checked_add(left: i32, right: i32) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SurfaceRole;
     use crate::{Color, color};
     use crate::render::DisplayList;
     use crate::test_support::{replace_skin_patches, test_atlas, test_skin};
@@ -161,7 +162,11 @@ mod tests {
     /// Replaces the generic frame role used by the frame geometry under test.
     fn with_frame(mut style: Skin, patch: NinePatch) -> Skin {
         // Tests mutate the same concrete catalog entry that production generic framing resolves.
-        replace_skin_patches(&mut style, crate::AppearanceRole::GenericFrame, crate::StateTable::filled(patch));
+        replace_skin_patches(
+            &mut style,
+            crate::AppearanceRole::Surface(SurfaceRole::GenericFrame),
+            crate::StateTable::filled(patch),
+        );
         style
     }
 
@@ -169,7 +174,11 @@ mod tests {
     fn frame_geometry_derives_inside_content() {
         let atlas = test_atlas();
         let style = with_frame(test_skin(&atlas), NinePatch::framed(SliceInsets::uniform(2), color(1, 2, 3, 255), None));
-        let geometry = frame_geometry(Recti::new(10, 20, 30, 40), Some(crate::AppearanceRole::GenericFrame), &style);
+        let geometry = frame_geometry(
+            Recti::new(10, 20, 30, 40),
+            Some(crate::AppearanceRole::Surface(SurfaceRole::GenericFrame)),
+            &style,
+        );
         assert_eq!(rect_tuple(geometry.outer), (10, 20, 30, 40));
         assert_eq!(geometry.content.map(rect_tuple), Some((12, 22, 26, 36)));
     }
@@ -179,7 +188,7 @@ mod tests {
         let atlas = test_atlas();
         let style = with_frame(test_skin(&atlas), NinePatch::framed(SliceInsets::ZERO, color(1, 2, 3, 255), None));
         let outer = Recti::new(10, 20, 30, 40);
-        let geometry = frame_geometry(outer, Some(crate::AppearanceRole::GenericFrame), &style);
+        let geometry = frame_geometry(outer, Some(crate::AppearanceRole::Surface(SurfaceRole::GenericFrame)), &style);
         assert_eq!(geometry.content.map(rect_tuple), Some(rect_tuple(outer)));
     }
 
@@ -188,7 +197,7 @@ mod tests {
         let atlas = test_atlas();
         let style = with_frame(test_skin(&atlas), NinePatch::framed(SliceInsets::uniform(1), color(0, 0, 0, 0), None));
         assert_eq!(
-            frame_geometry(Recti::new(4, 5, 8, 7), Some(crate::AppearanceRole::GenericFrame), &style)
+            frame_geometry(Recti::new(4, 5, 8, 7), Some(crate::AppearanceRole::Surface(SurfaceRole::GenericFrame)), &style)
                 .content
                 .map(rect_tuple),
             Some((5, 6, 6, 5))
@@ -200,7 +209,7 @@ mod tests {
         let atlas = test_atlas();
         let style = test_skin(&atlas);
         assert!(
-            frame_geometry(Recti::new(7, 8, 2, 10), Some(crate::AppearanceRole::GenericFrame), &style)
+            frame_geometry(Recti::new(7, 8, 2, 10), Some(crate::AppearanceRole::Surface(SurfaceRole::GenericFrame)), &style)
                 .content
                 .is_none()
         );

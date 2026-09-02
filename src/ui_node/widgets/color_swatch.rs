@@ -30,6 +30,8 @@
 
 //! Retained color-swatch widget.
 
+use crate::{ControlRole};
+
 use crate::*;
 
 /// One-shot construction input for a [`ColorSwatch`].
@@ -138,7 +140,7 @@ impl ColorSwatch {
         ctx.draw_rect(rect, self.fill);
         if !self.label.is_empty() {
             let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
-            ctx.draw_control_text_with_font(font, self.label.as_str(), rect, AppearanceRole::Button, self.opt);
+            ctx.draw_control_text_with_font(font, self.label.as_str(), rect, AppearanceRole::Control(ControlRole::Button), self.opt);
         }
     }
 }

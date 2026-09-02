@@ -28,6 +28,8 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
+use crate::{SurfaceRole};
+
 use std::{cell::RefCell, rc::Rc};
 
 use bitflags::bitflags;
@@ -321,7 +323,7 @@ impl Widget for ScrollArea {
 
     fn frame_appearance_role(&self) -> AppearanceRole {
         // A framed scroll area uses the same panel patch whose center fills its viewport.
-        AppearanceRole::Panel
+        AppearanceRole::Surface(SurfaceRole::Panel)
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {
@@ -348,9 +350,9 @@ impl Widget for ScrollArea {
         let surface = if surface.width > 0 || surface.height > 0 { surface } else { fallback };
         // Panel fill is passive container structure. Scrollbars remain independently interactive,
         // but hovering or dragging anywhere inside the viewport must not recolor its background.
-        ctx.draw_appearance_center_state(AppearanceRole::Panel, crate::VisualState::Normal, surface);
+        ctx.draw_appearance_center_state(AppearanceRole::Surface(SurfaceRole::Panel), crate::VisualState::Normal, surface);
         if let Some(corner) = corner {
-            ctx.draw_appearance_center_state(AppearanceRole::Panel, crate::VisualState::Normal, corner);
+            ctx.draw_appearance_center_state(AppearanceRole::Surface(SurfaceRole::Panel), crate::VisualState::Normal, corner);
         }
     }
 }
@@ -1045,7 +1047,7 @@ mod tests {
         let frame_insets = crate::SliceInsets::uniform(3);
         crate::test_support::replace_skin_patches(
             &mut style,
-            crate::AppearanceRole::Panel,
+            crate::AppearanceRole::Surface(SurfaceRole::Panel),
             crate::StateTable::filled(crate::NinePatch::framed(
                 frame_insets,
                 crate::color(1, 2, 3, 255),

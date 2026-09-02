@@ -52,6 +52,8 @@
 //
 //! Widget runtime contracts and retained event tracking.
 
+use crate::{SurfaceRole};
+
 use std::cell::RefCell;
 use std::cmp::max;
 use std::rc::{Rc, Weak};
@@ -386,7 +388,7 @@ pub trait Widget {
     fn frame_appearance_role(&self) -> AppearanceRole {
         // Generic framing remains the neutral default for application widgets that request FRAME
         // without opting into one of the built-in control meanings.
-        AppearanceRole::GenericFrame
+        AppearanceRole::Surface(SurfaceRole::GenericFrame)
     }
     /// Returns declarative keyboard routing capabilities for this widget surface.
     ///

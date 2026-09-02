@@ -33,6 +33,8 @@
 //! The combo widget tracks selected item text and popup-open state; the context root layer owns the
 //! actual popup traversal.
 
+use crate::{ControlRole};
+
 use super::*;
 use std::{cell::RefCell, rc::Rc};
 
@@ -343,10 +345,10 @@ impl Combo {
         let reserved_width = indicator_size.width;
         text_rect.width = (text_rect.width - reserved_width).max(0);
         let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
-        ctx.draw_control_text_with_font(font, self.label.as_str(), text_rect, AppearanceRole::Combo, self.opt);
+        ctx.draw_control_text_with_font(font, self.label.as_str(), text_rect, AppearanceRole::Control(ControlRole::Combo), self.opt);
 
-        let indicator_content = ctx.draw_appearance(AppearanceRole::Button, indicator);
-        let icon_color = ctx.foreground(AppearanceRole::Combo);
+        let indicator_content = ctx.draw_appearance(AppearanceRole::Control(ControlRole::Button), indicator);
+        let icon_color = ctx.foreground(AppearanceRole::Control(ControlRole::Combo));
         if let Some(indicator_content) = indicator_content {
             ctx.draw_icon(indicator_id, indicator_content, icon_color);
         }
@@ -372,7 +374,7 @@ impl Widget for Combo {
 
     fn frame_appearance_role(&self) -> AppearanceRole {
         // Combo headers use a distinct role so themes can separate them from command buttons.
-        AppearanceRole::Combo
+        AppearanceRole::Control(ControlRole::Combo)
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
