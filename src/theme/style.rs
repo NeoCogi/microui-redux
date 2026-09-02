@@ -52,7 +52,7 @@
 //
 //! Resolved, structured, atlas-bound skin values used across the crate.
 
-use super::{AppearanceRole, Color, FlatPalette, FontRef, FontRole, IconRole, VisualCatalog, VisualState};
+use super::{AppearanceRole, Color, FlatPalette, FontRef, FontRole, IconRole, SkinPatch, VisualCatalog, VisualState};
 use crate::atlas::{AtlasHandle, FontId};
 use crate::render::{NinePatch, SliceInsets};
 
@@ -203,6 +203,19 @@ impl Skin {
         // Metrics are plain concrete values, so configuration is immediate and cannot be retained
         // as an erased callback or deferred mutation.
         configure(&mut self.metrics);
+        self
+    }
+
+    /// Applies one concrete sparse skin patch in place.
+    pub fn apply_patch(&mut self, patch: &SkinPatch) {
+        // SkinPatch owns the exhaustive field mapping and deterministic omission semantics.
+        patch.apply_to(self);
+    }
+
+    /// Applies one concrete sparse patch and returns the resulting skin.
+    pub fn patched(mut self, patch: &SkinPatch) -> Self {
+        // Reuse the in-place path so builder-style and mutable application have identical behavior.
+        self.apply_patch(patch);
         self
     }
 

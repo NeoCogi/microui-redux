@@ -36,6 +36,7 @@ mod icons;
 #[cfg(feature = "theme-json")]
 pub(crate) mod loader;
 mod palette;
+mod patch;
 mod roles;
 mod style;
 mod tables;
@@ -48,6 +49,7 @@ pub use icons::{IconRef, IconRole};
 #[cfg(feature = "theme-json")]
 pub use loader::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};
 pub use palette::FlatPalette;
+pub use patch::{SkinEffectsPatch, SkinMetricsPatch, SkinPatch, VisualPatch, VisualPatchCatalog, WindowChromePatch};
 pub use roles::{AppearanceRole, VisualState};
 pub use style::{Skin, SkinEffects, SkinMetrics, WindowChromeLayout, WindowChromeSkin};
 pub use tables::{RoleTable, StateTable};
