@@ -54,6 +54,8 @@ macro_rules! indexed_role {
 indexed_role! {
     /// Structural surfaces whose presentation depends only on availability.
     pub enum SurfaceRole {
+        /// Window or modal-dialog background below application content and chrome.
+        Window,
         /// Generic frame requested through [`crate::WidgetOption::FRAME`].
         GenericFrame,
         /// Content panel or scroll-area viewport background.
@@ -112,9 +114,9 @@ indexed_role! {
 indexed_role! {
     /// Manager-owned window chrome whose presentation follows window activation.
     pub enum ChromeRole {
-        /// Window outer frame and body.
+        /// Ordinary-window outer frame decoration.
         WindowFrame,
-        /// Modal-dialog outer frame and body.
+        /// Modal-dialog outer frame decoration.
         DialogFrame,
         /// Window title patch and semantic-content color.
         Title,

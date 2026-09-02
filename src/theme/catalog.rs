@@ -127,9 +127,11 @@ impl AppearanceCatalog {
 
 /// Resolves one structural surface from the flat fallback palette.
 fn flat_surface_visual(frame_insets: SliceInsets, palette: &FlatPalette, role: SurfaceRole, state: SurfaceState) -> Visual {
-    // Surfaces react only to inherited availability. GenericFrame remains hollow in either state,
-    // while Panel owns the only state-dependent surface fill.
+    // Surfaces react only to inherited availability. Window owns the root fill independently of
+    // activation, GenericFrame remains hollow, and Panel combines its border with its own fill.
     let patch = match (role, state) {
+        (SurfaceRole::Window, SurfaceState::Normal) => NinePatch::solid(palette.window_background),
+        (SurfaceRole::Window, SurfaceState::Disabled) => NinePatch::solid(palette.disabled_background),
         (SurfaceRole::GenericFrame, _) => NinePatch::framed(frame_insets, palette.border, None),
         (SurfaceRole::Panel, SurfaceState::Normal) => NinePatch::framed(frame_insets, palette.border, Some(palette.panel_background)),
         (SurfaceRole::Panel, SurfaceState::Disabled) => NinePatch::framed(frame_insets, palette.border, Some(palette.disabled_background)),
@@ -282,6 +284,28 @@ mod tests {
 
         assert_ne!(original.control(ControlRole::Button, state).content_color.r, 10);
         assert_eq!(changed.control(ControlRole::Button, state).content_color.r, 10);
+    }
+
+    /// Verifies root backgrounds are concrete surface values rather than chrome side effects.
+    #[test]
+    fn window_surface_compiles_client_background_colors() {
+        let palette = FlatPalette {
+            window_background: color(11, 23, 37, 255),
+            disabled_background: color(47, 61, 79, 255),
+            ..FlatPalette::default()
+        };
+        let visuals = AppearanceCatalog::from_flat_palette(SliceInsets::uniform(3), &palette);
+
+        // Window and modal-dialog roots intentionally share this semantic surface. Their outer
+        // decorations remain independently selectable through the two ChromeRole frame values.
+        for (state, expected) in [(SurfaceState::Normal, (11, 23, 37, 255)), (SurfaceState::Disabled, (47, 61, 79, 255))] {
+            let patch = visuals.surface(SurfaceRole::Window, state).patch;
+            assert!(matches!(
+                patch.content,
+                crate::NinePatchContent::Flat { cells }
+                    if matches!(cells.center, crate::NinePatchCell::Color { color } if channels(color) == expected)
+            ));
+        }
     }
 
     /// Verifies a dark control-focus accent cannot darken an independently selected item.

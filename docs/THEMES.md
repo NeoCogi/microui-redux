@@ -207,7 +207,7 @@ flat skin while continuing to permit concrete metric changes for image-backed th
 The `appearances` object accepts four exact family objects, each with its own closed role-key
 vocabulary:
 
-- `surface`: `generic_frame`, `panel`
+- `surface`: `window`, `generic_frame`, `panel`
 - `control`: `button`, `checkbox`, `text_input`, `item`, `combo`, `slider_track`,
   `slider_thumb`, `scrollbar_track`, `scrollbar_thumb`, `close_button`, `minimize_button`,
   `maximize_button`, `restore_button`, `resize_grip`
@@ -230,8 +230,10 @@ Nesting pointer state under the two available control branches makes disabled-ho
 disabled-pressed combinations unrepresentable. Window activation and menu ownership stay in their
 own domains rather than being encoded as duplicate role names.
 
-`surface.panel` and container-owned `surface.generic_frame` are noninteractive structure: their
-body and border resolve the normal appearance while the pointer moves across them. Losing
+`surface.window`, `surface.panel`, and container-owned `surface.generic_frame` are noninteractive
+structure: their body and border resolve the normal appearance while the pointer moves across
+them. Ordinary windows and modal dialogs intentionally share `surface.window`; they retain
+independent `chrome.window_frame` and `chrome.dialog_frame` decorations. Losing
 top-level activation selects the `base` state of `chrome.window_frame`, `chrome.dialog_frame`, and
 `chrome.title` but does not rewrite enabled child widgets. A disabled widget or subtree
 resolves `disabled` independently of activation; its content color uses `disabled_foreground` (or
