@@ -317,9 +317,11 @@ fn downstream_window_owns_declarative_menu_and_live_concrete_items() {
 #[test]
 fn downstream_standalone_menu_uses_the_ordinary_popup_lifecycle() {
     let mut context = context_with_state::<()>();
-    let owner = context
-        .ui()
-        .create_window(Window::new("owner", rect(20, 20, 180, 120), TextBlock::create(TextBlockParameters::new("body")).1));
+    let owner = context.ui().create_window(Window::new(
+        "owner",
+        rect(20, 20, 180, 120),
+        TextBlock::create(TextBlockParameters::new("body")).1,
+    ));
     let (inspect, inspect_item) = MenuItem::create(MenuItemParameters::new("Inspect"));
     let (_, details_item) = MenuItem::create(MenuItemParameters::new("Details"));
 
@@ -329,9 +331,7 @@ fn downstream_standalone_menu_uses_the_ordinary_popup_lifecycle() {
         .ui()
         .create_menu_popup(
             &owner,
-            Menu::new("Object actions")
-                .item(inspect_item)
-                .submenu(Menu::new("More").item(details_item)),
+            Menu::new("Object actions").item(inspect_item).submenu(Menu::new("More").item(details_item)),
         )
         .unwrap();
     context.ui().show_popup_at(&popup, rect(40, 50, 1, 1)).unwrap();

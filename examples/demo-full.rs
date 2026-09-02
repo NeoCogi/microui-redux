@@ -1126,7 +1126,6 @@ struct DemoRootContents {
     weight: TypedWidgetHandle<Linear>,
     demo: TypedWidgetHandle<Linear>,
     combo: TypedWidgetHandle<Linear>,
-    popup: TypedWidgetHandle<Linear>,
 }
 
 fn root_content() -> (TypedWidgetHandle<Linear>, Node) {
@@ -1442,7 +1441,6 @@ struct DemoRuntimes {
     typography_button: Node,
     test_buttons: [Node; 6],
     tree_buttons: [Node; 6],
-    popup_buttons: [Node; 2],
     texture_buttons: [Node; 4],
     stack_direction_buttons: [Node; 6],
     weight_buttons: [Node; 9],
@@ -1493,7 +1491,8 @@ struct State {
 
     demo_root: WindowHandle,
     combo_popup_root: PopupHandle,
-    popup_root: PopupHandle,
+    /// Standalone compact menu opened by the Demo Window's Popup button.
+    test_popup: PopupHandle,
 
     /// Shared camera and presentation state consumed by the grid widget and render callback.
     grid_3d_state: Rc<RefCell<Grid3dState>>,
@@ -1521,7 +1520,8 @@ struct State {
     log_scroll_state: TypedWidgetHandle<ScrollArea>,
     test_button_submitted: [WidgetEventPortHandle<ButtonSubmitted>; 6],
     tree_button_submitted: [WidgetEventPortHandle<ButtonSubmitted>; 6],
-    popup_button_submitted: [WidgetEventPortHandle<ButtonSubmitted>; 2],
+    /// Native menu-item submissions for the two standalone popup commands.
+    popup_menu_item_submitted: [WidgetEventPortHandle<MenuItemSubmitted>; 2],
     stack_direction_button_submitted: [WidgetEventPortHandle<ButtonSubmitted>; 6],
     weight_button_submitted: [WidgetEventPortHandle<ButtonSubmitted>; 9],
     triangle_data: Rc<RefCell<TriangleState>>,
@@ -1739,7 +1739,6 @@ impl State {
         let (style_content, style_node) = root_content();
         let (log_content, log_node) = root_content();
         let (combo_content, combo_node) = root_content();
-        let (popup_content, popup_node) = root_content();
         let (typography_content, typography_node) = root_content();
         let (triangle_content, triangle_node) = root_content();
         let (painter_content, painter_node) = root_content();
@@ -1759,7 +1758,6 @@ impl State {
             weight: weight_content,
             demo: demo_content,
             combo: combo_content,
-            popup: popup_content,
         };
 
         // The grid Window owns its menu bar and custom-render body directly. Its placeholder extent
@@ -1816,16 +1814,15 @@ impl State {
                 WindowOption::FRAME | WindowOption::AUTO_HEIGHT | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
             )
             .expect("combo popup definition must exist");
-        let popup_root = ctx
+        // Build the standalone popup from native menu items. Their values move into the compact
+        // MenuSurface while the application retains only their typed submission endpoints.
+        let popup_menu_items = ["Hello", "World"].map(|label| MenuItem::create(MenuItemParameters::new(label)));
+        let popup_menu_item_submitted = popup_menu_items.each_ref().map(|(handle, _)| handle.submitted());
+        let [hello_item, world_item] = popup_menu_items.map(|(_, item)| item);
+        let test_popup = ctx
             .ui()
-            .create_popup(&demo_root, "Test Popup", popup_node)
+            .create_menu_popup(&demo_root, Menu::new("Test Popup").item(hello_item).item(world_item))
             .expect("demo window must own the test popup");
-        ctx.ui()
-            .set_popup_options(
-                &popup_root,
-                WindowOption::FRAME | WindowOption::AUTO_SIZE | WindowOption::NO_RESIZE | WindowOption::NO_TITLE,
-            )
-            .expect("test popup definition must exist");
         let _typography_root = ctx
             .ui()
             .create_child_window(&grid_root, Window::new("Typography Demo", rect(40, 500, 300, 170), typography_node))
@@ -1900,9 +1897,6 @@ impl State {
         ];
         let tree_button_submitted = tree_button_pairs.each_ref().map(|(submitted, _)| submitted.clone());
         let tree_buttons = tree_button_pairs.map(|(_, runtime)| runtime);
-        let popup_button_pairs = [centered_button("Hello"), centered_button("World")];
-        let popup_button_submitted = popup_button_pairs.each_ref().map(|(submitted, _)| submitted.clone());
-        let popup_buttons = popup_button_pairs.map(|(_, runtime)| runtime);
         let stack_direction_button_pairs = [
             centered_button("Call 1"),
             centered_button("Call 2"),
@@ -1981,7 +1975,6 @@ impl State {
             typography_button,
             test_buttons,
             tree_buttons,
-            popup_buttons,
             texture_buttons,
             stack_direction_buttons,
             weight_buttons,
@@ -2026,7 +2019,7 @@ impl State {
             theme_menu_items: menu_items.themes,
             demo_root,
             combo_popup_root,
-            popup_root,
+            test_popup,
             grid_3d_state,
             grid_root,
             grid_show_minor_lines_item: grid_menu_items.show_minor_lines,
@@ -2043,7 +2036,7 @@ impl State {
             log_scroll_state,
             test_button_submitted,
             tree_button_submitted,
-            popup_button_submitted,
+            popup_menu_item_submitted,
             stack_direction_button_submitted,
             weight_button_submitted,
             triangle_data,
@@ -2089,8 +2082,8 @@ impl State {
         // One concrete window event stream reports both geometry changes and close requests. The
         // floating Demo Window retains diagnostics independently of the platform-sized grid window.
         context.subscribe_context(self.demo_root.events(), Self::demo_window_event).unwrap();
-        for (submitted, label) in self.popup_button_submitted.iter().zip(["Hello", "World"]) {
-            context.subscribe_with(submitted.clone(), label, Self::log_button).unwrap();
+        for (submitted, label) in self.popup_menu_item_submitted.iter().zip(["Hello", "World"]) {
+            context.subscribe_with(submitted.clone(), label, Self::log_menu_item).unwrap();
         }
         for (submitted, label) in self.stack_direction_button_submitted.iter().zip([
             "Top->Bottom: call 1",
@@ -2200,7 +2193,7 @@ impl State {
                 // Apply the popup request at the typed-event boundary. WindowManager owns placement,
                 // exclusivity, and the layout commit; State needs no frame-polled command flag.
                 context
-                    .show_popup(&self.popup_root)
+                    .show_popup(&self.test_popup)
                     .expect("test popup definition and owning demo window must exist");
             }
             4 => self.write_log("Pressed button 4"),
@@ -2214,6 +2207,12 @@ impl State {
     }
 
     fn log_button(&mut self, label: &&'static str, _: &ButtonSubmitted) {
+        self.write_log(label);
+    }
+
+    /// Appends the label bound to one standalone popup-menu item endpoint.
+    fn log_menu_item(&mut self, label: &&'static str, _: &MenuItemSubmitted) {
+        // The menu manager has already closed the popup before dispatch reaches application state.
         self.write_log(label);
     }
 
@@ -2568,7 +2567,6 @@ impl State {
             typography_button,
             test_buttons,
             tree_buttons,
-            popup_buttons,
             texture_buttons,
             stack_direction_buttons,
             weight_buttons,
@@ -2768,16 +2766,6 @@ impl State {
                 }
             }),
             "combo popup",
-        );
-
-        replace_root_content(
-            &roots.popup,
-            DemoNodes::build(|tree| {
-                for button in popup_buttons {
-                    tree.widget(button);
-                }
-            }),
-            "test popup",
         );
 
         replace_root_content(
