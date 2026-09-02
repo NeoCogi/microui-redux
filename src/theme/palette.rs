@@ -40,10 +40,14 @@ pub struct FlatPalette {
     pub scrollbar_track: Color,
     /// Scrollbar thumb fill.
     pub scrollbar_thumb: Color,
-    /// Focused control fill and outline accent.
-    pub focus: Color,
+    /// Focused control border or fill accent.
+    pub control_focus: Color,
+    /// Background used by hovered, keyboard-focused, open, or otherwise selected items.
+    pub selection_background: Color,
+    /// Text and glyph color paired with [`Self::selection_background`].
+    pub selection_foreground: Color,
     /// Active window frame and title accent.
-    pub window_focus: Color,
+    pub window_active: Color,
     /// Menu text and marker foreground.
     pub menu_foreground: Color,
     /// Menu bar and popup background.
@@ -74,8 +78,10 @@ impl Default for FlatPalette {
             input_hovered: Color { r: 35, g: 35, b: 35, a: 255 },
             scrollbar_track: Color { r: 43, g: 43, b: 43, a: 255 },
             scrollbar_thumb: Color { r: 30, g: 30, b: 30, a: 255 },
-            focus: Color { r: 0, g: 120, b: 215, a: 255 },
-            window_focus: Color { r: 0, g: 120, b: 215, a: 255 },
+            control_focus: Color { r: 0, g: 120, b: 215, a: 255 },
+            selection_background: Color { r: 0, g: 120, b: 215, a: 255 },
+            selection_foreground: Color { r: 255, g: 255, b: 255, a: 255 },
+            window_active: Color { r: 0, g: 120, b: 215, a: 255 },
             menu_foreground: Color { r: 230, g: 230, b: 230, a: 255 },
             menu_background: Color { r: 50, g: 50, b: 50, a: 255 },
             disabled_background: Color { r: 50, g: 50, b: 50, a: 255 },

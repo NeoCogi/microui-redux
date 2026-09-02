@@ -55,7 +55,10 @@ the theme directories must remain available beside the repository sources at run
       "border": [0, 0, 0, 255],
       "button": [192, 192, 192, 255],
       "button_hover": [208, 208, 208, 255],
-      "focus": [0, 0, 128, 255]
+      "control_focus": [0, 0, 0, 255],
+      "selection_background": [0, 0, 128, 255],
+      "selection_foreground": [255, 255, 255, 255],
+      "window_active": [0, 0, 128, 255]
     }
   },
   "appearances": {
@@ -126,7 +129,8 @@ The optional `colors` object accepts RGBA byte arrays under these keys:
 - `text`, `border`, `window_background`, `title_background`, `title_text`
 - `disabled_text`, `disabled_background`, `disabled_title_text`
 - `panel_background`, `button`, `button_hover`, `input`, `input_hover`
-- `scrollbar_track`, `scrollbar_thumb`, `focus`, `window_focus`
+- `scrollbar_track`, `scrollbar_thumb`, `control_focus`
+- `selection_background`, `selection_foreground`, `window_active`
 - `menu_foreground`, `menu_background`
 
 These colors construct Skin's complete visual table before any per-state PNG or `foreground`

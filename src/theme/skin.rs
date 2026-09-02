@@ -291,8 +291,8 @@ impl Skin {
             },
             visuals,
             effects: SkinEffects {
-                focus_outline: palette.focus,
-                window_activation: palette.window_focus,
+                focus_outline: palette.control_focus,
+                window_activation: palette.window_active,
             },
             chrome: WindowChromeSkin::trailing_buttons(),
         }
@@ -320,8 +320,8 @@ impl Skin {
         // values. Callers that need different frame geometry can update that typed visual after.
         let frame_insets = self.frame_insets();
         self.visuals = visuals_from_flat_palette(frame_insets, &palette);
-        self.effects.focus_outline = palette.focus;
-        self.effects.window_activation = palette.window_focus;
+        self.effects.focus_outline = palette.control_focus;
+        self.effects.window_activation = palette.window_active;
         self.chrome.set_backdrop_color(palette.title_background);
     }
 

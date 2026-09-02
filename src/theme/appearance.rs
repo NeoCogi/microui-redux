@@ -50,35 +50,48 @@ pub(crate) fn visuals_from_flat_palette(frame_insets: SliceInsets, palette: &Fla
     menu_foregrounds.set(VisualState::Disabled, palette.disabled_foreground);
     let mut title_foregrounds = StateTable::filled(title_text);
     title_foregrounds.set(VisualState::Disabled, palette.disabled_title_foreground);
+    let interactive_foregrounds = |normal, disabled| {
+        StateTable::new([
+            normal,
+            palette.selection_foreground,
+            palette.selection_foreground,
+            palette.selection_foreground,
+            palette.selection_foreground,
+            palette.selection_foreground,
+            disabled,
+        ])
+    };
+    let selected_foregrounds = |disabled| {
+        StateTable::new([
+            palette.selection_foreground,
+            palette.selection_foreground,
+            palette.selection_foreground,
+            palette.selection_foreground,
+            palette.selection_foreground,
+            palette.selection_foreground,
+            disabled,
+        ])
+    };
 
-    let foregrounds_for = |role| {
-        if matches!(
-            role,
-            AppearanceRole::MenuBar
-                | AppearanceRole::MenuTitle
-                | AppearanceRole::MenuTitleOpen
-                | AppearanceRole::MenuPopup
-                | AppearanceRole::MenuItem
-                | AppearanceRole::MenuItemSelected
-        ) {
-            menu_foregrounds
-        } else if matches!(
-            role,
-            AppearanceRole::WindowTitle
-                | AppearanceRole::WindowTitleActive
-                | AppearanceRole::WindowCloseButton
-                | AppearanceRole::WindowMinimizeButton
-                | AppearanceRole::WindowMaximizeButton
-                | AppearanceRole::WindowRestoreButton
-                | AppearanceRole::WindowCloseGlyph
-                | AppearanceRole::WindowMinimizeGlyph
-                | AppearanceRole::WindowMaximizeGlyph
-                | AppearanceRole::WindowRestoreGlyph
-        ) {
-            title_foregrounds
-        } else {
-            body_foregrounds
+    let foregrounds_for = |role| match role {
+        AppearanceRole::ListItem | AppearanceRole::DisclosureHeader => interactive_foregrounds(text, palette.disabled_foreground),
+        AppearanceRole::MenuTitle | AppearanceRole::MenuItem | AppearanceRole::MenuItemSelected => {
+            interactive_foregrounds(palette.menu_foreground, palette.disabled_foreground)
         }
+        AppearanceRole::MenuTitleOpen => selected_foregrounds(palette.disabled_foreground),
+        AppearanceRole::ListItemSelected => selected_foregrounds(palette.disabled_foreground),
+        AppearanceRole::MenuBar | AppearanceRole::MenuPopup => menu_foregrounds,
+        AppearanceRole::WindowTitle
+        | AppearanceRole::WindowTitleActive
+        | AppearanceRole::WindowCloseButton
+        | AppearanceRole::WindowMinimizeButton
+        | AppearanceRole::WindowMaximizeButton
+        | AppearanceRole::WindowRestoreButton
+        | AppearanceRole::WindowCloseGlyph
+        | AppearanceRole::WindowMinimizeGlyph
+        | AppearanceRole::WindowMaximizeGlyph
+        | AppearanceRole::WindowRestoreGlyph => title_foregrounds,
+        _ => body_foregrounds,
     };
 
     let combine = |patches: StateTable<NinePatch>, foregrounds: StateTable<Color>| {
@@ -97,30 +110,26 @@ pub(crate) fn visuals_from_flat_palette(frame_insets: SliceInsets, palette: &Fla
         framed(palette.button),
         framed(palette.button_hovered),
         framed(palette.input),
-        framed(palette.focus),
+        framed(palette.control_focus),
         framed(palette.disabled_background),
     );
     let input = patch_states(
         framed(palette.input),
         framed(palette.input_hovered),
         framed(palette.input_hovered),
-        framed(palette.focus),
+        framed(palette.control_focus),
         framed(palette.disabled_background),
     );
-    let highlight = patch_states(
+    let highlight = StateTable::new([
         solid(transparent),
-        solid(palette.button_hovered),
-        solid(palette.button),
-        solid(palette.focus),
+        solid(palette.selection_background),
+        solid(palette.selection_background),
+        solid(palette.selection_background),
+        solid(palette.selection_background),
+        solid(palette.selection_background),
         solid(transparent),
-    );
-    let selected = patch_states(
-        solid(palette.focus),
-        solid(palette.button_hovered),
-        solid(palette.button),
-        solid(palette.focus),
-        solid(palette.disabled_background),
-    );
+    ]);
+    let selected = with_disabled(StateTable::filled(solid(palette.selection_background)), solid(palette.disabled_background));
     let window = patch_states(
         framed(palette.window_background),
         framed(palette.window_background),
@@ -175,7 +184,7 @@ pub(crate) fn visuals_from_flat_palette(frame_insets: SliceInsets, palette: &Fla
 
     let active_window = StateTable::filled(NinePatch::framed(
         frame_insets.at_least(1),
-        palette.window_focus,
+        palette.window_active,
         Some(palette.window_background),
     ));
     assign(AppearanceRole::WindowFrame, window);
@@ -183,7 +192,7 @@ pub(crate) fn visuals_from_flat_palette(frame_insets: SliceInsets, palette: &Fla
     assign(AppearanceRole::DialogFrame, window);
     assign(AppearanceRole::DialogFrameActive, active_window);
     assign(AppearanceRole::WindowTitle, StateTable::filled(solid(palette.title_background)));
-    assign(AppearanceRole::WindowTitleActive, StateTable::filled(solid(palette.window_focus)));
+    assign(AppearanceRole::WindowTitleActive, StateTable::filled(solid(palette.window_active)));
     assign(AppearanceRole::WindowCloseButton, button);
     assign(AppearanceRole::WindowMinimizeButton, button);
     assign(AppearanceRole::WindowMaximizeButton, button);
@@ -226,5 +235,32 @@ mod tests {
             channels(changed[AppearanceRole::Button][VisualState::Normal].foreground),
             channels(normal.foreground)
         );
+    }
+
+    /// Verifies a dark control-focus accent cannot darken an independently selected item.
+    #[test]
+    fn control_focus_and_item_selection_compile_to_independent_visuals() {
+        let mut palette = FlatPalette::default();
+        palette.control_focus = color(0, 0, 0, 255);
+        palette.selection_background = color(0, 0, 170, 255);
+        palette.selection_foreground = color(255, 255, 255, 255);
+
+        // Compile once through the production fallback builder so the assertion covers the exact
+        // semantic role/state mapping responsible for focused tree and list rows.
+        let visuals = visuals_from_flat_palette(SliceInsets::uniform(1), &palette);
+        let control = visuals[AppearanceRole::Button][VisualState::Focused];
+        let item = visuals[AppearanceRole::ListItem][VisualState::Focused];
+
+        assert!(matches!(
+            control.patch.content,
+            crate::NinePatchContent::Flat { cells }
+                if matches!(cells.center, crate::NinePatchCell::Color { color } if channels(color) == (0, 0, 0, 255))
+        ));
+        assert!(matches!(
+            item.patch.content,
+            crate::NinePatchContent::Flat { cells }
+                if matches!(cells.center, crate::NinePatchCell::Color { color } if channels(color) == (0, 0, 170, 255))
+        ));
+        assert_eq!(channels(item.foreground), (255, 255, 255, 255));
     }
 }

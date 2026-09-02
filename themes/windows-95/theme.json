@@ -37,8 +37,10 @@
       "input_hover": [255, 255, 255, 255],
       "scrollbar_track": [192, 192, 192, 255],
       "scrollbar_thumb": [192, 192, 192, 255],
-      "focus": [0, 0, 128, 255],
-      "window_focus": [0, 0, 128, 255],
+      "control_focus": [0, 0, 128, 255],
+      "selection_background": [0, 0, 128, 255],
+      "selection_foreground": [255, 255, 255, 255],
+      "window_active": [0, 0, 128, 255],
       "menu_foreground": [0, 0, 0, 255],
       "menu_background": [192, 192, 192, 255]
     }

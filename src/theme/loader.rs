@@ -482,8 +482,8 @@ impl ThemeDefinition {
         validate_non_negative("window_content", "skin.metrics.window_content_insets", skin.metrics.window_content_insets)?;
         validate_non_negative("window_frame", "skin.metrics.window_border", skin.metrics.window_border)?;
         skin.replace_flat_visuals(frame_insets, &palette);
-        skin.effects.focus_outline = palette.focus;
-        skin.effects.window_activation = palette.window_focus;
+        skin.effects.focus_outline = palette.control_focus;
+        skin.effects.window_activation = palette.window_active;
         skin.chrome.set_backdrop_color(palette.title_background);
         for role in AppearanceRole::ALL {
             let Some(document) = self.appearances.get(role) else {
@@ -753,10 +753,14 @@ struct ColorPaletteDocument {
     scrollbar_track: Option<ColorDocument>,
     /// Scrollbar thumb fill.
     scrollbar_thumb: Option<ColorDocument>,
-    /// Focused control accent.
-    focus: Option<ColorDocument>,
-    /// Active window accent.
-    window_focus: Option<ColorDocument>,
+    /// Focused control border or fill accent.
+    control_focus: Option<ColorDocument>,
+    /// Background used by interactive or selected item rows.
+    selection_background: Option<ColorDocument>,
+    /// Text and glyph color used over selected item rows.
+    selection_foreground: Option<ColorDocument>,
+    /// Active window frame and title accent.
+    window_active: Option<ColorDocument>,
     /// Menu text and marker color.
     menu_foreground: Option<ColorDocument>,
     /// Menu bar and popup background.
@@ -783,8 +787,10 @@ impl ColorPaletteDocument {
         replace_if_some(&mut self.input_hover, overlay.input_hover);
         replace_if_some(&mut self.scrollbar_track, overlay.scrollbar_track);
         replace_if_some(&mut self.scrollbar_thumb, overlay.scrollbar_thumb);
-        replace_if_some(&mut self.focus, overlay.focus);
-        replace_if_some(&mut self.window_focus, overlay.window_focus);
+        replace_if_some(&mut self.control_focus, overlay.control_focus);
+        replace_if_some(&mut self.selection_background, overlay.selection_background);
+        replace_if_some(&mut self.selection_foreground, overlay.selection_foreground);
+        replace_if_some(&mut self.window_active, overlay.window_active);
         replace_if_some(&mut self.menu_foreground, overlay.menu_foreground);
         replace_if_some(&mut self.menu_background, overlay.menu_background);
     }
@@ -808,8 +814,10 @@ impl ColorPaletteDocument {
         assign_color(&mut palette.input_hovered, self.input_hover);
         assign_color(&mut palette.scrollbar_track, self.scrollbar_track);
         assign_color(&mut palette.scrollbar_thumb, self.scrollbar_thumb);
-        assign_color(&mut palette.focus, self.focus);
-        assign_color(&mut palette.window_focus, self.window_focus);
+        assign_color(&mut palette.control_focus, self.control_focus);
+        assign_color(&mut palette.selection_background, self.selection_background);
+        assign_color(&mut palette.selection_foreground, self.selection_foreground);
+        assign_color(&mut palette.window_active, self.window_active);
         assign_color(&mut palette.menu_foreground, self.menu_foreground);
         assign_color(&mut palette.menu_background, self.menu_background);
     }
