@@ -3478,7 +3478,7 @@ fn positive_caption_flags_minimize_maximize_follow_viewport_and_restore_exactly(
 fn classic_mac_chrome_places_compact_close_and_trailing_controls_on_opposite_edges() {
     let atlas = test_atlas();
     let mut style = test_skin(&atlas);
-    style.chrome.layout = crate::WindowChromeLayout::ClassicMac;
+    style.chrome = crate::WindowChromeSkin::classic_mac(crate::color(255, 255, 255, 255));
     style.metrics.title_height = 24;
     let mut ctx = Context::new_test(NoopRenderer { atlas }, Dimensioni::new(360, 260));
     ctx.set_skin(style);
@@ -3515,7 +3515,7 @@ fn classic_mac_chrome_places_compact_close_and_trailing_controls_on_opposite_edg
 fn passive_classic_mac_caption_reserve_activates_title_without_triggering_hidden_button() {
     let atlas = test_atlas();
     let mut style = test_skin(&atlas);
-    style.chrome.layout = crate::WindowChromeLayout::ClassicMac;
+    style.chrome = crate::WindowChromeSkin::classic_mac(crate::color(255, 255, 255, 255));
     let dimensions = Dimensioni::new(460, 260);
     let mut ctx = Context::new_test(NoopRenderer { atlas }, dimensions);
     ctx.set_skin(style);

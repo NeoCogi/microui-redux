@@ -9,7 +9,7 @@
 
 use crate::{Color, NinePatch, SliceInsets};
 
-use super::{AppearanceRole, RoleTable, Skin, StateTable, VisualCatalog, VisualState, WindowChromeLayout};
+use super::{AppearanceRole, RoleTable, Skin, StateTable, VisualCatalog, VisualState, WindowChromeSkin};
 
 /// Optional scalar geometry edits applied to [`crate::SkinMetrics`].
 ///
@@ -243,31 +243,27 @@ impl SkinEffectsPatch {
 /// Optional replacements for manager-owned window chrome policy.
 #[derive(Copy, Clone, Default)]
 pub struct WindowChromePatch {
-    /// Optional replacement for caption layout and title alignment policy.
-    pub layout: Option<WindowChromeLayout>,
-    /// Optional replacement for the active classic-title text backdrop.
-    pub title_backdrop: Option<Color>,
+    /// Optional replacement for the complete data-driven chrome recipe.
+    pub recipe: Option<WindowChromeSkin>,
 }
 
 impl WindowChromePatch {
     /// Reports whether this group preserves all resolved chrome policy.
     pub const fn is_empty(self) -> bool {
-        // Both values are independent concrete leaves in WindowChromeSkin.
-        self.layout.is_none() && self.title_backdrop.is_none()
+        // The recipe is one internally coherent concrete value with no hidden mode discriminator.
+        self.recipe.is_none()
     }
 
     /// Applies every present chrome value.
     fn apply_to(self, chrome: &mut crate::WindowChromeSkin) {
-        // Exhaustive explicit mapping avoids a parallel configuration interpretation layer.
-        assign_if_some(&mut chrome.layout, self.layout);
-        assign_if_some(&mut chrome.title_backdrop, self.title_backdrop);
+        // Whole-recipe replacement prevents partially applying mutually dependent bank geometry.
+        assign_if_some(chrome, self.recipe);
     }
 
     /// Merges later present chrome values over this group.
     fn merge_later(&mut self, later: Self) {
         // Last-present-value wins matches metrics, effects, and visuals.
-        replace_option(&mut self.layout, later.layout);
-        replace_option(&mut self.title_backdrop, later.title_backdrop);
+        replace_option(&mut self.recipe, later.recipe);
     }
 }
 

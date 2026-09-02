@@ -351,7 +351,7 @@ impl ThemeDefinition {
         style.visuals = VisualCatalog::from_flat_palette(frame_insets, &palette);
         style.effects.focus_outline = palette.focus;
         style.effects.window_activation = palette.window_focus;
-        style.chrome.title_backdrop = palette.title_background;
+        style.chrome.set_backdrop_color(palette.title_background);
         for (name, document) in self.appearances {
             let role = AppearanceRole::from_json_name(name.as_str()).ok_or_else(|| ThemeLoadError::UnknownAppearance { name: name.clone() })?;
             let mut visuals = style.visuals.get(role);
@@ -511,7 +511,7 @@ impl StyleDocument {
         if let Some(window_chrome_layout) = self.window_chrome_layout {
             // The schema enum converts once into the public runtime enum, keeping deserialization
             // details out of Skin when JSON support is not compiled.
-            style.chrome.layout = window_chrome_layout.into_layout();
+            style.chrome = window_chrome_layout.into_skin(crate::Color { r: 0, g: 0, b: 0, a: 0 });
         }
         if let Some(window_border) = self.window_border {
             // Keep the schema-to-runtime conversion explicit because negative components are
@@ -536,13 +536,13 @@ enum WindowChromeLayoutDocument {
 }
 
 impl WindowChromeLayoutDocument {
-    /// Converts one schema value into its public runtime counterpart without string dispatch.
-    const fn into_layout(self) -> crate::WindowChromeLayout {
+    /// Converts one schema value into its complete data-driven runtime recipe.
+    const fn into_skin(self, title_backdrop: crate::Color) -> crate::WindowChromeSkin {
         // Exhaustive matching keeps a future schema spelling from silently inheriting an unrelated
         // runtime policy.
         match self {
-            Self::TrailingButtons => crate::WindowChromeLayout::TrailingButtons,
-            Self::ClassicMac => crate::WindowChromeLayout::ClassicMac,
+            Self::TrailingButtons => crate::WindowChromeSkin::trailing_buttons(),
+            Self::ClassicMac => crate::WindowChromeSkin::classic_mac(title_backdrop),
         }
     }
 }
@@ -1098,7 +1098,10 @@ mod tests {
         let (loaded, images) = install_bundled_theme("themes/mac-os-9/theme.json");
         assert_eq!(loaded.name(), "Mac OS 9");
         assert_eq!(images, 24, "each shared PNG path must be baked exactly once");
-        assert_eq!(loaded.bundle().skin().chrome.layout, crate::WindowChromeLayout::ClassicMac);
+        let chrome = loaded.bundle().skin().chrome;
+        assert_eq!(chrome.title_alignment, crate::WindowTitleAlignment::Centered);
+        assert_eq!(chrome.captions.close_side, crate::CaptionButtonSide::Leading);
+        assert!(!chrome.captions.show_when_inactive);
         assert_eq!(loaded.bundle().skin().metrics.title_height, 18);
         let content = loaded.bundle().skin().metrics.window_content_insets;
         assert_eq!(

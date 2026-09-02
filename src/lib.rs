@@ -281,9 +281,9 @@ pub mod prelude {
     };
     pub use crate::math::{expand_rect, rect, vec2};
     pub use crate::theme::{
-        AppearanceRole, Color, FlatPalette, FontRef, FontRole, IconRef, IconRole, RoleTable, Skin, SkinBundle, SkinEffects, SkinEffectsPatch, SkinMetrics,
-        SkinMetricsPatch, SkinPatch, StateTable, StatefulVisual, Visual, VisualCatalog, VisualPatch, VisualPatchCatalog, VisualState, WindowChromeLayout,
-        WindowChromePatch, WindowChromeSkin, color,
+        AppearanceRole, CaptionButtonSide, CaptionButtonsSkin, Color, FlatPalette, FontRef, FontRole, IconRef, IconRole, RoleTable, Skin, SkinBundle,
+        SkinEffects, SkinEffectsPatch, SkinMetrics, SkinMetricsPatch, SkinPatch, StateTable, StatefulVisual, TitleBackdropSkin, Visual, VisualCatalog,
+        VisualPatch, VisualPatchCatalog, VisualState, WindowChromePatch, WindowChromeSkin, WindowTitleAlignment, color,
     };
     #[cfg(feature = "theme-json")]
     pub use crate::theme::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};
@@ -315,9 +315,9 @@ pub use input::{Key, KeyEvent, KeyState, Modifiers, MouseButton};
 pub use math::{expand_rect, rect, vec2};
 pub use render::{AtlasUploadError, NinePatch, NinePatchCell, NinePatchCells, NinePatchContent, NinePatchImage, SliceInsets, TextureError, TextureId};
 pub use theme::{
-    AppearanceRole, Color, FlatPalette, FontRef, FontRole, IconRef, IconRole, RoleTable, Skin, SkinBundle, SkinEffects, SkinEffectsPatch, SkinMetrics,
-    SkinMetricsPatch, SkinPatch, StateTable, StatefulVisual, Visual, VisualCatalog, VisualPatch, VisualPatchCatalog, VisualState, WindowChromeLayout,
-    WindowChromePatch, WindowChromeSkin, color,
+    AppearanceRole, CaptionButtonSide, CaptionButtonsSkin, Color, FlatPalette, FontRef, FontRole, IconRef, IconRole, RoleTable, Skin, SkinBundle, SkinEffects,
+    SkinEffectsPatch, SkinMetrics, SkinMetricsPatch, SkinPatch, StateTable, StatefulVisual, TitleBackdropSkin, Visual, VisualCatalog, VisualPatch,
+    VisualPatchCatalog, VisualState, WindowChromePatch, WindowChromeSkin, WindowTitleAlignment, color,
 };
 #[cfg(feature = "theme-json")]
 pub use theme::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};

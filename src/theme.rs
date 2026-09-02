@@ -51,6 +51,6 @@ pub use loader::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};
 pub use palette::FlatPalette;
 pub use patch::{SkinEffectsPatch, SkinMetricsPatch, SkinPatch, VisualPatch, VisualPatchCatalog, WindowChromePatch};
 pub use roles::{AppearanceRole, VisualState};
-pub use style::{Skin, SkinEffects, SkinMetrics, WindowChromeLayout, WindowChromeSkin};
+pub use style::{CaptionButtonSide, CaptionButtonsSkin, Skin, SkinEffects, SkinMetrics, TitleBackdropSkin, WindowChromeSkin, WindowTitleAlignment};
 pub use tables::{RoleTable, StateTable};
 pub use typography::{FontRef, FontRole};

@@ -56,14 +56,52 @@ use super::{AppearanceRole, Color, FlatPalette, FontRef, FontRole, IconRole, Ski
 use crate::atlas::{AtlasHandle, FontId};
 use crate::render::{NinePatch, SliceInsets};
 
-/// Platform-oriented arrangement used for manager-owned window titles and caption buttons.
+/// Horizontal alignment policy for manager-owned window title text.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-pub enum WindowChromeLayout {
-    /// Places every caption button on the trailing edge and left-aligns title text.
+pub enum WindowTitleAlignment {
+    /// Uses the available title span from its leading edge.
     #[default]
-    TrailingButtons,
-    /// Uses centered title text, a leading close box, and compact trailing zoom/windowshade boxes.
-    ClassicMac,
+    Leading,
+    /// Reserves symmetric caption banks and centers text in the complete title.
+    Centered,
+}
+
+/// Edge selected for one manager-owned caption button.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub enum CaptionButtonSide {
+    /// Allocates the button from the title's leading edge.
+    Leading,
+    /// Allocates the button from the title's trailing edge.
+    #[default]
+    Trailing,
+}
+
+/// Data recipe controlling manager-owned caption button geometry and presentation.
+#[derive(Copy, Clone)]
+pub struct CaptionButtonsSkin {
+    /// Edge used by the close button.
+    pub close_side: CaptionButtonSide,
+    /// Edge used by the minimize button.
+    pub minimize_side: CaptionButtonSide,
+    /// Edge used by the maximize or restore button.
+    pub maximize_side: CaptionButtonSide,
+    /// Total pixels removed from title height to obtain each square caption extent.
+    pub extent_inset: i32,
+    /// Minimum square caption extent after applying the inset.
+    pub minimum_extent: i32,
+    /// Whether caption controls remain visible and hittable on inactive windows.
+    pub show_when_inactive: bool,
+    /// Whether a separate semantic glyph layer is painted over each caption button face.
+    pub draw_separate_glyphs: bool,
+}
+
+/// Optional flat field painted behind active centered title text.
+#[derive(Copy, Clone)]
+pub struct TitleBackdropSkin {
+    /// Flat background color interrupting title artwork behind the measured text.
+    pub color: Color,
+    /// Horizontal pixels added on each side of the measured title text.
+    pub horizontal_padding: i32,
 }
 
 /// Scalar geometry shared by layout and built-in widget measurement.
@@ -100,13 +138,71 @@ pub struct SkinMetrics {
 /// Manager-owned window chrome policy selected by the resolved skin.
 #[derive(Copy, Clone)]
 pub struct WindowChromeSkin {
-    /// Platform-oriented title alignment and caption-button arrangement.
-    ///
-    /// This controls geometry only. Button faces, title stripes, and every interaction state remain
-    /// ordinary typed appearance roles supplied by the active skin.
-    pub layout: WindowChromeLayout,
-    /// Flat label field painted behind centered active-title text when requested by the layout.
-    pub title_backdrop: Color,
+    /// Alignment and caption-bank reservation policy for title text.
+    pub title_alignment: WindowTitleAlignment,
+    /// Independent placement, extent, visibility, and fallback policy for caption buttons.
+    pub captions: CaptionButtonsSkin,
+    /// Optional active-title field painted behind measured text.
+    pub active_title_backdrop: Option<TitleBackdropSkin>,
+}
+
+impl WindowChromeSkin {
+    /// Creates a leading-title recipe with every caption button on the trailing edge.
+    pub const fn trailing_buttons() -> Self {
+        // This conventional recipe retains visible inactive controls and manager-drawn fallback
+        // glyphs when a skin supplies only button backgrounds.
+        Self {
+            title_alignment: WindowTitleAlignment::Leading,
+            captions: CaptionButtonsSkin {
+                close_side: CaptionButtonSide::Trailing,
+                minimize_side: CaptionButtonSide::Trailing,
+                maximize_side: CaptionButtonSide::Trailing,
+                extent_inset: 0,
+                minimum_extent: 0,
+                show_when_inactive: true,
+                draw_separate_glyphs: true,
+            },
+            active_title_backdrop: None,
+        }
+    }
+
+    /// Creates a centered-title recipe with split compact caption banks.
+    pub const fn classic_mac(title_backdrop: Color) -> Self {
+        // The recipe describes each independent behavior directly; manager code contains no
+        // Classic-Mac mode branch and can also represent mixed application-defined arrangements.
+        Self {
+            title_alignment: WindowTitleAlignment::Centered,
+            captions: CaptionButtonsSkin {
+                close_side: CaptionButtonSide::Leading,
+                minimize_side: CaptionButtonSide::Trailing,
+                maximize_side: CaptionButtonSide::Trailing,
+                extent_inset: 6,
+                minimum_extent: 1,
+                show_when_inactive: false,
+                draw_separate_glyphs: false,
+            },
+            active_title_backdrop: Some(TitleBackdropSkin {
+                color: title_backdrop,
+                horizontal_padding: 4,
+            }),
+        }
+    }
+
+    /// Updates an existing optional title backdrop without changing chrome geometry policy.
+    pub(crate) fn set_backdrop_color(&mut self, color: Color) {
+        // Conventional recipes have no backdrop and therefore remain unchanged by palette edits.
+        if let Some(backdrop) = &mut self.active_title_backdrop {
+            backdrop.color = color;
+        }
+    }
+}
+
+impl Default for WindowChromeSkin {
+    /// Returns the conventional trailing-caption recipe.
+    fn default() -> Self {
+        // Keep Skin::from_atlas and programmatic WindowChromeSkin defaults identical.
+        Self::trailing_buttons()
+    }
 }
 
 /// Paint effects that are not themselves semantic role/state visuals.
@@ -174,10 +270,7 @@ impl Skin {
                 focus_outline: palette.focus,
                 window_activation: palette.window_focus,
             },
-            chrome: WindowChromeSkin {
-                layout: WindowChromeLayout::TrailingButtons,
-                title_backdrop: palette.title_background,
-            },
+            chrome: WindowChromeSkin::trailing_buttons(),
         }
     }
 
@@ -192,7 +285,7 @@ impl Skin {
         self.visuals = VisualCatalog::from_flat_palette(frame_insets, &palette);
         self.effects.focus_outline = palette.focus;
         self.effects.window_activation = palette.window_focus;
-        self.chrome.title_backdrop = palette.title_background;
+        self.chrome.set_backdrop_color(palette.title_background);
     }
 
     /// Applies a concrete metrics edit and returns the resulting skin.
