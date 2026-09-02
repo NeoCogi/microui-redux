@@ -3796,6 +3796,76 @@ fn menu_heading_clicks_toggle_and_switch_the_single_active_popup_path() {
     assert!(ctx.debug_active_popup_names().is_empty());
 }
 
+/// Verifies hover navigation starts only after activation and then tracks the complete menu path.
+#[test]
+fn active_menu_path_hot_tracks_headings_and_submenu_siblings_without_outside_hover_dismissal() {
+    let (_, direct_item) = MenuItem::create(MenuItemParameters::new("Direct action"));
+    let (_, alpha_item) = MenuItem::create(MenuItemParameters::new("Alpha action"));
+    let (_, beta_item) = MenuItem::create(MenuItemParameters::new("Beta action"));
+    let (_, edit_item) = MenuItem::create(MenuItemParameters::new("Edit action"));
+    let menu_bar = MenuBar::new([
+        Menu::new("File")
+            .item(direct_item)
+            .submenu(Menu::new("Alpha").item(alpha_item))
+            .submenu(Menu::new("Beta").item(beta_item)),
+        Menu::new("Edit").item(edit_item),
+    ]);
+    let mut ctx = context();
+    let root = ctx
+        .ui()
+        .create_window(Window::new("menu hover", rect(20, 20, 220, 160), empty_content()).menu_bar(menu_bar));
+    ctx.update_and_render_ui();
+    let headings = ctx.debug_menu_anchor_rects(root.id()).unwrap();
+    let file_heading = headings[0].unwrap();
+    // Recursive popup definitions occupy the intervening forest positions, so the last top-level
+    // relation is Edit while the two unresolved middle anchors belong to File's submenus.
+    let edit_heading = headings.last().copied().flatten().unwrap();
+
+    // An inactive menu bar is hoverable but cannot open a popup until click or keyboard input has
+    // deliberately entered menu mode.
+    ctx.mousemove(edit_heading.x + edit_heading.width / 2, edit_heading.y + edit_heading.height / 2);
+    ctx.update_and_render_ui();
+    assert!(ctx.debug_active_popup_names().is_empty());
+
+    click_rect(&mut ctx, file_heading);
+    let file_rows = ctx.debug_active_menu_row_rects()[0].clone();
+    let direct_row = file_rows[0];
+    let alpha_row = file_rows[1];
+    let beta_row = file_rows[2];
+
+    // Submenu branches open on hover in the active scope. Hovering an ordinary direct sibling
+    // removes that child again while retaining the File popup itself.
+    ctx.mousemove(alpha_row.x + alpha_row.width / 2, alpha_row.y + alpha_row.height / 2);
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_popup_names(), ["menu hover File Menu", "menu hover Alpha Menu"]);
+    let alpha_child_row = ctx.debug_active_menu_row_rects()[1][0];
+    ctx.mousemove(alpha_child_row.x + alpha_child_row.width / 2, alpha_child_row.y + alpha_child_row.height / 2);
+    ctx.update_and_render_ui();
+    assert_eq!(
+        ctx.debug_active_popup_names(),
+        ["menu hover File Menu", "menu hover Alpha Menu"],
+        "entering the direct child must preserve its parent chain"
+    );
+    ctx.mousemove(direct_row.x + direct_row.width / 2, direct_row.y + direct_row.height / 2);
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_popup_names(), ["menu hover File Menu"]);
+    ctx.mousemove(beta_row.x + beta_row.width / 2, beta_row.y + beta_row.height / 2);
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_popup_names(), ["menu hover File Menu", "menu hover Beta Menu"]);
+
+    // Leaving menu entries does not end menu mode or collapse its current ancestry.
+    let body = ctx.debug_root_body(root.id()).unwrap();
+    ctx.mousemove(body.x + body.width / 2, body.y + body.height / 2);
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_popup_names(), ["menu hover File Menu", "menu hover Beta Menu"]);
+
+    // Re-entering the same bar over another heading replaces the complete old popup chain in one
+    // input transaction; no extra click is required while menu hot-tracking remains active.
+    ctx.mousemove(edit_heading.x + edit_heading.width / 2, edit_heading.y + edit_heading.height / 2);
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_popup_names(), ["menu hover Edit Menu"]);
+}
+
 /// Verifies that choosing a sibling submenu removes every deeper popup from the old branch.
 #[test]
 fn opening_sibling_submenu_replaces_the_complete_descendant_suffix() {

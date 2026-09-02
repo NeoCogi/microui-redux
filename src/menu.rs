@@ -401,6 +401,10 @@ pub(crate) enum MenuSlot {
 pub(crate) enum MenuAction {
     /// Open, toggle, or replace the child attached to this local branch slot.
     OpenSlot(usize),
+    /// Replace the open child with the hovered branch while menu hot-tracking is active.
+    HoverOpenSlot(usize),
+    /// Close the open child branch after hovering a direct non-branch sibling.
+    HoverCloseChild,
     /// Close the complete active path after an enabled item queued its typed event.
     SubmitAndClose,
 }
@@ -605,7 +609,7 @@ impl MenuSurface {
     }
 
     /// Routes one pointer event and returns a concrete manager action plus consumption state.
-    pub(crate) fn route_pointer(&mut self, input: &UiInputEvent) -> MenuRoute {
+    pub(crate) fn route_pointer(&mut self, input: &UiInputEvent, hot_tracking: bool) -> MenuRoute {
         let Some(position) = input.position() else {
             return MenuRoute::unhandled();
         };
@@ -629,6 +633,22 @@ impl MenuSurface {
             // Pointer movement inside an active keyboard scope updates the same visible selection
             // without making pointer hover the persistent source of keyboard state.
             self.keyboard_slot = Some(slot);
+        }
+
+        // Hover never opens an inactive bar. Once a menu path exists, however, the complete bar
+        // and popup ancestry enter one hot-tracking scope: sibling headings replace the top-level
+        // popup, submenu branches extend or replace the path, and ordinary sibling rows close a
+        // now-unrelated child branch. Moving outside menu entries intentionally emits no action so
+        // application widgets and the travel corridor between a parent row and child remain inert.
+        if hot_tracking && matches!(input, UiInputEvent::MouseMove { .. } | UiInputEvent::MouseDrag { .. }) {
+            let action = slot.and_then(|slot| match self.rows.get(slot)? {
+                MenuSlot::Branch { .. } if self.open_slot != Some(slot) => Some(MenuAction::HoverOpenSlot(slot)),
+                MenuSlot::Item(_) | MenuSlot::Separator if self.open_slot.is_some() => Some(MenuAction::HoverCloseChild),
+                MenuSlot::Branch { .. } | MenuSlot::Item(_) | MenuSlot::Separator => None,
+            });
+            if action.is_some() {
+                return MenuRoute::handled(action);
+            }
         }
 
         // Only the left press commits policy. Capture keeps the remainder of that physical gesture

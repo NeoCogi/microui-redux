@@ -149,14 +149,18 @@ visible heading-to-descendant chain:
 - pressing a closed heading opens its popup;
 - pressing the active heading closes the path;
 - pressing another heading replaces the path;
-- pressing a submenu row appends that child while retaining its ancestors;
-- opening a sibling submenu replaces only the older descendant branch;
+- pressing or hovering a submenu row appends that child while retaining its ancestors;
+- opening or hovering a sibling submenu replaces only the older descendant branch;
 - selecting an enabled item or pressing outside the chain closes the complete path.
 
 A disabled item cannot be invoked: it emits no `MenuItemSubmitted` event and does not close the
 menu. The popup remains one retained input surface, so disabled rows and separators still occlude
-content behind it while resolving to no menu action. Moving across headings changes hover
-presentation but does not open or switch menus.
+content behind it while resolving to no submission action. Hovering a bar heading while no menu is
+open changes presentation only. Once a click or keyboard command opens a menu, pointer movement
+hot-tracks the hierarchy: another heading immediately replaces the top-level popup, a submenu row
+opens or replaces its child, and an ordinary sibling row closes an unrelated child branch. Moving
+over application widgets or outside the menu entries leaves the current path open until an outside
+press, explicit cancellation, or item submission ends the menu scope.
 
 The same surfaces provide Windows-style keyboard navigation without a parallel menu model:
 

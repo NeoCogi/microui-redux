@@ -2079,7 +2079,14 @@ impl WindowManager {
 
     /// Routes a pointer event directly to a root bar or menu-popup body.
     fn route_menu_pointer(&mut self, key: SurfaceKey, event: &UiInputEvent) -> Option<crate::menu::MenuRoute> {
-        self.menu_surface_mut(key).map(|menu| menu.route_pointer(event))
+        // A click or keyboard command must establish the menu scope before pointer movement can
+        // navigate it. Restrict hot-tracking to the same owning root so merely crossing an inactive
+        // window's menu bar cannot steal another window's active menu path.
+        let hot_tracking = self
+            .active_menu_root()
+            .zip(self.surfaces.owning_root(key))
+            .is_some_and(|(active, owner)| active == owner && self.surfaces.active_popup.is_some());
+        self.menu_surface_mut(key).map(|menu| menu.route_pointer(event, hot_tracking))
     }
 
     /// Returns the direct menu-popup child opened by one branch slot.
@@ -2254,6 +2261,7 @@ impl WindowManager {
                 let action = self.menu_surface_mut(surface).and_then(MenuSurface::activate_keyboard_slot);
                 match action {
                     Some(MenuAction::OpenSlot(slot)) => self.open_menu_slot(surface, slot, false),
+                    Some(MenuAction::HoverOpenSlot(_) | MenuAction::HoverCloseChild) => true,
                     Some(MenuAction::SubmitAndClose) => {
                         self.finish_keyboard_menu(true);
                         true
@@ -2409,6 +2417,21 @@ impl WindowManager {
                     return;
                 }
                 let _ = self.open_menu_slot(surface, slot, false);
+            }
+            MenuAction::HoverOpenSlot(slot) => {
+                // Hot-tracking never toggles the current heading closed. MenuSurface emits this
+                // action only when the hovered branch differs from the child already projected from
+                // the active forest path, so opening it atomically replaces only the required suffix.
+                let _ = self.open_menu_slot(surface, slot, false);
+            }
+            MenuAction::HoverCloseChild => {
+                // Only popup rows can produce this action: every menu-bar slot is a branch. Retain
+                // the hovered row's own popup and remove the child level plus every descendant.
+                if let SurfaceKey::Popup(popup) = surface
+                    && let Some(depth) = self.surfaces.popup_depth(popup)
+                {
+                    self.truncate_active_popup_path(depth.saturating_add(1));
+                }
             }
             MenuAction::SubmitAndClose => {
                 // The surface already queued the typed event. Arm tail suppression before removing
