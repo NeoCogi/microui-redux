@@ -1313,6 +1313,16 @@ mod tests {
                 .content,
             crate::NinePatchContent::Image { .. }
         ));
+        for state in [VisualState::Focused, VisualState::HoveredFocused] {
+            let disclosure = loaded.bundle().skin().appearance(AppearanceRole::DisclosureHeader, state);
+            assert!(matches!(
+                disclosure.content,
+                crate::NinePatchContent::Flat { cells }
+                    if matches!(cells.center, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (0, 0, 128, 255))
+            ));
+            let foreground = loaded.bundle().skin().foreground(AppearanceRole::DisclosureHeader, state);
+            assert_eq!((foreground.r, foreground.g, foreground.b, foreground.a), (255, 255, 255, 255));
+        }
     }
 
     /// Verifies the earlier Windows theme remains a distinct definition with period title artwork.
@@ -1426,6 +1436,14 @@ mod tests {
         }
         let selected_text = loaded.bundle().skin().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
         assert_eq!((selected_text.r, selected_text.g, selected_text.b, selected_text.a), (255, 255, 255, 255));
+        for state in [VisualState::Focused, VisualState::HoveredFocused] {
+            assert!(matches!(
+                loaded.bundle().skin().appearance(AppearanceRole::DisclosureHeader, state).content,
+                crate::NinePatchContent::Image { .. }
+            ));
+            let foreground = loaded.bundle().skin().foreground(AppearanceRole::DisclosureHeader, state);
+            assert_eq!((foreground.r, foreground.g, foreground.b, foreground.a), (255, 255, 255, 255));
+        }
         // Checked menu rows retain their marker without becoming permanently highlighted. The
         // normal patch must therefore remain transparent over the white popup panel, while an
         // actual hover still selects the authored blue bitmap and contrasting white foreground.
@@ -1555,5 +1573,13 @@ mod tests {
         assert_eq!((menu_popup_size.width, menu_popup_size.height), (7, 7));
         let selected_text = loaded.bundle().skin().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
         assert_eq!((selected_text.r, selected_text.g, selected_text.b, selected_text.a), (255, 255, 255, 255));
+        for state in [VisualState::Focused, VisualState::HoveredFocused] {
+            assert!(matches!(
+                loaded.bundle().skin().appearance(AppearanceRole::DisclosureHeader, state).content,
+                crate::NinePatchContent::Image { .. }
+            ));
+            let foreground = loaded.bundle().skin().foreground(AppearanceRole::DisclosureHeader, state);
+            assert_eq!((foreground.r, foreground.g, foreground.b, foreground.a), (255, 255, 255, 255));
+        }
     }
 }

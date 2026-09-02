@@ -114,6 +114,16 @@
       "pressed_focused": { "png": "title-active.png", "foreground": [255, 255, 255, 255] },
       "disabled": { "foreground": [125, 125, 125, 255] }
     },
+    "disclosure_header": {
+      "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
+      "normal": { "foreground": [0, 0, 0, 255] },
+      "hovered": { "foreground": [0, 0, 0, 255] },
+      "pressed": { "foreground": [0, 0, 0, 255] },
+      "focused": { "png": "title-active.png", "foreground": [255, 255, 255, 255] },
+      "hovered_focused": { "png": "title-active.png", "foreground": [255, 255, 255, 255] },
+      "pressed_focused": { "foreground": [0, 0, 0, 255] },
+      "disabled": { "foreground": [125, 125, 125, 255] }
+    },
     "combo": {
       "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
       "normal": { "png": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
