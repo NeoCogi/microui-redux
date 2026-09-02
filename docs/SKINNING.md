@@ -83,9 +83,13 @@ because its alignment and caption-bank geometry are interdependent.
 immediately regenerates the resolved visual catalog and related effects when constructing a flat
 skin. A live editor working over an image theme instead uses
 `SkinPatch::from_flat_palette_transition`: it changes only affected flat cells, foregrounds, and
-effects while retaining image-backed cells. Merge those event patches over a pristine selected base
-skin so later edits compose without turning theme artwork back into flat fallbacks. JSON palette
-fields use full flat construction first, before authored PNG states replace individual visuals.
+effects. When an affected visual is image-backed, that one role/state becomes its exact flat palette
+equivalent because a named color cannot exactly rewrite a multicolor PNG; unrelated image visuals
+remain intact. A reversible editor regenerates this palette patch from its pristine selected skin,
+original palette, and current palette snapshot rather than merging event deltas; returning a value
+to its baseline then restores the original image. Independent metric or application layers can still
+merge normally. JSON palette fields use full flat construction first, before authored PNG states
+replace individual visuals.
 
 ## Stable resources
 

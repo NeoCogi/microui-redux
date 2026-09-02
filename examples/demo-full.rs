@@ -1460,16 +1460,16 @@ struct State {
     combo_item_submitted: [WidgetEventPortHandle<ListItemSubmitted>; 4],
     style_color_swatch_states: [TypedWidgetHandle<ColorSwatch>; 16],
     window_info_value_states: [TypedWidgetHandle<ListItem>; 3],
-    /// Fully resolved editable skin published after the base and accumulated patch are combined.
+    /// Fully resolved editable skin published after the base and current patch are combined.
     style: Skin,
-    /// Pristine selected skin from which the editor resolves its cumulative concrete patch.
+    /// Pristine selected skin from which the editor resolves its current concrete patch.
     style_base: Skin,
-    /// Cumulative typed edits applied over `style_base` in deterministic event order.
+    /// Current typed palette and metric edits applied over `style_base`.
     style_patch: SkinPatch,
     /// Atlas-independent flat authoring value used only by the demo's live skin editor.
     ///
-    /// Each slider event compiles its before-and-after difference into `style_patch`; the complete
-    /// palette is never installed in Context as a second runtime color source.
+    /// Each slider event compiles the complete baseline-to-current difference into `style_patch`;
+    /// the palette is never installed in Context as a second runtime color source.
     style_palette: FlatPalette,
     /// Whether the editable style differs from the last value published to the Context.
     ///
@@ -2118,7 +2118,6 @@ impl State {
     }
 
     fn style_color_changed(&mut self, index: &usize, event: &SliderChanged) {
-        let before = self.style_palette;
         let color_index = *index / 4;
         let color = match color_index {
             0 => &mut self.style_palette.text,
@@ -2146,11 +2145,9 @@ impl State {
             2 => color.b = value,
             _ => color.a = value,
         }
-        // Accumulate only the concrete visual leaves changed by this one palette transition. Build
-        // the delta against the current resolved value so edits sharing one flat patch compose.
-        let edit = SkinPatch::from_flat_palette_transition(&self.style, before, self.style_palette);
-        self.style_patch.merge_later(&edit);
-        self.rebuild_style_from_patch();
+        // Recreate the complete palette layer from the pristine base so returning every channel to
+        // its baseline removes the override and restores any image-backed theme visual.
+        self.rebuild_style_patch_from_palette();
         self.style_dirty = true;
     }
 
@@ -2504,11 +2501,22 @@ impl State {
         set_slider_value(&self.style_value_slider_states[4], self.style.metrics.scrollbar_size as Real);
     }
 
-    /// Rebuilds the editable skin from its pristine selected base and cumulative typed patch.
+    /// Rebuilds the editable skin from its pristine selected base and current typed patch.
     fn rebuild_style_from_patch(&mut self) {
         // Re-resolving from the base prevents discarded intermediate values from becoming another
         // source of truth. SkinPatch owns deterministic later-present-value precedence throughout.
         self.style = self.style_base.clone().patched(&self.style_patch);
+    }
+
+    /// Replaces the palette portion of the current patch while preserving live metric edits.
+    fn rebuild_style_patch_from_palette(&mut self) {
+        // Metrics are edited by independent controls and are already an exact snapshot. Rebuild the
+        // remaining groups from the original palette to the current authoring value, then compose
+        // that complete typed patch over the pristine selected theme.
+        let metrics = self.style_patch.metrics;
+        self.style_patch = SkinPatch::from_flat_palette_transition(&self.style_base, FlatPalette::default(), self.style_palette);
+        self.style_patch.metrics = metrics;
+        self.rebuild_style_from_patch();
     }
 
     fn write_log(&mut self, text: &str) {
