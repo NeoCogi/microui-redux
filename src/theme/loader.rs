@@ -301,9 +301,11 @@ impl ThemeDefinition {
             .map(|fonts| (fonts.texture_width, fonts.texture_height))
             .unwrap_or_else(|| (base.width(), base.height()));
         let mut builder = if self.fonts.is_some() {
-            // Explicit theme fonts replace every semantic role, so only application icons survive
-            // from the base allocation before the new recipes are rasterized below.
-            Builder::from_atlas_icons_with_size(base, width, height)
+            // Explicit recipes replace the five semantic roles while unrelated application fonts
+            // and every icon survive from the stable source catalog. This keeps named FontRef
+            // values valid without retaining stale typography from an earlier theme.
+            let semantic_font_names = FontRole::ALL.map(FontRole::atlas_name);
+            Builder::from_atlas_with_size_excluding_fonts(base, width, height, &semantic_font_names)
         } else {
             // Artwork-only themes retain exact base typography by copying its baked glyphs.
             Builder::from_atlas_with_size(base, width, height)

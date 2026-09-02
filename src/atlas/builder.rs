@@ -275,6 +275,22 @@ impl Builder {
     /// Returns an error when the requested dimensions are invalid or cannot contain all copied
     /// icons, glyph bitmaps, and metadata. The source atlas remains immutable on every failure.
     pub fn from_atlas_with_size(atlas: &AtlasHandle, width: usize, height: usize) -> Result<Builder, BuilderError> {
+        // Ordinary rebuilds preserve every named font. Theme recipes use the narrower internal
+        // helper below to replace only their semantic roles while retaining application fonts.
+        Self::from_atlas_with_size_excluding_fonts(atlas, width, height, &[])
+    }
+
+    /// Creates a builder by repacking all source resources except explicitly replaced fonts.
+    ///
+    /// The exclusion list is intentionally a concrete slice of atlas names. Theme loading has
+    /// exactly five semantic roles to replace and does not need a callback, erased predicate, or
+    /// second resource-copy abstraction.
+    pub(crate) fn from_atlas_with_size_excluding_fonts(
+        atlas: &AtlasHandle,
+        width: usize,
+        height: usize,
+        excluded_fonts: &[&str],
+    ) -> Result<Builder, BuilderError> {
         // Begin with the existing icon-copy path so required semantic icon names, including the
         // opaque white tile, retain their table order and exact pixels in the new allocation.
         let mut builder = Self::from_atlas_icons_with_size(atlas, width, height)?;
@@ -282,6 +298,11 @@ impl Builder {
         let source_width = atlas.width();
 
         for (name, source_font) in &atlas.0.fonts {
+            if excluded_fonts.contains(&name.as_str()) {
+                // A later recipe will insert this same name. Omitting it now avoids a duplicate
+                // while every unrelated application font follows the normal exact-copy path.
+                continue;
+            }
             // HashMap traversal is intentionally normalized by Unicode scalar value. Stable copy
             // order keeps atlas output reproducible and gives the rectangle packer deterministic
             // input even when the source atlas originated from serialized metadata.
@@ -857,6 +878,40 @@ mod tests {
         assert!(rebuilt.contains_icon(artwork));
         let artwork_size = rebuilt.get_icon_size(artwork);
         assert_eq!((artwork_size.width, artwork_size.height), (2, 2));
+    }
+
+    /// Verifies semantic font replacement retains unrelated application typography by name.
+    #[test]
+    fn selective_font_copy_replaces_roles_without_dropping_application_fonts() {
+        let fonts = [
+            FontAsset { name: "body", path: FONT_PATH, size: 10 },
+            FontAsset {
+                name: "application-code",
+                path: FONT_PATH,
+                size: 8,
+            },
+        ];
+        let config = Config {
+            texture_width: 512,
+            texture_height: 256,
+            white_icon: String::from(WHITE_PATH),
+            icons: &[],
+            fonts: &fonts,
+        };
+        let source = Builder::from_config(&config)
+            .expect("source typography must fit the fixture atlas")
+            .build()
+            .expect("source typography must satisfy atlas validation");
+        let mut replacement =
+            Builder::from_atlas_with_size_excluding_fonts(&source, 512, 256, &["body"]).expect("the application font must copy without the replaced body role");
+        replacement
+            .add_font_named("body", FONT_PATH, 14)
+            .expect("the replacement body recipe must fit beside the application font");
+        let replacement = replacement.build().expect("selectively rebuilt atlas must validate");
+
+        assert_eq!(replacement.get_font_size(replacement.font_id("body").unwrap()), 14);
+        assert_eq!(replacement.get_font_size(replacement.font_id("application-code").unwrap()), 8);
+        assert_eq!(replacement.clone_font_table().len(), 2);
     }
 
     /// Verifies duplicate resource keys are structural errors detected before opening the supplied

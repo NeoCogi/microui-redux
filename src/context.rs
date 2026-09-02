@@ -40,7 +40,7 @@ use crate::window_manager::{LayerBinding, PopupHandle, SurfaceCreationError, Sur
 #[cfg(test)]
 use crate::window_manager::RootId;
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, FrameInfo, RenderError, Renderer, RendererBackend};
-use crate::{AtlasHandle, Dimensioni, ImageSource, KeyEvent, MouseButton, Node, Recti, Skin, SkinBundle, TextureError, TextureId};
+use crate::{AtlasHandle, Dimensioni, ImageSource, KeyEvent, MouseButton, Node, Recti, ResourceCatalog, Skin, SkinBundle, TextureError, TextureId};
 #[cfg(feature = "theme-json")]
 use crate::{LoadedTheme, ThemeLoadError};
 #[cfg(feature = "theme-json")]
@@ -309,6 +309,8 @@ impl<'a> Ui<'a> {
 pub struct Context<B: RendererBackend, State: 'static = ()> {
     /// High-level renderer that replays root display lists.
     renderer: Renderer<B>,
+    /// Immutable application fonts and icons from which every later theme is derived.
+    resource_catalog: ResourceCatalog,
     /// Backend- and application-state-independent retained window manager.
     pub(crate) window_manager: WindowManager,
     /// Sole semantic widget-event dispatcher for this context and its retained widget forest.
@@ -349,12 +351,14 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// [`crate::IconRole::ALL`]. Every constructible atlas already has a validated white
     /// rendering tile.
     pub fn new(backend: B) -> Self {
-        // Pair the backend atlas with its default resolved skin before WindowManager can observe
-        // either projection. Retained widgets resolve stable resource references through this pair.
+        // Capture the renderer's initial resources before any replacement can occur. The default
+        // active bundle and every later loaded theme derive from this same immutable catalog.
         let renderer = Renderer::new(backend);
-        let bundle = SkinBundle::from_atlas(renderer.atlas());
+        let resource_catalog = ResourceCatalog::new(renderer.atlas());
+        let bundle = resource_catalog.default_skin_bundle();
         Self {
             renderer,
+            resource_catalog,
             window_manager: WindowManager::new(bundle),
             widget_event_dispatcher: crate::event::WidgetEventDispatcher::new(),
             #[cfg(test)]
@@ -371,6 +375,16 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     pub fn ui(&mut self) -> Ui<'_> {
         // Restrict the borrow to WindowManager so the façade remains backend- and State-independent.
         Ui::new(&mut self.window_manager)
+    }
+
+    /// Borrows the immutable application font and icon catalog captured at construction.
+    ///
+    /// Selecting another skin bundle never changes this value. Applications can therefore create
+    /// checked named [`crate::FontRef`] and [`crate::IconRef`] values here and keep them in retained
+    /// widget state across theme switches.
+    pub fn resource_catalog(&self) -> &ResourceCatalog {
+        // Expose stable named-resource lookup without exposing the inactive base atlas itself.
+        &self.resource_catalog
     }
 
     /// Creates a Context whose test-only frame helper uses `dimensions`.
@@ -714,7 +728,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         // Build theme typography and state artwork without mutating the live renderer. This lets
         // applications preload several bundles and choose one later without repeated file I/O.
         let definition = crate::theme::loader::ThemeDefinition::read(path.as_ref())?;
-        let theme_atlas = definition.build_atlas(self.skin_bundle().atlas())?;
+        let theme_atlas = definition.build_atlas(self.resource_catalog.atlas())?;
         let base = Skin::from_atlas(theme_atlas.atlas());
         definition.install(theme_atlas, base)
     }
@@ -1087,5 +1101,63 @@ mod theme_tests {
         assert_eq!(error, AtlasUploadError::new("fixture rejected atlas"));
         assert!(context.atlas().ptr_eq(&initial));
         assert_eq!(context.skin().resolve_font_role(&context.atlas(), crate::FontRole::Body), initial_font);
+    }
+
+    /// Verifies consecutive theme loads always derive from the pristine application catalog.
+    #[test]
+    fn consecutive_theme_loads_do_not_copy_private_assets_from_the_active_theme() {
+        let directory = tempfile::tempdir().expect("temporary theme directory must be available");
+        fs::write(directory.path().join("first.png"), fixture_png(2, 2)).expect("first fixture PNG must be writable");
+        fs::write(directory.path().join("second.png"), fixture_png(2, 2)).expect("second fixture PNG must be writable");
+        fs::write(
+            directory.path().join("first.json"),
+            r#"{
+                "schema_version": 1,
+                "name": "First",
+                "appearances": { "button": { "normal": { "png": "first.png" } } }
+            }"#,
+        )
+        .expect("first fixture JSON must be writable");
+        fs::write(
+            directory.path().join("second.json"),
+            r#"{
+                "schema_version": 1,
+                "name": "Second",
+                "appearances": { "checkbox": { "normal": { "png": "second.png" } } }
+            }"#,
+        )
+        .expect("second fixture JSON must be writable");
+
+        // Expand the compact shared source so each derived theme has room for one artwork tile.
+        // The catalog must retain this allocation even after the backend publishes the first one.
+        let source = crate::atlas::builder::Builder::from_atlas_with_size(&test_atlas(), 64, 64)
+            .expect("expanded application resources must fit")
+            .build()
+            .expect("expanded application resources must validate");
+        let mut context = Context::<ThemeAtlasBackend>::new(ThemeAtlasBackend {
+            atlas: source.clone(),
+            reject_replacement: false,
+        });
+        let first = context
+            .load_theme_file(directory.path().join("first.json"))
+            .expect("first theme must load from the catalog");
+        context.set_theme(&first).expect("first theme atlas must publish");
+        let second = context
+            .load_theme_file(directory.path().join("second.json"))
+            .expect("second theme must ignore the active theme's private artwork");
+
+        assert!(context.resource_catalog.atlas().ptr_eq(&source));
+        assert!(!context.atlas().ptr_eq(&source));
+        assert_eq!(
+            second
+                .bundle()
+                .atlas()
+                .clone_icon_table()
+                .iter()
+                .filter(|(name, _)| name.starts_with("@microui-theme-image/"))
+                .count(),
+            1,
+            "the second atlas must contain only its own private theme image"
+        );
     }
 }

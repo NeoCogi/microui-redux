@@ -53,8 +53,13 @@ pub enum FontRole {
 }
 
 impl FontRole {
+    /// Every semantic font role in declaration order.
+    pub const ALL: [Self; 5] = [Self::Body, Self::Small, Self::Title, Self::Heading, Self::Mono];
+
     /// Returns the conventional atlas font name resolved by [`Skin::from_atlas`].
-    pub fn atlas_name(self) -> &'static str {
+    pub const fn atlas_name(self) -> &'static str {
+        // Exhaustive matching keeps the typed role catalog and atlas spellings synchronized when
+        // theme loaders need to replace only these semantic entries.
         match self {
             Self::Body => "body",
             Self::Small => "small",
