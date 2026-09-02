@@ -47,7 +47,7 @@ use crate::{
         AtlasHandle,
         builder::{Builder, BuilderError},
     },
-    Color, IconId, ImageError, ImageSource, NinePatch, NinePatchImage, SliceInsets,
+    Color, IconId, ImageError, ImageSource, NinePatch, NinePatchCell, NinePatchCells, NinePatchImage, SliceInsets,
 };
 
 /// Theme-file schema version understood by this crate release.
@@ -55,7 +55,7 @@ pub const THEME_SCHEMA_VERSION: u32 = 1;
 
 /// A loaded theme with its display name, rebuilt resource atlas, and complete resolved skin.
 ///
-/// Fonts, semantic icons, and PNG state artwork share one immutable atlas. Install this complete
+/// Fonts, semantic icons, and image-backed state patches share one immutable atlas. Install this complete
 /// bundle through [`crate::Context::set_theme`] so renderer pixels and every atlas-scoped
 /// capability change together in one transaction.
 #[derive(Clone)]
@@ -280,24 +280,6 @@ impl AppearanceCatalogDocument {
             appearance.resolve_paths(directory);
         }
     }
-
-    /// Visits every authored state document without erasing its owning family.
-    fn for_each_state(&self, mut visit: impl FnMut(&StateDocument)) {
-        // Image packing needs only state-owned paths. Family state types remain inside their own
-        // adapters and are never flattened into a runtime union.
-        for appearance in self.surface.values() {
-            appearance.for_each_state(&mut visit);
-        }
-        for appearance in self.control.values() {
-            appearance.for_each_state(&mut visit);
-        }
-        for appearance in self.menu.values() {
-            appearance.for_each_state(&mut visit);
-        }
-        for appearance in self.chrome.values() {
-            appearance.for_each_state(&mut visit);
-        }
-    }
 }
 
 impl ThemeDefinition {
@@ -354,7 +336,7 @@ impl ThemeDefinition {
 
     /// Builds the atlas selected by this definition while preserving required base resources.
     ///
-    /// Every unique state PNG is packed once beside fonts and icons. A completely flat document
+    /// Every unique image-patch source is packed once beside fonts and icons. A completely flat document
     /// without a font recipe can reuse the base allocation exactly; adding artwork without new
     /// fonts repacks existing glyph bitmaps so the original font files are not required.
     pub(crate) fn build_atlas(&self, base: &AtlasHandle) -> Result<ThemeAtlas, ThemeLoadError> {
@@ -420,13 +402,13 @@ impl ThemeDefinition {
         Ok(ThemeAtlas { atlas, images })
     }
 
-    /// Resolves flat fallbacks and binds explicitly supplied PNG states to baked atlas regions.
+    /// Resolves flat fallbacks and binds explicitly supplied image patches to baked atlas regions.
     pub(crate) fn install(self, theme_atlas: ThemeAtlas, mut skin: Skin) -> Result<LoadedTheme, ThemeLoadError> {
         let ThemeAtlas { atlas, images } = theme_atlas;
         // Installation may only bind appearance icons onto a Skin created for this exact atlas;
         // enforcing that here prevents a LoadedTheme from ever containing mixed resources.
         assert!(skin.belongs_to(&atlas), "theme base skin contains image capabilities from another atlas");
-        // Apply palette and metric overrides before constructing fallbacks, so every omitted PNG
+        // Apply palette and metric overrides before constructing fallbacks, so every omitted patch
         // state reflects the JSON theme's own flat colors rather than the built-in default palette.
         skin.metrics = self.skin.metrics;
         skin.window_chrome = self.skin.window_chrome;
@@ -436,56 +418,39 @@ impl ThemeDefinition {
         validate_non_negative("window_frame", "skin.metrics.window_border", skin.metrics.window_border)?;
         skin.replace_flat_visuals(frame_insets, &self.skin.palette);
         for (role, document) in &self.appearances.surface {
-            install_appearance(
-                &mut skin,
-                &atlas,
-                &images,
-                format!("surface.{role:?}").as_str(),
-                document.insets,
-                SurfaceState::Normal,
-                document.states(),
-                |skin, state| skin.surface(*role, state),
-                |skin, state, visual| skin.set_surface(*role, state, visual),
-            )?;
+            // Each family resolves through its own typed Skin accessors. The shared compiler below
+            // transforms only concrete visual data and never receives behavioral callbacks.
+            let name = format!("surface.{role:?}");
+            let destination_insets = destination_insets(&name, document.insets, skin.surface(*role, SurfaceState::Normal).patch.insets)?;
+            for (state, authored) in document.states() {
+                let visual = compile_visual(&atlas, &images, &name, destination_insets, authored, skin.surface(*role, state))?;
+                skin.set_surface(*role, state, visual);
+            }
         }
         for (role, document) in &self.appearances.control {
-            install_appearance(
-                &mut skin,
-                &atlas,
-                &images,
-                format!("control.{role:?}").as_str(),
-                document.insets,
-                ControlState::Enabled(PointerState::Normal),
-                document.states(),
-                |skin, state| skin.control(*role, state),
-                |skin, state, visual| skin.set_control(*role, state, visual),
-            )?;
+            let name = format!("control.{role:?}");
+            let base_state = ControlState::Enabled(PointerState::Normal);
+            let destination_insets = destination_insets(&name, document.insets, skin.control(*role, base_state).patch.insets)?;
+            for (state, authored) in document.states() {
+                let visual = compile_visual(&atlas, &images, &name, destination_insets, authored, skin.control(*role, state))?;
+                skin.set_control(*role, state, visual);
+            }
         }
         for (role, document) in &self.appearances.menu {
-            install_appearance(
-                &mut skin,
-                &atlas,
-                &images,
-                format!("menu.{role:?}").as_str(),
-                document.insets,
-                MenuState::Normal,
-                document.states(),
-                |skin, state| skin.menu(*role, state),
-                |skin, state, visual| skin.set_menu(*role, state, visual),
-            )?;
+            let name = format!("menu.{role:?}");
+            let destination_insets = destination_insets(&name, document.insets, skin.menu(*role, MenuState::Normal).patch.insets)?;
+            for (state, authored) in document.states() {
+                let visual = compile_visual(&atlas, &images, &name, destination_insets, authored, skin.menu(*role, state))?;
+                skin.set_menu(*role, state, visual);
+            }
         }
         for (role, document) in &self.appearances.chrome {
-            install_appearance(
-                &mut skin,
-                &atlas,
-                &images,
-                format!("chrome.{role:?}").as_str(),
-                document.insets,
-                ChromeState::Base,
-                document.states(),
-                |skin, state| skin.chrome(*role, state),
-                |skin, state, visual| skin.set_chrome(*role, state, visual),
-            )?;
+            let name = format!("chrome.{role:?}");
+            let destination_insets = destination_insets(&name, document.insets, skin.chrome(*role, ChromeState::Base).patch.insets)?;
+            for (state, authored) in document.states() {
+                let visual = compile_visual(&atlas, &images, &name, destination_insets, authored, skin.chrome(*role, state))?;
+                skin.set_chrome(*role, state, visual);
+            }
         }
 
         // Pair atlas and resolved skin at the only public construction boundary before naming it.
@@ -494,58 +459,77 @@ impl ThemeDefinition {
 
     /// Returns every fully resolved PNG path in deterministic deduplicated order.
     fn image_paths(&self) -> BTreeSet<PathBuf> {
-        // Role and state documents retain independent slicing/tint metadata, while one path set is
+        // Image patch variants retain independent slicing/tint metadata, while one path set is
         // sufficient for immutable pixel packing. BTreeSet also stabilizes generated atlas names.
         let mut paths = BTreeSet::new();
-        self.appearances.for_each_state(|state| {
-            if let Some(path) = &state.png {
-                paths.insert(path.clone());
+        for appearance in self.appearances.surface.values() {
+            for (_, visual) in appearance.states() {
+                collect_image_path(visual, &mut paths);
             }
-        });
+        }
+        for appearance in self.appearances.control.values() {
+            for (_, visual) in appearance.states() {
+                collect_image_path(visual, &mut paths);
+            }
+        }
+        for appearance in self.appearances.menu.values() {
+            for (_, visual) in appearance.states() {
+                collect_image_path(visual, &mut paths);
+            }
+        }
+        for appearance in self.appearances.chrome.values() {
+            for (_, visual) in appearance.states() {
+                collect_image_path(visual, &mut paths);
+            }
+        }
         paths
     }
 }
 
-/// Installs one role whose exact state type and accessors are supplied by its appearance family.
-fn install_appearance<const N: usize, State: Copy>(
-    skin: &mut Skin,
+/// Selects and validates the destination geometry shared by every state of one role.
+fn destination_insets(name: &str, authored: Option<SliceInsets>, fallback: SliceInsets) -> Result<SliceInsets, ThemeLoadError> {
+    // A role-wide value prevents interaction transitions from changing layout. Omitting it retains
+    // the base state's concrete fallback geometry rather than copying another authored state.
+    let insets = authored.unwrap_or(fallback);
+    validate_non_negative(name, "insets", insets)?;
+    Ok(insets)
+}
+
+/// Compiles one optional authored override over its exact family/state fallback visual.
+fn compile_visual(
     atlas: &AtlasHandle,
     images: &BTreeMap<PathBuf, IconId>,
     name: &str,
-    authored_insets: Option<SliceInsets>,
-    base_state: State,
-    states: [(State, Option<&StateDocument>); N],
-    get: impl Fn(&Skin, State) -> super::Visual,
-    set: impl Fn(&mut Skin, State, super::Visual),
-) -> Result<(), ThemeLoadError> {
-    // Insets are role-wide so layout cannot shift between states. If the author omits them, retain
-    // the family compiler's base-state geometry before applying optional per-state artwork.
-    let destination_insets = authored_insets.unwrap_or_else(|| get(skin, base_state).patch.insets);
-    validate_non_negative(name, "insets", destination_insets)?;
-
-    for (state, authored) in states {
-        let mut visual = get(skin, state);
-        visual.patch = visual.patch.with_insets(destination_insets);
-        let Some(authored) = authored else {
-            // Even an omitted state receives the role-wide destination geometry.
-            set(skin, state, visual);
-            continue;
-        };
+    destination_insets: SliceInsets,
+    authored: Option<&VisualOverrideDocument>,
+    mut visual: super::Visual,
+) -> Result<super::Visual, ThemeLoadError> {
+    // Even an omitted state receives the role-wide destination geometry while retaining its own
+    // fallback cells. Authored fields then replace only the explicitly selected visual channels.
+    visual.patch = visual.patch.with_insets(destination_insets);
+    if let Some(authored) = authored {
         if let Some(content_color) = authored.content_color {
             // The patch and semantic content color remain one complete runtime value at the mutation boundary.
             visual.content_color = content_color;
         }
-        if let Some(path) = &authored.png {
-            let source_insets = authored.source_insets.unwrap_or(destination_insets);
-            let icon = *images.get(path).expect("every declared theme PNG must have one baked atlas capability");
-            let image_size = atlas.get_icon_size(icon);
-            validate_source_insets(name, source_insets, image_size.width, image_size.height)?;
-            let tint = authored.tint.unwrap_or(Color { r: 255, g: 255, b: 255, a: 255 });
-            visual.patch = NinePatch::image(destination_insets, NinePatchImage::new(icon, source_insets, tint));
+        if let Some(patch) = &authored.patch {
+            visual.patch = patch.compile(atlas, images, name, destination_insets)?;
         }
-        set(skin, state, visual);
     }
-    Ok(())
+    Ok(visual)
+}
+
+/// Adds the image path from one present image-backed visual to a deduplicated atlas work set.
+fn collect_image_path(visual: Option<&VisualOverrideDocument>, paths: &mut BTreeSet<PathBuf>) {
+    // Solid patches and content-color-only states have no resource dependency. Matching the closed
+    // patch enum makes that distinction explicit without probing a group of loosely related fields.
+    if let Some(VisualOverrideDocument {
+        patch: Some(PatchDocument::Image { path, .. }),
+        ..
+    }) = visual
+    {
+        paths.insert(path.clone());
+    }
 }
 
 /// Complete semantic font recipe for one rebuilt theme atlas.
@@ -645,65 +629,59 @@ impl Default for ThemeSkinDocument {
 }
 
 /// One structural surface role's destination insets and availability states.
-#[derive(Clone, Default, Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct SurfaceAppearanceDocument {
     /// Destination-space outer row and column sizes shared by both states.
     insets: Option<SliceInsets>,
     /// Enabled structural appearance.
-    normal: Option<StateDocument>,
+    normal: Option<VisualOverrideDocument>,
     /// Disabled structural appearance.
-    disabled: Option<StateDocument>,
+    disabled: Option<VisualOverrideDocument>,
 }
 
 impl SurfaceAppearanceDocument {
     /// Resolves every surface PNG path against the declaring document directory.
     fn resolve_paths(&mut self, directory: &Path) {
         // Only the two valid structural states are traversed.
-        resolve_state_paths([self.normal.as_mut(), self.disabled.as_mut()], directory);
+        resolve_visual_paths([self.normal.as_mut(), self.disabled.as_mut()], directory);
     }
 
     /// Returns every surface state paired with its optional authored value.
-    fn states(&self) -> [(SurfaceState, Option<&StateDocument>); SurfaceState::COUNT] {
+    fn states(&self) -> [(SurfaceState, Option<&VisualOverrideDocument>); SurfaceState::COUNT] {
         // Declaration order matches the runtime surface catalog.
         [(SurfaceState::Normal, self.normal.as_ref()), (SurfaceState::Disabled, self.disabled.as_ref())]
-    }
-
-    /// Visits every present structural state document.
-    fn for_each_state(&self, visit: &mut impl FnMut(&StateDocument)) {
-        // Reuse the typed adapter without exposing its state outside the family.
-        visit_present_states(self.states(), visit);
     }
 }
 
 /// Pointer-state fields shared by the enabled and focused branches of a control.
-#[derive(Clone, Default, Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct PointerAppearanceDocument {
     /// Pointer-neutral branch appearance.
-    normal: Option<StateDocument>,
+    normal: Option<VisualOverrideDocument>,
     /// Pointer-hover branch appearance.
-    hovered: Option<StateDocument>,
+    hovered: Option<VisualOverrideDocument>,
     /// Visible pointer-press branch appearance.
-    pressed: Option<StateDocument>,
+    pressed: Option<VisualOverrideDocument>,
 }
 
 impl PointerAppearanceDocument {
-    /// Resolves every pointer-state PNG path against the declaring document directory.
+    /// Resolves every pointer-state image path against the declaring document directory.
     fn resolve_paths(&mut self, directory: &Path) {
         // The branch contains exactly the pointer states representable inside ControlState.
-        resolve_state_paths([self.normal.as_mut(), self.hovered.as_mut(), self.pressed.as_mut()], directory);
+        resolve_visual_paths([self.normal.as_mut(), self.hovered.as_mut(), self.pressed.as_mut()], directory);
     }
 }
 
 /// One interactive control role's destination insets and nested control states.
-#[derive(Clone, Default, Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct ControlAppearanceDocument {
     /// Destination-space outer row and column sizes shared by every control state.
     insets: Option<SliceInsets>,
     /// Disabled appearance, with no contradictory pointer or focus substate.
-    disabled: Option<StateDocument>,
+    disabled: Option<VisualOverrideDocument>,
     /// Pointer appearances while the control is enabled without keyboard focus.
     enabled: PointerAppearanceDocument,
     /// Pointer appearances while the control owns visible keyboard focus.
@@ -714,13 +692,13 @@ impl ControlAppearanceDocument {
     /// Resolves every control PNG path against the declaring document directory.
     fn resolve_paths(&mut self, directory: &Path) {
         // Disabled is terminal; enabled and focused branches resolve their concrete pointer states.
-        resolve_state_paths([self.disabled.as_mut()], directory);
+        resolve_visual_paths([self.disabled.as_mut()], directory);
         self.enabled.resolve_paths(directory);
         self.focused.resolve_paths(directory);
     }
 
     /// Returns every concrete nested control state and its optional authored value.
-    fn states(&self) -> [(ControlState, Option<&StateDocument>); ControlState::COUNT] {
+    fn states(&self) -> [(ControlState, Option<&VisualOverrideDocument>); ControlState::COUNT] {
         // This order is the exact flattened storage order internal to the control family only.
         [
             (ControlState::Disabled, self.disabled.as_ref()),
@@ -732,39 +710,33 @@ impl ControlAppearanceDocument {
             (ControlState::Focused(PointerState::Pressed), self.focused.pressed.as_ref()),
         ]
     }
-
-    /// Visits every present nested control state document.
-    fn for_each_state(&self, visit: &mut impl FnMut(&StateDocument)) {
-        // The visitor sees only concrete state recipes, not erased role or state identifiers.
-        visit_present_states(self.states(), visit);
-    }
 }
 
 /// One menu role's destination insets and menu-specific selection states.
-#[derive(Clone, Default, Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct MenuAppearanceDocument {
     /// Destination-space outer row and column sizes shared by every menu state.
     insets: Option<SliceInsets>,
     /// Enabled menu appearance without transient selection.
-    normal: Option<StateDocument>,
+    normal: Option<VisualOverrideDocument>,
     /// Pointer-hover selection appearance.
-    hovered: Option<StateDocument>,
+    hovered: Option<VisualOverrideDocument>,
     /// Visible pointer-press selection appearance.
-    pressed: Option<StateDocument>,
+    pressed: Option<VisualOverrideDocument>,
     /// Keyboard-navigation selection appearance.
-    focused: Option<StateDocument>,
+    focused: Option<VisualOverrideDocument>,
     /// Appearance of an entry that owns an open popup.
-    open: Option<StateDocument>,
+    open: Option<VisualOverrideDocument>,
     /// Disabled menu appearance.
-    disabled: Option<StateDocument>,
+    disabled: Option<VisualOverrideDocument>,
 }
 
 impl MenuAppearanceDocument {
     /// Resolves every menu PNG path against the declaring document directory.
     fn resolve_paths(&mut self, directory: &Path) {
         // The fixed field list is the complete menu state vocabulary.
-        resolve_state_paths(
+        resolve_visual_paths(
             [
                 self.normal.as_mut(),
                 self.hovered.as_mut(),
@@ -778,7 +750,7 @@ impl MenuAppearanceDocument {
     }
 
     /// Returns every menu state paired with its optional authored value.
-    fn states(&self) -> [(MenuState, Option<&StateDocument>); MenuState::COUNT] {
+    fn states(&self) -> [(MenuState, Option<&VisualOverrideDocument>); MenuState::COUNT] {
         // Declaration order matches the runtime menu catalog.
         [
             (MenuState::Normal, self.normal.as_ref()),
@@ -789,37 +761,31 @@ impl MenuAppearanceDocument {
             (MenuState::Disabled, self.disabled.as_ref()),
         ]
     }
-
-    /// Visits every present menu state document.
-    fn for_each_state(&self, visit: &mut impl FnMut(&StateDocument)) {
-        // Reuse the typed menu adapter without manufacturing control focus combinations.
-        visit_present_states(self.states(), visit);
-    }
 }
 
 /// One window chrome role's destination insets and activation states.
-#[derive(Clone, Default, Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct ChromeAppearanceDocument {
     /// Destination-space outer row and column sizes shared by every chrome state.
     insets: Option<SliceInsets>,
     /// Enabled chrome appearance without window activation.
-    base: Option<StateDocument>,
+    base: Option<VisualOverrideDocument>,
     /// Enabled chrome appearance with window activation.
-    active: Option<StateDocument>,
+    active: Option<VisualOverrideDocument>,
     /// Disabled chrome appearance.
-    disabled: Option<StateDocument>,
+    disabled: Option<VisualOverrideDocument>,
 }
 
 impl ChromeAppearanceDocument {
     /// Resolves every chrome PNG path against the declaring document directory.
     fn resolve_paths(&mut self, directory: &Path) {
         // Chrome has no pointer or keyboard-focus states to normalize.
-        resolve_state_paths([self.base.as_mut(), self.active.as_mut(), self.disabled.as_mut()], directory);
+        resolve_visual_paths([self.base.as_mut(), self.active.as_mut(), self.disabled.as_mut()], directory);
     }
 
     /// Returns every chrome state paired with its optional authored value.
-    fn states(&self) -> [(ChromeState, Option<&StateDocument>); ChromeState::COUNT] {
+    fn states(&self) -> [(ChromeState, Option<&VisualOverrideDocument>); ChromeState::COUNT] {
         // Declaration order matches the runtime chrome catalog.
         [
             (ChromeState::Base, self.base.as_ref()),
@@ -827,54 +793,92 @@ impl ChromeAppearanceDocument {
             (ChromeState::Disabled, self.disabled.as_ref()),
         ]
     }
+}
 
-    /// Visits every present chrome state document.
-    fn for_each_state(&self, visit: &mut impl FnMut(&StateDocument)) {
-        // Reuse the typed chrome adapter while keeping activation out of role names.
-        visit_present_states(self.states(), visit);
+/// Sparse overrides for one exact family role and state.
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct VisualOverrideDocument {
+    /// Optional text and semantic-glyph color for this exact role and state.
+    content_color: Option<Color>,
+    /// Optional concrete patch source replacing the exact state's flat fallback.
+    patch: Option<PatchDocument>,
+}
+
+impl VisualOverrideDocument {
+    /// Anchors this state's optional image path to the one containing theme document.
+    fn resolve_path(&mut self, directory: &Path) {
+        // Content colors and solid patches own no filesystem state. The closed patch enum routes
+        // path handling only to the image variant that can legally contain a path.
+        if let Some(patch) = &mut self.patch {
+            patch.resolve_path(directory);
+        }
     }
 }
 
-/// Optional image supplied for one exact role state.
-#[derive(Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct StateDocument {
-    /// Optional text and semantic-glyph color for this exact role and state.
-    content_color: Option<Color>,
-    /// PNG path relative to the containing JSON file; absence keeps the flat fallback.
-    png: Option<PathBuf>,
-    /// Source-space PNG slices; defaults to the role's destination insets.
-    source_insets: Option<SliceInsets>,
-    /// Optional RGBA modulation; defaults to opaque white.
-    tint: Option<Color>,
+/// Concrete source for an authored visual patch.
+///
+/// Tagging the alternatives makes image-only fields structurally unavailable to solid patches.
+/// A state that omits `patch` retains its exact family/state fallback instead of manufacturing an
+/// empty image recipe.
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum PatchDocument {
+    /// A flat color painted across all nine destination cells.
+    Solid {
+        /// RGBA color covering the complete patch while role insets retain layout geometry.
+        color: Color,
+    },
+    /// One PNG divided into a typed three-by-three image patch.
+    Image {
+        /// PNG path resolved relative to the containing JSON document.
+        path: PathBuf,
+        /// Optional source-space slices; omission reuses the role's destination insets.
+        source_insets: Option<SliceInsets>,
+        /// Optional RGBA image modulation; omission preserves the source pixels.
+        tint: Option<Color>,
+    },
 }
 
-impl StateDocument {
-    /// Anchors this state's optional PNG path to the one containing theme document.
+impl PatchDocument {
+    /// Anchors an image patch path while leaving a solid patch unchanged.
     fn resolve_path(&mut self, directory: &Path) {
-        // Only an authored image needs path ownership; flat states remain allocation-free.
-        if let Some(path) = &mut self.png {
+        // Path ownership belongs to the concrete image variant, so no independent fields can fall
+        // out of sync while the document advances from decoding to atlas construction.
+        if let Self::Image { path, .. } = self {
             *path = directory.join(path.as_path());
+        }
+    }
+
+    /// Compiles this closed source choice into one runtime patch owned by `atlas`.
+    fn compile(
+        &self,
+        atlas: &AtlasHandle,
+        images: &BTreeMap<PathBuf, IconId>,
+        appearance: &str,
+        destination_insets: SliceInsets,
+    ) -> Result<NinePatch, ThemeLoadError> {
+        // Exhaustive matching keeps solid construction independent of atlas resources and confines
+        // source slicing, tinting, and capability lookup to the image alternative.
+        match self {
+            Self::Solid { color } => Ok(NinePatch::new(destination_insets, NinePatchCells::all(NinePatchCell::color(*color)))),
+            Self::Image { path, source_insets, tint } => {
+                let source_insets = source_insets.unwrap_or(destination_insets);
+                let icon = *images.get(path).expect("every declared theme image must have one baked atlas capability");
+                let image_size = atlas.get_icon_size(icon);
+                validate_source_insets(appearance, source_insets, image_size.width, image_size.height)?;
+                let tint = tint.unwrap_or(Color { r: 255, g: 255, b: 255, a: 255 });
+                Ok(NinePatch::image(destination_insets, NinePatchImage::new(icon, source_insets, tint)))
+            }
         }
     }
 }
 
 /// Resolves a fixed family-specific set of optional state paths.
-fn resolve_state_paths<const N: usize>(states: [Option<&mut StateDocument>; N], directory: &Path) {
+fn resolve_visual_paths<const N: usize>(states: [Option<&mut VisualOverrideDocument>; N], directory: &Path) {
     // Missing states remain absent; every present recipe is anchored to the containing document.
     for state in states.into_iter().flatten() {
         state.resolve_path(directory);
-    }
-}
-
-/// Passes every present state recipe from one typed family adapter to a common visitor.
-fn visit_present_states<const N: usize, State: Copy>(states: [(State, Option<&StateDocument>); N], visit: &mut impl FnMut(&StateDocument)) {
-    // Discard the already validated family state only after its document has been selected; image
-    // packing needs paths and pixels but never performs semantic state dispatch.
-    for (_, state) in states {
-        if let Some(state) = state {
-            visit(state);
-        }
     }
 }
 
@@ -934,9 +938,9 @@ mod tests {
         (loaded, image_count)
     }
 
-    /// Verifies missing state PNGs remain state-specific flat fallbacks after palette replacement.
+    /// Verifies missing state patches remain state-specific flat fallbacks after palette replacement.
     #[test]
-    fn omitted_png_states_use_theme_flat_colors() {
+    fn omitted_patch_states_use_theme_flat_colors() {
         let document = ThemeDefinition::parse_for_test(
             r#"{
                 "schema_version": 1,
@@ -992,7 +996,7 @@ mod tests {
 
     /// Verifies one state can replace text and glyph color without supplying background artwork.
     #[test]
-    fn state_content_color_override_does_not_require_a_png() {
+    fn state_content_color_override_does_not_require_a_patch() {
         let document = ThemeDefinition::parse_for_test(
             r#"{
                 "schema_version": 1,
@@ -1020,6 +1024,69 @@ mod tests {
         assert_eq!((normal.r, normal.g, normal.b, normal.a), (1, 2, 3, 255));
         assert_eq!((hovered.r, hovered.g, hovered.b, hovered.a), (250, 251, 252, 255));
         assert_eq!((disabled.r, disabled.g, disabled.b, disabled.a), (90, 91, 92, 255));
+    }
+
+    /// Verifies a solid patch is resource-free and covers every cell while retaining role geometry.
+    #[test]
+    fn solid_patch_compiles_without_rebuilding_the_atlas() {
+        let document = ThemeDefinition::parse_for_test(
+            r#"{
+                "schema_version": 1,
+                "name": "Solid panel",
+                "appearances": {
+                    "surface": {
+                        "panel": {
+                            "insets": { "left": 2, "top": 3, "right": 4, "bottom": 5 },
+                            "normal": { "patch": { "type": "solid", "color": [11, 22, 33, 255] } }
+                        }
+                    }
+                }
+            }"#,
+        )
+        .expect("solid patch must match the strict tagged schema");
+        let base = test_atlas();
+        let theme_atlas = document.build_atlas(&base).expect("solid patch must not require atlas work");
+        assert!(theme_atlas.atlas().ptr_eq(&base));
+        assert!(theme_atlas.images.is_empty());
+        let style = Skin::from_atlas(theme_atlas.atlas());
+        let loaded = document.install(theme_atlas, style).expect("solid patch must install");
+        let patch = loaded.bundle().skin().surface(SurfaceRole::Panel, SurfaceState::Normal).patch;
+
+        assert_eq!((patch.insets.left, patch.insets.top, patch.insets.right, patch.insets.bottom), (2, 3, 4, 5));
+        assert!(matches!(
+            patch.content,
+            crate::NinePatchContent::Flat { cells }
+                if matches!(cells.top_left, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (11, 22, 33, 255))
+                    && matches!(cells.center, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (11, 22, 33, 255))
+        ));
+    }
+
+    /// Verifies image-only data cannot exist beside or inside the wrong patch alternative.
+    #[test]
+    fn patch_variants_reject_meaningless_field_combinations() {
+        let invalid_states = [
+            (r#"{ "source_insets": { "left": 1, "top": 1, "right": 1, "bottom": 1 } }"#, "source_insets"),
+            (r#"{ "patch": { "type": "solid", "color": [1, 2, 3, 255], "path": "unused.png" } }"#, "path"),
+            (r#"{ "patch": { "type": "image", "tint": [255, 255, 255, 255] } }"#, "path"),
+        ];
+
+        for (state, rejected_field) in invalid_states {
+            let json = format!(
+                r#"{{
+                    "schema_version": 1,
+                    "name": "Invalid patch",
+                    "appearances": {{ "surface": {{ "panel": {{ "normal": {state} }} }} }}
+                }}"#
+            );
+            let error = match ThemeDefinition::parse_for_test(&json) {
+                Ok(_) => panic!("meaningless `{rejected_field}` combination must be rejected"),
+                Err(error) => error,
+            };
+            assert!(
+                error.to_string().contains(rejected_field),
+                "diagnostic must identify `{rejected_field}`: {error}"
+            );
+        }
     }
 
     /// Verifies the strict schema rejects misspelled fields instead of silently ignoring them.

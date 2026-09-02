@@ -66,55 +66,55 @@
     "surface": {
       "generic_frame": {
         "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
-        "normal": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-        "disabled": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [221, 221, 221, 255] } },
+        "normal": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+        "disabled": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [221, 221, 221, 255] } } },
       "panel": {
         "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
-        "normal": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-        "disabled": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [221, 221, 221, 255] } }
+        "normal": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+        "disabled": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [221, 221, 221, 255] } } }
     },
     "control": {
       "button": {
         "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 },
         "enabled": {
-          "normal": { "png": "raised.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } },
-          "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } },
-          "pressed": { "png": "pressed.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } }
+          "normal": { "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } },
+          "hovered": { "patch": { "type": "image", "path": "raised-hovered.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } },
+          "pressed": { "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } }
         },
         "focused": {
-          "normal": { "png": "focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } },
-          "hovered": { "png": "focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } },
-          "pressed": { "png": "pressed-focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } }
+          "normal": { "patch": { "type": "image", "path": "focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } },
+          "hovered": { "patch": { "type": "image", "path": "focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } },
+          "pressed": { "patch": { "type": "image", "path": "pressed-focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } }
         },
-        "disabled": { "png": "disabled.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } }
+        "disabled": { "patch": { "type": "image", "path": "disabled.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } }
       },
       "checkbox": {
         "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
         "enabled": {
-          "normal": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-          "hovered": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-          "pressed": { "png": "pressed.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } }
+          "normal": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "hovered": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "pressed": { "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } }
         },
         "focused": {
-          "normal": { "png": "recessed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-          "hovered": { "png": "recessed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-          "pressed": { "png": "pressed-focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } }
+          "normal": { "patch": { "type": "image", "path": "recessed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "hovered": { "patch": { "type": "image", "path": "recessed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "pressed": { "patch": { "type": "image", "path": "pressed-focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } }
         },
-        "disabled": { "png": "disabled.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } }
+        "disabled": { "patch": { "type": "image", "path": "disabled.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } }
       },
       "text_input": {
         "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
         "enabled": {
-          "normal": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-          "hovered": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-          "pressed": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } }
+          "normal": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "hovered": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "pressed": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } }
         },
         "focused": {
-          "normal": { "png": "recessed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-          "hovered": { "png": "recessed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-          "pressed": { "png": "recessed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } }
+          "normal": { "patch": { "type": "image", "path": "recessed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "hovered": { "patch": { "type": "image", "path": "recessed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "pressed": { "patch": { "type": "image", "path": "recessed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } }
         },
-        "disabled": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [221, 221, 221, 255] } },
+        "disabled": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [221, 221, 221, 255] } } },
       "item": {
         "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
         "enabled": {
@@ -123,8 +123,8 @@
           "pressed": { "content_color": [0, 0, 0, 255] }
         },
         "focused": {
-          "normal": { "png": "menu-selection.png", "content_color": [255, 255, 255, 255] },
-          "hovered": { "png": "menu-selection.png", "content_color": [255, 255, 255, 255] },
+          "normal": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "menu-selection.png" } },
+          "hovered": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "menu-selection.png" } },
           "pressed": { "content_color": [0, 0, 0, 255] }
         },
         "disabled": { "content_color": [119, 119, 119, 255] }
@@ -132,109 +132,109 @@
       "combo": {
         "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 },
         "enabled": {
-          "normal": { "png": "raised.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } },
-          "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } },
-          "pressed": { "png": "pressed.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } }
+          "normal": { "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } },
+          "hovered": { "patch": { "type": "image", "path": "raised-hovered.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } },
+          "pressed": { "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } }
         },
         "focused": {
-          "normal": { "png": "focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } },
-          "hovered": { "png": "focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } },
-          "pressed": { "png": "pressed-focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } }
+          "normal": { "patch": { "type": "image", "path": "focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } },
+          "hovered": { "patch": { "type": "image", "path": "focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } },
+          "pressed": { "patch": { "type": "image", "path": "pressed-focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } }
         },
-        "disabled": { "png": "disabled.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } }
+        "disabled": { "patch": { "type": "image", "path": "disabled.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } }
       },
       "slider_track": {
         "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
         "enabled": {
-          "normal": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-          "hovered": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-          "pressed": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } }
+          "normal": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "hovered": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "pressed": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } }
         },
         "focused": {
-          "normal": { "png": "recessed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-          "hovered": { "png": "recessed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-          "pressed": { "png": "recessed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } }
+          "normal": { "patch": { "type": "image", "path": "recessed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "hovered": { "patch": { "type": "image", "path": "recessed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "pressed": { "patch": { "type": "image", "path": "recessed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } }
         },
-        "disabled": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [221, 221, 221, 255] } },
+        "disabled": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [221, 221, 221, 255] } } },
       "slider_thumb": {
         "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 },
         "enabled": {
-          "normal": { "png": "raised.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } },
-          "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } },
-          "pressed": { "png": "pressed.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } }
+          "normal": { "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } },
+          "hovered": { "patch": { "type": "image", "path": "raised-hovered.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } },
+          "pressed": { "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } }
         },
         "focused": {
-          "normal": { "png": "focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } },
-          "hovered": { "png": "focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } },
-          "pressed": { "png": "pressed-focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } }
+          "normal": { "patch": { "type": "image", "path": "focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } },
+          "hovered": { "patch": { "type": "image", "path": "focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } },
+          "pressed": { "patch": { "type": "image", "path": "pressed-focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } }
         },
-        "disabled": { "png": "disabled.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } }
+        "disabled": { "patch": { "type": "image", "path": "disabled.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } }
       },
       "scrollbar_track": {
         "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
         "enabled": {
-          "normal": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-          "hovered": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-          "pressed": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } }
+          "normal": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "hovered": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "pressed": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } }
         },
         "focused": {},
-        "disabled": { "png": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [221, 221, 221, 255] } },
+        "disabled": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [221, 221, 221, 255] } } },
       "scrollbar_thumb": {
         "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 },
         "enabled": {
-          "normal": { "png": "raised.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } },
-          "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } },
-          "pressed": { "png": "pressed.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } }
+          "normal": { "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } },
+          "hovered": { "patch": { "type": "image", "path": "raised-hovered.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } },
+          "pressed": { "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } }
         },
         "focused": {
-          "normal": { "png": "focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } },
-          "hovered": { "png": "focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } },
-          "pressed": { "png": "pressed-focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } }
+          "normal": { "patch": { "type": "image", "path": "focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } },
+          "hovered": { "patch": { "type": "image", "path": "focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } },
+          "pressed": { "patch": { "type": "image", "path": "pressed-focused.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } }
         },
-        "disabled": { "png": "disabled.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } }
+        "disabled": { "patch": { "type": "image", "path": "disabled.png", "source_insets": { "left": 5, "top": 5, "right": 5, "bottom": 5 } } }
       },
       "close_button": {
         "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 },
         "enabled": {
-          "normal": { "png": "caption-close.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "content_color": [0, 0, 0, 0] },
-          "hovered": { "png": "caption-close.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "content_color": [0, 0, 0, 0] },
-          "pressed": { "png": "caption-close-pressed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "content_color": [0, 0, 0, 0] }
+          "normal": { "content_color": [0, 0, 0, 0], "patch": { "type": "image", "path": "caption-close.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "hovered": { "content_color": [0, 0, 0, 0], "patch": { "type": "image", "path": "caption-close.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "pressed": { "content_color": [0, 0, 0, 0], "patch": { "type": "image", "path": "caption-close-pressed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } }
         },
         "focused": {},
-        "disabled": { "png": "caption-close.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [221, 221, 221, 255], "content_color": [0, 0, 0, 0] } },
+        "disabled": { "content_color": [0, 0, 0, 0], "patch": { "type": "image", "path": "caption-close.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [221, 221, 221, 255] } } },
       "minimize_button": {
         "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 },
         "enabled": {
-          "normal": { "png": "caption-minimize.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "content_color": [0, 0, 0, 0] },
-          "hovered": { "png": "caption-minimize.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "content_color": [0, 0, 0, 0] },
-          "pressed": { "png": "caption-minimize-pressed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "content_color": [0, 0, 0, 0] }
+          "normal": { "content_color": [0, 0, 0, 0], "patch": { "type": "image", "path": "caption-minimize.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "hovered": { "content_color": [0, 0, 0, 0], "patch": { "type": "image", "path": "caption-minimize.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "pressed": { "content_color": [0, 0, 0, 0], "patch": { "type": "image", "path": "caption-minimize-pressed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } }
         },
         "focused": {},
-        "disabled": { "png": "caption-minimize.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [221, 221, 221, 255], "content_color": [0, 0, 0, 0] } },
+        "disabled": { "content_color": [0, 0, 0, 0], "patch": { "type": "image", "path": "caption-minimize.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [221, 221, 221, 255] } } },
       "maximize_button": {
         "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 },
         "enabled": {
-          "normal": { "png": "caption-maximize.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "content_color": [0, 0, 0, 0] },
-          "hovered": { "png": "caption-maximize.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "content_color": [0, 0, 0, 0] },
-          "pressed": { "png": "caption-maximize-pressed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "content_color": [0, 0, 0, 0] }
+          "normal": { "content_color": [0, 0, 0, 0], "patch": { "type": "image", "path": "caption-maximize.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "hovered": { "content_color": [0, 0, 0, 0], "patch": { "type": "image", "path": "caption-maximize.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "pressed": { "content_color": [0, 0, 0, 0], "patch": { "type": "image", "path": "caption-maximize-pressed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } }
         },
         "focused": {},
-        "disabled": { "png": "caption-maximize.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [221, 221, 221, 255], "content_color": [0, 0, 0, 0] } },
+        "disabled": { "content_color": [0, 0, 0, 0], "patch": { "type": "image", "path": "caption-maximize.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [221, 221, 221, 255] } } },
       "restore_button": {
         "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 },
         "enabled": {
-          "normal": { "png": "caption-restore.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "content_color": [0, 0, 0, 0] },
-          "hovered": { "png": "caption-restore.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "content_color": [0, 0, 0, 0] },
-          "pressed": { "png": "caption-restore-pressed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "content_color": [0, 0, 0, 0] }
+          "normal": { "content_color": [0, 0, 0, 0], "patch": { "type": "image", "path": "caption-restore.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "hovered": { "content_color": [0, 0, 0, 0], "patch": { "type": "image", "path": "caption-restore.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "pressed": { "content_color": [0, 0, 0, 0], "patch": { "type": "image", "path": "caption-restore-pressed.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } }
         },
         "focused": {},
-        "disabled": { "png": "caption-restore.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [221, 221, 221, 255], "content_color": [0, 0, 0, 0] } },
+        "disabled": { "content_color": [0, 0, 0, 0], "patch": { "type": "image", "path": "caption-restore.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [221, 221, 221, 255] } } },
       "resize_grip": {
         "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
         "enabled": {
-          "normal": { "png": "resize-grip.png" },
-          "hovered": { "png": "resize-grip.png" },
-          "pressed": { "png": "resize-grip.png", "tint": [204, 204, 204, 255] }
+          "normal": { "patch": { "type": "image", "path": "resize-grip.png" } },
+          "hovered": { "patch": { "type": "image", "path": "resize-grip.png" } },
+          "pressed": { "patch": { "type": "image", "path": "resize-grip.png", "tint": [204, 204, 204, 255] } }
         },
         "focused": {}
       }
@@ -242,38 +242,38 @@
     "menu": {
       "bar": {
         "insets": { "left": 1, "top": 1, "right": 1, "bottom": 1 },
-        "normal": { "png": "menu-bar.png", "source_insets": { "left": 1, "top": 1, "right": 1, "bottom": 1 } },
-        "disabled": { "png": "menu-bar.png", "source_insets": { "left": 1, "top": 1, "right": 1, "bottom": 1 }, "tint": [221, 221, 221, 255] } },
+        "normal": { "patch": { "type": "image", "path": "menu-bar.png", "source_insets": { "left": 1, "top": 1, "right": 1, "bottom": 1 } } },
+        "disabled": { "patch": { "type": "image", "path": "menu-bar.png", "source_insets": { "left": 1, "top": 1, "right": 1, "bottom": 1 }, "tint": [221, 221, 221, 255] } } },
       "popup": {
         "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
-        "normal": { "png": "menu-popup.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+        "normal": { "patch": { "type": "image", "path": "menu-popup.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
       },
       "item": {
         "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
-        "hovered": { "png": "menu-selection.png", "content_color": [255, 255, 255, 255] },
-        "pressed": { "png": "menu-selection.png", "content_color": [255, 255, 255, 255] },
-        "focused": { "png": "menu-selection.png", "content_color": [255, 255, 255, 255] }
+        "hovered": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "menu-selection.png" } },
+        "pressed": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "menu-selection.png" } },
+        "focused": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "menu-selection.png" } }
       },
       "title": {
-        "open": { "png": "menu-selection.png", "content_color": [255, 255, 255, 255] }
+        "open": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "menu-selection.png" } }
       }
     },
     "chrome": {
       "window_frame": {
         "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
-        "base": { "png": "window-frame.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "active": { "png": "window-frame-active.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "disabled": { "png": "window-frame.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "tint": [221, 221, 221, 255] } },
+        "base": { "patch": { "type": "image", "path": "window-frame.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+        "active": { "patch": { "type": "image", "path": "window-frame-active.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+        "disabled": { "patch": { "type": "image", "path": "window-frame.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "tint": [221, 221, 221, 255] } } },
       "dialog_frame": {
         "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
-        "base": { "png": "window-frame.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "active": { "png": "window-frame-active.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "disabled": { "png": "window-frame.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "tint": [221, 221, 221, 255] } },
+        "base": { "patch": { "type": "image", "path": "window-frame.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+        "active": { "patch": { "type": "image", "path": "window-frame-active.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+        "disabled": { "patch": { "type": "image", "path": "window-frame.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "tint": [221, 221, 221, 255] } } },
       "title": {
         "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
-        "base": { "png": "title-normal.png", "content_color": [102, 102, 102, 255] },
-        "active": { "png": "title-active.png" },
-        "disabled": { "png": "title-normal.png", "content_color": [119, 119, 119, 255] }
+        "base": { "content_color": [102, 102, 102, 255], "patch": { "type": "image", "path": "title-normal.png" } },
+        "active": { "patch": { "type": "image", "path": "title-active.png" } },
+        "disabled": { "content_color": [119, 119, 119, 255], "patch": { "type": "image", "path": "title-normal.png" } }
       }
     }
   }

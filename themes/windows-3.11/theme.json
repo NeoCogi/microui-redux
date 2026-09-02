@@ -51,168 +51,168 @@
     "surface": {
       "generic_frame": {
         "insets": { "left": 1, "top": 1, "right": 1, "bottom": 1 },
-        "normal": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "disabled": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+        "normal": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } },
+        "disabled": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } }
       },
       "panel": {
         "insets": { "left": 1, "top": 1, "right": 1, "bottom": 1 },
-        "normal": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "disabled": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+        "normal": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } },
+        "disabled": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } }
       }
     },
     "control": {
       "button": {
         "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
         "enabled": {
-          "normal": { "png": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-          "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-          "pressed": { "png": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+          "normal": { "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+          "hovered": { "patch": { "type": "image", "path": "raised-hovered.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+          "pressed": { "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
         },
         "focused": {
-          "normal": { "png": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-          "hovered": { "png": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-          "pressed": { "png": "pressed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } }
+          "normal": { "patch": { "type": "image", "path": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "hovered": { "patch": { "type": "image", "path": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "pressed": { "patch": { "type": "image", "path": "pressed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } }
         },
-        "disabled": { "png": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+        "disabled": { "patch": { "type": "image", "path": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
       },
       "checkbox": {
         "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
         "enabled": {
-          "normal": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-          "hovered": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-          "pressed": { "png": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+          "normal": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } },
+          "hovered": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } },
+          "pressed": { "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
         },
         "focused": {
-          "normal": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-          "hovered": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-          "pressed": { "png": "pressed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } }
+          "normal": { "patch": { "type": "image", "path": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+          "hovered": { "patch": { "type": "image", "path": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+          "pressed": { "patch": { "type": "image", "path": "pressed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } }
         },
-        "disabled": { "png": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+        "disabled": { "patch": { "type": "image", "path": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
       },
       "text_input": {
         "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
         "enabled": {
-          "normal": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-          "hovered": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-          "pressed": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+          "normal": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } },
+          "hovered": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } },
+          "pressed": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } }
         },
         "focused": {
-          "normal": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-          "hovered": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-          "pressed": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+          "normal": { "patch": { "type": "image", "path": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+          "hovered": { "patch": { "type": "image", "path": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+          "pressed": { "patch": { "type": "image", "path": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
         },
-        "disabled": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }, "tint": [184, 184, 184, 255] } },
+        "disabled": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }, "tint": [184, 184, 184, 255] } } },
       "item": {
         "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
         "enabled": {
           "normal": { "content_color": [0, 0, 0, 255] },
-          "hovered": { "png": "title-active.png", "content_color": [255, 255, 255, 255] },
-          "pressed": { "png": "title-active.png", "content_color": [255, 255, 255, 255] }
+          "hovered": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } },
+          "pressed": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } }
         },
         "focused": {
-          "normal": { "png": "title-active.png", "content_color": [255, 255, 255, 255] },
-          "hovered": { "png": "title-active.png", "content_color": [255, 255, 255, 255] },
-          "pressed": { "png": "title-active.png", "content_color": [255, 255, 255, 255] }
+          "normal": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } },
+          "hovered": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } },
+          "pressed": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } }
         },
         "disabled": { "content_color": [125, 125, 125, 255] }
       },
       "combo": {
         "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
         "enabled": {
-          "normal": { "png": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-          "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-          "pressed": { "png": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+          "normal": { "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+          "hovered": { "patch": { "type": "image", "path": "raised-hovered.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+          "pressed": { "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
         },
         "focused": {
-          "normal": { "png": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-          "hovered": { "png": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-          "pressed": { "png": "pressed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } }
+          "normal": { "patch": { "type": "image", "path": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "hovered": { "patch": { "type": "image", "path": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "pressed": { "patch": { "type": "image", "path": "pressed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } }
         },
-        "disabled": { "png": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+        "disabled": { "patch": { "type": "image", "path": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
       },
       "slider_track": {
         "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
         "enabled": {
-          "normal": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-          "hovered": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-          "pressed": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+          "normal": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } },
+          "hovered": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } },
+          "pressed": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } }
         },
         "focused": {
-          "normal": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-          "hovered": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-          "pressed": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+          "normal": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } },
+          "hovered": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } },
+          "pressed": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } }
         },
-        "disabled": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }, "tint": [184, 184, 184, 255] } },
+        "disabled": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }, "tint": [184, 184, 184, 255] } } },
       "slider_thumb": {
         "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
         "enabled": {
-          "normal": { "png": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-          "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-          "pressed": { "png": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+          "normal": { "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+          "hovered": { "patch": { "type": "image", "path": "raised-hovered.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+          "pressed": { "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
         },
         "focused": {
-          "normal": { "png": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-          "hovered": { "png": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-          "pressed": { "png": "pressed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } }
+          "normal": { "patch": { "type": "image", "path": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "hovered": { "patch": { "type": "image", "path": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
+          "pressed": { "patch": { "type": "image", "path": "pressed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } }
         },
-        "disabled": { "png": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+        "disabled": { "patch": { "type": "image", "path": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
       },
       "scrollbar_thumb": {
         "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
         "enabled": {
-          "normal": { "png": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-          "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-          "pressed": { "png": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+          "normal": { "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+          "hovered": { "patch": { "type": "image", "path": "raised-hovered.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+          "pressed": { "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
         },
         "focused": {},
-        "disabled": { "png": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+        "disabled": { "patch": { "type": "image", "path": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
       },
       "close_button": {
         "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
         "enabled": {
-          "normal": { "png": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "content_color": [0, 0, 0, 255] },
-          "hovered": { "png": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "content_color": [0, 0, 0, 255] },
-          "pressed": { "png": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "content_color": [0, 0, 0, 255] }
+          "normal": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+          "hovered": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+          "pressed": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
         },
         "focused": {},
-        "disabled": { "png": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "content_color": [125, 125, 125, 255] }
+        "disabled": { "content_color": [125, 125, 125, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
       },
       "minimize_button": {
         "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
         "enabled": {
-          "normal": { "png": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "content_color": [0, 0, 0, 255] },
-          "hovered": { "png": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "content_color": [0, 0, 0, 255] },
-          "pressed": { "png": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "content_color": [0, 0, 0, 255] }
+          "normal": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+          "hovered": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+          "pressed": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
         },
         "focused": {},
-        "disabled": { "png": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "content_color": [125, 125, 125, 255] }
+        "disabled": { "content_color": [125, 125, 125, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
       },
       "maximize_button": {
         "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
         "enabled": {
-          "normal": { "png": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "content_color": [0, 0, 0, 255] },
-          "hovered": { "png": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "content_color": [0, 0, 0, 255] },
-          "pressed": { "png": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "content_color": [0, 0, 0, 255] }
+          "normal": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+          "hovered": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+          "pressed": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
         },
         "focused": {},
-        "disabled": { "png": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "content_color": [125, 125, 125, 255] }
+        "disabled": { "content_color": [125, 125, 125, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
       },
       "restore_button": {
         "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
         "enabled": {
-          "normal": { "png": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "content_color": [0, 0, 0, 255] },
-          "hovered": { "png": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "content_color": [0, 0, 0, 255] },
-          "pressed": { "png": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "content_color": [0, 0, 0, 255] }
+          "normal": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+          "hovered": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
+          "pressed": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
         },
         "focused": {},
-        "disabled": { "png": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "content_color": [125, 125, 125, 255] }
+        "disabled": { "content_color": [125, 125, 125, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
       },
       "resize_grip": {
         "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
         "enabled": {
-          "normal": { "png": "resize-grip.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 } },
-          "hovered": { "png": "resize-grip.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 } },
-          "pressed": { "png": "resize-grip.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 }, "tint": [210, 210, 210, 255] } },
+          "normal": { "patch": { "type": "image", "path": "resize-grip.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 } } },
+          "hovered": { "patch": { "type": "image", "path": "resize-grip.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 } } },
+          "pressed": { "patch": { "type": "image", "path": "resize-grip.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 }, "tint": [210, 210, 210, 255] } } },
         "focused": {}
       }
     },
@@ -225,10 +225,10 @@
       "title": {
         "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
         "normal": { "content_color": [0, 0, 0, 255] },
-        "hovered": { "png": "title-active.png", "content_color": [255, 255, 255, 255] },
-        "pressed": { "png": "title-active.png", "content_color": [255, 255, 255, 255] },
-        "focused": { "png": "title-active.png", "content_color": [255, 255, 255, 255] },
-        "open": { "png": "title-active.png", "content_color": [255, 255, 255, 255] },
+        "hovered": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } },
+        "pressed": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } },
+        "focused": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } },
+        "open": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } },
         "disabled": { "content_color": [125, 125, 125, 255] }
       },
       "popup": {
@@ -239,26 +239,26 @@
       "item": {
         "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
         "normal": { "content_color": [0, 0, 0, 255] },
-        "hovered": { "png": "title-active.png", "content_color": [255, 255, 255, 255] },
-        "pressed": { "png": "title-active.png", "content_color": [255, 255, 255, 255] },
-        "focused": { "png": "title-active.png", "content_color": [255, 255, 255, 255] },
+        "hovered": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } },
+        "pressed": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } },
+        "focused": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } },
         "disabled": { "content_color": [125, 125, 125, 255] }
       }
     },
     "chrome": {
       "window_frame": {
         "insets": { "left": 23, "top": 23, "right": 23, "bottom": 23 },
-        "base": { "png": "window-frame.png", "source_insets": { "left": 23, "top": 23, "right": 23, "bottom": 23 } },
-        "active": { "png": "window-frame-active.png", "source_insets": { "left": 23, "top": 23, "right": 23, "bottom": 23 } },
-        "disabled": { "png": "window-frame.png", "source_insets": { "left": 23, "top": 23, "right": 23, "bottom": 23 }, "tint": [235, 235, 235, 255] } },
+        "base": { "patch": { "type": "image", "path": "window-frame.png", "source_insets": { "left": 23, "top": 23, "right": 23, "bottom": 23 } } },
+        "active": { "patch": { "type": "image", "path": "window-frame-active.png", "source_insets": { "left": 23, "top": 23, "right": 23, "bottom": 23 } } },
+        "disabled": { "patch": { "type": "image", "path": "window-frame.png", "source_insets": { "left": 23, "top": 23, "right": 23, "bottom": 23 }, "tint": [235, 235, 235, 255] } } },
       "dialog_frame": {
         "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }
       },
       "title": {
         "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
-        "base": { "png": "title-normal.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 }, "content_color": [0, 0, 0, 255] },
-        "active": { "png": "title-active.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 }, "content_color": [255, 255, 255, 255] },
-        "disabled": { "png": "title-normal.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 }, "content_color": [125, 125, 125, 255] } }
+        "base": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "title-normal.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 } } },
+        "active": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 } } },
+        "disabled": { "content_color": [125, 125, 125, 255], "patch": { "type": "image", "path": "title-normal.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 } } } }
     }
   }
 }

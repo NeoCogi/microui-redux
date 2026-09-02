@@ -1040,10 +1040,10 @@ mod theme_tests {
                     "control": {
                         "button": {
                             "insets": { "left": 1, "top": 1, "right": 1, "bottom": 1 },
-                            "enabled": { "normal": { "png": "button.png" } }
+                            "enabled": { "normal": { "patch": { "type": "image", "path": "button.png" } } }
                         },
                         "checkbox": {
-                            "enabled": { "normal": { "png": "missing.png" } }
+                            "enabled": { "normal": { "patch": { "type": "image", "path": "missing.png" } } }
                         }
                     }
                 }
@@ -1117,7 +1117,7 @@ mod theme_tests {
                 "schema_version": 1,
                 "name": "First",
                 "appearances": {
-                    "control": { "button": { "enabled": { "normal": { "png": "first.png" } } } }
+                    "control": { "button": { "enabled": { "normal": { "patch": { "type": "image", "path": "first.png" } } } } }
                 }
             }"#,
         )
@@ -1128,7 +1128,7 @@ mod theme_tests {
                 "schema_version": 1,
                 "name": "Second",
                 "appearances": {
-                    "control": { "checkbox": { "enabled": { "normal": { "png": "second.png" } } } }
+                    "control": { "checkbox": { "enabled": { "normal": { "patch": { "type": "image", "path": "second.png" } } } } }
                 }
             }"#,
         )

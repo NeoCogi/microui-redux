@@ -71,18 +71,30 @@ the theme directories must remain available beside the repository sources at run
         "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
         "enabled": {
           "normal": {
-            "png": "button-normal.png",
-            "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }
+            "patch": {
+              "type": "image",
+              "path": "button-normal.png",
+              "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }
+            }
           },
-          "hovered": { "png": "button-hovered.png" },
-          "pressed": { "png": "button-pressed.png", "content_color": [255, 255, 255, 255] }
+          "hovered": { "patch": { "type": "image", "path": "button-hovered.png" } },
+          "pressed": {
+            "content_color": [255, 255, 255, 255],
+            "patch": { "type": "image", "path": "button-pressed.png" }
+          }
         },
         "focused": {
-          "normal": { "png": "button-focused.png" },
-          "hovered": { "png": "button-hovered-focused.png" },
-          "pressed": { "png": "button-pressed-focused.png" }
+          "normal": { "patch": { "type": "image", "path": "button-focused.png" } },
+          "hovered": { "patch": { "type": "image", "path": "button-hovered-focused.png" } },
+          "pressed": { "patch": { "type": "image", "path": "button-pressed-focused.png" } }
         },
-        "disabled": { "png": "button-disabled.png", "tint": [255, 255, 255, 160] }
+        "disabled": {
+          "patch": {
+            "type": "image",
+            "path": "button-disabled.png",
+            "tint": [255, 255, 255, 160]
+          }
+        }
       }
     }
   }
@@ -92,7 +104,7 @@ the theme directories must remain available beside the repository sources at run
 The optional `fonts` object is all-or-nothing. When present, it declares atlas texture dimensions
 and exact file/size recipes for the five semantic roles: `body`, `small`, `title`, `heading`, and
 `mono`. Paths are relative to the JSON file. Loading copies the application catalog's named icons into a
-fresh atlas of the requested size, rasterizes these declared fonts, packs the unique state PNGs,
+fresh atlas of the requested size, rasterizes these declared fonts, packs the unique image-patch sources,
 and binds the resulting capabilities into the theme bundle. Without a font recipe, an
 artwork-bearing theme reuses the application resource catalog's atlas dimensions and repacks its
 icons and baked glyphs before adding the PNG regions. A flat palette-only theme reuses that source
@@ -108,10 +120,17 @@ that caches raw atlas UV coordinates must refresh those coordinates after instal
 bundle.
 
 An appearance or state may be omitted. Every omitted state keeps its own flat-color fallback; it
-does not borrow another state's PNG. A state may set `content_color` without a PNG to recolor its
-text and semantic glyphs over that fallback. Conversely, a PNG state may omit `content_color` and retain
-the fallback color. This makes partial themes predictable and lets a theme use images only where
-they add value.
+does not borrow another state's patch. A state may set `content_color` without a patch to recolor
+its text and semantic glyphs over that fallback. Conversely, a patch may omit `content_color` and
+retain the fallback color. This makes partial themes predictable and lets a theme use images only
+where they add value.
+
+The optional `patch` is a tagged, closed choice. `{ "type": "solid", "color": [...] }` supplies a
+flat RGBA patch, while `{ "type": "image", "path": "...", "source_insets": {...}, "tint": [...] }`
+supplies an atlas-backed three-by-three patch. `source_insets` and `tint` exist only on the image
+variant, so the schema cannot represent an image path without an image patch or attach slicing
+metadata to a solid color. Image paths are relative to the JSON file; omitted image tint is opaque
+white, and omitted source insets reuse the role's destination `insets`.
 
 `insets` controls destination layout and stretching. `source_insets` divides the PNG and defaults to
 the role's destination insets. Source insets must be non-negative and opposing values must fit
@@ -143,7 +162,7 @@ is the concrete `FlatPalette` and accepts RGBA byte arrays under these keys:
 - `selection_background`, `selection_foreground`, `window_active`
 - `menu_foreground`, `menu_background`
 
-These colors construct Skin's complete family catalogs before any per-state PNG or `content_color`
+These colors construct Skin's complete family catalogs before any per-state patch or `content_color`
 override is installed. Each family role/state cell is one concrete `Visual { patch, content_color }`;
 patches and content colors cannot drift through parallel catalogs, and no erased or string-keyed
 payload participates at runtime.
@@ -213,7 +232,7 @@ body and border resolve the normal appearance while the pointer moves across the
 top-level activation selects the `base` state of `chrome.window_frame`, `chrome.dialog_frame`, and
 `chrome.title` but does not rewrite enabled child widgets. A disabled widget or subtree
 resolves `disabled` independently of activation; its content color uses `disabled_foreground` (or
-`disabled_title_foreground` for chrome), and omitted PNG states use
+`disabled_title_foreground` for chrome), and omitted patch states use
 `disabled_background` as their flat fallback. The ordinary frame pair and modal dialog pair also
 use normal center artwork for the application body even when a resize edge is hovered or captured.
 Interactive descendants, resize borders, caption controls, and the title remain free to resolve
