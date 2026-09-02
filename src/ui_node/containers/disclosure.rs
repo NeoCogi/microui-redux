@@ -33,8 +33,8 @@ use crate::{ControlRole};
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    AppearanceRole, AtlasHandle, ChildParticipation, Container, ContainerWidget, Dimensioni, MeasureCtx, Recti, Skin, TypedWidgetHandle, UiInputEvent,
-    VisualState, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
+    AtlasHandle, ChildParticipation, Container, ContainerWidget, ControlState, Dimensioni, MeasureCtx, PointerState, Recti, Skin, TypedWidgetHandle,
+    UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
 use super::{Children, ContainerLayoutCtx, LinearItem, Node};
@@ -227,7 +227,7 @@ impl DisclosureHeader {
         // A header frame is internal to this child, so preferred size must include its inset here.
         let frame = if self.opt.intersects(WidgetOption::FRAME) {
             style
-                .visual(AppearanceRole::Control(ControlRole::Button), VisualState::Normal)
+                .control(ControlRole::Button, ControlState::Enabled(PointerState::Normal))
                 .patch
                 .insets
                 .normalized()
@@ -271,21 +271,21 @@ impl Widget for DisclosureHeader {
                 if self.opt.intersects(WidgetOption::FRAME) {
                     // The header owns this internal frame, so it resolves the complete button patch
                     // rather than asking retained traversal to inset the disclosure container.
-                    row = ctx.draw_appearance(AppearanceRole::Control(ControlRole::Button), row).unwrap_or_default();
+                    row = ctx.draw_control(ControlRole::Button, row).unwrap_or_default();
                 } else {
-                    ctx.draw_appearance_center(AppearanceRole::Control(ControlRole::Item), row);
+                    ctx.draw_control_center(ControlRole::Item, row);
                 }
             }
-            DisclosureVariant::Tree => ctx.draw_appearance_center(AppearanceRole::Control(ControlRole::Item), row),
+            DisclosureVariant::Tree => ctx.draw_control_center(ControlRole::Item, row),
         }
 
         // Reserve a square icon cell from row height, then paint text in the remaining rectangle.
         let foreground_role = if self.variant == DisclosureVariant::Header && self.opt.intersects(WidgetOption::FRAME) {
-            AppearanceRole::Control(ControlRole::Button)
+            ControlRole::Button
         } else {
-            AppearanceRole::Control(ControlRole::Item)
+            ControlRole::Item
         };
-        let text_color = ctx.foreground(foreground_role);
+        let text_color = ctx.control_foreground(foreground_role);
         let icon = if expanded {
             crate::IconRole::Collapse.resolve(ctx.atlas())
         } else {

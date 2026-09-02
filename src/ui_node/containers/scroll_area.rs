@@ -36,8 +36,8 @@ use bitflags::bitflags;
 
 use crate::ui_node::widgets::{Scrollbar, ScrollbarAxis, ScrollbarParameters};
 use crate::{
-    AppearanceRole, ChildParticipation, Container, ContainerWidget, Dimensioni, MeasureCtx, Recti, TypedWidgetHandle, UiInputEvent, Vec2i, Widget,
-    WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
+    ChildParticipation, Container, ContainerWidget, Dimensioni, FrameRole, MeasureCtx, Recti, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption,
+    WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
 use super::{Children, ContainerLayoutCtx, Node};
@@ -321,9 +321,9 @@ impl Widget for ScrollArea {
         &self.opt
     }
 
-    fn frame_appearance_role(&self) -> AppearanceRole {
+    fn frame_appearance_role(&self) -> FrameRole {
         // A framed scroll area uses the same panel patch whose center fills its viewport.
-        AppearanceRole::Surface(SurfaceRole::Panel)
+        FrameRole::Surface(SurfaceRole::Panel)
     }
 
     fn effective_widget_opt(&self) -> WidgetOption {
@@ -350,9 +350,9 @@ impl Widget for ScrollArea {
         let surface = if surface.width > 0 || surface.height > 0 { surface } else { fallback };
         // Panel fill is noninteractive container structure. Scrollbars remain independently interactive,
         // but hovering or dragging anywhere inside the viewport must not recolor its background.
-        ctx.draw_appearance_center_state(AppearanceRole::Surface(SurfaceRole::Panel), crate::VisualState::Normal, surface);
+        ctx.draw_surface_center_state(SurfaceRole::Panel, crate::SurfaceState::Normal, surface);
         if let Some(corner) = corner {
-            ctx.draw_appearance_center_state(AppearanceRole::Surface(SurfaceRole::Panel), crate::VisualState::Normal, corner);
+            ctx.draw_surface_center_state(SurfaceRole::Panel, crate::SurfaceState::Normal, corner);
         }
     }
 }
@@ -1045,15 +1045,9 @@ mod tests {
             metrics.scrollbar_size = 10;
         });
         let frame_insets = crate::SliceInsets::uniform(3);
-        crate::test_support::replace_skin_patches(
-            &mut style,
-            crate::AppearanceRole::Surface(SurfaceRole::Panel),
-            crate::StateTable::filled(crate::NinePatch::framed(
-                frame_insets,
-                crate::color(1, 2, 3, 255),
-                Some(crate::color(4, 5, 6, 255)),
-            )),
-        );
+        crate::test_support::replace_surface_patches(&mut style, SurfaceRole::Panel, |_| {
+            crate::NinePatch::framed(frame_insets, crate::color(1, 2, 3, 255), Some(crate::color(4, 5, 6, 255)))
+        });
         let outer = Recti::new(10, 20, 100, 80);
 
         runtime.begin_update();

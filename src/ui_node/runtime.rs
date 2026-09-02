@@ -358,7 +358,7 @@ fn node_accepts_input(node: &Node) -> bool {
 }
 
 /// Resolves the semantic role used by a node's optional shared frame geometry.
-fn node_frame_role(node: &Node) -> Option<crate::AppearanceRole> {
+fn node_frame_role(node: &Node) -> Option<crate::FrameRole> {
     // Read dynamic options and the concrete role under one widget borrow. Returning `None` keeps
     // unframed nodes on the same zero-inset geometry path in layout, routing, update, and paint.
     node.data.with_widget(|widget| {

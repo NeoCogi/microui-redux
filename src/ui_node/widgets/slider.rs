@@ -280,7 +280,7 @@ impl Slider {
         let base = ctx.local_rect();
         if !self.opt.intersects(WidgetOption::FRAME) {
             // Unframed sliders still retain the semantic track center without adding border space.
-            ctx.draw_appearance_center(AppearanceRole::Control(ControlRole::SliderTrack), base);
+            ctx.draw_control_center(ControlRole::SliderTrack, base);
         }
         // Measurement already treats negative theme thumb sizes as zero. Paint applies the same
         // normalization and uses saturated extent arithmetic so either public style or layout
@@ -297,9 +297,9 @@ impl Slider {
             0
         };
         let thumb = rect(base.x.saturating_add(x), base.y, width, base.height.max(0));
-        let _ = ctx.draw_appearance(AppearanceRole::Control(ControlRole::SliderThumb), thumb);
+        let _ = ctx.draw_control(ControlRole::SliderThumb, thumb);
         let label = number_label(self.value, self.precision);
-        ctx.draw_control_text_with_font(font, label.as_str(), base, AppearanceRole::Control(ControlRole::SliderTrack), self.opt);
+        ctx.draw_control_text_with_font(font, label.as_str(), base, ControlRole::SliderTrack, self.opt);
     }
 }
 
@@ -392,9 +392,9 @@ impl Widget for Slider {
         &self.opt
     }
 
-    fn frame_appearance_role(&self) -> AppearanceRole {
+    fn frame_appearance_role(&self) -> FrameRole {
         // Retained traversal paints the complete track before the slider paints its thumb and text.
-        AppearanceRole::Control(ControlRole::SliderTrack)
+        FrameRole::Control(ControlRole::SliderTrack)
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
@@ -794,14 +794,10 @@ mod tests {
         // A borderless ten-pixel thumb records one unambiguous fill rectangle at the computed x.
         style.metrics.thumb_size = 10;
         let frame = style
-            .visual(crate::AppearanceRole::Control(ControlRole::SliderThumb), crate::VisualState::Normal)
+            .control(ControlRole::SliderThumb, crate::ControlState::Enabled(crate::PointerState::Normal))
             .patch
             .with_insets(crate::SliceInsets::ZERO);
-        crate::test_support::replace_skin_patches(
-            &mut style,
-            crate::AppearanceRole::Control(ControlRole::SliderThumb),
-            crate::StateTable::filled(frame),
-        );
+        crate::test_support::replace_control_patches(&mut style, ControlRole::SliderThumb, |_| frame);
         let mut slider =
             SliderBuilder::create_widget(SliderParameters::new(Real::MAX / 2.0, 0.0, Real::MAX).expect("a maximum finite range span must remain usable"));
         let bounds = rect(0, 0, 100, 20);

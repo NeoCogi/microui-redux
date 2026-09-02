@@ -84,9 +84,9 @@ intrinsic menus retain their narrower keyboard scopes instead of participating i
 Paint exposes focus only for the manager-selected keyboard surface even though every window runtime
 retains its own target. Focused controls, disclosure rows, and menus resolve the focused state of
 their own semantic role; there is no widget-independent outline pass or hidden frame geometry.
-Active titles and framed windows likewise select their explicit active roles. Deactivated windows
+Active titles and framed windows likewise select their explicit active chrome state. Deactivated windows
 retain their remembered widget focus and
-enabled client presentation while their frame and title select base chrome roles. Only an
+enabled client presentation while their frame and title select `ChromeState::Base`. Only an
 explicit `WindowOption::DISABLED` resolves the chrome, intrinsic menu, client backgrounds, child
 appearances, text, and icons through the theme's `disabled` state.
 

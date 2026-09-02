@@ -35,16 +35,13 @@
 //! display list. The retained [`crate::Node`] stored for a window therefore represents only the
 //! application-authored content tree.
 
-use crate::{ChromeRole, MenuRole};
+use crate::{ChromeRole, ChromeState, ControlRole, ControlState, MenuRole, MenuState, PointerState};
 
 use std::fmt;
 
 use crate::math::RectExt;
 use crate::render::Painter;
-use crate::{
-    AppearanceRole, AtlasHandle, CaptionButtonSide, Dimensioni, Recti, Skin, VisualState, WidgetEventPortHandle, WindowChromeSkin, WindowOption,
-    WindowTitleAlignment,
-};
+use crate::{AtlasHandle, CaptionButtonSide, Dimensioni, Recti, Skin, WidgetEventPortHandle, WindowChromeSkin, WindowOption, WindowTitleAlignment};
 
 /// Active pointer gesture owned by manager-rendered window chrome.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -195,8 +192,8 @@ impl RootChromeVisualState {
         }
     }
 
-    /// Resolves one part's hover and pressed facts into a complete theme state.
-    fn part_state(self, part: RootChromePart) -> VisualState {
+    /// Resolves one interactive chrome part's hover and press into pointer state.
+    fn part_pointer_state(self, part: RootChromePart) -> PointerState {
         let hovered = self.hovered == Some(part);
         let captured = match (self.interaction, part) {
             (RootInteraction::Moving, RootChromePart::Title) => true,
@@ -206,18 +203,15 @@ impl RootChromeVisualState {
         };
         // As with widgets, a captured pointer outside its originating part is no longer visually
         // pressed even though release routing remains captured by the manager.
-        // This helper resolves only interaction within selected chrome. The recording boundary
-        // independently uses Normal when the window does not own activation, so activation never
-        // masquerades as disabled presentation or become part of the interaction-state domain.
-        VisualState::from_interaction(true, hovered, false, captured && hovered)
-    }
-
-    /// Resolves the complete window frame from any hovered or active resize region.
-    fn frame_state(self) -> VisualState {
-        let hovered = matches!(self.hovered, Some(RootChromePart::Resize(_)));
-        let pressed = matches!(self.interaction, RootInteraction::Resizing(_)) && hovered;
-        // Frame edges cannot own keyboard focus, so only hover and the matching capture contribute.
-        VisualState::from_interaction(true, hovered, false, pressed)
+        // Window activation and availability are resolved at the family boundary. This helper
+        // supplies only the pointer branch used by interactive caption and resize controls.
+        if captured && hovered {
+            PointerState::Pressed
+        } else if hovered {
+            PointerState::Hovered
+        } else {
+            PointerState::Normal
+        }
     }
 }
 
@@ -255,7 +249,7 @@ pub(super) struct RootChromeGeometry {
 pub(super) enum RootFrameKind {
     /// Ordinary independent or structurally owned window chrome.
     Window,
-    /// Modal dialog chrome with independently themed base and active roles.
+    /// Modal dialog chrome with independently themed base and active states.
     Dialog,
     /// Transient application popup chrome shared with compact popup-menu panels.
     Popup,
@@ -269,11 +263,7 @@ impl RootFrameKind {
         // directly define both the visible black outline and the content rectangle behind it.
         match self {
             Self::Window | Self::Dialog => style.metrics.window_border.normalized(),
-            Self::Popup => style
-                .visual(AppearanceRole::Menu(MenuRole::Popup), VisualState::Normal)
-                .patch
-                .insets
-                .normalized(),
+            Self::Popup => style.menu(MenuRole::Popup, MenuState::Normal).patch.insets.normalized(),
         }
     }
 }
@@ -390,7 +380,7 @@ pub(super) fn root_chrome_geometry(
     if !options.intersects(WindowOption::NO_TITLE) {
         // The title minimum retains enough room for text, padding, and every enabled caption button.
         let close_count = i32::from(!options.intersects(WindowOption::NO_CLOSE));
-        let caption_extent = root_caption_extent(&style.chrome, title_height);
+        let caption_extent = root_caption_extent(&style.window_chrome, title_height);
         let enabled_buttons = [
             (RootCaptionButton::Close, close_count),
             (RootCaptionButton::Maximize, i32::from(options.intersects(WindowOption::MAXIMIZE_BUTTON))),
@@ -398,15 +388,15 @@ pub(super) fn root_chrome_geometry(
         ];
         let leading_count = enabled_buttons
             .iter()
-            .filter(|(button, _)| caption_side(&style.chrome, *button) == CaptionButtonSide::Leading)
+            .filter(|(button, _)| caption_side(&style.window_chrome, *button) == CaptionButtonSide::Leading)
             .map(|(_, count)| *count)
             .sum::<i32>();
         let trailing_count = enabled_buttons
             .iter()
-            .filter(|(button, _)| caption_side(&style.chrome, *button) == CaptionButtonSide::Trailing)
+            .filter(|(button, _)| caption_side(&style.window_chrome, *button) == CaptionButtonSide::Trailing)
             .map(|(_, count)| *count)
             .sum::<i32>();
-        let caption_width = match style.chrome.title_alignment {
+        let caption_width = match style.window_chrome.title_alignment {
             WindowTitleAlignment::Leading => caption_extent.saturating_mul(leading_count.saturating_add(trailing_count)),
             WindowTitleAlignment::Centered => {
                 // Centered titles reserve equal space using the larger actual button bank.
@@ -452,13 +442,13 @@ pub(super) fn root_chrome_geometry(
     let title =
         (!options.intersects(WindowOption::NO_TITLE)).then(|| Recti::new(client.x, client.y, client.width.max(0), title_height.min(client.height.max(0))));
     let (close, maximize, minimize) = if let Some(title) = title {
-        let extent = root_caption_extent(&style.chrome, title.height).min(title.height.max(0));
+        let extent = root_caption_extent(&style.window_chrome, title.height).min(title.height.max(0));
         let button_y = title.y.saturating_add(title.height.saturating_sub(extent).max(0) / 2);
         // Allocate buttons in one stable semantic order. Each field independently selects its bank,
         // allowing recipes beyond the two built-in presets without adding manager mode branches.
         let mut leading_x = title.x;
         let mut trailing_x = title.x.saturating_add(title.width);
-        let mut allocate = |button| match caption_side(&style.chrome, button) {
+        let mut allocate = |button| match caption_side(&style.window_chrome, button) {
             CaptionButtonSide::Leading => allocate_leading_caption(&mut leading_x, trailing_x, button_y, extent),
             CaptionButtonSide::Trailing => allocate_trailing_caption(leading_x, button_y, extent, &mut trailing_x),
         };
@@ -632,7 +622,7 @@ fn root_titlebar_height(style: &Skin, atlas: &AtlasHandle) -> i32 {
 }
 
 /// Resolves window, dialog, or popup artwork while preserving each family's frame geometry.
-fn root_frame_patch(style: &Skin, frame_kind: RootFrameKind, active: bool, state: VisualState) -> crate::NinePatch {
+fn root_frame_patch(style: &Skin, frame_kind: RootFrameKind, active: bool, enabled: bool) -> crate::NinePatch {
     // Each root kind's base frame artwork is the visual corner-span authority for both of its
     // activation variants. Keeping the ordinary, dialog, and popup families independent allows a
     // classic theme to combine long L-shaped window corners, a thick dialog outline, and a compact
@@ -640,20 +630,21 @@ fn root_frame_patch(style: &Skin, frame_kind: RootFrameKind, active: bool, state
     // Structural client and resize thickness lives in Skin::window_border, so long transparent L
     // corners do not enlarge the client inset. Matching active visual insets still prevents focus
     // changes from moving or scaling the corner art itself.
-    let (base_role, active_role) = match frame_kind {
-        RootFrameKind::Window => (
-            AppearanceRole::Chrome(ChromeRole::WindowFrame),
-            AppearanceRole::Chrome(ChromeRole::WindowFrameActive),
-        ),
-        RootFrameKind::Dialog => (
-            AppearanceRole::Chrome(ChromeRole::DialogFrame),
-            AppearanceRole::Chrome(ChromeRole::DialogFrameActive),
-        ),
-        RootFrameKind::Popup => (AppearanceRole::Menu(MenuRole::Popup), AppearanceRole::Menu(MenuRole::Popup)),
-    };
-    let visual_insets = style.visual(base_role, VisualState::Normal).patch.insets;
-    let role = if active { active_role } else { base_role };
-    style.visual(role, state).patch.with_insets(visual_insets)
+    match frame_kind {
+        RootFrameKind::Window | RootFrameKind::Dialog => {
+            let role = match frame_kind {
+                RootFrameKind::Window => ChromeRole::WindowFrame,
+                RootFrameKind::Dialog => ChromeRole::DialogFrame,
+                RootFrameKind::Popup => unreachable!("popup frame was excluded by the outer match"),
+            };
+            let visual_insets = style.chrome(role, ChromeState::Base).patch.insets;
+            style.chrome(role, ChromeState::from_window(enabled, active)).patch.with_insets(visual_insets)
+        }
+        RootFrameKind::Popup => {
+            let state = if enabled { MenuState::Normal } else { MenuState::Disabled };
+            style.menu(MenuRole::Popup, state).patch
+        }
+    }
 }
 
 /// Records the frame or plain background that must appear behind application content.
@@ -675,8 +666,7 @@ pub(super) fn record_root_background(
     // Resolve enabled bodies from Normal so merely crossing a resize edge or transferring
     // activation cannot recolor the complete window interior. Explicit root disabling selects the
     // shared Disabled state, including its flat fallback center when no PNG was supplied.
-    let state = if enabled { VisualState::Normal } else { VisualState::Disabled };
-    let patch = root_frame_patch(style, frame_kind, active_frame && enabled, state).with_insets(crate::SliceInsets::ZERO);
+    let patch = root_frame_patch(style, frame_kind, active_frame && enabled, enabled).with_insets(crate::SliceInsets::ZERO);
     let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch);
 }
 
@@ -697,50 +687,28 @@ pub(super) fn record_root_overlay(
 ) {
     // Reuse committed geometry so hit-testing and painting cannot disagree within one UI commit.
     let mut painter = Painter::screen_space(display_list, viewport);
-    // Explicit disabling wins over interaction. Enabled chrome without activation resolves Normal
-    // even if it retains a stale hover snapshot, because losing activation does not disable the
-    // window and does not introduce another VisualState value.
+    // Explicit disabling wins over activation. Pointer interaction is reserved for caption and
+    // resize controls and cannot enter the chrome family.
     let chrome_active = active && enabled;
-    let chrome_state = |state| {
-        if !enabled {
-            VisualState::Disabled
-        } else if chrome_active {
-            state
-        } else {
-            VisualState::Normal
-        }
-    };
+    let chrome_state = ChromeState::from_window(enabled, chrome_active);
     if options.intersects(WindowOption::FRAME) {
         // Background recording already filled the framed interior before application content. Draw
         // only the border again in the overlay pass so an unclipped child may extend beyond the
         // parent body without covering parent-owned frame chrome.
-        painter.nine_patch(
-            outer,
-            root_frame_patch(style, frame_kind, chrome_active, chrome_state(visual.frame_state())).without_center(),
-        );
+        painter.nine_patch(outer, root_frame_patch(style, frame_kind, chrome_active, enabled).without_center());
     }
     if let Some(title) = geometry.title {
-        let role = if chrome_active {
-            AppearanceRole::Chrome(ChromeRole::TitleActive)
-        } else {
-            AppearanceRole::Chrome(ChromeRole::Title)
-        };
-        let _ = crate::ui_node::frame::paint_internal_frame(
-            &mut painter,
-            title,
-            style.visual(role, chrome_state(visual.part_state(RootChromePart::Title))).patch,
-        );
-        let text = root_title_text_rect(title, geometry, &style.chrome);
+        let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, title, style.chrome(ChromeRole::Title, chrome_state).patch);
+        let text = root_title_text_rect(title, geometry, &style.window_chrome);
         if text.width > 0 && text.height > 0 {
-            let state = chrome_state(visual.part_state(RootChromePart::Title));
-            let color = style.visual(role, state).foreground;
-            let options = match style.chrome.title_alignment {
+            let color = style.chrome(ChromeRole::Title, chrome_state).foreground;
+            let options = match style.window_chrome.title_alignment {
                 WindowTitleAlignment::Leading => crate::WidgetOption::NONE,
                 WindowTitleAlignment::Centered => crate::WidgetOption::ALIGN_CENTER,
             };
             let title_font = style.resolve_font_role(atlas, crate::FontRole::Title);
             let position = crate::ui_node::text_layout::control_text_position_with_font(style, atlas, title_font, name, text, options);
-            if chrome_active && let Some(backdrop) = style.chrome.active_title_backdrop {
+            if chrome_active && let Some(backdrop) = style.window_chrome.active_title_backdrop {
                 // The optional recipe field interrupts active title artwork only behind measured
                 // text, independent of title alignment or caption-bank placement.
                 let measured = atlas.get_text_size(title_font, name);
@@ -757,7 +725,7 @@ pub(super) fn record_root_overlay(
             }
             painter.with_clip(text, |painter| painter.text(title_font, name, position, color));
         }
-        if chrome_active || style.chrome.captions.show_without_activation {
+        if chrome_active || style.window_chrome.captions.show_without_activation {
             // The activation-specific recipe flag controls presentation and matches pointer hit
             // testing without overloading the interaction state used to paint the button itself.
             for button in [RootCaptionButton::Minimize, RootCaptionButton::Maximize, RootCaptionButton::Close] {
@@ -775,8 +743,8 @@ pub(super) fn record_root_overlay(
     {
         // A disabled window exposes no resize action, so omit its grip instead of inventing a
         // disabled rectangle when a classic theme deliberately uses transparent normal artwork.
-        let state = chrome_state(visual.part_state(RootChromePart::Resize(RootResizeAxis::Both)));
-        let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, grip, style.visual(AppearanceRole::Chrome(ChromeRole::ResizeGrip), state).patch);
+        let state = ControlState::Enabled(visual.part_pointer_state(RootChromePart::Resize(RootResizeAxis::Both)));
+        let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, grip, style.control(ControlRole::ResizeGrip, state).patch);
     }
 }
 
@@ -792,33 +760,33 @@ fn paint_caption_button(
     visual: RootChromeVisualState,
 ) {
     let role = match button {
-        RootCaptionButton::Minimize => AppearanceRole::Chrome(ChromeRole::MinimizeButton),
-        RootCaptionButton::Maximize if visual.maximized => AppearanceRole::Chrome(ChromeRole::RestoreButton),
-        RootCaptionButton::Maximize => AppearanceRole::Chrome(ChromeRole::MaximizeButton),
-        RootCaptionButton::Close => AppearanceRole::Chrome(ChromeRole::CloseButton),
+        RootCaptionButton::Minimize => ControlRole::MinimizeButton,
+        RootCaptionButton::Maximize if visual.maximized => ControlRole::RestoreButton,
+        RootCaptionButton::Maximize => ControlRole::MaximizeButton,
+        RootCaptionButton::Close => ControlRole::CloseButton,
     };
     let glyph_role = match button {
-        RootCaptionButton::Minimize => AppearanceRole::Chrome(ChromeRole::MinimizeGlyph),
-        RootCaptionButton::Maximize if visual.maximized => AppearanceRole::Chrome(ChromeRole::RestoreGlyph),
-        RootCaptionButton::Maximize => AppearanceRole::Chrome(ChromeRole::MaximizeGlyph),
-        RootCaptionButton::Close => AppearanceRole::Chrome(ChromeRole::CloseGlyph),
+        RootCaptionButton::Minimize => ControlRole::MinimizeGlyph,
+        RootCaptionButton::Maximize if visual.maximized => ControlRole::RestoreGlyph,
+        RootCaptionButton::Maximize => ControlRole::MaximizeGlyph,
+        RootCaptionButton::Close => ControlRole::CloseGlyph,
     };
     let state = if !window_enabled {
-        VisualState::Disabled
+        ControlState::Disabled
     } else if window_active {
-        visual.part_state(RootChromePart::Caption(button))
+        ControlState::Enabled(visual.part_pointer_state(RootChromePart::Caption(button)))
     } else {
-        VisualState::Normal
+        ControlState::Enabled(PointerState::Normal)
     };
-    let Some(content) = crate::ui_node::frame::paint_internal_frame(painter, rect, style.visual(role, state).patch) else {
+    let Some(content) = crate::ui_node::frame::paint_internal_frame(painter, rect, style.control(role, state).patch) else {
         return;
     };
-    if !style.chrome.captions.draw_separate_glyphs {
+    if !style.window_chrome.captions.draw_separate_glyphs {
         // Some button-face artwork contains its complete symbol. The recipe can suppress the
         // separate semantic glyph layer without coupling that choice to any other chrome behavior.
         return;
     }
-    let glyph = style.visual(glyph_role, state).patch;
+    let glyph = style.control(glyph_role, state).patch;
     if glyph.is_visible() {
         // Image glyphs retain their authored pixel dimensions and are centered in the button's
         // usable content instead of stretching to fill it. A visible flat glyph still receives the
@@ -839,7 +807,7 @@ fn paint_caption_button(
         let _ = crate::ui_node::frame::paint_internal_frame(painter, glyph_rect, glyph.with_insets(crate::SliceInsets::ZERO));
         return;
     }
-    let color = style.visual(role, state).foreground;
+    let color = style.control(role, state).foreground;
     match button {
         RootCaptionButton::Close => {
             // Close retains the atlas icon already required by every Skin and test atlas.
@@ -889,22 +857,21 @@ mod tests {
             interaction: RootInteraction::Caption(RootCaptionButton::Close),
             maximized: false,
         };
-        assert_eq!(close_pressed.part_state(close), VisualState::Pressed);
+        assert_eq!(close_pressed.part_pointer_state(close), PointerState::Pressed);
 
         let close_outside = RootChromeVisualState {
             hovered: Some(RootChromePart::Title),
             interaction: RootInteraction::Caption(RootCaptionButton::Close),
             maximized: false,
         };
-        assert_eq!(close_outside.part_state(close), VisualState::Normal);
+        assert_eq!(close_outside.part_pointer_state(close), PointerState::Normal);
 
         let width_pressed = RootChromeVisualState {
             hovered: Some(right),
             interaction: RootInteraction::Resizing(RootResizeAxis::Width),
             maximized: false,
         };
-        assert_eq!(width_pressed.part_state(right), VisualState::Pressed);
-        assert_eq!(width_pressed.frame_state(), VisualState::Pressed);
+        assert_eq!(width_pressed.part_pointer_state(right), PointerState::Pressed);
     }
 
     /// Verifies asymmetric Platinum caption banks still leave a symmetric title-label allocation.
@@ -931,9 +898,9 @@ mod tests {
     fn independent_caption_recipe_fields_support_mixed_banks_and_extent() {
         let atlas = crate::test_support::test_atlas();
         let mut skin = crate::test_support::test_skin(&atlas);
-        skin.chrome.captions.maximize_side = CaptionButtonSide::Leading;
-        skin.chrome.captions.extent_inset = 4;
-        skin.chrome.captions.minimum_extent = 2;
+        skin.window_chrome.captions.maximize_side = CaptionButtonSide::Leading;
+        skin.window_chrome.captions.extent_inset = 4;
+        skin.window_chrome.captions.minimum_extent = 2;
         let geometry = root_chrome_geometry(
             Recti::new(10, 20, 180, 110),
             Dimensioni::new(20, 20),

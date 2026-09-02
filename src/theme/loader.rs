@@ -38,7 +38,9 @@ use std::{
 
 use serde::Deserialize;
 
-use super::{AppearanceRole, ChromeRole, ControlRole, FlatPalette, FontRole, MenuRole, RoleTable, Skin, SkinBundle, SurfaceRole, VisualState};
+use super::{
+    ChromeRole, ChromeState, ControlRole, ControlState, FlatPalette, FontRole, MenuRole, MenuState, PointerState, Skin, SkinBundle, SurfaceRole, SurfaceState,
+};
 use crate::{
     atlas::{
         AtlasHandle,
@@ -276,36 +278,60 @@ struct ThemeDocument {
 #[serde(default, deny_unknown_fields)]
 struct AppearanceCatalogDocument {
     /// Structural surface appearances keyed by their category-local names.
-    surface: BTreeMap<SurfaceRole, AppearanceDocument>,
+    surface: BTreeMap<SurfaceRole, SurfaceAppearanceDocument>,
     /// Interactive control appearances keyed by their category-local names.
-    control: BTreeMap<ControlRole, AppearanceDocument>,
+    control: BTreeMap<ControlRole, ControlAppearanceDocument>,
     /// Compact menu appearances keyed by their category-local names.
-    menu: BTreeMap<MenuRole, AppearanceDocument>,
+    menu: BTreeMap<MenuRole, MenuAppearanceDocument>,
     /// Manager-owned window chrome appearances keyed by their category-local names.
-    chrome: BTreeMap<ChromeRole, AppearanceDocument>,
+    chrome: BTreeMap<ChromeRole, ChromeAppearanceDocument>,
 }
 
 impl AppearanceCatalogDocument {
-    /// Iterates mutably over every authored appearance independent of its semantic family.
-    fn values_mut(&mut self) -> impl Iterator<Item = &mut AppearanceDocument> {
-        // All four maps hold the same concrete document value, so ordinary iterator chaining
-        // shares path normalization without erasing or converting their typed keys.
-        self.surface
-            .values_mut()
-            .chain(self.control.values_mut())
-            .chain(self.menu.values_mut())
-            .chain(self.chrome.values_mut())
+    /// Resolves every authored image path relative to its declaring source document.
+    fn resolve_paths(&mut self, directory: &Path) {
+        // Each family keeps its concrete document shape; explicit loops avoid a typeless common
+        // appearance object whose state fields would admit invalid combinations.
+        for appearance in self.surface.values_mut() {
+            appearance.resolve_paths(directory);
+        }
+        for appearance in self.control.values_mut() {
+            appearance.resolve_paths(directory);
+        }
+        for appearance in self.menu.values_mut() {
+            appearance.resolve_paths(directory);
+        }
+        for appearance in self.chrome.values_mut() {
+            appearance.resolve_paths(directory);
+        }
     }
 
-    /// Consumes the categorized syntax into the single runtime role sum type.
-    fn into_entries(self) -> impl Iterator<Item = (AppearanceRole, AppearanceDocument)> {
-        // Conversion happens only after strict deserialization. Each closure exhaustively chooses
-        // the outer category while preserving the already validated nested role value.
-        let surfaces = self.surface.into_iter().map(|(role, document)| (AppearanceRole::Surface(role), document));
-        let controls = self.control.into_iter().map(|(role, document)| (AppearanceRole::Control(role), document));
-        let menus = self.menu.into_iter().map(|(role, document)| (AppearanceRole::Menu(role), document));
-        let chrome = self.chrome.into_iter().map(|(role, document)| (AppearanceRole::Chrome(role), document));
-        surfaces.chain(controls).chain(menus).chain(chrome)
+    /// Merges one more-derived categorized appearance document over this inherited document.
+    fn merge(&mut self, overlay: Self) {
+        // Role maps remain family-specific through inheritance and installation. There is no
+        // intermediate flattened role table or universal state document.
+        merge_appearance_map(&mut self.surface, overlay.surface, SurfaceAppearanceDocument::merge);
+        merge_appearance_map(&mut self.control, overlay.control, ControlAppearanceDocument::merge);
+        merge_appearance_map(&mut self.menu, overlay.menu, MenuAppearanceDocument::merge);
+        merge_appearance_map(&mut self.chrome, overlay.chrome, ChromeAppearanceDocument::merge);
+    }
+
+    /// Visits every authored state document without erasing its owning family.
+    fn for_each_state(&self, mut visit: impl FnMut(&StateDocument)) {
+        // Image packing needs only state-owned paths. Family state types remain inside their own
+        // adapters and are never flattened into a runtime union.
+        for appearance in self.surface.values() {
+            appearance.for_each_state(&mut visit);
+        }
+        for appearance in self.control.values() {
+            appearance.for_each_state(&mut visit);
+        }
+        for appearance in self.menu.values() {
+            appearance.for_each_state(&mut visit);
+        }
+        for appearance in self.chrome.values() {
+            appearance.for_each_state(&mut visit);
+        }
     }
 }
 
@@ -321,8 +347,8 @@ pub(crate) struct ThemeDefinition {
     fonts: Option<FontCatalogDocument>,
     /// Fully merged sparse scalar and flat-color overrides.
     skin: SkinDocument,
-    /// Closed role table containing optional authored appearance overrides.
-    appearances: RoleTable<Option<AppearanceDocument>>,
+    /// Fully merged family-specific appearance overrides.
+    appearances: AppearanceCatalogDocument,
 }
 
 impl ThemeDefinition {
@@ -388,15 +414,13 @@ impl ThemeDefinition {
         if let Some(fonts) = &mut document.fonts {
             fonts.resolve_paths(directory);
         }
-        for appearance in document.appearances.values_mut() {
-            appearance.resolve_paths(directory);
-        }
+        document.appearances.resolve_paths(directory);
 
         let mut definition = parent.unwrap_or_else(|| Self {
             name: String::new(),
             fonts: None,
             skin: SkinDocument::default(),
-            appearances: RoleTable::filled(None),
+            appearances: AppearanceCatalogDocument::default(),
         });
         definition.name = document.name;
         if let Some(fonts) = document.fonts {
@@ -405,11 +429,7 @@ impl ThemeDefinition {
             definition.fonts = Some(fonts);
         }
         definition.skin.merge(document.skin);
-        for (role, appearance) in document.appearances.into_entries() {
-            let mut merged = definition.appearances.get(role).clone().unwrap_or_default();
-            merged.merge(appearance);
-            definition.appearances.set(role, Some(merged));
-        }
+        definition.appearances.merge(document.appearances);
         Ok(definition)
     }
 
@@ -516,54 +536,58 @@ impl ThemeDefinition {
         validate_non_negative("window_content", "skin.metrics.window_content_insets", skin.metrics.window_content_insets)?;
         validate_non_negative("window_frame", "skin.metrics.window_border", skin.metrics.window_border)?;
         skin.replace_flat_visuals(frame_insets, &palette);
-        skin.chrome.set_backdrop_color(palette.title_background);
-        for role in AppearanceRole::ALL {
-            let Some(document) = self.appearances.get(role) else {
-                continue;
-            };
-            let name = appearance_path(role);
-            let mut visuals = skin.role_visuals(role);
-            let destination_insets = document
-                .insets
-                .map(InsetsDocument::into_insets)
-                .unwrap_or_else(|| visuals.get(VisualState::Normal).patch.insets);
-            validate_non_negative(name.as_str(), "insets", destination_insets)?;
-
-            // Role-level insets also apply to states that intentionally omit a PNG and retain their
-            // flat fallback, keeping layout stable across hover/focus transitions.
-            for state in VisualState::ALL {
-                let mut visual = *visuals.get(state);
-                visual.patch = visual.patch.with_insets(destination_insets);
-                visuals.set(state, visual);
-            }
-            for (state, state_document) in document.states() {
-                let Some(state_document) = state_document else {
-                    continue;
-                };
-                if let Some(foreground) = state_document.foreground {
-                    // A foreground can change without image artwork, but remains stored in the
-                    // same complete visual as the state's background patch.
-                    let mut visual = *visuals.get(state);
-                    visual.foreground = foreground.into_color();
-                    visuals.set(state, visual);
-                }
-                let Some(path) = state_document.png.as_ref() else {
-                    continue;
-                };
-                let source_insets = state_document.source_insets.map(InsetsDocument::into_insets).unwrap_or(destination_insets);
-                let icon = *images.get(path).expect("every declared theme PNG must have one baked atlas capability");
-                let image_size = atlas.get_icon_size(icon);
-                validate_source_insets(name.as_str(), source_insets, image_size.width, image_size.height)?;
-                let tint = state_document
-                    .tint
-                    .map(ColorDocument::into_color)
-                    .unwrap_or(Color { r: 255, g: 255, b: 255, a: 255 });
-                let image = NinePatchImage::new(icon, source_insets, tint);
-                let mut visual = *visuals.get(state);
-                visual.patch = NinePatch::image(destination_insets, image);
-                visuals.set(state, visual);
-            }
-            skin.set_role_visuals(role, visuals);
+        skin.window_chrome.set_backdrop_color(palette.title_background);
+        for (role, document) in &self.appearances.surface {
+            install_appearance(
+                &mut skin,
+                &atlas,
+                &images,
+                format!("surface.{role:?}").as_str(),
+                document.insets,
+                SurfaceState::Normal,
+                document.states(),
+                |skin, state| skin.surface(*role, state),
+                |skin, state, visual| skin.set_surface(*role, state, visual),
+            )?;
+        }
+        for (role, document) in &self.appearances.control {
+            install_appearance(
+                &mut skin,
+                &atlas,
+                &images,
+                format!("control.{role:?}").as_str(),
+                document.insets,
+                ControlState::Enabled(PointerState::Normal),
+                document.states(),
+                |skin, state| skin.control(*role, state),
+                |skin, state, visual| skin.set_control(*role, state, visual),
+            )?;
+        }
+        for (role, document) in &self.appearances.menu {
+            install_appearance(
+                &mut skin,
+                &atlas,
+                &images,
+                format!("menu.{role:?}").as_str(),
+                document.insets,
+                MenuState::Normal,
+                document.states(),
+                |skin, state| skin.menu(*role, state),
+                |skin, state, visual| skin.set_menu(*role, state, visual),
+            )?;
+        }
+        for (role, document) in &self.appearances.chrome {
+            install_appearance(
+                &mut skin,
+                &atlas,
+                &images,
+                format!("chrome.{role:?}").as_str(),
+                document.insets,
+                ChromeState::Base,
+                document.states(),
+                |skin, state| skin.chrome(*role, state),
+                |skin, state, visual| skin.set_chrome(*role, state, visual),
+            )?;
         }
 
         // Pair atlas and resolved skin at the only public construction boundary before naming it.
@@ -574,14 +598,58 @@ impl ThemeDefinition {
     fn image_paths(&self) -> BTreeSet<PathBuf> {
         // Role and state documents retain independent slicing/tint metadata, while one path set is
         // sufficient for immutable pixel packing. BTreeSet also stabilizes generated atlas names.
-        self.appearances
-            .iter()
-            .filter_map(Option::as_ref)
-            .flat_map(AppearanceDocument::states)
-            .filter_map(|(_, state)| state.and_then(|state| state.png.as_ref()))
-            .cloned()
-            .collect()
+        let mut paths = BTreeSet::new();
+        self.appearances.for_each_state(|state| {
+            if let Some(path) = &state.png {
+                paths.insert(path.clone());
+            }
+        });
+        paths
     }
+}
+
+/// Installs one role whose exact state type and accessors are supplied by its appearance family.
+fn install_appearance<const N: usize, State: Copy>(
+    skin: &mut Skin,
+    atlas: &AtlasHandle,
+    images: &BTreeMap<PathBuf, IconId>,
+    name: &str,
+    authored_insets: Option<InsetsDocument>,
+    base_state: State,
+    states: [(State, Option<&StateDocument>); N],
+    get: impl Fn(&Skin, State) -> super::Visual,
+    set: impl Fn(&mut Skin, State, super::Visual),
+) -> Result<(), ThemeLoadError> {
+    // Insets are role-wide so layout cannot shift between states. If the author omits them, retain
+    // the family compiler's base-state geometry before applying optional per-state artwork.
+    let destination_insets = authored_insets
+        .map(InsetsDocument::into_insets)
+        .unwrap_or_else(|| get(skin, base_state).patch.insets);
+    validate_non_negative(name, "insets", destination_insets)?;
+
+    for (state, authored) in states {
+        let mut visual = get(skin, state);
+        visual.patch = visual.patch.with_insets(destination_insets);
+        let Some(authored) = authored else {
+            // Even an omitted state inherits the role-wide destination geometry.
+            set(skin, state, visual);
+            continue;
+        };
+        if let Some(foreground) = authored.foreground {
+            // Foreground and background remain one complete runtime value at the mutation boundary.
+            visual.foreground = foreground.into_color();
+        }
+        if let Some(path) = &authored.png {
+            let source_insets = authored.source_insets.map(InsetsDocument::into_insets).unwrap_or(destination_insets);
+            let icon = *images.get(path).expect("every declared theme PNG must have one baked atlas capability");
+            let image_size = atlas.get_icon_size(icon);
+            validate_source_insets(name, source_insets, image_size.width, image_size.height)?;
+            let tint = authored.tint.map(ColorDocument::into_color).unwrap_or(Color { r: 255, g: 255, b: 255, a: 255 });
+            visual.patch = NinePatch::image(destination_insets, NinePatchImage::new(icon, source_insets, tint));
+        }
+        set(skin, state, visual);
+    }
+    Ok(())
 }
 
 /// Complete semantic font recipe for one rebuilt theme atlas.
@@ -620,7 +688,7 @@ impl FontCatalogDocument {
 
     /// Resolves every relative font filename against its declaring document directory.
     fn resolve_paths(&mut self, directory: &Path) {
-        // Traverse through the same typed role table used by atlas insertion so no semantic font
+        // Traverse through the same typed role list used by atlas insertion so no semantic font
         // can retain ambiguous path ownership after inheritance resolution.
         self.body.resolve_path(directory);
         self.small.resolve_path(directory);
@@ -715,7 +783,7 @@ impl SkinDocument {
         if let Some(window_chrome_layout) = self.window_chrome_layout {
             // The schema enum converts once into the public runtime enum, keeping deserialization
             // details out of Skin when JSON support is not compiled.
-            skin.chrome = window_chrome_layout.into_skin(crate::Color { r: 0, g: 0, b: 0, a: 0 });
+            skin.window_chrome = window_chrome_layout.into_skin(crate::Color { r: 0, g: 0, b: 0, a: 0 });
         }
         if let Some(window_border) = self.window_border {
             // Keep the schema-to-runtime conversion explicit because negative components are
@@ -855,81 +923,240 @@ impl ColorPaletteDocument {
     }
 }
 
-/// One role's destination insets and optional per-state PNG definitions.
+/// One structural surface role's destination insets and availability states.
 #[derive(Clone, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-struct AppearanceDocument {
-    /// Destination-space outer row and column sizes shared by every state.
+struct SurfaceAppearanceDocument {
+    /// Destination-space outer row and column sizes shared by both states.
     insets: Option<InsetsDocument>,
-    /// Normal state image.
+    /// Enabled structural appearance.
     normal: Option<StateDocument>,
-    /// Pointer-hover image.
-    hovered: Option<StateDocument>,
-    /// Pointer-pressed image.
-    pressed: Option<StateDocument>,
-    /// Keyboard-focused image.
-    focused: Option<StateDocument>,
-    /// Simultaneously hovered and focused image.
-    hovered_focused: Option<StateDocument>,
-    /// Simultaneously pressed and focused image.
-    pressed_focused: Option<StateDocument>,
-    /// Disabled image.
+    /// Disabled structural appearance.
     disabled: Option<StateDocument>,
 }
 
-impl AppearanceDocument {
-    /// Merges one more-derived role layer over an inherited appearance recipe.
+impl SurfaceAppearanceDocument {
+    /// Merges one more-derived surface layer over inherited values.
     fn merge(&mut self, overlay: Self) {
-        // Role insets inherit independently from state recipes. State objects merge field by field
-        // so a child can retint or recolor inherited artwork without restating its owned path.
+        // Insets and states inherit independently so a child can retint one state only.
+        replace_if_some(&mut self.insets, overlay.insets);
+        merge_state(&mut self.normal, overlay.normal);
+        merge_state(&mut self.disabled, overlay.disabled);
+    }
+
+    /// Resolves every surface PNG path against the declaring document directory.
+    fn resolve_paths(&mut self, directory: &Path) {
+        // Only the two valid structural states are traversed.
+        resolve_state_paths([self.normal.as_mut(), self.disabled.as_mut()], directory);
+    }
+
+    /// Returns every surface state paired with its optional authored value.
+    fn states(&self) -> [(SurfaceState, Option<&StateDocument>); SurfaceState::COUNT] {
+        // Declaration order matches the runtime surface catalog.
+        [(SurfaceState::Normal, self.normal.as_ref()), (SurfaceState::Disabled, self.disabled.as_ref())]
+    }
+
+    /// Visits every present structural state document.
+    fn for_each_state(&self, visit: &mut impl FnMut(&StateDocument)) {
+        // Reuse the typed adapter without exposing its state outside the family.
+        visit_present_states(self.states(), visit);
+    }
+}
+
+/// Pointer-state fields shared by the enabled and focused branches of a control.
+#[derive(Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct PointerAppearanceDocument {
+    /// Pointer-neutral branch appearance.
+    normal: Option<StateDocument>,
+    /// Pointer-hover branch appearance.
+    hovered: Option<StateDocument>,
+    /// Visible pointer-press branch appearance.
+    pressed: Option<StateDocument>,
+}
+
+impl PointerAppearanceDocument {
+    /// Merges one more-derived pointer-state branch over inherited values.
+    fn merge(&mut self, overlay: Self) {
+        // Every state object merges field by field through the common concrete state recipe.
+        merge_state(&mut self.normal, overlay.normal);
+        merge_state(&mut self.hovered, overlay.hovered);
+        merge_state(&mut self.pressed, overlay.pressed);
+    }
+
+    /// Resolves every pointer-state PNG path against the declaring document directory.
+    fn resolve_paths(&mut self, directory: &Path) {
+        // The branch contains exactly the pointer states representable inside ControlState.
+        resolve_state_paths([self.normal.as_mut(), self.hovered.as_mut(), self.pressed.as_mut()], directory);
+    }
+}
+
+/// One interactive control role's destination insets and nested control states.
+#[derive(Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct ControlAppearanceDocument {
+    /// Destination-space outer row and column sizes shared by every control state.
+    insets: Option<InsetsDocument>,
+    /// Disabled appearance, with no contradictory pointer or focus substate.
+    disabled: Option<StateDocument>,
+    /// Pointer appearances while the control is enabled without keyboard focus.
+    enabled: PointerAppearanceDocument,
+    /// Pointer appearances while the control owns visible keyboard focus.
+    focused: PointerAppearanceDocument,
+}
+
+impl ControlAppearanceDocument {
+    /// Merges one more-derived control layer over inherited values.
+    fn merge(&mut self, overlay: Self) {
+        // The two enabled branches retain their nested identity throughout inheritance.
+        replace_if_some(&mut self.insets, overlay.insets);
+        merge_state(&mut self.disabled, overlay.disabled);
+        self.enabled.merge(overlay.enabled);
+        self.focused.merge(overlay.focused);
+    }
+
+    /// Resolves every control PNG path against the declaring document directory.
+    fn resolve_paths(&mut self, directory: &Path) {
+        // Disabled is terminal; enabled and focused branches resolve their concrete pointer states.
+        resolve_state_paths([self.disabled.as_mut()], directory);
+        self.enabled.resolve_paths(directory);
+        self.focused.resolve_paths(directory);
+    }
+
+    /// Returns every concrete nested control state and its optional authored value.
+    fn states(&self) -> [(ControlState, Option<&StateDocument>); ControlState::COUNT] {
+        // This order is the exact flattened storage order internal to the control family only.
+        [
+            (ControlState::Disabled, self.disabled.as_ref()),
+            (ControlState::Enabled(PointerState::Normal), self.enabled.normal.as_ref()),
+            (ControlState::Enabled(PointerState::Hovered), self.enabled.hovered.as_ref()),
+            (ControlState::Enabled(PointerState::Pressed), self.enabled.pressed.as_ref()),
+            (ControlState::Focused(PointerState::Normal), self.focused.normal.as_ref()),
+            (ControlState::Focused(PointerState::Hovered), self.focused.hovered.as_ref()),
+            (ControlState::Focused(PointerState::Pressed), self.focused.pressed.as_ref()),
+        ]
+    }
+
+    /// Visits every present nested control state document.
+    fn for_each_state(&self, visit: &mut impl FnMut(&StateDocument)) {
+        // The visitor sees only concrete state recipes, not erased role or state identifiers.
+        visit_present_states(self.states(), visit);
+    }
+}
+
+/// One menu role's destination insets and menu-specific selection states.
+#[derive(Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct MenuAppearanceDocument {
+    /// Destination-space outer row and column sizes shared by every menu state.
+    insets: Option<InsetsDocument>,
+    /// Enabled menu appearance without transient selection.
+    normal: Option<StateDocument>,
+    /// Pointer-hover selection appearance.
+    hovered: Option<StateDocument>,
+    /// Visible pointer-press selection appearance.
+    pressed: Option<StateDocument>,
+    /// Keyboard-navigation selection appearance.
+    focused: Option<StateDocument>,
+    /// Appearance of an entry that owns an open popup.
+    open: Option<StateDocument>,
+    /// Disabled menu appearance.
+    disabled: Option<StateDocument>,
+}
+
+impl MenuAppearanceDocument {
+    /// Merges one more-derived menu layer over inherited values.
+    fn merge(&mut self, overlay: Self) {
+        // Menu selection states stay independent so open ownership does not impersonate hover.
         replace_if_some(&mut self.insets, overlay.insets);
         merge_state(&mut self.normal, overlay.normal);
         merge_state(&mut self.hovered, overlay.hovered);
         merge_state(&mut self.pressed, overlay.pressed);
         merge_state(&mut self.focused, overlay.focused);
-        merge_state(&mut self.hovered_focused, overlay.hovered_focused);
-        merge_state(&mut self.pressed_focused, overlay.pressed_focused);
+        merge_state(&mut self.open, overlay.open);
         merge_state(&mut self.disabled, overlay.disabled);
     }
 
-    /// Resolves every PNG path against the directory of this exact source layer.
+    /// Resolves every menu PNG path against the declaring document directory.
     fn resolve_paths(&mut self, directory: &Path) {
-        // Named schema fields adapt once into typed state order, then each present state owns the
-        // same concrete path-resolution behavior.
-        for (_, state) in self.states_mut() {
-            if let Some(state) = state {
-                state.resolve_path(directory);
-            }
-        }
+        // The fixed field list is the complete menu state vocabulary.
+        resolve_state_paths(
+            [
+                self.normal.as_mut(),
+                self.hovered.as_mut(),
+                self.pressed.as_mut(),
+                self.focused.as_mut(),
+                self.open.as_mut(),
+                self.disabled.as_mut(),
+            ],
+            directory,
+        );
     }
 
-    /// Returns every optional state document paired with its exact enum value.
-    fn states(&self) -> [(VisualState, Option<&StateDocument>); VisualState::COUNT] {
-        // Named fields make JSON readable; this fixed adapter preserves the catalog's typed order.
+    /// Returns every menu state paired with its optional authored value.
+    fn states(&self) -> [(MenuState, Option<&StateDocument>); MenuState::COUNT] {
+        // Declaration order matches the runtime menu catalog.
         [
-            (VisualState::Normal, self.normal.as_ref()),
-            (VisualState::Hovered, self.hovered.as_ref()),
-            (VisualState::Pressed, self.pressed.as_ref()),
-            (VisualState::Focused, self.focused.as_ref()),
-            (VisualState::HoveredFocused, self.hovered_focused.as_ref()),
-            (VisualState::PressedFocused, self.pressed_focused.as_ref()),
-            (VisualState::Disabled, self.disabled.as_ref()),
+            (MenuState::Normal, self.normal.as_ref()),
+            (MenuState::Hovered, self.hovered.as_ref()),
+            (MenuState::Pressed, self.pressed.as_ref()),
+            (MenuState::Focused, self.focused.as_ref()),
+            (MenuState::Open, self.open.as_ref()),
+            (MenuState::Disabled, self.disabled.as_ref()),
         ]
     }
 
-    /// Returns mutable optional state documents in exact enum order for source normalization.
-    fn states_mut(&mut self) -> [(VisualState, Option<&mut StateDocument>); VisualState::COUNT] {
-        // Separate named borrows are disjoint struct fields, so the fixed array safely provides one
-        // mutable reference per state without an index map or runtime downcast.
+    /// Visits every present menu state document.
+    fn for_each_state(&self, visit: &mut impl FnMut(&StateDocument)) {
+        // Reuse the typed menu adapter without manufacturing control focus combinations.
+        visit_present_states(self.states(), visit);
+    }
+}
+
+/// One window chrome role's destination insets and activation states.
+#[derive(Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct ChromeAppearanceDocument {
+    /// Destination-space outer row and column sizes shared by every chrome state.
+    insets: Option<InsetsDocument>,
+    /// Enabled chrome appearance without window activation.
+    base: Option<StateDocument>,
+    /// Enabled chrome appearance with window activation.
+    active: Option<StateDocument>,
+    /// Disabled chrome appearance.
+    disabled: Option<StateDocument>,
+}
+
+impl ChromeAppearanceDocument {
+    /// Merges one more-derived chrome layer over inherited values.
+    fn merge(&mut self, overlay: Self) {
+        // Activation and availability remain explicit state fields rather than duplicate roles.
+        replace_if_some(&mut self.insets, overlay.insets);
+        merge_state(&mut self.base, overlay.base);
+        merge_state(&mut self.active, overlay.active);
+        merge_state(&mut self.disabled, overlay.disabled);
+    }
+
+    /// Resolves every chrome PNG path against the declaring document directory.
+    fn resolve_paths(&mut self, directory: &Path) {
+        // Chrome has no pointer or keyboard-focus states to normalize.
+        resolve_state_paths([self.base.as_mut(), self.active.as_mut(), self.disabled.as_mut()], directory);
+    }
+
+    /// Returns every chrome state paired with its optional authored value.
+    fn states(&self) -> [(ChromeState, Option<&StateDocument>); ChromeState::COUNT] {
+        // Declaration order matches the runtime chrome catalog.
         [
-            (VisualState::Normal, self.normal.as_mut()),
-            (VisualState::Hovered, self.hovered.as_mut()),
-            (VisualState::Pressed, self.pressed.as_mut()),
-            (VisualState::Focused, self.focused.as_mut()),
-            (VisualState::HoveredFocused, self.hovered_focused.as_mut()),
-            (VisualState::PressedFocused, self.pressed_focused.as_mut()),
-            (VisualState::Disabled, self.disabled.as_mut()),
+            (ChromeState::Base, self.base.as_ref()),
+            (ChromeState::Active, self.active.as_ref()),
+            (ChromeState::Disabled, self.disabled.as_ref()),
         ]
+    }
+
+    /// Visits every present chrome state document.
+    fn for_each_state(&self, visit: &mut impl FnMut(&StateDocument)) {
+        // Reuse the typed chrome adapter while keeping activation out of role names.
+        visit_present_states(self.states(), visit);
     }
 }
 
@@ -1018,6 +1245,39 @@ fn replace_if_some<T>(destination: &mut Option<T>, overlay: Option<T>) {
     }
 }
 
+/// Merges every typed role entry from one family map into its inherited family map.
+fn merge_appearance_map<Role: Ord, Appearance: Default>(
+    inherited: &mut BTreeMap<Role, Appearance>,
+    overlay: BTreeMap<Role, Appearance>,
+    merge: impl Fn(&mut Appearance, Appearance),
+) {
+    // The helper is generic only over homogeneous map storage. Family-specific appearance shapes
+    // and their state enums remain concrete at each call site.
+    for (role, appearance) in overlay {
+        merge(inherited.entry(role).or_default(), appearance);
+    }
+}
+
+/// Resolves a fixed family-specific set of optional state paths.
+fn resolve_state_paths<const N: usize>(states: [Option<&mut StateDocument>; N], directory: &Path) {
+    // Missing states remain absent; present concrete state recipes own their resolved path before
+    // inheritance moves them into another document.
+    for state in states.into_iter().flatten() {
+        state.resolve_path(directory);
+    }
+}
+
+/// Passes every present state recipe from one typed family adapter to a common visitor.
+fn visit_present_states<const N: usize, State: Copy>(states: [(State, Option<&StateDocument>); N], visit: &mut impl FnMut(&StateDocument)) {
+    // Discard the already validated family state only after its document has been selected; image
+    // packing needs paths and pixels but never performs semantic state dispatch.
+    for (_, state) in states {
+        if let Some(state) = state {
+            visit(state);
+        }
+    }
+}
+
 /// Merges one optional state document without duplicating seven field-level branches.
 fn merge_state(destination: &mut Option<StateDocument>, overlay: Option<StateDocument>) {
     // A present child state refines an inherited state when available and otherwise becomes the
@@ -1043,18 +1303,6 @@ fn assign_color(destination: &mut Color, value: Option<ColorDocument>) {
     // Keep color conversion centralized so every palette field uses identical channel ordering.
     if let Some(value) = value {
         *destination = value.into_color();
-    }
-}
-
-/// Formats one typed role as its category-qualified path for loader diagnostics.
-fn appearance_path(role: AppearanceRole) -> String {
-    // Only error construction needs an owned string. Runtime lookup continues to use the concrete
-    // sum type and never performs formatting, parsing, hashing, or string comparison.
-    match role {
-        AppearanceRole::Surface(role) => format!("surface.{}", role.json_name()),
-        AppearanceRole::Control(role) => format!("control.{}", role.json_name()),
-        AppearanceRole::Menu(role) => format!("menu.{}", role.json_name()),
-        AppearanceRole::Chrome(role) => format!("chrome.{}", role.json_name()),
     }
 }
 
@@ -1144,18 +1392,14 @@ mod tests {
         let normal = loaded
             .bundle()
             .skin()
-            .visual(AppearanceRole::Control(ControlRole::Button), VisualState::Normal)
+            .control(ControlRole::Button, ControlState::Enabled(PointerState::Normal))
             .patch;
         let hovered = loaded
             .bundle()
             .skin()
-            .visual(AppearanceRole::Control(ControlRole::Button), VisualState::Hovered)
+            .control(ControlRole::Button, ControlState::Enabled(PointerState::Hovered))
             .patch;
-        let disabled = loaded
-            .bundle()
-            .skin()
-            .visual(AppearanceRole::Control(ControlRole::Button), VisualState::Disabled)
-            .patch;
+        let disabled = loaded.bundle().skin().control(ControlRole::Button, ControlState::Disabled).patch;
         assert_eq!(normal.insets.left, 2);
         assert!(matches!(
             normal.content,
@@ -1198,21 +1442,9 @@ mod tests {
         let style = Skin::from_atlas(theme_atlas.atlas());
         let loaded = document.install(theme_atlas, style).expect("foreground-only theme must install");
 
-        let normal = loaded
-            .bundle()
-            .skin()
-            .visual(AppearanceRole::Menu(MenuRole::Item), VisualState::Normal)
-            .foreground;
-        let hovered = loaded
-            .bundle()
-            .skin()
-            .visual(AppearanceRole::Menu(MenuRole::Item), VisualState::Hovered)
-            .foreground;
-        let disabled = loaded
-            .bundle()
-            .skin()
-            .visual(AppearanceRole::Menu(MenuRole::Item), VisualState::Disabled)
-            .foreground;
+        let normal = loaded.bundle().skin().menu(MenuRole::Item, MenuState::Normal).foreground;
+        let hovered = loaded.bundle().skin().menu(MenuRole::Item, MenuState::Hovered).foreground;
+        let disabled = loaded.bundle().skin().menu(MenuRole::Item, MenuState::Disabled).foreground;
         assert_eq!((normal.r, normal.g, normal.b, normal.a), (1, 2, 3, 255));
         assert_eq!((hovered.r, hovered.g, hovered.b, hovered.a), (250, 251, 252, 255));
         assert_eq!((disabled.r, disabled.g, disabled.b, disabled.a), (90, 91, 92, 255));
@@ -1266,7 +1498,9 @@ mod tests {
                 "appearances": {
                     "control": {
                         "button": {
-                            "normal": { "png": "parent.png", "tint": [4, 5, 6, 255] }
+                            "enabled": {
+                                "normal": { "png": "parent.png", "tint": [4, 5, 6, 255] }
+                            }
                         }
                     }
                 }
@@ -1286,8 +1520,10 @@ mod tests {
                 "appearances": {
                     "control": {
                         "button": {
-                            "normal": { "foreground": [11, 12, 13, 255] },
-                            "hovered": { "png": "child.png" }
+                            "enabled": {
+                                "normal": { "foreground": [11, 12, 13, 255] },
+                                "hovered": { "png": "child.png" }
+                            }
                         }
                     }
                 }
@@ -1298,11 +1534,11 @@ mod tests {
         let definition = ThemeDefinition::read(child_directory.join("theme.json").as_path()).expect("typed inheritance must resolve");
         let button = definition
             .appearances
-            .get(AppearanceRole::Control(ControlRole::Button))
-            .as_ref()
+            .control
+            .get(&ControlRole::Button)
             .expect("button appearance must be inherited");
-        let normal = button.normal.as_ref().expect("normal state must be inherited and refined");
-        let hovered = button.hovered.as_ref().expect("hovered state must come from the child");
+        let normal = button.enabled.normal.as_ref().expect("normal state must be inherited and refined");
+        let hovered = button.enabled.hovered.as_ref().expect("hovered state must come from the child");
 
         assert_eq!(definition.name, "Child");
         assert_eq!(definition.skin.padding, Some(3));
@@ -1402,39 +1638,24 @@ mod tests {
             "the theme atlas must contain exactly its five semantic font roles"
         );
         assert_eq!(atlas.get_font_size(atlas.font_id("heading").unwrap()), 18);
-        let insets = loaded
-            .bundle()
-            .skin()
-            .visual(AppearanceRole::Chrome(ChromeRole::WindowFrame), VisualState::Normal)
-            .patch
-            .insets;
+        let insets = loaded.bundle().skin().chrome(ChromeRole::WindowFrame, ChromeState::Base).patch.insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (4, 4, 4, 4));
         assert!(matches!(
-            loaded
-                .bundle()
-                .skin()
-                .visual(AppearanceRole::Control(ControlRole::Button), VisualState::Disabled)
-                .patch
-                .content,
+            loaded.bundle().skin().control(ControlRole::Button, ControlState::Disabled).patch.content,
             crate::NinePatchContent::Image { .. }
         ));
         assert!(matches!(
-            loaded
-                .bundle()
-                .skin()
-                .visual(AppearanceRole::Chrome(ChromeRole::DialogFrameActive), VisualState::Normal)
-                .patch
-                .content,
+            loaded.bundle().skin().chrome(ChromeRole::DialogFrame, ChromeState::Active).patch.content,
             crate::NinePatchContent::Image { .. }
         ));
-        for state in [VisualState::Focused, VisualState::HoveredFocused] {
-            let disclosure = loaded.bundle().skin().visual(AppearanceRole::Control(ControlRole::Item), state).patch;
+        for state in [ControlState::Focused(PointerState::Normal), ControlState::Focused(PointerState::Hovered)] {
+            let disclosure = loaded.bundle().skin().control(ControlRole::Item, state).patch;
             assert!(matches!(
                 disclosure.content,
                 crate::NinePatchContent::Flat { cells }
                     if matches!(cells.center, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (0, 0, 128, 255))
             ));
-            let foreground = loaded.bundle().skin().visual(AppearanceRole::Control(ControlRole::Item), state).foreground;
+            let foreground = loaded.bundle().skin().control(ControlRole::Item, state).foreground;
             assert_eq!((foreground.r, foreground.g, foreground.b, foreground.a), (255, 255, 255, 255));
         }
     }
@@ -1445,12 +1666,7 @@ mod tests {
         let (loaded, images) = install_bundled_theme("themes/windows-3.11/theme.json");
         assert_eq!(loaded.name(), "Windows 3.11 for Workgroups");
         assert_eq!(images, 21, "each shared PNG path must be baked exactly once");
-        let insets = loaded
-            .bundle()
-            .skin()
-            .visual(AppearanceRole::Chrome(ChromeRole::WindowFrame), VisualState::Normal)
-            .patch
-            .insets;
+        let insets = loaded.bundle().skin().chrome(ChromeRole::WindowFrame, ChromeState::Base).patch.insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (23, 23, 23, 23));
         let border = loaded.bundle().skin().metrics.window_border;
         assert_eq!((border.left, border.top, border.right, border.bottom), (4, 4, 4, 4));
@@ -1463,19 +1679,10 @@ mod tests {
         // Ordinary windows retain their long L-corner bitmap. Only modal dialogs use the uniform
         // four-pixel blue focus frame visible around period Windows 3.11 dialog boxes.
         assert!(matches!(
-            loaded
-                .bundle()
-                .skin()
-                .visual(AppearanceRole::Chrome(ChromeRole::WindowFrameActive), VisualState::Normal)
-                .patch
-                .content,
+            loaded.bundle().skin().chrome(ChromeRole::WindowFrame, ChromeState::Active).patch.content,
             crate::NinePatchContent::Image { .. }
         ));
-        let dialog_frame = loaded
-            .bundle()
-            .skin()
-            .visual(AppearanceRole::Chrome(ChromeRole::DialogFrameActive), VisualState::Normal)
-            .patch;
+        let dialog_frame = loaded.bundle().skin().chrome(ChromeRole::DialogFrame, ChromeState::Active).patch;
         assert_eq!(
             (
                 dialog_frame.insets.left,
@@ -1491,7 +1698,7 @@ mod tests {
                 if matches!(cells.top, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (0, 0, 170, 255))
                     && matches!(cells.center, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (195, 199, 203, 255))
         ));
-        let menu_popup = loaded.bundle().skin().visual(AppearanceRole::Menu(MenuRole::Popup), VisualState::Normal).patch;
+        let menu_popup = loaded.bundle().skin().menu(MenuRole::Popup, MenuState::Normal).patch;
         assert_eq!(
             (menu_popup.insets.left, menu_popup.insets.top, menu_popup.insets.right, menu_popup.insets.bottom),
             (2, 2, 2, 2)
@@ -1503,57 +1710,29 @@ mod tests {
                     && matches!(cells.center, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (255, 255, 255, 255))
         ));
         assert!(matches!(
-            loaded
-                .bundle()
-                .skin()
-                .visual(AppearanceRole::Chrome(ChromeRole::Title), VisualState::Pressed)
-                .patch
-                .content,
+            loaded.bundle().skin().chrome(ChromeRole::Title, ChromeState::Base).patch.content,
             crate::NinePatchContent::Image { .. }
         ));
         assert!(matches!(
-            loaded
-                .bundle()
-                .skin()
-                .visual(AppearanceRole::Chrome(ChromeRole::TitleActive), VisualState::Pressed)
-                .patch
-                .content,
+            loaded.bundle().skin().chrome(ChromeRole::Title, ChromeState::Active).patch.content,
             crate::NinePatchContent::Image { .. }
         ));
         assert!(matches!(
-            loaded
-                .bundle()
-                .skin()
-                .visual(AppearanceRole::Chrome(ChromeRole::Title), VisualState::Disabled)
-                .patch
-                .content,
+            loaded.bundle().skin().chrome(ChromeRole::Title, ChromeState::Disabled).patch.content,
             crate::NinePatchContent::Image { .. }
         ));
-        for state in [
-            VisualState::Normal,
-            VisualState::Hovered,
-            VisualState::Pressed,
-            VisualState::Focused,
-            VisualState::HoveredFocused,
-            VisualState::PressedFocused,
-        ] {
-            // Base Windows 3.11 titles are white and require black text, while selected blue
-            // titles retain white text for every enabled interaction combination.
-            let base = loaded.bundle().skin().visual(AppearanceRole::Chrome(ChromeRole::Title), state).foreground;
-            let active = loaded.bundle().skin().visual(AppearanceRole::Chrome(ChromeRole::TitleActive), state).foreground;
-            assert_eq!((base.r, base.g, base.b, base.a), (0, 0, 0, 255));
-            assert_eq!((active.r, active.g, active.b, active.a), (255, 255, 255, 255));
-        }
-        let disabled_title = loaded
-            .bundle()
-            .skin()
-            .visual(AppearanceRole::Chrome(ChromeRole::Title), VisualState::Disabled)
-            .foreground;
+        // Base Windows 3.11 titles are white and require black text, while active blue titles use
+        // white text. Pointer interaction is not a representable chrome state.
+        let base = loaded.bundle().skin().chrome(ChromeRole::Title, ChromeState::Base).foreground;
+        let active = loaded.bundle().skin().chrome(ChromeRole::Title, ChromeState::Active).foreground;
+        assert_eq!((base.r, base.g, base.b, base.a), (0, 0, 0, 255));
+        assert_eq!((active.r, active.g, active.b, active.a), (255, 255, 255, 255));
+        let disabled_title = loaded.bundle().skin().chrome(ChromeRole::Title, ChromeState::Disabled).foreground;
         assert_eq!((disabled_title.r, disabled_title.g, disabled_title.b, disabled_title.a), (125, 125, 125, 255));
         let minimize_glyph = loaded
             .bundle()
             .skin()
-            .visual(AppearanceRole::Chrome(ChromeRole::MinimizeGlyph), VisualState::Normal)
+            .control(ControlRole::MinimizeGlyph, ControlState::Enabled(PointerState::Normal))
             .patch;
         let crate::NinePatchContent::Image { image: minimize_image } = minimize_glyph.content else {
             panic!("Windows 3.11 minimize glyph must use baked artwork");
@@ -1564,34 +1743,30 @@ mod tests {
         // roles fall back to their flat palette appearance would combine a one-pixel black frame
         // with the role's three-pixel visual insets and produce an incorrect heavy black square.
         for role in [
-            AppearanceRole::Chrome(ChromeRole::CloseButton),
-            AppearanceRole::Chrome(ChromeRole::MinimizeButton),
-            AppearanceRole::Chrome(ChromeRole::MaximizeButton),
-            AppearanceRole::Chrome(ChromeRole::RestoreButton),
+            ControlRole::CloseButton,
+            ControlRole::MinimizeButton,
+            ControlRole::MaximizeButton,
+            ControlRole::RestoreButton,
         ] {
-            let normal = loaded.bundle().skin().visual(role, VisualState::Normal).patch;
-            let disabled = loaded.bundle().skin().visual(role, VisualState::Disabled).patch;
+            let normal = loaded.bundle().skin().control(role, ControlState::Enabled(PointerState::Normal)).patch;
+            let disabled = loaded.bundle().skin().control(role, ControlState::Disabled).patch;
             assert!(matches!(
                 (normal.content, disabled.content),
                 (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: disabled })
                     if normal.icon == disabled.icon
             ));
         }
-        let selected_text = loaded
-            .bundle()
-            .skin()
-            .visual(AppearanceRole::Menu(MenuRole::Item), VisualState::Hovered)
-            .foreground;
+        let selected_text = loaded.bundle().skin().menu(MenuRole::Item, MenuState::Hovered).foreground;
         assert_eq!((selected_text.r, selected_text.g, selected_text.b, selected_text.a), (255, 255, 255, 255));
         let slider_normal = loaded
             .bundle()
             .skin()
-            .visual(AppearanceRole::Control(ControlRole::SliderTrack), VisualState::Normal)
+            .control(ControlRole::SliderTrack, ControlState::Enabled(PointerState::Normal))
             .patch;
         let slider_focused = loaded
             .bundle()
             .skin()
-            .visual(AppearanceRole::Control(ControlRole::SliderTrack), VisualState::Focused)
+            .control(ControlRole::SliderTrack, ControlState::Focused(PointerState::Normal))
             .patch;
         assert!(matches!(
             (slider_normal.content, slider_focused.content),
@@ -1599,19 +1774,19 @@ mod tests {
                 if normal.icon == focused.icon
         ));
         for state in [
-            VisualState::Hovered,
-            VisualState::Pressed,
-            VisualState::Focused,
-            VisualState::HoveredFocused,
-            VisualState::PressedFocused,
+            ControlState::Enabled(PointerState::Hovered),
+            ControlState::Enabled(PointerState::Pressed),
+            ControlState::Focused(PointerState::Normal),
+            ControlState::Focused(PointerState::Hovered),
+            ControlState::Focused(PointerState::Pressed),
         ] {
             // Combo popup choices and tree rows share the semantic Item visual. Its complete
             // interaction ladder carries both blue selection art and contrasting text.
             assert!(matches!(
-                loaded.bundle().skin().visual(AppearanceRole::Control(ControlRole::Item), state).patch.content,
+                loaded.bundle().skin().control(ControlRole::Item, state).patch.content,
                 crate::NinePatchContent::Image { .. }
             ));
-            let foreground = loaded.bundle().skin().visual(AppearanceRole::Control(ControlRole::Item), state).foreground;
+            let foreground = loaded.bundle().skin().control(ControlRole::Item, state).foreground;
             assert_eq!((foreground.r, foreground.g, foreground.b, foreground.a), (255, 255, 255, 255));
         }
     }
@@ -1622,7 +1797,7 @@ mod tests {
         let (loaded, images) = install_bundled_theme("themes/mac-os-9/theme.json");
         assert_eq!(loaded.name(), "Mac OS 9");
         assert_eq!(images, 24, "each shared PNG path must be baked exactly once");
-        let chrome = loaded.bundle().skin().chrome;
+        let chrome = loaded.bundle().skin().window_chrome;
         assert_eq!(chrome.title_alignment, crate::WindowTitleAlignment::Centered);
         assert_eq!(chrome.captions.close_side, crate::CaptionButtonSide::Leading);
         assert!(!chrome.captions.show_without_activation);
@@ -1633,58 +1808,31 @@ mod tests {
             (0, 0, 0, 0),
             "Platinum windows expose their complete application body below root chrome"
         );
-        let insets = loaded
-            .bundle()
-            .skin()
-            .visual(AppearanceRole::Chrome(ChromeRole::WindowFrame), VisualState::Normal)
-            .patch
-            .insets;
+        let insets = loaded.bundle().skin().chrome(ChromeRole::WindowFrame, ChromeState::Base).patch.insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (3, 3, 3, 3));
-        let active_title = loaded
-            .bundle()
-            .skin()
-            .visual(AppearanceRole::Chrome(ChromeRole::TitleActive), VisualState::Pressed)
-            .patch;
+        let active_title = loaded.bundle().skin().chrome(ChromeRole::Title, ChromeState::Active).patch;
         let crate::NinePatchContent::Image { image: active_title_image } = active_title.content else {
             panic!("Mac OS 9 active title must use baked artwork");
         };
         let active_title_size = loaded.bundle().atlas().get_icon_size(active_title_image.icon);
         assert_eq!((active_title_size.width, active_title_size.height), (8, 18));
         assert!(matches!(
-            loaded
-                .bundle()
-                .skin()
-                .visual(AppearanceRole::Control(ControlRole::Button), VisualState::Disabled)
-                .patch
-                .content,
+            loaded.bundle().skin().control(ControlRole::Button, ControlState::Disabled).patch.content,
             crate::NinePatchContent::Image { .. }
         ));
         assert!(matches!(
-            loaded
-                .bundle()
-                .skin()
-                .visual(AppearanceRole::Chrome(ChromeRole::DialogFrameActive), VisualState::Normal)
-                .patch
-                .content,
+            loaded.bundle().skin().chrome(ChromeRole::DialogFrame, ChromeState::Active).patch.content,
             crate::NinePatchContent::Image { .. }
         ));
 
-        // Hovering or pressing a base frame must not borrow the darker active-frame bitmap.
-        // This guards the Platinum distinction before the manager supplies the active role.
-        let normal_frame = loaded
-            .bundle()
-            .skin()
-            .visual(AppearanceRole::Chrome(ChromeRole::WindowFrame), VisualState::Normal)
-            .patch;
-        let pressed_frame = loaded
-            .bundle()
-            .skin()
-            .visual(AppearanceRole::Chrome(ChromeRole::WindowFrame), VisualState::Pressed)
-            .patch;
+        // Base and active chrome retain their independently authored frame bitmaps without a
+        // pointer-state path that could select one from the other.
+        let normal_frame = loaded.bundle().skin().chrome(ChromeRole::WindowFrame, ChromeState::Base).patch;
+        let active_frame = loaded.bundle().skin().chrome(ChromeRole::WindowFrame, ChromeState::Active).patch;
         assert!(matches!(
-            (normal_frame.content, pressed_frame.content),
-            (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: pressed })
-                if normal.icon == pressed.icon
+            (normal_frame.content, active_frame.content),
+            (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: active })
+                if normal.icon != active.icon
         ));
 
         // The Mac layout consumes complete caption-face images and does not overlay generic
@@ -1692,12 +1840,12 @@ mod tests {
         let close = loaded
             .bundle()
             .skin()
-            .visual(AppearanceRole::Chrome(ChromeRole::CloseButton), VisualState::Normal)
+            .control(ControlRole::CloseButton, ControlState::Enabled(PointerState::Normal))
             .patch;
         let close_pressed = loaded
             .bundle()
             .skin()
-            .visual(AppearanceRole::Chrome(ChromeRole::CloseButton), VisualState::Pressed)
+            .control(ControlRole::CloseButton, ControlState::Enabled(PointerState::Pressed))
             .patch;
         let (crate::NinePatchContent::Image { image: close_image }, crate::NinePatchContent::Image { image: pressed_image }) =
             (close.content, close_pressed.content)
@@ -1710,24 +1858,20 @@ mod tests {
 
         // Platinum popup selection uses black image-backed rows with white foreground text, while
         // the popup itself retains its authored thick black and beveled frame.
-        let menu_popup = loaded.bundle().skin().visual(AppearanceRole::Menu(MenuRole::Popup), VisualState::Normal).patch;
+        let menu_popup = loaded.bundle().skin().menu(MenuRole::Popup, MenuState::Normal).patch;
         let crate::NinePatchContent::Image { image: menu_popup_image } = menu_popup.content else {
             panic!("Mac OS 9 popup must use baked artwork");
         };
         let menu_popup_size = loaded.bundle().atlas().get_icon_size(menu_popup_image.icon);
         assert_eq!((menu_popup_size.width, menu_popup_size.height), (7, 7));
-        let selected_text = loaded
-            .bundle()
-            .skin()
-            .visual(AppearanceRole::Menu(MenuRole::Item), VisualState::Hovered)
-            .foreground;
+        let selected_text = loaded.bundle().skin().menu(MenuRole::Item, MenuState::Hovered).foreground;
         assert_eq!((selected_text.r, selected_text.g, selected_text.b, selected_text.a), (255, 255, 255, 255));
-        for state in [VisualState::Focused, VisualState::HoveredFocused] {
+        for state in [ControlState::Focused(PointerState::Normal), ControlState::Focused(PointerState::Hovered)] {
             assert!(matches!(
-                loaded.bundle().skin().visual(AppearanceRole::Control(ControlRole::Item), state).patch.content,
+                loaded.bundle().skin().control(ControlRole::Item, state).patch.content,
                 crate::NinePatchContent::Image { .. }
             ));
-            let foreground = loaded.bundle().skin().visual(AppearanceRole::Control(ControlRole::Item), state).foreground;
+            let foreground = loaded.bundle().skin().control(ControlRole::Item, state).foreground;
             assert_eq!((foreground.r, foreground.g, foreground.b, foreground.a), (255, 255, 255, 255));
         }
     }

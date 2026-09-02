@@ -126,13 +126,13 @@ impl ListBox {
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         let rect = ctx.local_rect();
         if widget_fill_visible(ctx, WidgetFillOption::HOVER | WidgetFillOption::CLICK) {
-            ctx.draw_appearance_center(AppearanceRole::Control(ControlRole::Button), rect);
+            ctx.draw_control_center(ControlRole::Button, rect);
         }
         let visual_size = self.image.map(TextureId::size);
         let placement = place_inline_content(rect, ctx.skin(), &self.label, visual_size);
         if !self.label.is_empty() {
             let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
-            ctx.draw_control_text_with_font(font, &self.label, placement.text, AppearanceRole::Control(ControlRole::Button), self.opt);
+            ctx.draw_control_text_with_font(font, &self.label, placement.text, ControlRole::Button, self.opt);
         }
         if let (Some(image), Some(visual)) = (self.image, placement.visual) {
             // List-box labels remain theme-colored while external image content preserves the

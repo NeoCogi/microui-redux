@@ -35,15 +35,13 @@
 //! per-row widget subtree, interaction node, or three-cell presentation tree. Keyboard focus is the
 //! manager's active surface identity plus that container's selected direct-child slot.
 
-use crate::{MenuRole};
-
 use std::{cell::RefCell, fmt, rc::Rc};
 
 use crate::ui_node::widgets::content_height;
 use crate::math::RectExt;
 use crate::{
-    AppearanceRole, AtlasHandle, Color, Dimensioni, FontRef, FontRole, MouseButton, Recti, Skin, UiInputEvent, Vec2i, VisualState, WidgetEventPortHandle,
-    WidgetOption, WidgetPaintCtx,
+    AtlasHandle, Color, Dimensioni, FontRef, FontRole, MenuRole, MenuState, MouseButton, Recti, Skin, UiInputEvent, Vec2i, WidgetEventPortHandle, WidgetOption,
+    WidgetPaintCtx,
 };
 
 #[cfg(test)]
@@ -702,29 +700,25 @@ impl MenuSurface {
         // One uninterrupted semantic panel and one slot loop replace container, row, and cell
         // paint passes while allowing every row state to select its own PNG.
         let style = ctx.skin().clone();
-        let panel_role = if self.popup {
-            AppearanceRole::Menu(MenuRole::Popup)
-        } else {
-            AppearanceRole::Menu(MenuRole::Bar)
-        };
-        let panel_state = if enabled { VisualState::Normal } else { VisualState::Disabled };
-        let _ = ctx.draw_appearance_state(panel_role, panel_state, ctx.local_rect());
+        let panel_role = if self.popup { MenuRole::Popup } else { MenuRole::Bar };
+        let panel_state = if enabled { MenuState::Normal } else { MenuState::Disabled };
+        let _ = ctx.draw_menu_state(panel_role, panel_state, ctx.local_rect());
         for (slot, entry) in self.rows.iter().enumerate() {
             let row = self.geometry.slots[slot];
             match entry {
                 MenuSlot::Item(item) => {
                     let hovered = self.hovered_slot == Some(slot);
                     let focused = self.keyboard_slot == Some(slot);
-                    let state = VisualState::from_interaction(enabled && item.parameters.enabled, hovered, focused, self.captured && hovered);
+                    let state = MenuState::from_interaction(enabled && item.parameters.enabled, false, hovered, focused, self.captured && hovered);
                     // Check and radio state already has a dedicated marker glyph. Keeping the row
                     // on MenuItem prevents persistent marker data from overriding interaction art.
-                    let role = AppearanceRole::Menu(MenuRole::Item);
-                    let _ = ctx.draw_appearance_state(role, state, row);
+                    let role = MenuRole::Item;
+                    let _ = ctx.draw_menu_state(role, state, row);
                     let marker = Recti::new(row.x, row.y, self.geometry.marker_width.max(0), row.height);
                     let text = text_region(row, self.geometry.marker_width);
                     // Text, marks, and shortcut hints resolve the same semantic role and exact
                     // interaction state as the row background.
-                    let color = ctx.foreground_state(role, state);
+                    let color = ctx.menu_foreground(role, state);
                     paint_item_marker(&mut ctx, marker, item.parameters.mark, color);
                     let font = style.resolve_font(ctx.atlas(), &item.parameters.font);
                     // Both strings share one clip so control padding is applied exactly once.
@@ -737,19 +731,13 @@ impl MenuSurface {
                 MenuSlot::Branch { label } => {
                     let hovered = self.hovered_slot == Some(slot);
                     let focused = self.keyboard_slot == Some(slot);
-                    let state = VisualState::from_interaction(enabled, hovered, focused, self.captured && hovered);
-                    let role = if self.popup {
-                        AppearanceRole::Menu(MenuRole::Item)
-                    } else if self.open_slot == Some(slot) {
-                        AppearanceRole::Menu(MenuRole::TitleOpen)
-                    } else {
-                        AppearanceRole::Menu(MenuRole::Title)
-                    };
-                    let _ = ctx.draw_appearance_state(role, state, row);
+                    let state = MenuState::from_interaction(enabled, self.open_slot == Some(slot), hovered, focused, self.captured && hovered);
+                    let role = if self.popup { MenuRole::Item } else { MenuRole::Title };
+                    let _ = ctx.draw_menu_state(role, state, row);
                     // Bar headings use their full slot; popup branches reserve the marker gutter.
                     let text = if self.popup { text_region(row, self.geometry.marker_width) } else { row };
                     let font = style.resolve_font(ctx.atlas(), &FontRef::Role(FontRole::Body));
-                    let color = ctx.foreground_state(role, state);
+                    let color = ctx.menu_foreground(role, state);
                     ctx.draw_control_text_color_with_font(font, label, text, color, WidgetOption::NONE);
                     if self.popup {
                         paint_submenu_arrow(&mut ctx, text, color);
@@ -883,11 +871,7 @@ fn layout_popup(rows: &[MenuSlot], style: &Skin, atlas: &AtlasHandle, mut slots:
     // second WindowFrame. Measure raw glyph maxima because control text supplies its own padding.
     slots.clear();
     slots.reserve(rows.len());
-    let panel_insets = style
-        .visual(AppearanceRole::Menu(MenuRole::Popup), VisualState::Normal)
-        .patch
-        .insets
-        .normalized();
+    let panel_insets = style.menu(MenuRole::Popup, MenuState::Normal).patch.insets.normalized();
     let padding = style.metrics.padding.max(1);
     let mut label_width = 0_i32;
     let mut trailing_width = 0_i32;
@@ -1034,7 +1018,7 @@ fn paint_separator(ctx: &mut WidgetPaintCtx<'_>, row: Recti) {
         row.width.saturating_sub(padding.saturating_mul(2)).max(0),
         1,
     );
-    let mut color = ctx.foreground_state(AppearanceRole::Menu(MenuRole::Popup), VisualState::Normal);
+    let mut color = ctx.menu_foreground(MenuRole::Popup, MenuState::Normal);
     color.a = ((u16::from(color.a) * 45) / 100).max(1) as u8;
     ctx.draw_rect(rule, color);
 }

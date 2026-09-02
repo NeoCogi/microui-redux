@@ -99,7 +99,7 @@ impl SkinBundle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AppearanceRole, Color, ControlRole, IconRole, NinePatch, NinePatchImage, SliceInsets, StateTable};
+    use crate::{Color, ControlRole, IconRole, NinePatch, NinePatchImage, SliceInsets};
 
     /// Verifies the pair rejects the only allocation-bound value still retained by a skin.
     #[test]
@@ -109,14 +109,12 @@ mod tests {
         let foreign_atlas = crate::test_support::test_atlas();
         let mut skin = Skin::from_atlas(&local_atlas);
         let foreign_icon = IconRole::Close.resolve(&foreign_atlas);
-        crate::test_support::replace_skin_patches(
-            &mut skin,
-            AppearanceRole::Control(ControlRole::Button),
-            StateTable::filled(NinePatch::image(
+        crate::test_support::replace_control_patches(&mut skin, ControlRole::Button, |_| {
+            NinePatch::image(
                 SliceInsets::ZERO,
                 NinePatchImage::new(foreign_icon, SliceInsets::ZERO, Color { r: 255, g: 255, b: 255, a: 255 }),
-            )),
-        );
+            )
+        });
 
         // Construction is the sole public pairing boundary, so malformed ownership cannot enter a
         // LoadedTheme or WindowManager and fail later during rendering.

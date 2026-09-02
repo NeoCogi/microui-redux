@@ -59,10 +59,7 @@ use crate::{ControlRole};
 use std::{cell::RefCell, rc::Rc};
 
 use crate::math::{clamp_i64_to_i32, RectExt};
-use crate::{
-    AppearanceRole, Dimensioni, MouseButton, Node, Recti, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters,
-    WidgetUpdateCtx,
-};
+use crate::{Dimensioni, MouseButton, Node, Recti, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 /// Axis selector used by shared scrollbar geometry helpers.
@@ -457,8 +454,8 @@ impl Widget for Scrollbar {
         // Hidden composite children never reach this phase, while mounted zero-range bars display a
         // full-length thumb that communicates the absence of overflow.
         let geometry = self.geometry(ctx.local_rect(), ctx.skin().metrics.thumb_size.max(0));
-        let _ = ctx.draw_appearance(AppearanceRole::Control(ControlRole::ScrollbarTrack), geometry.track());
-        let _ = ctx.draw_appearance(AppearanceRole::Control(ControlRole::ScrollbarThumb), geometry.thumb());
+        let _ = ctx.draw_control(ControlRole::ScrollbarTrack, geometry.track());
+        let _ = ctx.draw_control(ControlRole::ScrollbarThumb, geometry.thumb());
     }
 }
 

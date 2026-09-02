@@ -59,73 +59,146 @@
     "control": {
       "button": {
         "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
-        "normal": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "pressed": { "png": "pressed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "focused": { "png": "focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "hovered_focused": { "png": "focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "pressed_focused": { "png": "pressed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+        "enabled": {
+          "normal": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "pressed": { "png": "pressed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+        },
+        "focused": {
+          "normal": { "png": "focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+          "hovered": { "png": "focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+          "pressed": { "png": "pressed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+        },
         "disabled": { "png": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
       },
       "checkbox": {
         "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
-        "normal": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "hovered": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "pressed": { "png": "pressed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "focused": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "hovered_focused": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "pressed_focused": { "png": "pressed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "disabled": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }, "tint": [160, 160, 160, 255] }
-      },
+        "enabled": {
+          "normal": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "hovered": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "pressed": { "png": "pressed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+        },
+        "focused": {
+          "normal": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+          "hovered": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+          "pressed": { "png": "pressed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+        },
+        "disabled": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }, "tint": [160, 160, 160, 255] } },
       "text_input": {
         "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
-        "normal": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "hovered": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "pressed": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "focused": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "hovered_focused": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "pressed_focused": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "disabled": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }, "tint": [160, 160, 160, 255] }
-      },
+        "enabled": {
+          "normal": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "hovered": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "pressed": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+        },
+        "focused": {
+          "normal": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+          "hovered": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+          "pressed": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+        },
+        "disabled": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }, "tint": [160, 160, 160, 255] } },
       "combo": {
         "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
-        "normal": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "pressed": { "png": "pressed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "focused": { "png": "focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "hovered_focused": { "png": "focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "pressed_focused": { "png": "pressed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+        "enabled": {
+          "normal": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "pressed": { "png": "pressed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+        },
+        "focused": {
+          "normal": { "png": "focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+          "hovered": { "png": "focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+          "pressed": { "png": "pressed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+        },
         "disabled": { "png": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
       },
       "slider_track": {
         "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
-        "normal": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "hovered": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "pressed": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "focused": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "hovered_focused": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "pressed_focused": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "disabled": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }, "tint": [160, 160, 160, 255] }
-      },
+        "enabled": {
+          "normal": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "hovered": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "pressed": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+        },
+        "focused": {
+          "normal": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+          "hovered": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+          "pressed": { "png": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+        },
+        "disabled": { "png": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }, "tint": [160, 160, 160, 255] } },
       "slider_thumb": {
         "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
-        "normal": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "pressed": { "png": "pressed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "focused": { "png": "focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "hovered_focused": { "png": "focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "pressed_focused": { "png": "pressed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+        "enabled": {
+          "normal": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "pressed": { "png": "pressed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+        },
+        "focused": {
+          "normal": { "png": "focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+          "hovered": { "png": "focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+          "pressed": { "png": "pressed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+        },
         "disabled": { "png": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
       },
       "scrollbar_thumb": {
         "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
-        "normal": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "pressed": { "png": "pressed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "focused": { "png": "focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "hovered_focused": { "png": "focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
-        "pressed_focused": { "png": "pressed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+        "enabled": {
+          "normal": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "pressed": { "png": "pressed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+        },
+        "focused": {
+          "normal": { "png": "focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+          "hovered": { "png": "focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } },
+          "pressed": { "png": "pressed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+        },
         "disabled": { "png": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } }
+      },
+      "close_button": {
+        "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
+        "enabled": {
+          "normal": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "pressed": { "png": "pressed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+        },
+        "focused": {},
+        "disabled": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+      },
+      "minimize_button": {
+        "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
+        "enabled": {
+          "normal": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "pressed": { "png": "pressed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+        },
+        "focused": {},
+        "disabled": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+      },
+      "maximize_button": {
+        "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
+        "enabled": {
+          "normal": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "pressed": { "png": "pressed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+        },
+        "focused": {},
+        "disabled": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+      },
+      "restore_button": {
+        "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
+        "enabled": {
+          "normal": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
+          "pressed": { "png": "pressed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+        },
+        "focused": {},
+        "disabled": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
+      },
+      "resize_grip": {
+        "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
+        "enabled": {
+          "normal": { "png": "resize-grip.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 } },
+          "hovered": { "png": "resize-grip.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 }, "tint": [224, 224, 255, 255] },
+          "pressed": { "png": "resize-grip.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 }, "tint": [192, 192, 224, 255] } },
+        "focused": {}
       }
     },
     "menu": {
@@ -137,64 +210,14 @@
     "chrome": {
       "window_frame": {
         "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 },
-        "normal": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-        "hovered": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-        "pressed": { "png": "window-frame-active.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-        "disabled": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [240, 240, 240, 255] }
-      },
-      "window_frame_active": {
-        "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 },
-        "normal": { "png": "window-frame-active.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-        "hovered": { "png": "window-frame-active.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-        "pressed": { "png": "window-frame-active.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } }
-      },
+        "base": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
+        "active": { "png": "window-frame-active.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
+        "disabled": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [240, 240, 240, 255] } },
       "dialog_frame": {
         "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 },
-        "normal": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-        "hovered": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-        "pressed": { "png": "window-frame-active.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-        "disabled": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [240, 240, 240, 255] }
-      },
-      "dialog_frame_active": {
-        "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 },
-        "normal": { "png": "window-frame-active.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-        "hovered": { "png": "window-frame-active.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
-        "pressed": { "png": "window-frame-active.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } }
-      },
-      "close_button": {
-        "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
-        "normal": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "pressed": { "png": "pressed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "disabled": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
-      },
-      "minimize_button": {
-        "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
-        "normal": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "pressed": { "png": "pressed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "disabled": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
-      },
-      "maximize_button": {
-        "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
-        "normal": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "pressed": { "png": "pressed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "disabled": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
-      },
-      "restore_button": {
-        "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
-        "normal": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "hovered": { "png": "raised-hovered.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "pressed": { "png": "pressed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } },
-        "disabled": { "png": "raised.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } }
-      },
-      "resize_grip": {
-        "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
-        "normal": { "png": "resize-grip.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 } },
-        "hovered": { "png": "resize-grip.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 }, "tint": [224, 224, 255, 255] },
-        "pressed": { "png": "resize-grip.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 }, "tint": [192, 192, 224, 255] }
-      }
+        "base": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
+        "active": { "png": "window-frame-active.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } },
+        "disabled": { "png": "window-frame.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }, "tint": [240, 240, 240, 255] } }
     }
   }
 }

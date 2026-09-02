@@ -29,7 +29,7 @@
 //
 
 use crate::render::Painter;
-use crate::{AppearanceRole, AvailableSpace, Constraints, Dimensioni, NinePatch, Recti, SliceInsets, Skin, VisualState};
+use crate::{AvailableSpace, Constraints, ControlState, Dimensioni, FrameRole, NinePatch, Recti, SliceInsets, Skin, SurfaceState, Visual};
 
 /// Geometry derived from one authoritative outer allocation.
 #[derive(Copy, Clone, Debug)]
@@ -46,13 +46,33 @@ impl FrameGeometry {
 }
 
 /// Resolves the border box and its derived content rectangle.
-pub(crate) fn frame_geometry(outer: Recti, role: Option<AppearanceRole>, style: &Skin) -> FrameGeometry {
+pub(crate) fn frame_geometry(outer: Recti, role: Option<FrameRole>, style: &Skin) -> FrameGeometry {
     // A non-framed node uses zero insets. A framed node uses its semantic normal-state geometry;
     // every interaction state for one role is required to preserve those destination insets.
     let insets = role
-        .map(|role| style.visual(role, VisualState::Normal).patch.insets.normalized())
+        .map(|role| normal_frame_visual(style, role).patch.insets.normalized())
         .unwrap_or(SliceInsets::ZERO);
     frame_geometry_with_insets(outer, insets)
+}
+
+/// Resolves one node frame from its deliberately limited surface-or-control role.
+pub(crate) fn frame_visual(style: &Skin, role: FrameRole, control_state: ControlState) -> Visual {
+    match role {
+        FrameRole::Surface(role) => {
+            // Structural surfaces inherit only availability from the surrounding control state.
+            let state = SurfaceState::from_enabled(!matches!(control_state, ControlState::Disabled));
+            style.surface(role, state)
+        }
+        FrameRole::Control(role) => style.control(role, control_state),
+    }
+}
+
+/// Resolves the stable state used for frame geometry during measurement and placement.
+pub(crate) fn normal_frame_visual(style: &Skin, role: FrameRole) -> Visual {
+    match role {
+        FrameRole::Surface(role) => style.surface(role, SurfaceState::Normal),
+        FrameRole::Control(role) => style.control(role, ControlState::Enabled(crate::PointerState::Normal)),
+    }
 }
 
 /// Resolves a border box using structural insets supplied independently from appearance artwork.
@@ -157,16 +177,12 @@ mod tests {
     use crate::SurfaceRole;
     use crate::{Color, color};
     use crate::render::DisplayList;
-    use crate::test_support::{replace_skin_patches, test_atlas, test_skin};
+    use crate::test_support::{replace_surface_patches, test_atlas, test_skin};
 
     /// Replaces the generic frame role used by the frame geometry under test.
     fn with_frame(mut style: Skin, patch: NinePatch) -> Skin {
         // Tests mutate the same concrete catalog entry that production generic framing resolves.
-        replace_skin_patches(
-            &mut style,
-            crate::AppearanceRole::Surface(SurfaceRole::GenericFrame),
-            crate::StateTable::filled(patch),
-        );
+        replace_surface_patches(&mut style, SurfaceRole::GenericFrame, |_| patch);
         style
     }
 
@@ -174,11 +190,7 @@ mod tests {
     fn frame_geometry_derives_inside_content() {
         let atlas = test_atlas();
         let style = with_frame(test_skin(&atlas), NinePatch::framed(SliceInsets::uniform(2), color(1, 2, 3, 255), None));
-        let geometry = frame_geometry(
-            Recti::new(10, 20, 30, 40),
-            Some(crate::AppearanceRole::Surface(SurfaceRole::GenericFrame)),
-            &style,
-        );
+        let geometry = frame_geometry(Recti::new(10, 20, 30, 40), Some(FrameRole::Surface(SurfaceRole::GenericFrame)), &style);
         assert_eq!(rect_tuple(geometry.outer), (10, 20, 30, 40));
         assert_eq!(geometry.content.map(rect_tuple), Some((12, 22, 26, 36)));
     }
@@ -188,7 +200,7 @@ mod tests {
         let atlas = test_atlas();
         let style = with_frame(test_skin(&atlas), NinePatch::framed(SliceInsets::ZERO, color(1, 2, 3, 255), None));
         let outer = Recti::new(10, 20, 30, 40);
-        let geometry = frame_geometry(outer, Some(crate::AppearanceRole::Surface(SurfaceRole::GenericFrame)), &style);
+        let geometry = frame_geometry(outer, Some(FrameRole::Surface(SurfaceRole::GenericFrame)), &style);
         assert_eq!(geometry.content.map(rect_tuple), Some(rect_tuple(outer)));
     }
 
@@ -197,7 +209,7 @@ mod tests {
         let atlas = test_atlas();
         let style = with_frame(test_skin(&atlas), NinePatch::framed(SliceInsets::uniform(1), color(0, 0, 0, 0), None));
         assert_eq!(
-            frame_geometry(Recti::new(4, 5, 8, 7), Some(crate::AppearanceRole::Surface(SurfaceRole::GenericFrame)), &style)
+            frame_geometry(Recti::new(4, 5, 8, 7), Some(FrameRole::Surface(SurfaceRole::GenericFrame)), &style)
                 .content
                 .map(rect_tuple),
             Some((5, 6, 6, 5))
@@ -209,7 +221,7 @@ mod tests {
         let atlas = test_atlas();
         let style = test_skin(&atlas);
         assert!(
-            frame_geometry(Recti::new(7, 8, 2, 10), Some(crate::AppearanceRole::Surface(SurfaceRole::GenericFrame)), &style)
+            frame_geometry(Recti::new(7, 8, 2, 10), Some(FrameRole::Surface(SurfaceRole::GenericFrame)), &style)
                 .content
                 .is_none()
         );

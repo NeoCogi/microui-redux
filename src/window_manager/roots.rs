@@ -2883,7 +2883,7 @@ impl WindowManager {
             if !handled && let Some(surface) = pointer {
                 handled = match surface {
                     SurfaceKey::Root(root) => {
-                        let caption_controls_visible = pointer_owner_was_active || style.chrome.captions.show_without_activation;
+                        let caption_controls_visible = pointer_owner_was_active || style.window_chrome.captions.show_without_activation;
                         self.route_chrome_event(root, event, caption_controls_visible)
                     }
                     SurfaceKey::Popup(_) => false,

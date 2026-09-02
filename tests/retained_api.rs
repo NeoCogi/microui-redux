@@ -37,10 +37,10 @@ use microui_redux::prelude::{
     MenuItemSubmitted, Recti, TextBlock, TextBlockParameters, TypedWidgetHandle, Vec2i, Window,
 };
 use microui_redux::{
-    color, rect, AppearanceRole, AtlasHandle, AtlasSource, AtlasUploadError, CaptionButtonSide, CharEntry, Constraints, Context, ControlRole, Disclosure,
-    DisclosureParameters, FontEntry, FontRef, FontRole, Grid, GridParameters, IconRef, IconRole, ImageError, Linear, LinearParameters, ScrollArea,
-    ScrollAreaOption, ScrollAreaParameters, Skin, SkinBundle, SourceFormat, StateTable, SurfaceMutationError, TextureError, TextureId, VisualState,
-    WindowChromeSkin, WindowTitleAlignment,
+    color, rect, AtlasHandle, AtlasSource, AtlasUploadError, CaptionButtonSide, CharEntry, Constraints, Context, ControlRole, ControlState, Disclosure,
+    DisclosureParameters, FontEntry, FontRef, FontRole, Grid, GridParameters, IconRef, IconRole, ImageError, Linear, LinearParameters, PointerState,
+    ScrollArea, ScrollAreaOption, ScrollAreaParameters, Skin, SkinBundle, SourceFormat, SurfaceMutationError, TextureError, TextureId, WindowChromeSkin,
+    WindowTitleAlignment,
 };
 
 struct TestBackend {
@@ -146,28 +146,24 @@ fn context() -> Context<TestBackend> {
     context_with_state()
 }
 
-/// Verifies external code replaces complete typed visuals through the exhaustive state table.
+/// Verifies external code reads and replaces visuals through the typed control family.
 #[test]
 fn downstream_skin_visuals_are_concrete_and_exhaustive() {
-    // The role catalog is an implementation detail. A client reads and replaces complete Visual
-    // values, while StateTable makes a bulk role replacement total without erased payloads.
+    // A control state carries both focus ownership and pointer interaction. That concrete shape
+    // makes impossible combinations such as a simultaneously disabled and pressed control
+    // unrepresentable without requiring a universal, sparsely meaningful state table.
     let context = context();
     let mut skin = context.skin().clone();
-    let original = skin.visual(AppearanceRole::Control(ControlRole::Button), VisualState::Focused);
+    let focused = ControlState::Focused(PointerState::Normal);
+    let pressed = ControlState::Focused(PointerState::Pressed);
+    let original = skin.control(ControlRole::Button, focused);
     let mut changed = original;
     changed.foreground = color(17, 29, 43, 255);
-    let mut states = StateTable::filled(original);
-    states.set(VisualState::Focused, changed);
-    skin.set_role_visuals(AppearanceRole::Control(ControlRole::Button), states);
+    skin.set_control(ControlRole::Button, focused, changed);
 
-    assert_eq!(states.iter().count(), VisualState::COUNT);
-    assert_eq!(skin.visual(AppearanceRole::Control(ControlRole::Button), VisualState::Focused).foreground.r, 17);
-    assert_eq!(
-        skin.visual(AppearanceRole::Control(ControlRole::Button), VisualState::PressedFocused)
-            .foreground
-            .r,
-        original.foreground.r
-    );
+    assert_eq!(ControlState::ALL.len(), ControlState::COUNT);
+    assert_eq!(skin.control(ControlRole::Button, focused).foreground.r, 17);
+    assert_eq!(skin.control(ControlRole::Button, pressed).foreground.r, original.foreground.r);
 }
 
 /// Verifies stable named resources and one atomic bundle remain the only atlas replacement path.
@@ -185,15 +181,15 @@ fn downstream_resources_bundle_and_chrome_form_one_typed_runtime_value() {
     let replacement_atlas = replacement_context.atlas();
     let mut replacement_skin = Skin::from_atlas(&replacement_atlas);
     replacement_skin.metrics.padding = 19;
-    replacement_skin.chrome = WindowChromeSkin::classic_mac(color(222, 222, 222, 255));
+    replacement_skin.window_chrome = WindowChromeSkin::classic_mac(color(222, 222, 222, 255));
     let replacement = SkinBundle::new(replacement_atlas, replacement_skin);
     context
         .set_skin_bundle(&replacement)
         .expect("the downstream renderer accepts immutable atlas handles");
 
     assert_eq!(context.skin().metrics.padding, 19);
-    assert_eq!(context.skin().chrome.title_alignment, WindowTitleAlignment::Centered);
-    assert_eq!(context.skin().chrome.captions.close_side, CaptionButtonSide::Leading);
+    assert_eq!(context.skin().window_chrome.title_alignment, WindowTitleAlignment::Centered);
+    assert_eq!(context.skin().window_chrome.captions.close_side, CaptionButtonSide::Leading);
     assert_eq!(body.resolve(context.skin(), &context.atlas()), context.atlas().font_id("body").unwrap());
     assert_eq!(close.resolve(&context.atlas()), context.atlas().icon_id("close").unwrap());
 

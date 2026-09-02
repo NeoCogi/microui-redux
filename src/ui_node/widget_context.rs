@@ -59,7 +59,7 @@ use crate::math::RectExt;
 use crate::render::{DisplayList, Painter, TextureId};
 use crate::input::{Modifiers, MouseButton};
 use crate::{KeyboardAction, KeyboardBehavior, WidgetOption};
-use crate::theme::{AppearanceRole, Color, Skin, VisualState};
+use crate::theme::{Color, ControlRole, ControlState, MenuRole, MenuState, Skin, SurfaceRole, SurfaceState};
 use crate::ui_node::text_layout::control_text_position_with_font;
 
 use super::UiInputEvent;
@@ -397,11 +397,11 @@ impl<'a> WidgetPaintCtx<'a> {
         self.window_active
     }
 
-    /// Resolves the exact semantic appearance state for this paint snapshot.
-    pub fn visual_state(&self) -> VisualState {
+    /// Resolves the exact control state for this paint snapshot.
+    pub fn control_state(&self) -> ControlState {
         // Capture counts as a visible press only while the pointer remains over the widget. A drag
         // outside retains capture for correct release delivery but returns to the non-pressed art.
-        VisualState::from_interaction(self.enabled, self.hovered(), self.focused(), self.active() && self.hovered())
+        ControlState::from_interaction(self.enabled, self.hovered(), self.focused(), self.active() && self.hovered())
     }
 
     /// Returns a widget-local painter that records directly into the current frame display list.
@@ -446,57 +446,71 @@ impl<'a> WidgetPaintCtx<'a> {
         self.painter().image(image, rect, crate::color(255, 255, 255, 255));
     }
 
-    /// Draws one semantic role using this widget's resolved interaction state.
-    pub(crate) fn draw_appearance(&mut self, role: AppearanceRole, rect: Recti) -> Option<Recti> {
+    /// Draws one control using this widget's resolved interaction state.
+    pub(crate) fn draw_control(&mut self, role: ControlRole, rect: Recti) -> Option<Recti> {
         // Resolve state before borrowing the display list through Painter so immutable and mutable
         // context borrows do not overlap.
-        let state = self.visual_state();
-        self.draw_appearance_state(role, state, rect)
+        let state = self.control_state();
+        self.draw_control_state(role, state, rect)
     }
 
-    /// Draws one semantic role using an explicit state selected by a composite control.
-    pub(crate) fn draw_appearance_state(&mut self, role: AppearanceRole, state: VisualState, rect: Recti) -> Option<Recti> {
-        // Menu rows and selected list items own semantic state beyond the widget-wide interaction
-        // snapshot. They still resolve the same typed catalog and checked nine-patch geometry.
-        let patch = self.common.style.visual(role, state).patch;
+    /// Draws one control using an explicit nested control state.
+    pub(crate) fn draw_control_state(&mut self, role: ControlRole, state: ControlState, rect: Recti) -> Option<Recti> {
+        // Composite controls can select a child part's state without converting it into a universal
+        // state accepted by unrelated surface, menu, or chrome families.
+        let patch = self.common.style.control(role, state).patch;
         let mut painter = self.painter();
         crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch)
     }
 
-    /// Draws only the stretchable center of one semantic role over an unframed rectangle.
-    pub(crate) fn draw_appearance_center(&mut self, role: AppearanceRole, rect: Recti) {
-        // Interactive controls resolve their ordinary pointer/focus state before sharing the same
-        // center-only recording path used by structural containers with an explicit state.
-        self.draw_appearance_center_state(role, self.visual_state(), rect);
+    /// Draws only the stretchable center of one control over an unframed rectangle.
+    pub(crate) fn draw_control_center(&mut self, role: ControlRole, rect: Recti) {
+        // Resolve the complete nested state before recording the center cell.
+        self.draw_control_center_state(role, self.control_state(), rect);
     }
 
-    /// Draws only the stretchable center of one semantic role using an explicit state.
-    pub(crate) fn draw_appearance_center_state(&mut self, role: AppearanceRole, state: VisualState, rect: Recti) {
+    /// Draws only the stretchable center of one control using an explicit state.
+    pub(crate) fn draw_control_center_state(&mut self, role: ControlRole, state: ControlState, rect: Recti) {
         // Zero destination insets collapse all eight outer cells. Flat patches retain their center
         // cell and image patches sample only their center source, preserving the old unframed fill
         // contract without introducing a second theme asset vocabulary.
-        let patch = self.common.style.visual(role, state).patch.with_insets(crate::SliceInsets::ZERO);
+        let patch = self.common.style.control(role, state).patch.with_insets(crate::SliceInsets::ZERO);
         let mut painter = self.painter();
         let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch);
     }
 
-    /// Resolves a role foreground using this widget's complete interaction state.
-    pub(crate) fn foreground(&self, role: AppearanceRole) -> Color {
-        // visual_state gives explicit disabling precedence over retained hover, focus, and press.
-        self.common.style.visual(role, self.visual_state()).foreground
+    /// Draws only the stretchable center of one structural surface.
+    pub(crate) fn draw_surface_center_state(&mut self, role: SurfaceRole, state: SurfaceState, rect: Recti) {
+        // Center-only structural fills share the same nine-patch behavior as unframed controls.
+        let patch = self.common.style.surface(role, state).patch.with_insets(crate::SliceInsets::ZERO);
+        let mut painter = self.painter();
+        let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch);
     }
 
-    /// Resolves a role foreground using a composite control's explicit interaction state.
-    pub(crate) fn foreground_state(&self, role: AppearanceRole, state: VisualState) -> Color {
-        // The composite owns this exact typed state; window activation affects chrome roles and
-        // focus visibility rather than rewriting enabled widget presentation.
-        self.common.style.visual(role, state).foreground
+    /// Draws one menu part using its menu-specific state.
+    pub(crate) fn draw_menu_state(&mut self, role: MenuRole, state: MenuState, rect: Recti) -> Option<Recti> {
+        // The Open state remains confined to menu rendering.
+        let patch = self.common.style.menu(role, state).patch;
+        let mut painter = self.painter();
+        crate::ui_node::frame::paint_internal_frame(&mut painter, rect, patch)
     }
 
-    /// Draws aligned control text using the foreground for one semantic appearance role.
-    pub(crate) fn draw_control_text_with_font(&mut self, font: FontId, text: &str, rect: Recti, role: AppearanceRole, opt: WidgetOption) {
+    /// Resolves a control foreground using this widget's complete interaction state.
+    pub(crate) fn control_foreground(&self, role: ControlRole) -> Color {
+        // ControlState gives disabling precedence and nests pointer state beneath focus ownership.
+        self.common.style.control(role, self.control_state()).foreground
+    }
+
+    /// Resolves a menu foreground using an explicit menu selection state.
+    pub(crate) fn menu_foreground(&self, role: MenuRole, state: MenuState) -> Color {
+        // Composite menu panels own their exact open, pointer, and keyboard selection state.
+        self.common.style.menu(role, state).foreground
+    }
+
+    /// Draws aligned control text using the foreground for one concrete control role.
+    pub(crate) fn draw_control_text_with_font(&mut self, font: FontId, text: &str, rect: Recti, role: ControlRole, opt: WidgetOption) {
         // Resolve the same state as the adjacent appearance before mutable display-list recording.
-        let color = self.foreground(role);
+        let color = self.control_foreground(role);
         self.draw_control_text_color_with_font(font, text, rect, color, opt);
     }
 
@@ -544,7 +558,7 @@ mod tests {
 
     /// Verifies paint state distinguishes visible presses, capture outside, and disabled ancestry.
     #[test]
-    fn paint_visual_state_uses_enabled_hover_focus_and_visible_capture() {
+    fn paint_control_state_uses_enabled_hover_focus_and_visible_capture() {
         let atlas = crate::test_support::test_atlas();
         let style = crate::test_support::test_skin(&atlas);
         let bounds = Recti::new(0, 0, 20, 10);
@@ -552,22 +566,22 @@ mod tests {
 
         {
             let ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut list, bounds, &style, &atlas, true, true, true, false, true, true);
-            assert_eq!(ctx.visual_state(), VisualState::PressedFocused);
+            assert_eq!(ctx.control_state(), ControlState::Focused(crate::PointerState::Pressed));
         }
         {
             // Capture remains active outside for release routing, but theme art is no longer pressed.
             let ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut list, bounds, &style, &atlas, true, false, true, false, true, true);
-            assert_eq!(ctx.visual_state(), VisualState::Focused);
+            assert_eq!(ctx.control_state(), ControlState::Focused(crate::PointerState::Normal));
         }
         {
             // Disabled ancestry wins over stale retained interaction snapshots.
             let ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut list, bounds, &style, &atlas, false, true, true, true, true, true);
-            assert_eq!(ctx.visual_state(), VisualState::Disabled);
+            assert_eq!(ctx.control_state(), ControlState::Disabled);
         }
         {
             // Window activation does not turn an otherwise enabled widget into a disabled one.
             let ctx = WidgetPaintCtx::new_with_content_geometry(bounds, &mut list, bounds, &style, &atlas, true, true, true, true, true, false);
-            assert_eq!(ctx.visual_state(), VisualState::PressedFocused);
+            assert_eq!(ctx.control_state(), ControlState::Focused(crate::PointerState::Pressed));
         }
     }
 }

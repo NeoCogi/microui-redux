@@ -65,7 +65,7 @@ impl UiRuntime {
         node: &mut Node,
         style: &Skin,
         atlas: &crate::AtlasHandle,
-        frame_role: Option<crate::AppearanceRole>,
+        frame_role: Option<crate::FrameRole>,
         outer: Recti,
         preferred: Dimensioni,
         measurement_cached: bool,

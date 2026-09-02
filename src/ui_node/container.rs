@@ -197,8 +197,7 @@ impl Container {
             .unwrap_or_else(|_| panic!("retained child invariant violated: collection is already borrowed during measurement"));
         let widget = self.widget.try_borrow().unwrap_or_else(|_| typed_container_borrow_conflict());
         let frame_insets = if widget.widget.effective_widget_opt().intersects(WidgetOption::FRAME) {
-            style
-                .visual(widget.widget.frame_appearance_role(), crate::VisualState::Normal)
+            super::frame::normal_frame_visual(style, widget.widget.frame_appearance_role())
                 .patch
                 .insets
                 .normalized()

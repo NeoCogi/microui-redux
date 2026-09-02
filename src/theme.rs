@@ -32,6 +32,7 @@
 
 mod appearance;
 mod bundle;
+mod catalog;
 mod icons;
 #[cfg(feature = "theme-json")]
 pub(crate) mod loader;
@@ -39,7 +40,6 @@ mod palette;
 mod resources;
 mod roles;
 mod skin;
-mod tables;
 mod typography;
 
 pub use appearance::Visual;
@@ -50,9 +50,7 @@ pub use icons::{IconRef, IconRole};
 pub use loader::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};
 pub use palette::FlatPalette;
 pub use resources::ResourceCatalog;
-pub use roles::{AppearanceRole, ChromeRole, ControlRole, MenuRole, SurfaceRole, VisualState};
+pub use roles::{ChromeRole, ChromeState, ControlRole, ControlState, FrameRole, MenuRole, MenuState, PointerState, SurfaceRole, SurfaceState};
 pub use skin::{CaptionButtonSide, CaptionButtonsSkin, Skin, SkinMetrics, TitleBackdropSkin, WindowChromeSkin, WindowTitleAlignment};
 pub(crate) use skin::SkinRevision;
-pub use tables::StateTable;
-pub(crate) use tables::RoleTable;
 pub use typography::{FontRef, FontRole};

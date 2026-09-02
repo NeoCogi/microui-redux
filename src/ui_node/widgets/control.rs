@@ -184,11 +184,13 @@ pub(super) fn widget_fill_visible(ctx: &WidgetPaintCtx<'_>, fill: WidgetFillOpti
     // Preserve the public visibility policy while delegating actual pixels to the typed appearance
     // catalog. Combined focus states accept either relevant policy bit; a pressed state remains a
     // click visual even when pointer capture outlives the one-update clicked transition.
-    match ctx.visual_state() {
-        VisualState::Normal | VisualState::Disabled => fill.intersects(WidgetFillOption::NORMAL),
-        VisualState::Hovered => fill.intersects(WidgetFillOption::HOVER),
-        VisualState::Pressed | VisualState::Focused | VisualState::PressedFocused => fill.intersects(WidgetFillOption::CLICK),
-        VisualState::HoveredFocused => fill.intersects(WidgetFillOption::HOVER | WidgetFillOption::CLICK),
+    match ctx.control_state() {
+        ControlState::Disabled | ControlState::Enabled(PointerState::Normal) => fill.intersects(WidgetFillOption::NORMAL),
+        ControlState::Enabled(PointerState::Hovered) => fill.intersects(WidgetFillOption::HOVER),
+        ControlState::Enabled(PointerState::Pressed) | ControlState::Focused(PointerState::Normal | PointerState::Pressed) => {
+            fill.intersects(WidgetFillOption::CLICK)
+        }
+        ControlState::Focused(PointerState::Hovered) => fill.intersects(WidgetFillOption::HOVER | WidgetFillOption::CLICK),
     }
 }
 

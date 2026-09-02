@@ -345,10 +345,10 @@ impl Combo {
         let reserved_width = indicator_size.width;
         text_rect.width = (text_rect.width - reserved_width).max(0);
         let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
-        ctx.draw_control_text_with_font(font, self.label.as_str(), text_rect, AppearanceRole::Control(ControlRole::Combo), self.opt);
+        ctx.draw_control_text_with_font(font, self.label.as_str(), text_rect, ControlRole::Combo, self.opt);
 
-        let indicator_content = ctx.draw_appearance(AppearanceRole::Control(ControlRole::Button), indicator);
-        let icon_color = ctx.foreground(AppearanceRole::Control(ControlRole::Combo));
+        let indicator_content = ctx.draw_control(ControlRole::Button, indicator);
+        let icon_color = ctx.control_foreground(ControlRole::Combo);
         if let Some(indicator_content) = indicator_content {
             ctx.draw_icon(indicator_id, indicator_content, icon_color);
         }
@@ -372,9 +372,9 @@ impl Widget for Combo {
         &self.opt
     }
 
-    fn frame_appearance_role(&self) -> AppearanceRole {
+    fn frame_appearance_role(&self) -> FrameRole {
         // Combo headers use a distinct role so themes can separate them from command buttons.
-        AppearanceRole::Control(ControlRole::Combo)
+        FrameRole::Control(ControlRole::Combo)
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {

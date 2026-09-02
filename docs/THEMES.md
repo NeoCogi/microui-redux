@@ -65,15 +65,19 @@ the theme directories must remain available beside the repository sources at run
     "control": {
       "button": {
         "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
-        "normal": {
-          "png": "button-normal.png",
-          "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }
+        "enabled": {
+          "normal": {
+            "png": "button-normal.png",
+            "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }
+          },
+          "hovered": { "png": "button-hovered.png" },
+          "pressed": { "png": "button-pressed.png", "foreground": [255, 255, 255, 255] }
         },
-        "hovered": { "png": "button-hovered.png" },
-        "pressed": { "png": "button-pressed.png", "foreground": [255, 255, 255, 255] },
-        "focused": { "png": "button-focused.png" },
-        "hovered_focused": { "png": "button-hovered-focused.png" },
-        "pressed_focused": { "png": "button-pressed-focused.png" },
+        "focused": {
+          "normal": { "png": "button-focused.png" },
+          "hovered": { "png": "button-hovered-focused.png" },
+          "pressed": { "png": "button-pressed-focused.png" }
+        },
         "disabled": { "png": "button-disabled.png", "tint": [255, 255, 255, 160] }
       }
     }
@@ -135,10 +139,10 @@ The optional `colors` object accepts RGBA byte arrays under these keys:
 - `selection_background`, `selection_foreground`, `window_active`
 - `menu_foreground`, `menu_background`
 
-These colors construct Skin's complete visual table before any per-state PNG or `foreground`
-override is installed. Each `AppearanceRole`/`VisualState` cell is one concrete
-`Visual { patch, foreground }`; background and foreground cannot drift through parallel catalogs,
-and no erased or string-keyed payload participates at runtime.
+These colors construct Skin's complete family catalogs before any per-state PNG or `foreground`
+override is installed. Each family role/state cell is one concrete `Visual { patch, foreground }`;
+background and foreground cannot drift through parallel catalogs, and no erased or string-keyed
+payload participates at runtime.
 
 ## Inheritance
 
@@ -156,8 +160,8 @@ The loader rejects unknown document fields, unknown skin/palette fields, unknown
 categories or role keys, unknown state fields, cycles, chains deeper than 32 documents, unsupported
 schema versions, and invalid names before constructing an atlas. Family and role keys deserialize
 directly into concrete enums; no string-keyed appearance map exists between syntax parsing and the
-fully merged `AppearanceRole` table. The runtime bundle retains no inheritance graph or authored
-key strings.
+fully merged family documents. The runtime bundle retains no inheritance graph or authored key
+strings.
 
 ## Loading and selecting
 
@@ -183,26 +187,32 @@ vocabulary:
 
 - `surface`: `generic_frame`, `panel`
 - `control`: `button`, `checkbox`, `text_input`, `item`, `combo`, `slider_track`,
-  `slider_thumb`, `scrollbar_track`, `scrollbar_thumb`
-- `menu`: `bar`, `title`, `title_open`, `popup`, `item`
-- `chrome`: `window_frame`, `window_frame_active`, `dialog_frame`, `dialog_frame_active`, `title`,
-  `title_active`, `close_button`, `minimize_button`, `maximize_button`, `restore_button`,
-  `resize_grip`, `close_glyph`, `minimize_glyph`, `maximize_glyph`, `restore_glyph`
+  `slider_thumb`, `scrollbar_track`, `scrollbar_thumb`, `close_button`, `minimize_button`,
+  `maximize_button`, `restore_button`, `resize_grip`, `close_glyph`, `minimize_glyph`,
+  `maximize_glyph`, `restore_glyph`
+- `menu`: `bar`, `title`, `popup`, `item`
+- `chrome`: `window_frame`, `dialog_frame`, `title`
 
 Category qualification makes local names such as `control.item` and `menu.item` unambiguous while
 keeping widget implementation types out of the loader. Unknown categories, role names, and fields
 are errors, so a misspelled state or control name cannot silently fall back to a flat appearance.
 
-Every role has the same closed interaction-state vocabulary: `normal`, `hovered`, `pressed`,
-`focused`, `hovered_focused`, `pressed_focused`, and `disabled`. `normal` means enabled with no
-current pointer press, hover, or visible focus combination; it does not mean that a window lacks
-activation. Window activation instead selects a base or `*_active` role inside the `chrome`
-family. Open menu titles likewise select `menu.title_open` rather than inventing an `open` state.
+Each family accepts only states meaningful to it:
+
+- surface roles contain `normal` and `disabled`;
+- control roles contain `disabled`, plus `enabled` and `focused` objects whose nested fields are
+  `normal`, `hovered`, and `pressed`;
+- menu roles contain `normal`, `hovered`, `pressed`, `focused`, `open`, and `disabled`;
+- chrome roles contain `base`, `active`, and `disabled`.
+
+Nesting pointer state under the two available control branches makes disabled-hovered and
+disabled-pressed combinations unrepresentable. Window activation and menu ownership stay in their
+own domains rather than being encoded as duplicate role names.
 
 `surface.panel` and container-owned `surface.generic_frame` are noninteractive structure: their
 body and border resolve the normal appearance while the pointer moves across them. Losing
-top-level activation selects the base `chrome.window_frame`, `chrome.dialog_frame`, and
-`chrome.title` roles but does not rewrite enabled child widgets. A disabled widget or subtree
+top-level activation selects the `base` state of `chrome.window_frame`, `chrome.dialog_frame`, and
+`chrome.title` but does not rewrite enabled child widgets. A disabled widget or subtree
 resolves `disabled` independently of activation; its foreground uses `disabled_text` (or
 `disabled_title_text` for chrome), and omitted PNG states use
 `disabled_background` as their flat fallback. The ordinary frame pair and modal dialog pair also
@@ -211,7 +221,7 @@ Interactive descendants, resize borders, caption controls, and the title remain 
 their own hover and pressed states while enabled.
 
 `WindowOption::DISABLED` is the explicit whole-window counterpart. It keeps the root visible and
-keeps its retained update traversal running, but resolves the base frame/title roles, intrinsic
+keeps its retained update traversal running, but resolves the disabled frame/title states, intrinsic
 menu bar, caption controls, and complete widget tree through `disabled`. It also rejects pointer,
 keyboard, popup, move, resize, and caption input while retaining focus for later re-enabling. A
 structural child window inherits a disabled structural parent; an owned modal dialog remains an
@@ -224,11 +234,11 @@ children.
 `skin.window_border` is the window's structural border thickness. Its four values drive client
 layout and the right/bottom one-axis resize hit regions. `chrome.window_frame.insets` and
 `chrome.dialog_frame.insets` instead control the fixed visual corner span for their respective
-three-by-three artwork; each active role is normalized to its corresponding base role's visual
+three-by-three artwork; each active state is normalized to its corresponding base state's visual
 authority. Keeping the values separate permits a four-pixel Windows 3.11 edge to carry a 23-pixel
 L-shaped ordinary-window corner while a modal dialog uses a uniform four-pixel outline, without
 reserving 23 pixels around either client. The bottom-right two-axis region remains larger for easy
-input, but themes may leave `chrome.resize_grip` transparent when the frame corner itself is the
+input, but themes may leave `control.resize_grip` transparent when the frame corner itself is the
 complete visible affordance.
 
 `skin.window_content_insets` is a separate four-edge inset around the application body. Root
@@ -244,9 +254,9 @@ popups already paint the same role as their complete manager-owned panel.
 
 Window caption controls are enabled explicitly through `WindowOption::MINIMIZE_BUTTON` and
 `WindowOption::MAXIMIZE_BUTTON`. The close button remains enabled unless `WindowOption::NO_CLOSE`
-is present. Caption and resize roles receive `hovered` and `pressed` states from manager-owned
-pointer capture just like widgets. A press dragged away from its originating caption button is no
-longer painted pressed and does not activate on release.
+is present. Caption and resize controls receive nested enabled/hovered and enabled/pressed states
+from manager-owned pointer capture just like widgets. A press dragged away from its originating
+caption button is no longer painted pressed and does not activate on release.
 
 `skin.window_chrome_layout` selects concrete platform geometry without changing the semantic
 caption roles. `trailing_buttons` preserves the ordinary left-aligned title and places every

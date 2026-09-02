@@ -57,7 +57,7 @@
 //! when text enters concrete widget storage. Visible glyph coverage and missing-character fallback
 //! come from the selected atlas font.
 
-use crate::{SurfaceRole};
+use crate::{SurfaceRole, SurfaceState};
 
 use crate::ui_node::text_layout::{baseline_aligned_top, build_display_text_lines, text_block_size};
 use crate::*;
@@ -169,7 +169,10 @@ impl TextBlock {
 
         let bounds = ctx.local_rect();
         let font = ctx.skin().resolve_font(ctx.atlas(), &self.font);
-        let color = ctx.foreground(AppearanceRole::Surface(SurfaceRole::GenericFrame));
+        let color = ctx
+            .skin()
+            .surface(SurfaceRole::GenericFrame, SurfaceState::from_enabled(ctx.enabled()))
+            .foreground;
         let line_height = ctx.atlas().get_font_height(font) as i32;
         let baseline = ctx.atlas().get_font_baseline(font);
         let max_width = if self.wrap == TextWrap::Word { bounds.width.max(1) } else { i32::MAX / 4 };

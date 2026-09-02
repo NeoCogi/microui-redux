@@ -407,7 +407,7 @@ pub(crate) fn textbox_paint(ctx: &mut WidgetPaintCtx<'_>, buf: &str, cursor: usi
     let r = ctx.local_rect();
     if !opt.intersects(WidgetOption::FRAME) {
         // Runtime-owned framed editors already painted the complete input patch below this content.
-        ctx.draw_appearance_center(AppearanceRole::Control(ControlRole::TextInput), r);
+        ctx.draw_control_center(ControlRole::TextInput, r);
     }
 
     let metrics = font_line_metrics(font, ctx.atlas());
@@ -426,7 +426,7 @@ pub(crate) fn textbox_paint(ctx: &mut WidgetPaintCtx<'_>, buf: &str, cursor: usi
 
     if ctx.focused() {
         // Focused editing path clips text/caret to the textbox bounds.
-        let color = ctx.foreground(AppearanceRole::Control(ControlRole::TextInput));
+        let color = ctx.control_foreground(ControlRole::TextInput);
         let caret = caret_rect(clamp_i64_to_i32(i64::from(textx) + i64::from(caret_offset)), baseline_y, metrics, r);
         let mut painter = ctx.painter();
         painter.with_clip(r, |painter| {
@@ -434,7 +434,7 @@ pub(crate) fn textbox_paint(ctx: &mut WidgetPaintCtx<'_>, buf: &str, cursor: usi
             painter.fill_rect(caret, color);
         });
     } else {
-        ctx.draw_control_text_with_font(font, buf, r, AppearanceRole::Control(ControlRole::TextInput), opt);
+        ctx.draw_control_text_with_font(font, buf, r, ControlRole::TextInput, opt);
     }
 }
 
@@ -443,9 +443,9 @@ impl Widget for Textbox {
         &self.opt
     }
 
-    fn frame_appearance_role(&self) -> AppearanceRole {
+    fn frame_appearance_role(&self) -> FrameRole {
         // Single-line textboxes use the semantic input frame for every interaction state.
-        AppearanceRole::Control(ControlRole::TextInput)
+        FrameRole::Control(ControlRole::TextInput)
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {

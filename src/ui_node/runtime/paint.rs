@@ -48,8 +48,8 @@ impl UiRuntime {
         // surface may present it. This prevents windows without activation and menu-suspended widgets from
         // showing simultaneous carets, fills, or outlines. Activation remains available to custom
         // widget paint code but does not rewrite the semantic state of enabled descendants.
-        // Focus is an ordinary VisualState input. Each widget or container selects its semantic
-        // role, so traversal has no second paint pass and no widget-independent focus decoration.
+        // Focus is part of ControlState. Each control selects its semantic role, so traversal has
+        // no second paint pass and no widget-independent focus decoration.
         self.paint_node_ref(
             root,
             self.root_transform,
@@ -86,20 +86,20 @@ impl UiRuntime {
         let screen_clip = parent_transform.clip.positive_intersection(screen_rect).unwrap_or_default();
         let enabled = ancestors_enabled && node.state.participation.accepts_input();
         let focused = focus_visible && node.state.focused;
-        let visual_state = crate::VisualState::from_interaction(enabled, node.state.hovered, focused, node.state.active && node.state.hovered);
+        let control_state = crate::ControlState::from_interaction(enabled, node.state.hovered, focused, node.state.active && node.state.hovered);
         if let Some(role) = frame_role {
             // Semantic framing belongs beneath the widget's own paint and descendant paint.
             // A container frame describes noninteractive structure rather than a selectable control, so
             // pointer hover and capture must not replace its background or border artwork.
             let frame_state = if !enabled {
-                crate::VisualState::Disabled
+                crate::ControlState::Disabled
             } else if node.is_container() {
-                crate::VisualState::Normal
+                crate::ControlState::Enabled(crate::PointerState::Normal)
             } else {
-                visual_state
+                control_state
             };
             let mut painter = crate::render::Painter::screen_space(display_list, screen_clip);
-            crate::ui_node::frame::paint_internal_frame(&mut painter, screen_rect, style.visual(role, frame_state).patch);
+            crate::ui_node::frame::paint_internal_frame(&mut painter, screen_rect, crate::ui_node::frame::frame_visual(style, role, frame_state).patch);
         }
         let child_transform = parent_transform.push(node.state.layout);
         let local_clip = screen_clip.relative_to(screen_origin);

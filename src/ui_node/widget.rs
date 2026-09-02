@@ -52,7 +52,7 @@
 //
 //! Widget runtime contracts and retained event tracking.
 
-use crate::{SurfaceRole};
+use crate::{FrameRole, SurfaceRole};
 
 use std::cell::RefCell;
 use std::cmp::max;
@@ -63,7 +63,7 @@ use rs_math3d::Dimensioni;
 
 use crate::atlas::AtlasHandle;
 use crate::input::{Key, Modifiers};
-use crate::theme::{AppearanceRole, Skin};
+use crate::theme::Skin;
 use crate::Constraints;
 use super::UiInputEvent;
 pub use super::widget_context::{WidgetPaintCtx, WidgetUpdateCtx};
@@ -385,10 +385,10 @@ pub trait Widget {
     /// The runtime uses this one role for measurement, layout, input localization, and paint. A
     /// custom widget therefore changes themed border geometry without duplicating or bypassing the
     /// retained outer/content-box contract.
-    fn frame_appearance_role(&self) -> AppearanceRole {
+    fn frame_appearance_role(&self) -> FrameRole {
         // Generic framing remains the neutral default for application widgets that request FRAME
         // without opting into one of the built-in control meanings.
-        AppearanceRole::Surface(SurfaceRole::GenericFrame)
+        FrameRole::Surface(SurfaceRole::GenericFrame)
     }
     /// Returns declarative keyboard routing capabilities for this widget surface.
     ///

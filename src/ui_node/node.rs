@@ -298,8 +298,7 @@ impl Node {
             NodeKind::Widget(node) => {
                 let widget = node.widget.try_borrow().unwrap_or_else(|_| widget_borrow_conflict());
                 let frame_insets = if widget.widget.effective_widget_opt().intersects(crate::WidgetOption::FRAME) {
-                    style
-                        .visual(widget.widget.frame_appearance_role(), crate::VisualState::Normal)
+                    crate::ui_node::frame::normal_frame_visual(style, widget.widget.frame_appearance_role())
                         .patch
                         .insets
                         .normalized()

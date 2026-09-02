@@ -182,13 +182,14 @@ also consumes Ctrl+F6 window-cycle chords; window cycling resumes only after the
 
 ## Skin and current scope
 
-The complete visuals for `MenuTitle`, `MenuTitleOpen`, and `MenuItem` color menu labels, item text,
+The complete visuals for `MenuRole::Title` and `MenuRole::Item` color menu labels, item text,
 marks, and arrows in the row's exact interaction state. Checked and radio state affects only the
 independent marker glyph. `MenuPopup` supplies the separator color. A theme can pair a dark selected PNG or
 flat highlight with a light hovered/focused foreground without changing ordinary menu text.
 The `MenuBar` and `MenuPopup` visuals fill the persistent bar and popup surfaces. Menu surfaces
 receive the same context skin as window chrome and retained widgets and paint it directly. The
-current keyboard-selected heading or row uses its focused role/state visual, and active window roles
+current keyboard-selected heading or row uses `MenuState::Focused`, an open title uses
+`MenuState::Open`, and active window states
 continue to mark the owner while menu scope suspends its application widget cue.
 
 Keyboard navigation is intrinsic to menu surfaces, but mnemonics and shortcut dispatch remain

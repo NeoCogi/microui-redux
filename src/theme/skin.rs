@@ -52,9 +52,10 @@
 //
 //! Resolved, structured, atlas-bound skin values used across the crate.
 
-use crate::SurfaceRole;
-
-use super::{appearance::visuals_from_flat_palette, AppearanceRole, Color, FlatPalette, FontRef, FontRole, IconRole, RoleTable, StateTable, Visual, VisualState};
+use super::{
+    ChromeRole, ChromeState, Color, ControlRole, ControlState, FlatPalette, FontRef, FontRole, IconRole, MenuRole, MenuState, SurfaceRole, SurfaceState,
+    Visual, appearance::visuals_from_flat_palette, catalog::AppearanceCatalog,
+};
 use crate::atlas::{AtlasHandle, FontId};
 use crate::render::{NinePatch, SliceInsets};
 
@@ -113,9 +114,8 @@ pub struct CaptionButtonsSkin {
     pub minimum_extent: i32,
     /// Whether caption controls remain visible and hittable without window activation.
     ///
-    /// Activation selects the base or `*Active` chrome role; it is not a [`VisualState`]. Keeping
-    /// this policy named after that condition avoids treating [`VisualState::Normal`] as a synonym
-    /// for a window that does not own activation.
+    /// Activation selects [`ChromeState::Active`] for frame and title chrome; it does not rewrite
+    /// the control state of the caption buttons themselves.
     pub show_without_activation: bool,
     /// Whether a separate semantic glyph layer is painted over each caption button face.
     pub draw_separate_glyphs: bool,
@@ -241,14 +241,14 @@ pub struct Skin {
     revision: SkinRevision,
     /// Layout and widget geometry values.
     pub metrics: SkinMetrics,
-    /// Complete background and foreground visuals indexed by semantic role and interaction state.
+    /// Complete background and foreground visuals stored in their semantic state families.
     ///
     /// Storage stays private so every public read and replacement crosses the API as one `Visual`.
     /// This prevents callers from temporarily or permanently pairing a new background with the
     /// foreground belonging to an unrelated state.
-    visuals: RoleTable<StateTable<Visual>>,
+    appearances: AppearanceCatalog,
     /// Window-title and caption-control arrangement.
-    pub chrome: WindowChromeSkin,
+    pub window_chrome: WindowChromeSkin,
 }
 
 impl Skin {
@@ -270,7 +270,7 @@ impl Skin {
         let palette = FlatPalette::default();
         // Build complete visuals from the same concrete flat values stored below. JSON theme
         // loading follows this identical fallback constructor before replacing authored states.
-        let visuals = visuals_from_flat_palette(SliceInsets::uniform(1), &palette);
+        let appearances = visuals_from_flat_palette(SliceInsets::uniform(1), &palette);
         Self {
             revision: SkinRevision::allocate(),
             metrics: SkinMetrics {
@@ -284,8 +284,8 @@ impl Skin {
                 scrollbar_size: 12,
                 thumb_size: 8,
             },
-            visuals,
-            chrome: WindowChromeSkin::trailing_buttons(),
+            appearances,
+            window_chrome: WindowChromeSkin::trailing_buttons(),
         }
     }
 
@@ -310,8 +310,8 @@ impl Skin {
         // Preserve the currently selected generic frame geometry while replacing all flat paint
         // values. Callers that need different frame geometry can update that typed visual after.
         let frame_insets = self.frame_insets();
-        self.visuals = visuals_from_flat_palette(frame_insets, &palette);
-        self.chrome.set_backdrop_color(palette.title_background);
+        self.appearances = visuals_from_flat_palette(frame_insets, &palette);
+        self.window_chrome.set_backdrop_color(palette.title_background);
     }
 
     /// Applies a concrete metrics edit and returns the resulting skin.
@@ -329,9 +329,8 @@ impl Skin {
     pub(crate) fn belongs_to(&self, atlas: &AtlasHandle) -> bool {
         // Retained widget resources are stable FontRef/IconRef values and therefore need no owner
         // check. Only compiled image patches contain renderer-facing atlas capabilities.
-        self.visuals
+        self.appearances
             .iter()
-            .flat_map(StateTable::iter)
             .map(|visual| visual.patch)
             .filter_map(NinePatch::image_content)
             .all(|image| atlas.contains_icon(image.icon))
@@ -341,46 +340,62 @@ impl Skin {
     pub(crate) fn frame_insets(&self) -> SliceInsets {
         // NinePatch owns normalization so layout and renderer geometry cannot disagree on negative
         // application-provided style components.
-        self.visual(AppearanceRole::Surface(SurfaceRole::GenericFrame), VisualState::Normal)
-            .patch
-            .insets
-            .normalized()
+        self.surface(SurfaceRole::GenericFrame, SurfaceState::Normal).patch.insets.normalized()
     }
 
-    /// Returns the complete visual assigned to one semantic role and interaction state.
-    pub fn visual(&self, role: AppearanceRole, state: VisualState) -> Visual {
-        // Both indices are closed enums and both tables are total, so lookup cannot fail or require
-        // a string key, type erasure, fallback branch, or runtime downcast.
-        self.visuals[role][state]
+    /// Returns one structural surface visual.
+    pub fn surface(&self, role: SurfaceRole, state: SurfaceState) -> Visual {
+        // Family-specific parameters make pointer, menu-open, and activation states unrepresentable.
+        self.appearances.surface(role, state)
     }
 
-    /// Replaces one complete visual while preserving every sibling role and state.
-    pub fn set_visual(&mut self, role: AppearanceRole, state: VisualState, visual: Visual) {
-        // Copy the small fixed state table, update its typed slot, then replace the role atomically.
-        // No API exists for publishing only the patch or foreground half of the new value.
-        let mut states = self.role_visuals(role);
-        states.set(state, visual);
-        self.visuals.set(role, states);
+    /// Replaces one complete structural surface visual.
+    pub fn set_surface(&mut self, role: SurfaceRole, state: SurfaceState, visual: Visual) {
+        // Patch and foreground cross the mutation boundary together as one complete value.
+        self.appearances.set_surface(role, state, visual);
     }
 
-    /// Replaces the complete state table for one semantic role.
-    pub fn set_role_visuals(&mut self, role: AppearanceRole, visuals: StateTable<Visual>) {
-        // RoleTable supplies copy-on-write value semantics when a cloned Skin is customized.
-        self.visuals.set(role, visuals);
+    /// Returns one interactive control visual.
+    pub fn control(&self, role: ControlRole, state: ControlState) -> Visual {
+        // Disabled controls cannot be queried with a contradictory hover or focus state.
+        self.appearances.control(role, state)
     }
 
-    /// Returns a copy of every complete interaction-state visual for one semantic role.
-    pub(crate) fn role_visuals(&self, role: AppearanceRole) -> StateTable<Visual> {
-        // Returning the concrete table by value lets builders prepare a coherent replacement
-        // without exposing the private table shared by cloned skins.
-        self.visuals[role]
+    /// Replaces one complete interactive control visual.
+    pub fn set_control(&mut self, role: ControlRole, state: ControlState, visual: Visual) {
+        // Patch and foreground cross the mutation boundary together as one complete value.
+        self.appearances.set_control(role, state, visual);
+    }
+
+    /// Returns one menu visual.
+    pub fn menu(&self, role: MenuRole, state: MenuState) -> Visual {
+        // The menu family alone exposes the persistent Open selection state.
+        self.appearances.menu(role, state)
+    }
+
+    /// Replaces one complete menu visual.
+    pub fn set_menu(&mut self, role: MenuRole, state: MenuState, visual: Visual) {
+        // Patch and foreground cross the mutation boundary together as one complete value.
+        self.appearances.set_menu(role, state, visual);
+    }
+
+    /// Returns one manager-owned window chrome visual.
+    pub fn chrome(&self, role: ChromeRole, state: ChromeState) -> Visual {
+        // Pointer and keyboard focus states cannot enter activation-driven chrome lookup.
+        self.appearances.chrome(role, state)
+    }
+
+    /// Replaces one complete manager-owned window chrome visual.
+    pub fn set_chrome(&mut self, role: ChromeRole, state: ChromeState, visual: Visual) {
+        // Patch and foreground cross the mutation boundary together as one complete value.
+        self.appearances.set_chrome(role, state, visual);
     }
 
     /// Rebuilds all visual roles from a flat palette and a shared fallback frame geometry.
     pub(crate) fn replace_flat_visuals(&mut self, frame_insets: SliceInsets, palette: &FlatPalette) {
         // Theme loading compiles authoring data into the same private concrete table as defaults.
         // The serialized representation is never retained as a second source of runtime truth.
-        self.visuals = visuals_from_flat_palette(frame_insets, palette);
+        self.appearances = visuals_from_flat_palette(frame_insets, palette);
     }
 
     /// Returns the active atlas capability for one semantic font role.
@@ -460,18 +475,16 @@ mod tests {
         // Stable FontRef and IconRef values do not participate in atlas ownership. A compiled
         // image patch remains the sole atlas-bound skin value and must still be rejected.
         let mut candidate = local;
-        crate::test_support::replace_skin_patches(
-            &mut candidate,
-            AppearanceRole::Control(ControlRole::Button),
-            crate::StateTable::filled(NinePatch::image(
+        crate::test_support::replace_control_patches(&mut candidate, ControlRole::Button, |_| {
+            NinePatch::image(
                 SliceInsets::ZERO,
                 crate::NinePatchImage::new(
                     IconRole::Close.resolve(&foreign_atlas),
                     SliceInsets::ZERO,
                     Color { r: 255, g: 255, b: 255, a: 255 },
                 ),
-            )),
-        );
+            )
+        });
 
         assert!(!candidate.belongs_to(&local_atlas));
     }
@@ -491,11 +504,9 @@ mod tests {
     fn frame_insets_normalize_each_component_without_changing_cells() {
         let atlas = make_test_atlas(&[(FontRole::Body.atlas_name(), 12)]);
         let mut style = Skin::from_atlas(&atlas);
-        crate::test_support::replace_skin_patches(
-            &mut style,
-            AppearanceRole::Surface(SurfaceRole::GenericFrame),
-            crate::StateTable::filled(NinePatch::framed(SliceInsets::new(-4, 2, -3, 5), Color { r: 10, g: 20, b: 30, a: 255 }, None)),
-        );
+        crate::test_support::replace_surface_patches(&mut style, SurfaceRole::GenericFrame, |_| {
+            NinePatch::framed(SliceInsets::new(-4, 2, -3, 5), Color { r: 10, g: 20, b: 30, a: 255 }, None)
+        });
         let insets = style.frame_insets();
 
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (0, 2, 0, 5));

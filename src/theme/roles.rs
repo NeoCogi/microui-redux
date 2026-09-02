@@ -5,23 +5,20 @@
 // modification, are permitted provided that the conditions in LICENSE are met.
 //
 
-//! Exhaustive semantic indices used by the concrete skin tables.
-//!
-//! This module deliberately defines each indexed enum and its serialized spelling in one place.
-//! Adding a role or state therefore changes the enum, its count, its ordered traversal, and its
-//! external name together instead of relying on several manually synchronized match expressions.
+//! Semantic appearance roles and the state domains that are meaningful for each family.
 
-/// Defines a fieldless enum whose declaration order is also its fixed-table index order.
+/// Defines a fieldless semantic role whose declaration order indexes one family catalog.
 ///
-/// The macro is private because the generated enums are the public contract; exposing the macro
-/// would let downstream crates create unrelated index domains that the skin tables cannot store.
-macro_rules! indexed_enum {
+/// The macro is private because only the four appearance families are storage domains. Keeping
+/// count, traversal, and indexing beside each declaration prevents hand-maintained offsets or a
+/// flattened cross-family role list from reappearing.
+macro_rules! indexed_role {
     (
         $(#[$enum_meta:meta])*
         pub enum $name:ident {
             $(
                 $(#[$variant_meta:meta])*
-                $variant:ident => $external_name:literal
+                $variant:ident
             ),+ $(,)?
         }
     ) => {
@@ -38,220 +35,261 @@ macro_rules! indexed_enum {
         }
 
         impl $name {
-            /// Number of values in this closed index domain.
+            /// Number of roles in this closed semantic family.
             pub const COUNT: usize = [$(Self::$variant),+].len();
 
-            /// Every value in discriminant and fixed-table order.
+            /// Every role in declaration and family-catalog order.
             pub const ALL: [Self; Self::COUNT] = [$(Self::$variant),+];
 
-            /// Returns the stable snake-case spelling used by authored skin documents.
-            pub const fn json_name(self) -> &'static str {
-                // Exhaustive matching makes the compiler require an external spelling whenever a
-                // new semantic value is introduced.
-                match self {
-                    $(Self::$variant => $external_name,)+
-                }
-            }
-
-            /// Converts the value into its checked fixed-table index.
+            /// Converts this closed role into its family-local array index.
             pub(crate) const fn index(self) -> usize {
-                // The representation is contiguous because the macro emits no explicit
-                // discriminants and callers cannot construct an enum outside these variants.
+                // The macro emits contiguous variants without explicit discriminants, so the cast
+                // cannot escape the array whose length is generated from the same declaration.
                 self as usize
             }
         }
     };
 }
 
-indexed_enum! {
-    /// Structural surface painted without knowledge of a concrete container implementation.
+indexed_role! {
+    /// Structural surfaces whose presentation depends only on availability.
     pub enum SurfaceRole {
         /// Generic frame requested through [`crate::WidgetOption::FRAME`].
-        GenericFrame => "generic_frame",
+        GenericFrame,
         /// Content panel or scroll-area viewport background.
-        Panel => "panel",
+        Panel,
     }
 }
 
-indexed_enum! {
-    /// Interactive control part shared by built-in widgets with equivalent visual behavior.
+indexed_role! {
+    /// Interactive control parts sharing pointer and keyboard-focus behavior.
     pub enum ControlRole {
         /// Ordinary command button or button-like list box.
-        Button => "button",
-        /// Checkbox square; checked state is represented by the independently painted check glyph.
-        Checkbox => "checkbox",
+        Button,
+        /// Checkbox square; checked state is represented by an independently painted glyph.
+        Checkbox,
         /// Single-line, multiline, or numeric text input background.
-        TextInput => "text_input",
-        /// Generic item or tree row whose interaction state supplies transient selection.
-        Item => "item",
+        TextInput,
+        /// Generic item or tree row whose state supplies transient selection.
+        Item,
         /// Combo-box header.
-        Combo => "combo",
+        Combo,
         /// Slider background track.
-        SliderTrack => "slider_track",
+        SliderTrack,
         /// Slider value thumb.
-        SliderThumb => "slider_thumb",
+        SliderThumb,
         /// Scrollbar background track.
-        ScrollbarTrack => "scrollbar_track",
+        ScrollbarTrack,
         /// Scrollbar movable thumb.
-        ScrollbarThumb => "scrollbar_thumb",
+        ScrollbarThumb,
+        /// Window close caption button.
+        CloseButton,
+        /// Window minimize caption button.
+        MinimizeButton,
+        /// Window maximize caption button.
+        MaximizeButton,
+        /// Window restore caption button used while maximized.
+        RestoreButton,
+        /// Visible bottom-right resize grip.
+        ResizeGrip,
+        /// Optional themed symbol painted inside the close caption button.
+        CloseGlyph,
+        /// Optional themed symbol painted inside the minimize caption button.
+        MinimizeGlyph,
+        /// Optional themed symbol painted inside the maximize caption button.
+        MaximizeGlyph,
+        /// Optional themed symbol painted inside the restore caption button.
+        RestoreGlyph,
     }
 }
 
-indexed_enum! {
-    /// Menu-owned surface or entry independent of retained widget implementation types.
+indexed_role! {
+    /// Menu-owned surfaces and entries with menu-specific open-selection behavior.
     pub enum MenuRole {
         /// Menu bar spanning a window.
-        Bar => "bar",
-        /// Menu-bar title that does not own an open popup.
-        Title => "title",
-        /// Menu-bar title whose popup is open.
-        TitleOpen => "title_open",
+        Bar,
+        /// Menu-bar title; [`MenuState::Open`] represents ownership of an open popup.
+        Title,
         /// Popup-menu panel.
-        Popup => "popup",
-        /// Ordinary menu item row.
-        Item => "item",
+        Popup,
+        /// Ordinary menu item or submenu row.
+        Item,
     }
 }
 
-indexed_enum! {
-    /// Manager-owned window frame, title, caption, glyph, or resize visual.
+indexed_role! {
+    /// Manager-owned window chrome whose presentation follows window activation.
     pub enum ChromeRole {
-        /// Normal window outer frame and body.
-        WindowFrame => "window_frame",
-        /// Active window outer frame and body.
-        WindowFrameActive => "window_frame_active",
-        /// Normal modal-dialog outer frame and body.
-        DialogFrame => "dialog_frame",
-        /// Active modal-dialog outer frame and body.
-        DialogFrameActive => "dialog_frame_active",
-        /// Normal window title background.
-        Title => "title",
-        /// Active window title background.
-        TitleActive => "title_active",
-        /// Window close caption button.
-        CloseButton => "close_button",
-        /// Window minimize caption button.
-        MinimizeButton => "minimize_button",
-        /// Window maximize caption button.
-        MaximizeButton => "maximize_button",
-        /// Window restore caption button used while maximized.
-        RestoreButton => "restore_button",
-        /// Visible bottom-right resize grip.
-        ResizeGrip => "resize_grip",
-        /// Optional themed glyph painted inside the window close button.
-        CloseGlyph => "close_glyph",
-        /// Optional themed glyph painted inside the window minimize button.
-        MinimizeGlyph => "minimize_glyph",
-        /// Optional themed glyph painted inside the window maximize button.
-        MaximizeGlyph => "maximize_glyph",
-        /// Optional themed glyph painted inside the window restore button.
-        RestoreGlyph => "restore_glyph",
+        /// Window outer frame and body.
+        WindowFrame,
+        /// Modal-dialog outer frame and body.
+        DialogFrame,
+        /// Window title background and foreground.
+        Title,
     }
 }
 
-/// Semantic family and visual part painted by the built-in user interface.
+/// Appearance family used by the retained node frame contract.
 ///
-/// The outer category describes a rendering domain, while each nested enum names only parts in
-/// that domain. This prevents the loader and skin catalog from acquiring knowledge of concrete
-/// widget or container Rust types without introducing erased storage or dynamic dispatch.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub enum AppearanceRole {
-    /// Structural frame or panel presentation.
+/// This sum is deliberately limited to the two families a widget frame can use. It is not a skin
+/// catalog key: lookup remains family-specific, and menu or chrome roles cannot enter generic node
+/// layout by accident.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum FrameRole {
+    /// Structural frame whose pointer and focus state is irrelevant.
     Surface(SurfaceRole),
-    /// Interactive control presentation.
+    /// Interactive control frame resolved from the owning widget's state.
     Control(ControlRole),
-    /// Compact menu presentation.
-    Menu(MenuRole),
-    /// Manager-owned window chrome presentation.
-    Chrome(ChromeRole),
 }
 
-impl AppearanceRole {
-    /// Number of values across all closed appearance families.
-    pub const COUNT: usize = SurfaceRole::COUNT + ControlRole::COUNT + MenuRole::COUNT + ChromeRole::COUNT;
+/// Pointer interaction nested inside an enabled control state.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum PointerState {
+    /// Pointer is not hovering or pressing the control.
+    Normal,
+    /// Pointer is hovering the control without an active press.
+    Hovered,
+    /// Pointer capture is pressed while the pointer remains over the control.
+    Pressed,
+}
 
-    /// Every categorized role in fixed-table order.
-    pub const ALL: [Self; Self::COUNT] = Self::collect_all();
+impl PointerState {
+    /// Number of pointer states in each enabled control branch.
+    pub const COUNT: usize = 3;
 
-    /// Builds [`Self::ALL`] from each family's independently generated ordered values.
-    const fn collect_all() -> [Self; Self::COUNT] {
-        // Populate one concrete array in family order so declarations remain authoritative and no
-        // manually duplicated flattened role list can drift from a nested enum.
-        let mut roles = [Self::Surface(SurfaceRole::GenericFrame); Self::COUNT];
-        let mut destination = 0;
-        let mut source = 0;
-        while source < SurfaceRole::COUNT {
-            roles[destination] = Self::Surface(SurfaceRole::ALL[source]);
-            destination += 1;
-            source += 1;
-        }
-        source = 0;
-        while source < ControlRole::COUNT {
-            roles[destination] = Self::Control(ControlRole::ALL[source]);
-            destination += 1;
-            source += 1;
-        }
-        source = 0;
-        while source < MenuRole::COUNT {
-            roles[destination] = Self::Menu(MenuRole::ALL[source]);
-            destination += 1;
-            source += 1;
-        }
-        source = 0;
-        while source < ChromeRole::COUNT {
-            roles[destination] = Self::Chrome(ChromeRole::ALL[source]);
-            destination += 1;
-            source += 1;
-        }
-        roles
-    }
+    /// Every pointer state in family-catalog order.
+    pub const ALL: [Self; Self::COUNT] = [Self::Normal, Self::Hovered, Self::Pressed];
 
-    /// Converts one categorized role into its checked flattened table index.
-    pub(crate) const fn index(self) -> usize {
-        // Fixed family offsets preserve one compact exhaustive catalog without exposing a second
-        // storage abstraction for each category.
+    /// Converts this closed pointer state into its branch-local array index.
+    const fn index(self) -> usize {
+        // The explicit match remains valid independently of enum representation choices.
         match self {
-            Self::Surface(role) => role.index(),
-            Self::Control(role) => SurfaceRole::COUNT + role.index(),
-            Self::Menu(role) => SurfaceRole::COUNT + ControlRole::COUNT + role.index(),
-            Self::Chrome(role) => SurfaceRole::COUNT + ControlRole::COUNT + MenuRole::COUNT + role.index(),
+            Self::Normal => 0,
+            Self::Hovered => 1,
+            Self::Pressed => 2,
         }
     }
 }
 
-indexed_enum! {
-    /// Mutually exclusive interaction state used to select one visual.
-    pub enum VisualState {
-        /// Enabled widget with no hover, focus, or active press.
-        Normal => "normal",
-        /// Pointer is over an enabled widget.
-        Hovered => "hovered",
-        /// Pointer capture is pressed over an enabled widget.
-        Pressed => "pressed",
-        /// Keyboard focus is visible without pointer hover.
-        Focused => "focused",
-        /// Keyboard focus and pointer hover are both present.
-        HoveredFocused => "hovered_focused",
-        /// Keyboard focus and a pointer press are both present.
-        PressedFocused => "pressed_focused",
-        /// Widget or menu item is disabled regardless of pointer position.
-        Disabled => "disabled",
+/// State of an interactive control, excluding impossible disabled interaction combinations.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum ControlState {
+    /// Control is unavailable; pointer and keyboard-focus presentation no longer apply.
+    Disabled,
+    /// Control is available without keyboard focus and has the enclosed pointer state.
+    Enabled(PointerState),
+    /// Control owns visible keyboard focus and has the enclosed pointer state.
+    Focused(PointerState),
+}
+
+impl ControlState {
+    /// Number of concrete control states stored for each control role.
+    pub const COUNT: usize = 1 + PointerState::COUNT * 2;
+
+    /// Every concrete control state in family-catalog order.
+    pub const ALL: [Self; Self::COUNT] = [
+        Self::Disabled,
+        Self::Enabled(PointerState::Normal),
+        Self::Enabled(PointerState::Hovered),
+        Self::Enabled(PointerState::Pressed),
+        Self::Focused(PointerState::Normal),
+        Self::Focused(PointerState::Hovered),
+        Self::Focused(PointerState::Pressed),
+    ];
+
+    /// Resolves one exact control state from retained interaction facts.
+    pub const fn from_interaction(enabled: bool, hovered: bool, focused: bool, pressed: bool) -> Self {
+        if !enabled {
+            // Disabled is terminal: a disabled control cannot expose misleading hover or press art.
+            return Self::Disabled;
+        }
+        let pointer = if pressed {
+            PointerState::Pressed
+        } else if hovered {
+            PointerState::Hovered
+        } else {
+            PointerState::Normal
+        };
+        if focused { Self::Focused(pointer) } else { Self::Enabled(pointer) }
+    }
+
+    /// Converts this closed state into its control-catalog array index.
+    pub(crate) const fn index(self) -> usize {
+        // Disabled occupies one slot; the two enabled branches then occupy equal contiguous spans.
+        match self {
+            Self::Disabled => 0,
+            Self::Enabled(pointer) => 1 + pointer.index(),
+            Self::Focused(pointer) => 1 + PointerState::COUNT + pointer.index(),
+        }
     }
 }
 
-impl VisualState {
-    /// Resolves one exact state from concrete widget interaction facts.
-    pub const fn from_interaction(enabled: bool, hovered: bool, focused: bool, pressed: bool) -> Self {
-        // Disabled wins before the ordinary press, hover, and focus ladder. Window activation is
-        // deliberately represented by distinct appearance roles rather than smuggled into state.
+/// Availability state of a noninteractive structural surface.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum SurfaceState {
+    /// Surface belongs to an enabled retained subtree.
+    Normal,
+    /// Surface belongs to a disabled retained subtree.
+    Disabled,
+}
+
+impl SurfaceState {
+    /// Number of concrete surface states stored for each surface role.
+    pub const COUNT: usize = 2;
+
+    /// Every surface state in family-catalog order.
+    pub const ALL: [Self; Self::COUNT] = [Self::Normal, Self::Disabled];
+
+    /// Resolves surface availability without accepting pointer or focus facts.
+    pub const fn from_enabled(enabled: bool) -> Self {
+        // The binary domain keeps structural surfaces independent from widget interaction.
+        if enabled { Self::Normal } else { Self::Disabled }
+    }
+
+    /// Converts this closed state into its surface-catalog array index.
+    pub(crate) const fn index(self) -> usize {
+        // The match documents storage order rather than relying on a representation cast.
+        match self {
+            Self::Normal => 0,
+            Self::Disabled => 1,
+        }
+    }
+}
+
+/// State of a menu surface or entry after menu-specific precedence is resolved.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum MenuState {
+    /// Enabled entry or surface without transient selection.
+    Normal,
+    /// Pointer is over an enabled entry.
+    Hovered,
+    /// Pointer capture is pressed over an enabled entry.
+    Pressed,
+    /// Keyboard navigation selected an enabled entry.
+    Focused,
+    /// Entry owns the popup currently open beneath it.
+    Open,
+    /// Entry or surface is unavailable.
+    Disabled,
+}
+
+impl MenuState {
+    /// Number of concrete menu states stored for each menu role.
+    pub const COUNT: usize = 6;
+
+    /// Every menu state in family-catalog order.
+    pub const ALL: [Self; Self::COUNT] = [Self::Normal, Self::Hovered, Self::Pressed, Self::Focused, Self::Open, Self::Disabled];
+
+    /// Resolves menu selection with one explicit precedence order.
+    pub const fn from_interaction(enabled: bool, open: bool, hovered: bool, focused: bool, pressed: bool) -> Self {
+        // Open selection remains stable while moving through the owned popup; ordinary pointer and
+        // keyboard selection matter only when this entry does not own that popup.
         if !enabled {
             Self::Disabled
-        } else if pressed && focused {
-            Self::PressedFocused
+        } else if open {
+            Self::Open
         } else if pressed {
             Self::Pressed
-        } else if hovered && focused {
-            Self::HoveredFocused
         } else if hovered {
             Self::Hovered
         } else if focused {
@@ -260,35 +298,94 @@ impl VisualState {
             Self::Normal
         }
     }
+
+    /// Converts this closed state into its menu-catalog array index.
+    pub(crate) const fn index(self) -> usize {
+        // The explicit mapping keeps serialized field order irrelevant to runtime storage.
+        match self {
+            Self::Normal => 0,
+            Self::Hovered => 1,
+            Self::Pressed => 2,
+            Self::Focused => 3,
+            Self::Open => 4,
+            Self::Disabled => 5,
+        }
+    }
+}
+
+/// State of manager-owned chrome after activation and availability are resolved.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum ChromeState {
+    /// Enabled chrome for a window that does not own activation.
+    Base,
+    /// Enabled chrome for the active window.
+    Active,
+    /// Chrome belonging to a disabled window.
+    Disabled,
+}
+
+impl ChromeState {
+    /// Number of concrete chrome states stored for each chrome role.
+    pub const COUNT: usize = 3;
+
+    /// Every chrome state in family-catalog order.
+    pub const ALL: [Self; Self::COUNT] = [Self::Base, Self::Active, Self::Disabled];
+
+    /// Resolves chrome state from availability and window activation.
+    pub const fn from_window(enabled: bool, active: bool) -> Self {
+        // A disabled window never presents active chrome even if it remains manager-selected.
+        if !enabled {
+            Self::Disabled
+        } else if active {
+            Self::Active
+        } else {
+            Self::Base
+        }
+    }
+
+    /// Converts this closed state into its chrome-catalog array index.
+    pub(crate) const fn index(self) -> usize {
+        // The explicit mapping avoids giving the word "inactive" two unrelated UI meanings.
+        match self {
+            Self::Base => 0,
+            Self::Active => 1,
+            Self::Disabled => 2,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Keeps declaration order, table indices, and authored spellings synchronized.
+    /// Keeps every closed state domain synchronized with its family-local storage index.
     #[test]
-    fn generated_metadata_is_complete_and_index_ordered() {
-        for (index, role) in AppearanceRole::ALL.into_iter().enumerate() {
-            assert_eq!(role.index(), index);
-        }
-        // Category-local authored names are exhaustive within each typed document map; equal
-        // local names such as control.item and menu.item remain unambiguous through their family.
-        for role in SurfaceRole::ALL {
-            assert!(!role.json_name().is_empty());
-        }
-        for role in ControlRole::ALL {
-            assert!(!role.json_name().is_empty());
-        }
-        for role in MenuRole::ALL {
-            assert!(!role.json_name().is_empty());
-        }
-        for role in ChromeRole::ALL {
-            assert!(!role.json_name().is_empty());
-        }
-        for (index, state) in VisualState::ALL.into_iter().enumerate() {
+    fn state_metadata_is_complete_and_index_ordered() {
+        for (index, state) in ControlState::ALL.into_iter().enumerate() {
             assert_eq!(state.index(), index);
-            assert!(!state.json_name().is_empty());
         }
+        for (index, state) in SurfaceState::ALL.into_iter().enumerate() {
+            assert_eq!(state.index(), index);
+        }
+        for (index, state) in MenuState::ALL.into_iter().enumerate() {
+            assert_eq!(state.index(), index);
+        }
+        for (index, state) in ChromeState::ALL.into_iter().enumerate() {
+            assert_eq!(state.index(), index);
+        }
+    }
+
+    /// Verifies disabled, focus, and pointer facts resolve without representable contradictions.
+    #[test]
+    fn control_state_nests_pointer_interaction_only_inside_enabled_branches() {
+        assert_eq!(ControlState::from_interaction(false, true, true, true), ControlState::Disabled);
+        assert_eq!(
+            ControlState::from_interaction(true, true, false, false),
+            ControlState::Enabled(PointerState::Hovered)
+        );
+        assert_eq!(
+            ControlState::from_interaction(true, true, true, true),
+            ControlState::Focused(PointerState::Pressed)
+        );
     }
 }

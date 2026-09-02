@@ -37,19 +37,21 @@ switching themes cannot gradually accumulate fonts, icons, or artwork.
 | --- | --- |
 | `Skin` | One resolved value containing metrics, complete visuals, and chrome policy. |
 | `SkinMetrics` | Layout, spacing, window inset, border, title, scrollbar, and thumb geometry. |
-| `Skin::visual` | Resolves one complete `Visual { patch, foreground }` for a role and state. |
-| `AppearanceRole` | Closed sum of the surface, control, menu, and chrome role families. |
+| `Skin::surface` / `control` / `menu` / `chrome` | Resolves one complete `Visual { patch, foreground }` in a concrete family. |
 | `SurfaceRole` / `ControlRole` | Concrete structural and interactive widget-facing roles. |
 | `MenuRole` / `ChromeRole` | Concrete menu and manager-owned window-decoration roles. |
-| `VisualState` | Closed interaction domain: normal, hover, press, focus combinations, and disabled. |
-| `StateTable<T>` | Exhaustive state-indexed generic storage with one concrete `T`. |
+| `SurfaceState` | Structural availability: normal or disabled. |
+| `ControlState` / `PointerState` | Disabled, or enabled/focused with a nested normal, hovered, or pressed pointer state. |
+| `MenuState` | Menu-local normal, hovered, pressed, focused, open, and disabled states. |
+| `ChromeState` | Window-local base, active, and disabled states. |
 | `WindowChromeSkin` | Data recipe for title alignment, caption placement, sizing, and backdrop. |
 | `FontRef` / `IconRef` | Stable semantic or named references resolved against the active bundle. |
 | `SkinBundle` | Validated atomic ownership of one skin and its exact atlas. |
 
-The generic tables provide code sharing without erasing types. Both enum domains expose `ALL` and
-`COUNT`; lookup is total, and a new role or state must participate in the complete table contract.
-Paint resolves one `Visual`, keeping a state's artwork and foreground adjacent.
+Each role and state enum exposes `ALL` and `COUNT`. The private catalog stores four concrete arrays,
+so lookup is total inside each family and code cannot pass menu-open state to a widget or pointer
+state to a window frame. Paint resolves one `Visual`, keeping a state's artwork and foreground
+adjacent without erased values or a universal role/state cross-product.
 
 ## Programmatic construction
 
@@ -57,15 +59,15 @@ Start from a skin whose atlas ownership is known, mutate its concrete fields, an
 completed value:
 
 ```rust,ignore
-use microui_redux::{color, AppearanceRole, ControlRole, Visual, VisualState};
+use microui_redux::{color, ControlRole, ControlState, PointerState, Visual};
 
 let mut skin = context.skin().clone();
 skin.metrics.padding = 8;
-let button = AppearanceRole::Control(ControlRole::Button);
-let focused_button = skin.visual(button, VisualState::Focused);
-skin.set_visual(
-    button,
-    VisualState::Focused,
+let state = ControlState::Focused(PointerState::Normal);
+let focused_button = skin.control(ControlRole::Button, state);
+skin.set_control(
+    ControlRole::Button,
+    state,
     Visual::new(focused_button.patch, color(255, 255, 255, 255)),
 );
 context.set_skin(skin);
