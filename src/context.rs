@@ -40,7 +40,7 @@ use crate::window_manager::{LayerBinding, PopupHandle, SurfaceCreationError, Sur
 #[cfg(test)]
 use crate::window_manager::RootId;
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, FrameInfo, RenderError, Renderer, RendererBackend};
-use crate::{AtlasHandle, Dimensioni, ImageSource, KeyEvent, MouseButton, Node, Recti, ResourceCatalog, Skin, SkinBundle, TextureError, TextureId};
+use crate::{AtlasHandle, Dimensioni, ImageSource, KeyEvent, Menu, MouseButton, Node, Recti, ResourceCatalog, Skin, SkinBundle, TextureError, TextureId};
 #[cfg(feature = "theme-json")]
 use crate::{LoadedTheme, ThemeLoadError};
 #[cfg(feature = "theme-json")]
@@ -134,6 +134,22 @@ impl<'a> Ui<'a> {
         self.window_manager.create_popup(parent, name, content)
     }
 
+    /// Creates a hidden popup menu owned directly by `parent`.
+    ///
+    /// The supplied [`Menu`] is the same concrete declaration used below a menu-bar heading. Its
+    /// label names the retained popup for diagnostics; its items, separators, and submenus are
+    /// presented by the normal compact menu surface when the returned handle is shown.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SurfaceCreationError<Menu>`] when `parent` is stale or belongs to another
+    /// Context. [`SurfaceCreationError::into_input`] recovers the unchanged menu declaration.
+    #[allow(clippy::result_large_err)] // Failure deliberately returns the complete unique Menu without allocation or erasure.
+    pub fn create_menu_popup(&mut self, parent: &WindowHandle, menu: Menu) -> Result<PopupHandle, SurfaceCreationError<Menu>> {
+        // Authenticate the owner capability before transferring the menu into the surface forest.
+        self.window_manager.create_menu_popup(parent, menu)
+    }
+
     /// Replaces a retained window or dialog title before the next layout commit.
     pub fn set_window_name(&mut self, window: &WindowHandle, name: impl Into<String>) -> Result<(), SurfaceMutationError> {
         // Convert the caller-facing string once at the concrete manager boundary that owns it.
@@ -199,7 +215,7 @@ impl<'a> Ui<'a> {
         self.window_manager.set_window_visible(window, visible)
     }
 
-    /// Shows a popup at the current pointer position and gives its widget tree keyboard focus.
+    /// Shows a popup at the current pointer position and activates its keyboard scope.
     pub fn show_popup(&mut self, popup: &PopupHandle) -> Result<(), SurfaceMutationError> {
         // Placement and active-path replacement remain atomic inside the manager.
         self.window_manager.show_popup(popup)
@@ -214,12 +230,13 @@ impl<'a> Ui<'a> {
         self.window_manager.hide_popup(popup)
     }
 
-    /// Shows and focuses a popup at an exact screen-space anchor before the following layout commit.
+    /// Shows and activates a popup at an exact screen-space anchor before the following layout commit.
     ///
     /// This atomic form is intended for composed controls such as combos. It applies popup-path
-    /// replacement, replaces the popup rectangle, and selects its first eligible keyboard target
-    /// after layout, so no pointer-relative intermediate placement can be observed. The typed
-    /// handle prevents passing a window or dialog as the popup target.
+    /// replacement and replaces the popup rectangle, so no pointer-relative intermediate placement
+    /// can be observed. Widget popups select their first eligible keyboard target after layout;
+    /// popup menus enter their ordinary compact-menu keyboard scope. The typed handle prevents
+    /// passing a window or dialog as the popup target.
     pub fn show_popup_at(&mut self, popup: &PopupHandle, anchor: Recti) -> Result<(), SurfaceMutationError> {
         // Delegate the complete transaction while retaining compile-time popup identity across the
         // event façade boundary.

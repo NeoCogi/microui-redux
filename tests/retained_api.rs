@@ -313,6 +313,38 @@ fn downstream_window_owns_declarative_menu_and_live_concrete_items() {
     assert!(!model.word_wrap.submitted().is_alive());
 }
 
+/// Verifies downstream code can reuse one Menu declaration as an application-addressable popup.
+#[test]
+fn downstream_standalone_menu_uses_the_ordinary_popup_lifecycle() {
+    let mut context = context_with_state::<()>();
+    let owner = context
+        .ui()
+        .create_window(Window::new("owner", rect(20, 20, 180, 120), TextBlock::create(TextBlockParameters::new("body")).1));
+    let (inspect, inspect_item) = MenuItem::create(MenuItemParameters::new("Inspect"));
+    let (_, details_item) = MenuItem::create(MenuItemParameters::new("Details"));
+
+    // The same recursive declaration accepted by MenuBar becomes a compact popup without exposing
+    // row widgets or a second menu-specific lifecycle capability.
+    let popup = context
+        .ui()
+        .create_menu_popup(
+            &owner,
+            Menu::new("Object actions")
+                .item(inspect_item)
+                .submenu(Menu::new("More").item(details_item)),
+        )
+        .unwrap();
+    context.ui().show_popup_at(&popup, rect(40, 50, 1, 1)).unwrap();
+    assert!(popup.events().is_alive());
+    assert_eq!(context.ui().menu_item(&inspect).unwrap().label, "Inspect");
+
+    // Popup and menu-item handles are both weak projections of the manager-owned declaration.
+    // Destroying the owner releases the whole surface branch and expires both endpoints.
+    context.ui().destroy_window(&owner).unwrap();
+    assert!(!popup.events().is_alive());
+    assert!(!inspect.submitted().is_alive());
+}
+
 #[test]
 fn every_builtin_container_returns_a_typed_handle_and_completed_node() {
     let (row, row_node) = Linear::create(LinearParameters::horizontal(std::iter::empty::<Node>()));

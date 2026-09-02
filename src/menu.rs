@@ -330,18 +330,18 @@ impl MenuBar {
     }
 }
 
-/// One top-level menu or recursively nested submenu.
+/// One menu declaration used as a bar heading, submenu, or standalone popup menu.
 pub struct Menu {
-    /// User-visible heading or submenu-row label.
+    /// User-visible heading/submenu label, or diagnostic name for a standalone popup menu.
     label: String,
     /// Ordered logical entries transferred into compact popup leaves.
     entries: Vec<MenuEntry>,
 }
 
 impl Menu {
-    /// Creates an empty menu with the supplied user-visible label.
+    /// Creates an empty menu with the supplied heading, submenu label, or popup name.
     pub fn new(label: impl Into<String>) -> Self {
-        // Entries remain declaration data until a window consumes the complete bar.
+        // Entries remain declaration data until a window or standalone popup consumes the menu.
         Self { label: label.into(), entries: Vec::new() }
     }
 

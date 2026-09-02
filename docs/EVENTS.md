@@ -453,15 +453,15 @@ widgets. Multiple component instances are independent dialogs directly owned by 
 windows; the frontmost visible dialog is the active modal group, whether shown or explicitly raised.
 
 Menus need no application-owned component binding. Applications subscribe each concrete
-`MenuItemHandle::submitted()` endpoint, move the uniquely owned `MenuItem` values into
-recursive `Menu` values, install a `MenuBar` on `Window`, and retain only handles for items whose
-presentation changes later. The window manager opens and positions private menu popups from logical
-heading and submenu-row slots cached by direct `MenuSurface` bodies, then closes the derived active
-branch before dispatching an invoked item's event. Item presentation is manager-owned and borrowed
-through `Ui::menu_item` or `Ui::menu_item_mut`; the handle's stable ID selects that record while
-`submitted()` supplies its independent typed endpoint. No command payload, menu coordinator, or public menu-popup handle
-intervenes. See the [menu guide](MENUS.md) for construction, state mutation, and the shared pointer
-and Windows-style keyboard navigation contract.
+`MenuItemHandle::submitted()` endpoint, move the uniquely owned `MenuItem` values into recursive
+`Menu` values, and either install a `MenuBar` on `Window` or pass one `Menu` to
+`Ui::create_menu_popup`. The window manager presents both forms with direct `MenuSurface` bodies and
+closes the derived active branch before dispatching an invoked item's event. Item presentation is
+manager-owned and borrowed through `Ui::menu_item` or `Ui::menu_item_mut`; the handle's stable ID
+selects that record while `submitted()` supplies its independent typed endpoint. A standalone menu
+uses the ordinary `PopupHandle` only for showing, hiding, and dismissal observation—there is no
+menu-specific handle, command payload, or coordinator. See the [menu guide](MENUS.md) for
+construction, state mutation, and the shared pointer and Windows-style keyboard navigation contract.
 
 ```rust
 use microui_redux::prelude::*;

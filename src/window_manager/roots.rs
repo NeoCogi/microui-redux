@@ -89,14 +89,15 @@ impl std::error::Error for SurfaceMutationError {}
 
 /// Failed surface creation together with the unchanged value offered for registration.
 ///
-/// `T` is [`Window`] for child-window and dialog creation and [`Node`] for popup creation. The
-/// concrete type parameter prevents a caller from recovering the wrong kind of owner and avoids
+/// `T` is the exact declaration offered to the failed operation: [`Window`] for child-window and
+/// dialog creation, [`Node`] for a widget popup, or [`Menu`](crate::Menu) for a popup menu. The
+/// concrete type parameter prevents a caller from recovering the wrong kind of input and avoids
 /// type erasure. Read [`Self::reason`] before consuming the error with [`Self::into_input`] to retry,
 /// revise, or otherwise retain the original value.
 pub struct SurfaceCreationError<T> {
     /// Concrete validation failure that prevented any forest mutation.
     reason: SurfaceMutationError,
-    /// Unmodified unique owner supplied by the caller.
+    /// Unmodified unique declaration supplied by the caller.
     input: T,
 }
 
@@ -114,7 +115,7 @@ impl<T> SurfaceCreationError<T> {
         self.reason
     }
 
-    /// Recovers the exact [`Window`] or [`Node`] passed to the failed creation call.
+    /// Recovers the exact typed declaration passed to the failed creation call.
     pub fn into_input(self) -> T {
         // Consume the error so unique ownership has one explicit destination.
         self.input
@@ -124,8 +125,8 @@ impl<T> SurfaceCreationError<T> {
 impl<T> fmt::Debug for SurfaceCreationError<T> {
     /// Reports the validation reason while retaining support for non-Debug unique owners.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Window and Node intentionally expose no structural Debug view. Mark the omitted owner as
-        // non-exhaustive instead of adding an erased/debug-only inspection path.
+        // Unique declaration types intentionally expose no structural Debug requirement. Mark the
+        // omitted input as non-exhaustive instead of adding an erased/debug-only inspection path.
         f.debug_struct("SurfaceCreationError").field("reason", &self.reason).finish_non_exhaustive()
     }
 }
@@ -276,11 +277,11 @@ impl Surface {
     }
 
     /// Creates an auto-sized popup around one concrete menu surface.
-    fn menu(surface: MenuSurface) -> Self {
+    fn menu(name: String, surface: MenuSurface) -> Self {
         // MenuPopup owns its own semantic border and interior. Avoid wrapping it in WindowFrame:
         // classic popup menus use a narrow menu outline, not top-level window corner artwork.
         Self {
-            name: String::new(),
+            name,
             options: WindowOption::NO_PADDING | WindowOption::NO_TITLE | WindowOption::NO_RESIZE | WindowOption::AUTO_SIZE,
             rect: Recti::default(),
             geometry: RootChromeGeometry::default(),
@@ -1257,20 +1258,16 @@ impl WindowManager {
         self.menu_item(handle)?;
         self.invalidate_ui_commit();
         for node in &mut self.surfaces.nodes {
-            match (&mut node.kind, &mut node.surface.body) {
-                (SurfaceKind::Root(root), _) => {
+            match &mut node.kind {
+                SurfaceKind::Root(root) => {
                     if let Some(item) = root.menu_bar.as_mut().and_then(|menu| menu.item_mut(handle)) {
                         return Ok(&mut item.parameters);
                     }
                 }
-                (SurfaceKind::Popup(PopupState::Menu { .. }), SurfaceBody::Menu(menu)) => {
-                    if let Some(item) = menu.item_mut(handle) {
+                SurfaceKind::Popup(_) => {
+                    if let Some(item) = node.surface.body.menu_mut().and_then(|menu| menu.item_mut(handle)) {
                         return Ok(&mut item.parameters);
                     }
-                }
-                (SurfaceKind::Popup(_), SurfaceBody::Widgets { .. }) => {}
-                (SurfaceKind::Popup(_), SurfaceBody::Menu(_)) => {
-                    unreachable!("surface role and concrete body must remain structurally aligned")
                 }
             }
         }
@@ -1375,11 +1372,33 @@ impl WindowManager {
             Err(reason) => return Err(SurfaceCreationError::new(reason, content)),
         };
         // A top-level popup's sole parent edge points directly to its owning root.
-        Ok(self.register_application_popup(SurfaceKey::Root(owner), name, content))
+        let surface = Surface::new(name.to_owned(), Self::default_popup_options(), Recti::default(), content);
+        Ok(self.register_application_popup(SurfaceKey::Root(owner), surface))
     }
 
-    /// Registers one application-authored popup below an already validated root.
-    fn register_application_popup(&mut self, parent: SurfaceKey, name: &str, content: Node) -> PopupHandle {
+    /// Creates a hidden standalone menu popup inside one window or dialog.
+    #[allow(clippy::result_large_err)] // Preserve the complete Menu directly, matching the widget-popup creation contract.
+    pub fn create_menu_popup(&mut self, owner: &WindowHandle, menu: crate::Menu) -> Result<PopupHandle, SurfaceCreationError<crate::Menu>> {
+        // Authenticate while the complete recursive declaration remains recoverable by the caller.
+        let owner = match self.window_id(owner) {
+            Ok(owner) => owner,
+            Err(reason) => return Err(SurfaceCreationError::new(reason, menu)),
+        };
+        let (name, entries) = menu.into_parts();
+        let (rows, children) = Self::consume_menu_entries(entries);
+        let handle = self.register_application_popup(SurfaceKey::Root(owner), Surface::menu(name, MenuSurface::new(rows, true)));
+
+        // Nested declarations retain the same relational children used beneath a menu-bar heading.
+        // Only the root popup has an application handle and exact screen anchor.
+        let parent = SurfaceKey::Popup(handle.id());
+        for (trigger_slot, entries) in children {
+            self.register_menu_popup(parent, trigger_slot, entries);
+        }
+        Ok(handle)
+    }
+
+    /// Registers one application-addressable popup below an already validated root.
+    fn register_application_popup(&mut self, parent: SurfaceKey, surface: Surface) -> PopupHandle {
         let id = PopupId::allocate();
         // The forest node retains the strong lifecycle port while the application handle combines
         // an independent stable ID with a weak endpoint for the same registered popup.
@@ -1388,7 +1407,7 @@ impl WindowManager {
         self.surfaces.insert_popup(SurfaceNode {
             key: SurfaceKey::Popup(id),
             parent: Some(parent),
-            surface: Surface::new(name.to_owned(), Self::default_popup_options(), Recti::default(), content),
+            surface,
             kind: SurfaceKind::Popup(PopupState::Application {
                 anchor: Recti::default(),
                 events,
@@ -1399,8 +1418,8 @@ impl WindowManager {
         PopupHandle::new(id, event_handle)
     }
 
-    /// Consumes one declaration row vector directly into a concrete menu-popup forest node.
-    fn register_menu_popup(&mut self, parent: SurfaceKey, trigger_slot: usize, entries: Vec<MenuEntry>) {
+    /// Separates direct menu rows from recursive children without creating a parallel menu tree.
+    fn consume_menu_entries(entries: Vec<MenuEntry>) -> (Vec<MenuSlot>, Vec<(usize, Vec<MenuEntry>)>) {
         let mut rows = Vec::with_capacity(entries.len());
         let mut children = Vec::new();
         for (slot, entry) in entries.into_iter().enumerate() {
@@ -1416,11 +1435,17 @@ impl WindowManager {
                 }
             }
         }
+        (rows, children)
+    }
+
+    /// Consumes one declaration row vector directly into a relational menu-popup forest node.
+    fn register_menu_popup(&mut self, parent: SurfaceKey, trigger_slot: usize, entries: Vec<MenuEntry>) {
+        let (rows, children) = Self::consume_menu_entries(entries);
         let id = PopupId::allocate();
         self.surfaces.insert_popup(SurfaceNode {
             key: SurfaceKey::Popup(id),
             parent: Some(parent),
-            surface: Surface::menu(MenuSurface::new(rows, true)),
+            surface: Surface::menu(String::new(), MenuSurface::new(rows, true)),
             kind: SurfaceKind::Popup(PopupState::Menu { trigger_slot }),
         });
         // The parent is retained before recursion, satisfying the forest's sole structural invariant.
@@ -1636,13 +1661,15 @@ impl WindowManager {
             self.finish_keyboard_menu(false);
         }
         let node = self.surfaces.popup_node_mut(popup).expect("authenticated popup must remain retained");
+        let focus_widgets = matches!(node.surface.body, SurfaceBody::Widgets { .. });
         let PopupState::Application { anchor: current, focus_on_layout, .. } = node.popup_mut().expect("popup lookup must return popup policy") else {
             return Err(SurfaceMutationError::UnknownPopup);
         };
         *current = anchor;
-        // Geometry is committed later in this transaction, so defer first-focus selection until
-        // the popup tree has valid allocations and clipping.
-        *focus_on_layout = true;
+        // Widget geometry is committed later in this transaction, so defer first-focus selection
+        // until that tree has valid allocations and clipping. Menu bodies own row selection and do
+        // not manufacture a meaningless widget-focus request.
+        *focus_on_layout = focus_widgets;
         node.surface.rect = anchor;
         self.active_surface = Some(SurfaceKey::Popup(popup));
         self.invalidate_ui_commit();
@@ -1925,9 +1952,9 @@ impl WindowManager {
                 // that concrete container as the active route.
                 self.menu_surface(surface)?.keyboard_slot().map(|_| surface)
             }
-            SurfaceKey::Popup(popup) if matches!(self.surfaces.popup_node(popup).and_then(SurfaceNode::popup), Some(PopupState::Menu { .. })) => {
-                // A menu popup retains its own forest identity even when an empty row collection
-                // provides no direct child to select; Escape must still be able to close it.
+            SurfaceKey::Popup(popup) if self.surfaces.popup_node(popup).and_then(|node| node.surface.body.menu()).is_some() => {
+                // Placement policy does not define presentation. Both standalone and relational
+                // menu popups retain their own keyboard scope even when they contain no rows.
                 Some(surface)
             }
             SurfaceKey::Popup(_) => None,
@@ -2230,6 +2257,15 @@ impl WindowManager {
             return false;
         };
         let popup = matches!(surface, SurfaceKey::Popup(_));
+        // Only a relational popup attached directly to a root has sibling bar headings. A
+        // standalone popup and every submenu use their own local horizontal-key behavior.
+        let bar_popup = match surface {
+            SurfaceKey::Popup(popup) => self
+                .surfaces
+                .popup_node(popup)
+                .is_some_and(|node| matches!(node.popup(), Some(PopupState::Menu { .. })) && matches!(node.parent, Some(SurfaceKey::Root(_)))),
+            SurfaceKey::Root(_) => false,
+        };
         match event.key {
             crate::Key::ArrowDown if popup => self.menu_surface_mut(surface).is_some_and(|menu| menu.move_keyboard_focus(true)),
             crate::Key::ArrowUp if popup => self.menu_surface_mut(surface).is_some_and(|menu| menu.move_keyboard_focus(false)),
@@ -2257,19 +2293,16 @@ impl WindowManager {
             }
             crate::Key::ArrowRight if popup => match self.menu_surface(surface).and_then(MenuSurface::keyboard_branch_slot) {
                 Some(slot) => self.open_menu_slot(surface, slot, false),
-                None if self.surfaces.popup_depth(match surface {
-                    SurfaceKey::Popup(id) => id,
-                    SurfaceKey::Root(_) => unreachable!(),
-                }) == Some(0) =>
-                {
-                    self.move_keyboard_menu_heading(root, true, true)
-                }
+                None if bar_popup => self.move_keyboard_menu_heading(root, true, true),
                 None => true,
             },
             crate::Key::ArrowLeft if popup => {
                 let SurfaceKey::Popup(popup) = surface else { unreachable!() };
-                if self.surfaces.popup_depth(popup) == Some(0) {
+                if bar_popup {
                     self.move_keyboard_menu_heading(root, false, true)
+                } else if self.surfaces.popup_depth(popup) == Some(0) {
+                    // A standalone popup menu has no parent row or sibling heading to visit.
+                    true
                 } else {
                     self.close_keyboard_menu_level()
                 }
@@ -2354,12 +2387,13 @@ impl WindowManager {
         let Some(SurfaceKey::Popup(popup)) = self.active_surface else {
             return false;
         };
+        let Some(node) = self.surfaces.popup_node(popup) else {
+            return false;
+        };
         if !self.surface_accepts_input(SurfaceKey::Popup(popup))
             || !self.surfaces.popup_is_active(popup)
-            || !matches!(
-                self.surfaces.popup_node(popup).and_then(SurfaceNode::popup),
-                Some(PopupState::Application { .. })
-            )
+            || !matches!(node.popup(), Some(PopupState::Application { .. }))
+            || !matches!(node.surface.body, SurfaceBody::Widgets { .. })
         {
             return false;
         }
@@ -3052,7 +3086,7 @@ impl WindowManager {
             let popup_enabled = self.surface_accepts_input(key);
             let node_index = self.surfaces.node_index(key).expect("active popup must remain retained");
             let node = &mut self.surfaces.nodes[node_index];
-            let application_popup = matches!(&node.kind, SurfaceKind::Popup(PopupState::Application { .. }));
+            let widget_popup = matches!(&node.surface.body, SurfaceBody::Widgets { .. });
             // Transient widget popups and compact menu popups share the semantic popup panel
             // center. Compact menus paint their own complete panel inside the body; application
             // popups receive the matching border overlay after their retained content below.
@@ -3073,7 +3107,7 @@ impl WindowManager {
                 true,
                 popup_enabled,
             );
-            if application_popup {
+            if widget_popup {
                 // Record border cells last so application content cannot cover the popup's black
                 // outline. Popup options exclude title and resizing, making the shared recorder a
                 // single semantic frame pass with no hidden window behavior.
@@ -3554,7 +3588,6 @@ impl WindowManager {
             .filter_map(|key| {
                 let SurfaceKey::Popup(popup_id) = key else { return None };
                 let popup = self.surfaces.popup_node(popup_id)?;
-                let PopupState::Menu { .. } = popup.popup()? else { return None };
                 Some(popup.surface.body.menu()?.slot_rects())
             })
             .collect()

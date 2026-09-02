@@ -91,7 +91,9 @@
 //! [`MenuItemSubmitted`] endpoint through [`MenuItemHandle::submitted`]; [`Ui::menu_item`] and
 //! [`Ui::menu_item_mut`] lend the authoritative mounted
 //! [`MenuItemParameters`]. Both return [`MenuItemAccessError::UnknownItem`] for an unmounted,
-//! destroyed, or foreign item capability.
+//! destroyed, or foreign item capability. The same recursive [`Menu`] declaration installs below
+//! a [`MenuBar`] heading or becomes an application-addressable compact popup through
+//! [`Ui::create_menu_popup`]; both paths use the same manager-owned menu surface.
 //!
 //! # Update and paint boundary
 //!

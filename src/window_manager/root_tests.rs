@@ -2673,6 +2673,32 @@ fn failed_popup_creation_preserves_its_node_for_retry() {
     assert!(popup_body.is_alive(), "retry must transfer the same Node into the popup surface");
 }
 
+/// Verifies a rejected owner leaves the exact recursive menu declaration available for retry.
+#[test]
+fn failed_menu_popup_creation_preserves_its_declaration_for_retry() {
+    let mut ctx = context();
+    let owner = ctx.ui().create_window(Window::new("owner", rect(0, 0, 220, 180), empty_content()));
+    let mut foreign = context();
+    let foreign_owner = foreign.ui().create_window(Window::new("foreign", rect(0, 0, 20, 20), empty_content()));
+    let (item, item_value) = MenuItem::create(MenuItemParameters::new("Retained action"));
+
+    // Authentication occurs before the recursive Menu moves into the receiving forest. The live
+    // item endpoint proves the typed error still owns that exact declaration until retry.
+    let popup_error = ctx
+        .ui()
+        .create_menu_popup(&foreign_owner, Menu::new("invalid menu popup").item(item_value))
+        .expect_err("a foreign window cannot own a menu popup in this Context");
+    assert_eq!(popup_error.reason(), SurfaceMutationError::UnknownWindow);
+    assert!(
+        item.submitted().is_alive(),
+        "the rejected error must retain the menu item's strong event source"
+    );
+
+    ctx.ui().create_menu_popup(&owner, popup_error.into_input()).unwrap();
+    assert!(item.submitted().is_alive(), "retry must transfer the same menu item into the popup surface");
+    assert_eq!(ctx.ui().menu_item(&item).unwrap().label, "Retained action");
+}
+
 #[test]
 fn parent_content_clip_accumulates_through_nested_child_windows() {
     let mut ctx = context();
@@ -4001,6 +4027,75 @@ fn menu_pointer_scope_suspends_and_restores_preexisting_application_keyboard_foc
     ctx.update_and_render_ui();
     assert!(ctx.debug_active_popup_names().is_empty());
     assert_eq!(probe.try_read(|state| state.events.clone()), Some(vec!["down", "up", "text"]));
+}
+
+/// Verifies a standalone popup uses the existing menu surface, hierarchy, and lifecycle contract.
+#[test]
+fn standalone_popup_menu_reuses_compact_menu_input_layout_and_events() {
+    // Retain handles for one root item and one nested item while their uniquely owned declarations
+    // move into the same Menu type accepted by a window menu bar.
+    let (direct, direct_item) = MenuItem::create(MenuItemParameters::new("Direct action"));
+    let (nested, nested_item) = MenuItem::create(MenuItemParameters::new("Nested action"));
+    let menu = Menu::new("Standalone actions")
+        .item(direct_item)
+        .separator()
+        .submenu(Menu::new("More").item(nested_item));
+    let mut ctx = context();
+    let owner = ctx.ui().create_window(Window::new("owner", rect(20, 20, 180, 120), empty_content()));
+    let popup = ctx.ui().create_menu_popup(&owner, menu).unwrap();
+    let mut direct_dispatcher = event_counter(direct.submitted());
+    let mut nested_dispatcher = event_counter(nested.submitted());
+    let mut dismissed_dispatcher = event_counter(popup.events());
+    let (mut direct_submissions, mut nested_submissions, mut dismissals) = (0, 0, 0);
+
+    // An application popup keeps its exact public anchor, while MenuSurface supplies intrinsic
+    // dimensions and row geometry. The usual menu item capability reaches this mounted body too.
+    ctx.ui().menu_item_mut(&direct).unwrap().shortcut_hint = Some("Ctrl+D".to_owned());
+    let anchor = rect(70, 80, 1, 1);
+    ctx.ui().show_popup_at(&popup, anchor).unwrap();
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_popup_names(), ["Standalone actions"]);
+    let outer = ctx.debug_popup_rect(&popup).unwrap();
+    assert_eq!((outer.x, outer.y), (anchor.x, anchor.y));
+    let rows = ctx.debug_active_menu_row_rects();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].len(), 3);
+    let border = ctx.skin().menu(MenuRole::Popup, MenuState::Normal).patch.insets.left;
+    assert_eq!(rows[0][0].x, outer.x + border);
+    assert_eq!(rows[0][2].y + rows[0][2].height + border, outer.y + outer.height);
+
+    // A standalone root has no neighboring menu-bar heading, so horizontal leaf navigation keeps
+    // it open. Pointer activation of its branch then uses the ordinary relational submenu edge.
+    ctx.key(KeyEvent::pressed(Key::ArrowLeft, Modifiers::NONE));
+    ctx.key(KeyEvent::pressed(Key::ArrowRight, Modifiers::NONE));
+    ctx.update_and_render_ui();
+    assert_eq!(ctx.debug_active_popup_names(), ["Standalone actions"]);
+    let branch = ctx.debug_active_menu_row_rects()[0][2];
+    click_rect(&mut ctx, branch);
+    assert_eq!(ctx.debug_active_popup_names(), ["Standalone actions", "owner More Menu"]);
+    let branch_popup = ctx.debug_active_popup_rects()[1];
+    assert_eq!((branch_popup.x, branch_popup.y), (branch.x + branch.width, branch.y));
+
+    // Selecting the nested item queues its native typed event and closes the complete ancestry.
+    // Only the application-addressable root emits the observable popup dismissal event.
+    let nested_row = ctx.debug_active_menu_row_rects()[1][0];
+    click_rect(&mut ctx, nested_row);
+    assert!(nested_dispatcher.dispatch(&mut nested_submissions));
+    assert!(dismissed_dispatcher.dispatch(&mut dismissals));
+    assert_eq!((direct_submissions, nested_submissions, dismissals), (0, 1, 1));
+    assert!(ctx.debug_active_popup_names().is_empty());
+
+    // Reopening retains the same declaration and starts a fresh menu scope. Down selects the first
+    // actionable root row, and Enter follows the same submission-and-close path as pointer input.
+    ctx.ui().show_popup_at(&popup, anchor).unwrap();
+    ctx.update_and_render_ui();
+    ctx.key(KeyEvent::pressed(Key::ArrowDown, Modifiers::NONE));
+    ctx.key(KeyEvent::pressed(Key::Enter, Modifiers::NONE));
+    ctx.update_and_render_ui();
+    assert!(direct_dispatcher.dispatch(&mut direct_submissions));
+    assert!(dismissed_dispatcher.dispatch(&mut dismissals));
+    assert_eq!((direct_submissions, nested_submissions, dismissals), (1, 1, 2));
+    assert!(ctx.debug_active_popup_names().is_empty());
 }
 
 /// Verifies the complete Windows-style keyboard path through a nested declarative menu.

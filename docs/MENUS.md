@@ -1,9 +1,9 @@
 # Application menus
 
-Menus are an optional, intrinsic part of a [`Window`](../src/window_manager.rs). A window owns its
-body, compact [`MenuBar`](../src/menu.rs) data, and the private surfaces that present that data.
-Applications describe the hierarchy once and keep only the `MenuItemHandle`s needed for later state
-changes.
+Menus may be an intrinsic part of a [`Window`](../src/window_manager.rs) or a standalone popup shown
+through a `PopupHandle`. A window owns its body, compact [`MenuBar`](../src/menu.rs) data, and the
+surfaces that present that data. Applications describe either form with the same recursive `Menu`
+and keep only the `MenuItemHandle`s needed for later state changes.
 
 The persistent bar is root chrome rather than application content. Root geometry allocates the
 frame, title, and full-client-width menu bar before applying the independent content inset to the
@@ -15,11 +15,12 @@ The public composition types are deliberately small:
 | Type | Role |
 | --- | --- |
 | `MenuBar` | Ordered top-level menus installed on one window. |
-| `Menu` | One heading or submenu, built with `item`, `separator`, and `submenu`. |
+| `Menu` | One heading, submenu, or standalone popup, built with `item`, `separator`, and `submenu`. |
 | `MenuItem` | Uniquely owned actionable value moved into exactly one menu position. |
 | `MenuItemHandle` | Cloneable non-owning handle containing private stable identity and a separately projected submission endpoint. Mounted presentation is borrowed through `Ui`. |
 
-There is no public menu-popup handle, coordinator, command enum, row widget, or parallel menu model.
+There is no menu-specific handle, coordinator, command enum, row widget, or parallel popup-menu
+model. A standalone menu uses the ordinary `PopupHandle` lifecycle API.
 
 ## Construction and events
 
@@ -81,6 +82,28 @@ Consuming `MenuItem` in `Menu::item` makes the relationship unforgeable: a value
 one declaration position, and a caller cannot accidentally pair one item's visible state with a
 different item's submission handle.
 
+The same declaration creates a popup menu without a menu bar. Its label is a diagnostic popup name
+rather than a painted heading. `show_popup` places it at the pointer; `show_popup_at` accepts an
+explicit screen-space anchor:
+
+```rust
+let (inspect, inspect_item) = MenuItem::create(MenuItemParameters::new("Inspect"));
+let (details, details_item) = MenuItem::create(MenuItemParameters::new("Details"));
+let popup = ui.create_menu_popup(
+    &window,
+    Menu::new("Object actions")
+        .item(inspect_item)
+        .submenu(Menu::new("More").item(details_item)),
+)?;
+
+ui.show_popup(&popup)?;
+```
+
+`inspect.submitted()`, `details.submitted()`, `ui.menu_item`, and `ui.menu_item_mut` work exactly as
+they do for bar-owned items. The popup handle additionally exposes the normal
+`PopupEvent::Dismissed` endpoint; private descendant submenus do not create separate application
+lifecycle events.
+
 The handle's private stable ID identifies its concrete item; the subscribed port only delivers
 `MenuItemSubmitted` and carries no copied command value. The manager closes an active menu before
 dispatch reaches the application handler. An enabled item without a subscriber still closes the
@@ -130,10 +153,12 @@ slot-geometry vector and the forest's popup-path workspace.
 ## Placement and interaction
 
 Menu topology and placement remain manager-private. Every menu popup is a concrete forest node with
-one parent edge and one trigger-slot index. A top-level popup is anchored below its heading slot in
-the bar surface; a submenu popup is anchored at the right edge of its row slot in its parent popup.
-The manager resolves these relationships from current surface geometry, so open menus follow their
-window and parent rows without application-supplied screen coordinates or retained anchor nodes.
+one parent edge. A bar-owned top-level popup adds a trigger-slot index and anchors below its heading;
+a submenu adds an index and anchors at the right edge of its parent row. A standalone popup instead
+uses the exact screen anchor retained by its public `PopupHandle`, while its descendants use the
+same relational submenu edges as bar-owned menus. The manager resolves relational placement from
+current surface geometry, so open menus follow their window and parent rows without retained anchor
+widgets.
 
 An intrinsic bar is also the overlay boundary for structural child windows. Within one window
 family the manager records the parent's background and application body, then its child families,

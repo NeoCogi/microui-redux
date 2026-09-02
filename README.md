@@ -72,11 +72,17 @@ let dialog = context
     .ui()
     .create_dialog(&main, Window::new("settings", rect(80, 60, 320, 220), settings_content))?;
 let popup = context.ui().create_popup(&main, "choices", popup_content)?;
+let (inspect, inspect_item) = MenuItem::create(MenuItemParameters::new("Inspect"));
+let actions = context
+    .ui()
+    .create_menu_popup(&main, Menu::new("object actions").item(inspect_item))?;
 
 context.subscribe_context(main.events(), Model::window_event)?;
 context.subscribe(popup.events(), Model::popup_event)?;
+context.subscribe_context(inspect.submitted(), Model::inspect)?;
 context.ui().set_window_visible(&dialog, true)?;
 context.ui().show_popup_at(&popup, anchor)?;
+context.ui().show_popup(&actions)?;
 ```
 
 `WindowEvent` combines geometry, close, minimize, maximize, and restore observations on one typed

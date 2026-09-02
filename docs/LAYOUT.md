@@ -69,13 +69,13 @@ focused node ID that will resume when the menu closes. Custom widgets opt into f
 the shared Windows-style action mapping through `Widget::keyboard_behavior`; their default behavior
 is keyboard-inert.
 
-An application popup is a concrete keyboard surface with its own widget runtime. Showing it selects
-its first eligible target after layout; Tab wraps inside that tree, while Escape or focus transfer
-outside the popup restores the direct parent's remembered focused ID. When the popup accepts an
-initial non-repeated Escape press, only that press is manager-owned. Later repeats and the physical
-release use ordinary routing against the restored parent surface, keeping popup dismissal
-stateless. Without an active application popup, every Escape transition likewise remains available
-to the focused application widget.
+An application-addressable popup is a concrete keyboard surface. A widget popup selects its first
+eligible target after layout and wraps Tab inside that tree; a popup menu uses the compact menu's
+direct-row navigation instead. Escape or focus transfer outside either popup restores the direct
+parent's remembered focused ID. When the popup accepts an initial non-repeated Escape press, only
+that press is manager-owned. Later repeats and the physical release use ordinary routing against the
+restored parent surface, keeping popup dismissal stateless. Without an active popup, every Escape
+transition likewise remains available to the focused application widget.
 
 At the window level, `Ctrl+F6` and `Ctrl+Shift+F6` cycle forward and backward through visible
 ordinary roots. Each root's runtime keeps its focused ID while not selected; modal dialogs and open

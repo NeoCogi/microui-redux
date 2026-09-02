@@ -42,7 +42,8 @@ may own screen-space structural children created with `Ui::create_child_window(&
 its `Window::child_window_clip(ChildWindowClip::Content)` construction policy optionally confines
 their complete descendant surfaces to its application body. An independent or child window may
 directly own dialogs created with `Ui::create_dialog(&parent, window)`. A window or dialog may retain
-generic popups created with `Ui::create_popup(&parent, name, content)`. Applications
+generic widget popups created with `Ui::create_popup(&parent, name, content)` or compact popup menus
+created from the ordinary recursive `Menu` declaration with `Ui::create_menu_popup`. Applications
 mutate leaves and containers through weak
 `TypedWidgetHandle<W>` values, commit contexts without application callbacks through
 `Context::update_ui(...)` or subscriber-driven contexts through `Context::update_ui_state(...)`,
@@ -93,9 +94,9 @@ concrete role:
 
 - a window or dialog owns one application `Node` and its `UiRuntime`, window policy, the unified
   `WindowEvent` port, and an optional concrete menu-bar `MenuSurface`;
-- an application popup owns one application `Node`, its `UiRuntime`, its anchor, and a
-  `PopupEvent` port;
-- a private menu popup owns its compact `MenuSurface` directly.
+- an application-addressable popup owns its anchor and `PopupEvent` port, plus either one
+  application `Node` with its `UiRuntime` or one compact `MenuSurface`;
+- a private relational menu popup owns its compact `MenuSurface` and parent trigger-slot index.
 
 The surface layer uses concrete enums for those bodies and roles. It does not store `Any`, erased
 surface payloads, or a manager-side menu controller. Widget implementations remain erased at the
@@ -193,11 +194,12 @@ retained tree to that identity while enforcing every ancestor's participation an
 retained sibling order, wrap at the ends, and skip hidden, clipped, disabled, or
 pointer-focus-only surfaces.
 
-Showing an application popup selects its concrete surface immediately and focuses its first Tab
-stop after that popup's geometry is committed. Tab traversal then wraps inside the popup's own
-widget tree. Escape or an outside press dismisses the popup and restores its direct parent surface,
-whose independently retained focused widget ID was never discarded. An Escape dismissal retains
-no key-tail state: only the initial non-repeated press is the dismissal command, while later repeats
+Showing an application-addressable popup selects its concrete surface immediately. A widget popup
+focuses its first Tab stop after geometry is committed and then wraps Tab traversal inside its own
+tree. A popup menu instead uses the same direct-row keyboard navigation as an intrinsic menu.
+Escape or an outside press dismisses either body and restores its direct parent surface, whose
+independently retained focused widget ID was never discarded. An Escape dismissal retains no
+key-tail state: only the initial non-repeated press is the dismissal command, while later repeats
 and release transitions route normally against the restored parent surface.
 
 `Ctrl+F6` selects the next visible independent or child window in activation chronology and
@@ -215,15 +217,14 @@ active. Structural children inherit their parent's disabled policy. Modal dialog
 independently, allowing an enabled dialog to remain usable above a disabled owner.
 
 The frontmost dialog replaces the ordinary active window as the keyboard scope while modal. An
-intrinsic menu opened by pointer, F10, or an unchorded Alt tap uses the same active `SurfaceKey` as
-windows and application popups. The root key denotes its intrinsic menu bar; each menu-popup key
-denotes the concrete popup container. A `MenuSurface` retains only its selected direct-child slot,
-so the active surface plus that slot is the menu's complete focus route and no parallel
-`keyboard_menu_root` exists. Menu navigation consumes key/text delivery but preserves the widget
-runtime's path so closing the menu resumes it exactly. Pointer drags remain with their captured
-surface, while wheel input has no capture lifecycle and goes to the topmost eligible surface under
-the pointer. Hiding or destroying an active surface or structural ancestor repairs that same
-identity from the retained forest.
+intrinsic or standalone menu uses the same active `SurfaceKey` as windows and widget popups. The
+root key denotes an intrinsic bar; each popup key denotes one concrete popup container. A
+`MenuSurface` retains only its selected direct-child slot, so the active surface plus that slot is
+the menu's complete focus route and no parallel `keyboard_menu_root` exists. Menu navigation
+consumes key/text delivery but preserves the widget runtime's path so closing the menu resumes it
+exactly. Pointer drags remain with their captured surface, while wheel input has no capture lifecycle
+and goes to the topmost eligible surface under the pointer. Hiding or destroying an active surface
+or structural ancestor repairs that same identity from the retained forest.
 
 The manager projects that same routing decision into paint. Only the current keyboard surface
 receives a visible focused state; nonselected runtimes preserve their target without drawing duplicate
