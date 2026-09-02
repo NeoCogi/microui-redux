@@ -29,249 +29,15 @@
 
 //! Typed semantic appearances and interaction states shared by flat and image themes.
 
-use std::sync::Arc;
-
 use crate::{Color, ControlColor, NinePatch, SliceInsets};
 
-/// Semantic background or chrome part painted by the built-in UI.
-///
-/// Roles describe meaning rather than concrete widget Rust types. Composite controls can therefore
-/// select separate track, thumb, popup, and caption-button appearances without inventing an erased
-/// style lookup protocol.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-#[repr(u8)]
-pub enum AppearanceRole {
-    /// Generic frame requested through [`crate::WidgetOption::FRAME`].
-    GenericFrame,
-    /// Content panel or scroll-area viewport background.
-    Panel,
-    /// Ordinary command button or button-like list box.
-    Button,
-    /// Unchecked checkbox square.
-    Checkbox,
-    /// Checked checkbox square.
-    CheckboxChecked,
-    /// Single-line, multiline, or numeric text input background.
-    TextInput,
-    /// Unselected list row.
-    ListItem,
-    /// Semantically selected list row.
-    ListItemSelected,
-    /// Combo-box header.
-    Combo,
-    /// Slider background track.
-    SliderTrack,
-    /// Slider value thumb.
-    SliderThumb,
-    /// Scrollbar background track.
-    ScrollbarTrack,
-    /// Scrollbar movable thumb.
-    ScrollbarThumb,
-    /// Disclosure header or tree row.
-    DisclosureHeader,
-    /// Menu bar spanning a window.
-    MenuBar,
-    /// Menu-bar title that does not own an open popup.
-    MenuTitle,
-    /// Menu-bar title whose popup is open.
-    MenuTitleOpen,
-    /// Popup-menu panel.
-    MenuPopup,
-    /// Ordinary menu item row.
-    MenuItem,
-    /// Checked or radio-selected menu item row.
-    MenuItemSelected,
-    /// Passive window outer frame and body.
-    WindowFrame,
-    /// Active window outer frame and body.
-    WindowFrameActive,
-    /// Passive modal-dialog outer frame and body.
-    DialogFrame,
-    /// Active modal-dialog outer frame and body.
-    DialogFrameActive,
-    /// Passive window title background.
-    WindowTitle,
-    /// Active window title background.
-    WindowTitleActive,
-    /// Window close caption button.
-    WindowCloseButton,
-    /// Window minimize caption button.
-    WindowMinimizeButton,
-    /// Window maximize caption button.
-    WindowMaximizeButton,
-    /// Window restore caption button used while maximized.
-    WindowRestoreButton,
-    /// Visible bottom-right resize grip.
-    WindowResizeGrip,
-    /// Optional themed glyph painted inside the window close button.
-    WindowCloseGlyph,
-    /// Optional themed glyph painted inside the window minimize button.
-    WindowMinimizeGlyph,
-    /// Optional themed glyph painted inside the window maximize button.
-    WindowMaximizeGlyph,
-    /// Optional themed glyph painted inside the window restore button.
-    WindowRestoreGlyph,
-}
-
-impl AppearanceRole {
-    /// Number of role slots retained by [`AppearanceCatalog`].
-    pub const COUNT: usize = Self::WindowRestoreGlyph as usize + 1;
-
-    /// Returns the stable snake-case JSON key for this role.
-    pub const fn json_name(self) -> &'static str {
-        // Keeping the complete conversion exhaustive makes a newly added role fail compilation
-        // until its theme-file spelling is deliberately chosen.
-        match self {
-            Self::GenericFrame => "generic_frame",
-            Self::Panel => "panel",
-            Self::Button => "button",
-            Self::Checkbox => "checkbox",
-            Self::CheckboxChecked => "checkbox_checked",
-            Self::TextInput => "text_input",
-            Self::ListItem => "list_item",
-            Self::ListItemSelected => "list_item_selected",
-            Self::Combo => "combo",
-            Self::SliderTrack => "slider_track",
-            Self::SliderThumb => "slider_thumb",
-            Self::ScrollbarTrack => "scrollbar_track",
-            Self::ScrollbarThumb => "scrollbar_thumb",
-            Self::DisclosureHeader => "disclosure_header",
-            Self::MenuBar => "menu_bar",
-            Self::MenuTitle => "menu_title",
-            Self::MenuTitleOpen => "menu_title_open",
-            Self::MenuPopup => "menu_popup",
-            Self::MenuItem => "menu_item",
-            Self::MenuItemSelected => "menu_item_selected",
-            Self::WindowFrame => "window_frame",
-            Self::WindowFrameActive => "window_frame_active",
-            Self::DialogFrame => "dialog_frame",
-            Self::DialogFrameActive => "dialog_frame_active",
-            Self::WindowTitle => "window_title",
-            Self::WindowTitleActive => "window_title_active",
-            Self::WindowCloseButton => "window_close_button",
-            Self::WindowMinimizeButton => "window_minimize_button",
-            Self::WindowMaximizeButton => "window_maximize_button",
-            Self::WindowRestoreButton => "window_restore_button",
-            Self::WindowResizeGrip => "window_resize_grip",
-            Self::WindowCloseGlyph => "window_close_glyph",
-            Self::WindowMinimizeGlyph => "window_minimize_glyph",
-            Self::WindowMaximizeGlyph => "window_maximize_glyph",
-            Self::WindowRestoreGlyph => "window_restore_glyph",
-        }
-    }
-
-    /// Parses one exact snake-case JSON role name.
-    #[cfg(feature = "theme-json")]
-    pub(crate) fn from_json_name(name: &str) -> Option<Self> {
-        // Match exact schema spellings so misspelled theme roles produce a useful load error rather
-        // than silently creating an unused entry.
-        Self::ALL.into_iter().find(|role| role.json_name() == name)
-    }
-
-    /// Complete role list in catalog index order.
-    pub(crate) const ALL: [Self; Self::COUNT] = [
-        Self::GenericFrame,
-        Self::Panel,
-        Self::Button,
-        Self::Checkbox,
-        Self::CheckboxChecked,
-        Self::TextInput,
-        Self::ListItem,
-        Self::ListItemSelected,
-        Self::Combo,
-        Self::SliderTrack,
-        Self::SliderThumb,
-        Self::ScrollbarTrack,
-        Self::ScrollbarThumb,
-        Self::DisclosureHeader,
-        Self::MenuBar,
-        Self::MenuTitle,
-        Self::MenuTitleOpen,
-        Self::MenuPopup,
-        Self::MenuItem,
-        Self::MenuItemSelected,
-        Self::WindowFrame,
-        Self::WindowFrameActive,
-        Self::DialogFrame,
-        Self::DialogFrameActive,
-        Self::WindowTitle,
-        Self::WindowTitleActive,
-        Self::WindowCloseButton,
-        Self::WindowMinimizeButton,
-        Self::WindowMaximizeButton,
-        Self::WindowRestoreButton,
-        Self::WindowResizeGrip,
-        Self::WindowCloseGlyph,
-        Self::WindowMinimizeGlyph,
-        Self::WindowMaximizeGlyph,
-        Self::WindowRestoreGlyph,
-    ];
-}
-
-/// Mutually exclusive interaction state used to select one appearance PNG or flat fallback.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-#[repr(u8)]
-pub enum VisualState {
-    /// Enabled widget with no hover, focus, or active press.
-    Normal,
-    /// Pointer is over an enabled widget.
-    Hovered,
-    /// Pointer capture is pressed over an enabled widget.
-    Pressed,
-    /// Keyboard focus is visible without pointer hover.
-    Focused,
-    /// Keyboard focus and pointer hover are both present.
-    HoveredFocused,
-    /// Keyboard focus and a pointer press are both present.
-    PressedFocused,
-    /// Widget or menu item is disabled regardless of pointer position.
-    Disabled,
-}
-
-impl VisualState {
-    /// Number of state slots retained for every semantic role.
-    pub const COUNT: usize = Self::Disabled as usize + 1;
-
-    /// Complete state list in catalog index order.
-    #[cfg(feature = "theme-json")]
-    pub(crate) const ALL: [Self; Self::COUNT] = [
-        Self::Normal,
-        Self::Hovered,
-        Self::Pressed,
-        Self::Focused,
-        Self::HoveredFocused,
-        Self::PressedFocused,
-        Self::Disabled,
-    ];
-
-    /// Resolves one exact state from concrete widget interaction facts.
-    pub const fn from_interaction(enabled: bool, hovered: bool, focused: bool, pressed: bool) -> Self {
-        // Disabled wins before the ordinary press, hover, and focus ladder. Window activation is
-        // deliberately absent: active and passive chrome use distinct appearance roles, while an
-        // enabled widget keeps its ordinary presentation when another window owns activation.
-        if !enabled {
-            Self::Disabled
-        } else if pressed && focused {
-            Self::PressedFocused
-        } else if pressed {
-            Self::Pressed
-        } else if hovered && focused {
-            Self::HoveredFocused
-        } else if hovered {
-            Self::Hovered
-        } else if focused {
-            Self::Focused
-        } else {
-            Self::Normal
-        }
-    }
-}
+use super::{AppearanceRole, RoleTable, StateTable, VisualState};
 
 /// Complete state table for one semantic appearance role.
 #[derive(Copy, Clone)]
 pub struct StatefulAppearance {
     /// Fixed state-indexed patch table.
-    patches: [NinePatch; VisualState::COUNT],
+    patches: StateTable<NinePatch>,
 }
 
 /// Complete foreground-color table for one semantic appearance role.
@@ -283,7 +49,7 @@ pub struct StatefulAppearance {
 #[derive(Copy, Clone)]
 pub struct StatefulColor {
     /// Fixed state-indexed color table stored in [`VisualState`] discriminant order.
-    colors: [Color; VisualState::COUNT],
+    colors: StateTable<Color>,
 }
 
 impl StatefulColor {
@@ -291,20 +57,22 @@ impl StatefulColor {
     pub const fn all(color: Color) -> Self {
         // Repetition makes every programmatically constructed role total before selected states
         // are customized by application code or a theme document.
-        Self { colors: [color; VisualState::COUNT] }
+        Self {
+            colors: StateTable::new([color; VisualState::COUNT]),
+        }
     }
 
     /// Returns the exact foreground assigned to `state`.
     pub const fn get(self, state: VisualState) -> Color {
         // VisualState is contiguous and its final variant defines COUNT, so every enum value is a
         // valid fixed-array index without a string lookup or fallible branch.
-        self.colors[state as usize]
+        *self.colors.get(state)
     }
 
     /// Replaces one exact state foreground.
     pub fn set(&mut self, state: VisualState, color: Color) {
         // The typed enum keeps invalid numeric state slots outside the public API.
-        self.colors[state as usize] = color;
+        self.colors.set(state, color);
     }
 }
 
@@ -312,7 +80,7 @@ impl StatefulColor {
 #[derive(Clone)]
 pub struct ForegroundCatalog {
     /// Copy-on-write role table shared by cloned styles and detached theme variants.
-    entries: Arc<[StatefulColor; AppearanceRole::COUNT]>,
+    entries: RoleTable<StatefulColor>,
 }
 
 impl ForegroundCatalog {
@@ -320,22 +88,20 @@ impl ForegroundCatalog {
     pub fn new(default: StatefulColor) -> Self {
         // A fixed array guarantees total role lookup, while Arc preserves cheap Style cloning and
         // copy-on-write value semantics for live style editors.
-        Self {
-            entries: Arc::new([default; AppearanceRole::COUNT]),
-        }
+        Self { entries: RoleTable::filled(default) }
     }
 
     /// Returns the complete foreground table for `role`.
     pub fn get(&self, role: AppearanceRole) -> StatefulColor {
         // AppearanceRole discriminants are contiguous and catalog construction always allocates
         // exactly COUNT entries.
-        self.entries[role as usize]
+        *self.entries.get(role)
     }
 
     /// Replaces one role's complete foreground table.
     pub fn set(&mut self, role: AppearanceRole, colors: StatefulColor) {
         // Clone shared storage only when a caller actually customizes a style.
-        Arc::make_mut(&mut self.entries)[role as usize] = colors;
+        self.entries.set(role, colors);
     }
 
     /// Replaces one exact role/state foreground without exposing catalog storage.
@@ -399,7 +165,9 @@ impl StatefulAppearance {
     /// Creates a state table that initially uses one patch for every interaction state.
     pub const fn all(patch: NinePatch) -> Self {
         // A repeated flat default makes every state total before JSON replaces selected entries.
-        Self { patches: [patch; VisualState::COUNT] }
+        Self {
+            patches: StateTable::new([patch; VisualState::COUNT]),
+        }
     }
 
     /// Creates an explicit state table in enum order.
@@ -416,26 +184,26 @@ impl StatefulAppearance {
         // The named parameters make programmatic construction readable while the retained array
         // keeps lookup branch-free and allocation-free.
         Self {
-            patches: [normal, hovered, pressed, focused, hovered_focused, pressed_focused, disabled],
+            patches: StateTable::new([normal, hovered, pressed, focused, hovered_focused, pressed_focused, disabled]),
         }
     }
 
     /// Returns the exact patch assigned to `state`.
     pub const fn get(self, state: VisualState) -> NinePatch {
         // `VisualState` uses a contiguous private representation whose final variant defines COUNT.
-        self.patches[state as usize]
+        *self.patches.get(state)
     }
 
     /// Replaces one exact state patch.
     pub fn set(&mut self, state: VisualState, patch: NinePatch) {
         // Mutation remains typed by the enum; callers cannot address an invalid numeric slot.
-        self.patches[state as usize] = patch;
+        self.patches.set(state, patch);
     }
 
     /// Returns every state patch in stable enum order for resource validation.
     pub(crate) fn patches(self) -> [NinePatch; VisualState::COUNT] {
         // Copy the small fixed table so callers do not receive mutable access to catalog storage.
-        self.patches
+        self.patches.into_array()
     }
 }
 
@@ -443,7 +211,7 @@ impl StatefulAppearance {
 #[derive(Clone)]
 pub struct AppearanceCatalog {
     /// Copy-on-write role table shared by cloned styles and local style overrides.
-    entries: Arc<[StatefulAppearance; AppearanceRole::COUNT]>,
+    entries: RoleTable<StatefulAppearance>,
 }
 
 impl AppearanceCatalog {
@@ -451,21 +219,19 @@ impl AppearanceCatalog {
     pub fn new(default: StatefulAppearance) -> Self {
         // The fixed array guarantees total role lookup without a hash map, string key, or erased
         // payload. Arc keeps ordinary Style cloning cheap while preserving value semantics.
-        Self {
-            entries: Arc::new([default; AppearanceRole::COUNT]),
-        }
+        Self { entries: RoleTable::filled(default) }
     }
 
     /// Returns the exact state table for one semantic role.
     pub fn get(&self, role: AppearanceRole) -> StatefulAppearance {
         // Role discriminants are contiguous and private catalog construction always has COUNT slots.
-        self.entries[role as usize]
+        *self.entries.get(role)
     }
 
     /// Replaces one role's complete state table using copy-on-write storage.
     pub fn set(&mut self, role: AppearanceRole, appearance: StatefulAppearance) {
         // Clone the fixed catalog only when a shared Style is actually customized.
-        Arc::make_mut(&mut self.entries)[role as usize] = appearance;
+        self.entries.set(role, appearance);
     }
 
     /// Returns one exact role and interaction patch.
