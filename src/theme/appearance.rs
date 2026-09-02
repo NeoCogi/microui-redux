@@ -23,6 +23,9 @@ pub struct Visual {
     /// Background, border, or image-backed nine-patch painted for the visual.
     pub patch: NinePatch,
     /// Foreground color used for text and semantic glyphs over the patch.
+    ///
+    /// A transparent value naturally suppresses separately drawn semantic content when the patch
+    /// already contains the control's complete label or symbol.
     pub foreground: Color,
 }
 
@@ -98,7 +101,6 @@ pub(crate) fn visuals_from_flat_palette(frame_insets: SliceInsets, palette: &Fla
                     ControlState::Disabled => solid(palette.disabled_background),
                     ControlState::Enabled(_) | ControlState::Focused(_) => solid(palette.scrollbar_thumb),
                 },
-                ControlRole::CloseGlyph | ControlRole::MinimizeGlyph | ControlRole::MaximizeGlyph | ControlRole::RestoreGlyph => solid(transparent),
             };
             let foreground = match role {
                 ControlRole::Item => match state {
@@ -107,14 +109,7 @@ pub(crate) fn visuals_from_flat_palette(frame_insets: SliceInsets, palette: &Fla
                     ControlState::Enabled(PointerState::Hovered | PointerState::Pressed)
                     | ControlState::Focused(PointerState::Normal | PointerState::Hovered | PointerState::Pressed) => palette.selection_foreground,
                 },
-                ControlRole::CloseButton
-                | ControlRole::MinimizeButton
-                | ControlRole::MaximizeButton
-                | ControlRole::RestoreButton
-                | ControlRole::CloseGlyph
-                | ControlRole::MinimizeGlyph
-                | ControlRole::MaximizeGlyph
-                | ControlRole::RestoreGlyph => match state {
+                ControlRole::CloseButton | ControlRole::MinimizeButton | ControlRole::MaximizeButton | ControlRole::RestoreButton => match state {
                     ControlState::Disabled => palette.disabled_title_foreground,
                     ControlState::Enabled(_) | ControlState::Focused(_) => palette.title_foreground,
                 },

@@ -3,14 +3,14 @@
 This bundled theme reconstructs the late Mac OS 9 Platinum visual language through the crate's
 typed appearance catalog. Active windows use centered labels over interrupted horizontal racing
 stripes, a blank leading close box, and compact trailing windowshade and zoom boxes. Windows
-without activation use the base flat-gray title role without caption boxes. The surrounding chrome
+without activation use the base flat-gray title state without caption boxes. The surrounding chrome
 uses thin black outlines, directional white and dark-gray bevels, sixteen-pixel scrollbars, and a grooved diagonal
 resize handle. Popup menus use a heavy black perimeter and black selections with white text.
 
 Controls use chamfered raised faces, recessed white fields, black focus keylines, reversed pressed
-bevels, and softened disabled edges. Normal, hovered, pressed, focused, combined focus/pointer, and
-disabled sources remain independent JSON states even where period Mac OS intentionally gives two
-states the same restrained appearance. The bundled Open Sans and fixed-width fonts are
+bevels, and softened disabled edges. Disabled and nested enabled/focused pointer sources remain
+independent JSON states even where period Mac OS intentionally gives two states the same restrained
+appearance. The bundled Open Sans and fixed-width fonts are
 freely-licensed approximations for the proprietary Chicago, Charcoal, and Geneva families; all five
 semantic font roles and their sizes are declared by this theme and receive fresh atlas IDs when the
 theme is loaded.

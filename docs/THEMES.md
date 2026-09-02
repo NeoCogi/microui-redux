@@ -188,8 +188,7 @@ vocabulary:
 - `surface`: `generic_frame`, `panel`
 - `control`: `button`, `checkbox`, `text_input`, `item`, `combo`, `slider_track`,
   `slider_thumb`, `scrollbar_track`, `scrollbar_thumb`, `close_button`, `minimize_button`,
-  `maximize_button`, `restore_button`, `resize_grip`, `close_glyph`, `minimize_glyph`,
-  `maximize_glyph`, `restore_glyph`
+  `maximize_button`, `restore_button`, `resize_grip`
 - `menu`: `bar`, `title`, `popup`, `item`
 - `chrome`: `window_frame`, `dialog_frame`, `title`
 
@@ -258,21 +257,21 @@ is present. Caption and resize controls receive nested enabled/hovered and enabl
 from manager-owned pointer capture just like widgets. A press dragged away from its originating
 caption button is no longer painted pressed and does not activate on release.
 
+The manager draws each caption control's close, minimize, maximize, or restore symbol using that
+control state's `foreground`. Image-backed caption faces that already contain their complete symbol
+set `foreground` alpha to zero. There are no separate caption-glyph roles or window-chrome switch,
+so the same role/state visual fully describes each control without special handling in the loader.
+
 `skin.window_chrome_layout` selects concrete platform geometry without changing the semantic
 caption roles. `trailing_buttons` preserves the ordinary left-aligned title and places every
 caption control at the trailing edge. `classic_mac` centers the title, places a compact close box
 at the leading edge, places compact zoom/windowshade controls at the trailing edge, and omits those
 faces from base titles. Classic Mac caption PNGs are complete faces, so this layout does not
-overlay the generic procedural glyphs used by flat and Windows-oriented skins. The JSON enum is
-compiled once into a concrete `WindowChromeSkin` data recipe; manager code does not branch on a
-theme or platform mode.
-
-The optional caption-glyph roles paint centered image artwork inside their corresponding button
-face. If a glyph role is transparent or omitted, the renderer uses its deterministic procedural
-fallback. This lets classic themes provide period-specific triangle controls and pressed offsets
-without forcing every flat application skin to ship additional images.
+show an additional manager-owned symbol because those states use a transparent foreground. The
+JSON enum is compiled once into a concrete `WindowChromeSkin` data recipe; manager code does not
+branch on a theme or platform mode.
 
 Minimize hides the retained window and emits `WindowEvent::Minimized`; the same `WindowHandle` can
 be shown again. Maximize saves the exact normal outer rectangle, tracks the complete inherited
 viewport, and emits `WindowEvent::Maximized`. Activating the same caption position while maximized
-uses `chrome.restore_button`, restores the saved rectangle, and emits `WindowEvent::Restored`.
+uses `control.restore_button`, restores the saved rectangle, and emits `WindowEvent::Restored`.

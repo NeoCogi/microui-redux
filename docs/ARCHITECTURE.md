@@ -228,7 +228,7 @@ identity from the retained forest.
 The manager projects that same routing decision into paint. Only the current keyboard surface
 receives a visible focused state; nonselected runtimes preserve their target without drawing duplicate
 carets or fills. Each widget paints the focused state of its semantic role during the ordinary tree
-pass, while the active owner window selects its active title and frame roles. During menu navigation
+pass, while the active owner window selects the active state of its title and frame roles. During menu navigation
 the menu selection replaces the suspended widget cue while the owning window remains visibly active.
 
 A fullscreen application surface remains an ordinary independent window, not a special surface

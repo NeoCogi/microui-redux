@@ -748,7 +748,7 @@ pub(super) fn record_root_overlay(
     }
 }
 
-/// Records one stateful caption patch and its manager-owned flat fallback symbol.
+/// Records one stateful caption control and its manager-owned semantic symbol.
 fn paint_caption_button(
     painter: &mut Painter<'_>,
     rect: Recti,
@@ -765,12 +765,6 @@ fn paint_caption_button(
         RootCaptionButton::Maximize => ControlRole::MaximizeButton,
         RootCaptionButton::Close => ControlRole::CloseButton,
     };
-    let glyph_role = match button {
-        RootCaptionButton::Minimize => ControlRole::MinimizeGlyph,
-        RootCaptionButton::Maximize if visual.maximized => ControlRole::RestoreGlyph,
-        RootCaptionButton::Maximize => ControlRole::MaximizeGlyph,
-        RootCaptionButton::Close => ControlRole::CloseGlyph,
-    };
     let state = if !window_enabled {
         ControlState::Disabled
     } else if window_active {
@@ -778,36 +772,13 @@ fn paint_caption_button(
     } else {
         ControlState::Enabled(PointerState::Normal)
     };
-    let Some(content) = crate::ui_node::frame::paint_internal_frame(painter, rect, style.control(role, state).patch) else {
+    // Resolve the face and content color together so the caption consumes one ordinary control
+    // visual. There is no independently selected glyph role or chrome-layout drawing flag.
+    let appearance = style.control(role, state);
+    let Some(content) = crate::ui_node::frame::paint_internal_frame(painter, rect, appearance.patch) else {
         return;
     };
-    if !style.window_chrome.captions.draw_separate_glyphs {
-        // Some button-face artwork contains its complete symbol. The recipe can suppress the
-        // separate semantic glyph layer without coupling that choice to any other chrome behavior.
-        return;
-    }
-    let glyph = style.control(glyph_role, state).patch;
-    if glyph.is_visible() {
-        // Image glyphs retain their authored pixel dimensions and are centered in the button's
-        // usable content instead of stretching to fill it. A visible flat glyph still receives the
-        // complete content rectangle, keeping programmatic skins concrete and deterministic.
-        let glyph_rect = if let Some(image) = glyph.image_content() {
-            let image_size = atlas.get_icon_size(image.icon);
-            let width = image_size.width.max(0).min(content.width.max(0));
-            let height = image_size.height.max(0).min(content.height.max(0));
-            Recti::new(
-                content.x.saturating_add(content.width.saturating_sub(width) / 2),
-                content.y.saturating_add(content.height.saturating_sub(height) / 2),
-                width,
-                height,
-            )
-        } else {
-            content
-        };
-        let _ = crate::ui_node::frame::paint_internal_frame(painter, glyph_rect, glyph.with_insets(crate::SliceInsets::ZERO));
-        return;
-    }
-    let color = style.control(role, state).foreground;
+    let color = appearance.foreground;
     match button {
         RootCaptionButton::Close => {
             // Close retains the atlas icon already required by every Skin and test atlas.
@@ -872,6 +843,38 @@ mod tests {
             maximized: false,
         };
         assert_eq!(width_pressed.part_pointer_state(right), PointerState::Pressed);
+    }
+
+    /// Verifies caption symbols use the control foreground instead of a second appearance role.
+    #[test]
+    fn transparent_caption_foreground_suppresses_the_manager_owned_symbol() {
+        let atlas = crate::test_support::test_atlas();
+        let opaque = crate::test_support::test_skin(&atlas);
+        let state = ControlState::Enabled(PointerState::Normal);
+        let mut complete_face = opaque.clone();
+        let mut visual = complete_face.control(ControlRole::CloseButton, state);
+        visual.foreground.a = 0;
+        complete_face.set_control(ControlRole::CloseButton, state, visual);
+
+        let record_count = |style: &Skin| {
+            // Paint the same face through the production helper. Only the ordinary foreground
+            // channel differs, so the opaque result must contain exactly one additional icon op.
+            let mut display_list = crate::render::DisplayList::default();
+            let mut painter = Painter::screen_space(&mut display_list, Recti::new(0, 0, 32, 32));
+            paint_caption_button(
+                &mut painter,
+                Recti::new(4, 4, 16, 16),
+                RootCaptionButton::Close,
+                style,
+                &atlas,
+                true,
+                true,
+                RootChromeVisualState::idle(),
+            );
+            display_list.debug_operation_count()
+        };
+
+        assert_eq!(record_count(&opaque), record_count(&complete_face) + 1);
     }
 
     /// Verifies asymmetric Platinum caption banks still leave a symmetric title-label allocation.

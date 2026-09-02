@@ -1665,7 +1665,7 @@ mod tests {
     fn bundled_windows_311_theme_uses_white_and_blue_title_images() {
         let (loaded, images) = install_bundled_theme("themes/windows-3.11/theme.json");
         assert_eq!(loaded.name(), "Windows 3.11 for Workgroups");
-        assert_eq!(images, 21, "each shared PNG path must be baked exactly once");
+        assert_eq!(images, 13, "only complete role-state artwork is baked into the theme atlas");
         let insets = loaded.bundle().skin().chrome(ChromeRole::WindowFrame, ChromeState::Base).patch.insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (23, 23, 23, 23));
         let border = loaded.bundle().skin().metrics.window_border;
@@ -1729,16 +1729,15 @@ mod tests {
         assert_eq!((active.r, active.g, active.b, active.a), (255, 255, 255, 255));
         let disabled_title = loaded.bundle().skin().chrome(ChromeRole::Title, ChromeState::Disabled).foreground;
         assert_eq!((disabled_title.r, disabled_title.g, disabled_title.b, disabled_title.a), (125, 125, 125, 255));
-        let minimize_glyph = loaded
+        let minimize = loaded
             .bundle()
             .skin()
-            .control(ControlRole::MinimizeGlyph, ControlState::Enabled(PointerState::Normal))
-            .patch;
-        let crate::NinePatchContent::Image { image: minimize_image } = minimize_glyph.content else {
-            panic!("Windows 3.11 minimize glyph must use baked artwork");
-        };
-        let minimize_size = loaded.bundle().atlas().get_icon_size(minimize_image.icon);
-        assert_eq!((minimize_size.width, minimize_size.height), (9, 9));
+            .control(ControlRole::MinimizeButton, ControlState::Enabled(PointerState::Normal));
+        assert_eq!(
+            (minimize.foreground.r, minimize.foreground.g, minimize.foreground.b, minimize.foreground.a),
+            (0, 0, 0, 255),
+            "the caption control's foreground drives its manager-owned semantic symbol"
+        );
         // Disabling must preserve the raised caption face authored by the theme. Letting these
         // roles fall back to their flat palette appearance would combine a one-pixel black frame
         // with the role's three-pixel visual insets and produce an incorrect heavy black square.
@@ -1835,20 +1834,20 @@ mod tests {
                 if normal.icon != active.icon
         ));
 
-        // The Mac layout consumes complete caption-face images and does not overlay generic
-        // Windows glyphs. Pressed artwork remains a distinct upload for visible inset feedback.
-        let close = loaded
+        // Complete Mac caption faces suppress the manager-owned semantic symbol through their
+        // ordinary transparent foreground. Pressed artwork remains a distinct image for feedback.
+        let close_visual = loaded
             .bundle()
             .skin()
-            .control(ControlRole::CloseButton, ControlState::Enabled(PointerState::Normal))
-            .patch;
-        let close_pressed = loaded
+            .control(ControlRole::CloseButton, ControlState::Enabled(PointerState::Normal));
+        let close_pressed_visual = loaded
             .bundle()
             .skin()
-            .control(ControlRole::CloseButton, ControlState::Enabled(PointerState::Pressed))
-            .patch;
+            .control(ControlRole::CloseButton, ControlState::Enabled(PointerState::Pressed));
+        assert_eq!(close_visual.foreground.a, 0);
+        assert_eq!(close_pressed_visual.foreground.a, 0);
         let (crate::NinePatchContent::Image { image: close_image }, crate::NinePatchContent::Image { image: pressed_image }) =
-            (close.content, close_pressed.content)
+            (close_visual.patch.content, close_pressed_visual.patch.content)
         else {
             panic!("Mac OS 9 close states must use baked artwork");
         };

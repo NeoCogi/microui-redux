@@ -3,9 +3,10 @@
 This bundled theme translates the compact rectangular controls, gray raised and recessed bevels,
 navy active-window accent, muted base title, and square resize treatment associated with
 Windows 95 into microui-redux's typed appearance roles. Its JSON deliberately supplies PNGs for
-normal, hovered, pressed, focused, combined focus/pointer, and disabled control states while
+disabled controls and for normal, hovered, and pressed pointer states nested beneath enabled and
+focused controls while
 leaving selection rows and title colors on the schema's flat fallbacks. Window activation changes
-only the active/base chrome roles and never disables the retained client hierarchy.
+only the active/base chrome states and never disables the retained client hierarchy.
 
 The visual research reference was the
 [Chicago95 GTK/Xfce theme](https://github.com/grassmunk/Chicago95). That repository is a reference

@@ -117,8 +117,6 @@ pub struct CaptionButtonsSkin {
     /// Activation selects [`ChromeState::Active`] for frame and title chrome; it does not rewrite
     /// the control state of the caption buttons themselves.
     pub show_without_activation: bool,
-    /// Whether a separate semantic glyph layer is painted over each caption button face.
-    pub draw_separate_glyphs: bool,
 }
 
 /// Optional flat field painted behind active centered title text.
@@ -166,7 +164,7 @@ pub struct SkinMetrics {
 pub struct WindowChromeSkin {
     /// Alignment and caption-bank reservation policy for title text.
     pub title_alignment: WindowTitleAlignment,
-    /// Independent placement, extent, visibility, and fallback policy for caption buttons.
+    /// Independent placement, extent, and visibility policy for caption buttons.
     pub captions: CaptionButtonsSkin,
     /// Optional active-title field painted behind measured text.
     pub active_title_backdrop: Option<TitleBackdropSkin>,
@@ -175,8 +173,7 @@ pub struct WindowChromeSkin {
 impl WindowChromeSkin {
     /// Creates a leading-title recipe with every caption button on the trailing edge.
     pub const fn trailing_buttons() -> Self {
-        // This conventional recipe retains visible caption controls without activation and uses
-        // manager-drawn fallback glyphs when a skin supplies only button backgrounds.
+        // This conventional recipe retains visible caption controls without activation.
         Self {
             title_alignment: WindowTitleAlignment::Leading,
             captions: CaptionButtonsSkin {
@@ -186,7 +183,6 @@ impl WindowChromeSkin {
                 extent_inset: 0,
                 minimum_extent: 0,
                 show_without_activation: true,
-                draw_separate_glyphs: true,
             },
             active_title_backdrop: None,
         }
@@ -205,7 +201,6 @@ impl WindowChromeSkin {
                 extent_inset: 6,
                 minimum_extent: 1,
                 show_without_activation: false,
-                draw_separate_glyphs: false,
             },
             active_title_backdrop: Some(TitleBackdropSkin {
                 color: title_backdrop,

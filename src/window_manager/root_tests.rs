@@ -916,17 +916,17 @@ fn modal_dialog_uses_its_own_active_frame_role() {
     let dimensions = Dimensioni::new(320, 240);
     ctx.update_ui(dimensions);
 
-    // Before the hidden dialog opens, the ordinary root must continue using the existing active
-    // window role. Merely retaining a dialog definition cannot affect its owner's presentation.
+    // Before the hidden dialog opens, the ordinary root must continue using its active window
+    // state. Merely retaining a dialog definition cannot affect its owner's presentation.
     log.clear();
     ctx.frame(frame_info(dimensions)).render_ui().unwrap();
     let events = log.snapshot();
     assert!(!atlas_quads_with_color(&events, window_frame_color).is_empty());
     assert!(atlas_quads_with_color(&events, dialog_frame_color).is_empty());
 
-    // Opening the modal transfers activation and selects only the dialog-specific active frame.
-    // The owner without activation uses its base ordinary-window role rather than either active
-    // color. Its interaction state remains Normal rather than acquiring an activation state.
+    // Opening the modal transfers activation and selects only the dialog frame's active state. The
+    // owner without activation uses its ordinary frame's Base state rather than either active
+    // color; pointer interaction is not part of this chrome state domain.
     ctx.ui().set_window_visible(&dialog, true).unwrap();
     ctx.update_ui(dimensions);
     assert_eq!(ctx.debug_active_root(), Some(dialog.id()));
@@ -937,7 +937,7 @@ fn modal_dialog_uses_its_own_active_frame_role() {
     assert!(!atlas_quads_with_color(&events, dialog_frame_color).is_empty());
 }
 
-/// Verifies top-level deactivation changes chrome roles without disabling retained widgets.
+/// Verifies top-level deactivation changes chrome state without disabling retained widgets.
 #[test]
 fn deactivated_window_keeps_enabled_child_widget_appearance() {
     // Distinct role and state colors make activation and disabling independently observable.
@@ -1135,7 +1135,7 @@ fn disabled_window_propagates_disabled_presentation_and_rejects_input() {
     }
     assert!(
         atlas_quads_with_color(&events, forbidden_active_frame_color).is_empty(),
-        "disabled windows use the base frame role even when they were most recently active"
+        "disabled windows do not use active frame state even when they were most recently active"
     );
 
     // Pointer delivery, caption actions, and resizing are all rejected while the visible surface

@@ -92,14 +92,6 @@ indexed_role! {
         RestoreButton,
         /// Visible bottom-right resize grip.
         ResizeGrip,
-        /// Optional themed symbol painted inside the close caption button.
-        CloseGlyph,
-        /// Optional themed symbol painted inside the minimize caption button.
-        MinimizeGlyph,
-        /// Optional themed symbol painted inside the maximize caption button.
-        MaximizeGlyph,
-        /// Optional themed symbol painted inside the restore caption button.
-        RestoreGlyph,
     }
 }
 
