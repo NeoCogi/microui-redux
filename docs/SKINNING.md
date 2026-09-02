@@ -80,8 +80,12 @@ applying layers in order have identical results. Window chrome is replaced as a 
 because its alignment and caption-bank geometry are interdependent.
 
 `FlatPalette` is compiler/editor input, not retained shadow state. `Skin::apply_flat_palette`
-immediately regenerates the resolved visual catalog and related effects. JSON palette fields follow
-the same path before authored PNG states replace individual visuals.
+immediately regenerates the resolved visual catalog and related effects when constructing a flat
+skin. A live editor working over an image theme instead uses
+`SkinPatch::from_flat_palette_transition`: it changes only affected flat cells, foregrounds, and
+effects while retaining image-backed cells. Merge those event patches over a pristine selected base
+skin so later edits compose without turning theme artwork back into flat fallbacks. JSON palette
+fields use full flat construction first, before authored PNG states replace individual visuals.
 
 ## Stable resources
 

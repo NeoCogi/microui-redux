@@ -7,7 +7,7 @@
 
 //! Concrete, deterministic partial edits for resolved skins.
 
-use crate::{Color, NinePatch, SliceInsets};
+use crate::{Color, FlatPalette, NinePatch, NinePatchCell, NinePatchContent, SliceInsets};
 
 use super::{AppearanceRole, RoleTable, Skin, StateTable, VisualCatalog, VisualState, WindowChromeSkin};
 
@@ -285,6 +285,57 @@ pub struct SkinPatch {
 }
 
 impl SkinPatch {
+    /// Compiles one flat-palette transition into a sparse patch over `current`.
+    ///
+    /// Only flat patch cells whose palette template changed are replaced. Image-backed visuals
+    /// remain intact, while matching foregrounds, effects, and an optional title backdrop receive
+    /// concrete edits. To accumulate several editor events, pass the currently resolved skin for
+    /// each transition and merge the returned patches in event order with [`Self::merge_later`].
+    pub fn from_flat_palette_transition(current: &Skin, before: FlatPalette, after: FlatPalette) -> Self {
+        // Compile both authoring values through Skin's single flat-palette mapping. Their
+        // difference identifies the exact role/state leaves owned by this edit without duplicating
+        // the palette-to-visual mapping or retaining a second runtime palette.
+        let mut before_skin = current.clone();
+        before_skin.apply_flat_palette(before);
+        let mut after_skin = current.clone();
+        after_skin.apply_flat_palette(after);
+        let mut patch = Self::default();
+
+        for role in AppearanceRole::ALL {
+            for state in VisualState::ALL {
+                let current_visual = current.visuals.resolve(role, state);
+                let before_visual = before_skin.visuals.resolve(role, state);
+                let after_visual = after_skin.visuals.resolve(role, state);
+                let visual_patch = VisualPatch {
+                    patch: flat_patch_transition(current_visual.patch, before_visual.patch, after_visual.patch),
+                    foreground: (!same_color(before_visual.foreground, after_visual.foreground)).then_some(after_visual.foreground),
+                };
+                if !visual_patch.is_empty() {
+                    // Store only leaves affected by this palette transition. Unmentioned image,
+                    // patch, and foreground values continue to come from the supplied skin.
+                    patch.visuals.set(role, state, visual_patch);
+                }
+            }
+        }
+
+        if !same_color(before_skin.effects.focus_outline, after_skin.effects.focus_outline) {
+            patch.effects.focus_outline = Some(after_skin.effects.focus_outline);
+        }
+        if !same_color(before_skin.effects.window_activation, after_skin.effects.window_activation) {
+            patch.effects.window_activation = Some(after_skin.effects.window_activation);
+        }
+        if !same_color(before.title_background, after.title_background) {
+            let mut chrome = current.chrome;
+            if let Some(backdrop) = &mut chrome.active_title_backdrop {
+                // Classic centered titles own one flat field outside the visual catalog. Replace
+                // the complete coherent recipe only when that optional backdrop exists.
+                backdrop.color = after.title_background;
+                patch.chrome.recipe = Some(chrome);
+            }
+        }
+        patch
+    }
+
     /// Reports whether applying this patch would preserve every resolved skin value.
     pub fn is_empty(&self) -> bool {
         // Delegate to all four concrete groups so new skin categories cannot be silently omitted.
@@ -328,6 +379,61 @@ fn replace_option<T: Copy>(earlier: &mut Option<T>, later: Option<T>) {
     }
 }
 
+/// Reports whether two concrete colors contain the same four channel values.
+fn same_color(left: Color, right: Color) -> bool {
+    // Color intentionally remains a plain rendering value without equality traits, so patch
+    // compilation compares its complete public representation at this small authoring boundary.
+    (left.r, left.g, left.b, left.a) == (right.r, right.g, right.b, right.a)
+}
+
+/// Reports whether two flat nine-patch cells contain the same concrete paint value.
+fn same_patch_cell(left: NinePatchCell, right: NinePatchCell) -> bool {
+    // Exhaustive matching keeps Empty distinct from a color cell without byte-wise comparison or
+    // an erased representation for the closed render vocabulary.
+    match (left, right) {
+        (NinePatchCell::Empty, NinePatchCell::Empty) => true,
+        (NinePatchCell::Color { color: left }, NinePatchCell::Color { color: right }) => same_color(left, right),
+        (NinePatchCell::Empty | NinePatchCell::Color { .. }, _) => false,
+    }
+}
+
+/// Replaces one current flat cell only when a palette transition changed that template cell.
+fn apply_patch_cell_transition(current: &mut NinePatchCell, before: NinePatchCell, after: NinePatchCell) -> bool {
+    // The current cell may already contain an earlier editor change. Preserve it unless this
+    // transition owns the same cell, then publish the new concrete value and report the mutation.
+    if same_patch_cell(before, after) {
+        false
+    } else {
+        *current = after;
+        true
+    }
+}
+
+/// Applies one flat-palette transition without replacing image-backed artwork.
+fn flat_patch_transition(current: NinePatch, before: NinePatch, after: NinePatch) -> Option<NinePatch> {
+    let mut edited = current;
+    let (NinePatchContent::Flat { cells: current_cells }, NinePatchContent::Flat { cells: before_cells }, NinePatchContent::Flat { cells: after_cells }) =
+        (&mut edited.content, before.content, after.content)
+    else {
+        // A selected image owns its complete nine-slice. Palette changes target only flat fallback
+        // cells, so image content and its atlas capability remain exactly untouched.
+        return None;
+    };
+
+    // Compare all named cells explicitly. This mirrors NinePatchCells' concrete structure and
+    // ensures a later field addition cannot silently escape palette patch construction.
+    let mut changed = apply_patch_cell_transition(&mut current_cells.top_left, before_cells.top_left, after_cells.top_left);
+    changed |= apply_patch_cell_transition(&mut current_cells.top, before_cells.top, after_cells.top);
+    changed |= apply_patch_cell_transition(&mut current_cells.top_right, before_cells.top_right, after_cells.top_right);
+    changed |= apply_patch_cell_transition(&mut current_cells.left, before_cells.left, after_cells.left);
+    changed |= apply_patch_cell_transition(&mut current_cells.center, before_cells.center, after_cells.center);
+    changed |= apply_patch_cell_transition(&mut current_cells.right, before_cells.right, after_cells.right);
+    changed |= apply_patch_cell_transition(&mut current_cells.bottom_left, before_cells.bottom_left, after_cells.bottom_left);
+    changed |= apply_patch_cell_transition(&mut current_cells.bottom, before_cells.bottom, after_cells.bottom);
+    changed |= apply_patch_cell_transition(&mut current_cells.bottom_right, before_cells.bottom_right, after_cells.bottom_right);
+    changed.then_some(edited)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -342,6 +448,16 @@ mod tests {
     fn edges(insets: SliceInsets) -> (i32, i32, i32, i32) {
         // Preserve the public left/top/right/bottom order used by geometry and JSON documents.
         (insets.left, insets.top, insets.right, insets.bottom)
+    }
+
+    /// Returns the concrete color in one expected flat patch cell.
+    fn cell_color(cell: NinePatchCell) -> Color {
+        // The selected cells are always painted by flat catalog construction; treating Empty as a
+        // failed invariant gives a precise diagnostic instead of returning a sentinel color.
+        match cell {
+            NinePatchCell::Color { color } => color,
+            NinePatchCell::Empty => panic!("expected the edited flat patch cell to contain a color"),
+        }
     }
 
     /// Verifies a sparse patch changes only its exact concrete leaves.
@@ -408,6 +524,54 @@ mod tests {
             edges(merged.appearance(AppearanceRole::TextInput, VisualState::Focused).insets),
             edges(sequential.appearance(AppearanceRole::TextInput, VisualState::Focused).insets)
         );
+    }
+
+    /// Verifies a palette transition cannot replace selected image-backed artwork.
+    #[test]
+    fn palette_transition_preserves_image_backed_visuals() {
+        let atlas = crate::test_support::test_atlas();
+        let mut base = Skin::from_atlas(&atlas);
+        let icon = crate::IconRole::Close.resolve(&atlas);
+        let image = crate::NinePatchImage::new(icon, SliceInsets::ZERO, Color { r: 255, g: 255, b: 255, a: 255 });
+        base.visuals
+            .set_patch(AppearanceRole::Button, VisualState::Normal, NinePatch::image(SliceInsets::uniform(2), image));
+        let original_foreground = base.foreground(AppearanceRole::Button, VisualState::Normal);
+        let before = FlatPalette::default();
+        let mut after = before;
+        after.button = Color { r: 1, g: 2, b: 3, a: 255 };
+
+        let resolved = base.clone().patched(&SkinPatch::from_flat_palette_transition(&base, before, after));
+
+        match resolved.appearance(AppearanceRole::Button, VisualState::Normal).content {
+            NinePatchContent::Image { image: retained } => assert_eq!(retained.icon, icon),
+            NinePatchContent::Flat { .. } => panic!("palette transition replaced selected image artwork with a flat patch"),
+        }
+        assert_eq!(
+            channels(resolved.foreground(AppearanceRole::Button, VisualState::Normal)),
+            channels(original_foreground)
+        );
+    }
+
+    /// Verifies sequential fill and border transitions compose inside one concrete flat patch.
+    #[test]
+    fn cumulative_palette_transitions_preserve_prior_shared_patch_edits() {
+        let atlas = crate::test_support::test_atlas();
+        let base = Skin::from_atlas(&atlas);
+        let initial = FlatPalette::default();
+        let mut changed_fill = initial;
+        changed_fill.button = Color { r: 11, g: 12, b: 13, a: 255 };
+        let mut cumulative = SkinPatch::from_flat_palette_transition(&base, initial, changed_fill);
+        let current = base.clone().patched(&cumulative);
+        let mut changed_border = changed_fill;
+        changed_border.border = Color { r: 21, g: 22, b: 23, a: 255 };
+        cumulative.merge_later(&SkinPatch::from_flat_palette_transition(&current, changed_fill, changed_border));
+
+        let resolved = base.patched(&cumulative);
+        let NinePatchContent::Flat { cells } = resolved.appearance(AppearanceRole::Button, VisualState::Normal).content else {
+            panic!("default button visual must remain a flat patch");
+        };
+        assert_eq!(channels(cell_color(cells.center)), channels(changed_fill.button));
+        assert_eq!(channels(cell_color(cells.top)), channels(changed_border.border));
     }
 
     /// Verifies the default patch has no hidden mutation or synthesized fallback values.
