@@ -268,8 +268,8 @@ including transparent frame pixels and any space exposed by `window_content_inse
 
 `skin.window_content_insets` is a separate four-edge inset around the application body. Root
 geometry applies it after the frame, title, and menu bar have been allocated, so it never narrows
-the menubar and never changes ordinary widget padding. The bundled Windows and Mac themes set all
-four edges to zero; the default flat Skin retains a five-pixel body inset.
+the menubar and never changes ordinary widget padding. The Windows 3.11 theme uses a two-pixel
+margin; the other bundled classic themes use zero, and the default flat Skin retains five pixels.
 `WindowOption::NO_PADDING` overrides the metric with zero for an individual root.
 
 Application-authored popup windows use the `menu.popup` appearance for both their structural

@@ -1193,9 +1193,15 @@ mod tests {
         let content = loaded.bundle().skin().metrics.window_content_insets;
         assert_eq!(
             (content.left, content.top, content.right, content.bottom),
-            (0, 0, 0, 0),
-            "period Windows applications decide their own content margins inside root chrome"
+            (2, 2, 2, 2),
+            "the period theme leaves a narrow application margin inside root chrome"
         );
+        let window_surface = loaded.bundle().skin().surface(SurfaceRole::Window, SurfaceState::Normal).patch;
+        assert!(matches!(
+            window_surface.content,
+            crate::NinePatchContent::Flat { cells }
+                if matches!(cells.center, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (255, 255, 255, 255))
+        ));
         // Ordinary windows retain their long L-corner bitmap. Only modal dialogs use the uniform
         // four-pixel blue focus frame visible around period Windows 3.11 dialog boxes.
         assert!(matches!(
@@ -1216,7 +1222,7 @@ mod tests {
             dialog_frame.content,
             crate::NinePatchContent::Flat { cells }
                 if matches!(cells.top, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (0, 0, 170, 255))
-                    && matches!(cells.center, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (195, 199, 203, 255))
+                    && matches!(cells.center, crate::NinePatchCell::Empty)
         ));
         let menu_popup = loaded.bundle().skin().menu(MenuRole::Popup, MenuState::Normal).patch;
         assert_eq!(
