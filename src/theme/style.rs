@@ -52,7 +52,7 @@
 //
 //! Atlas-bound UI style values used across the crate.
 
-use super::{AppearanceCatalog, AppearanceRole, Color, ControlColor, FontChoice, FontRole, ForegroundCatalog, ThemeIcons, VisualState};
+use super::{AppearanceRole, Color, ControlColor, FontChoice, FontRole, ThemeIcons, VisualCatalog, VisualState};
 use crate::atlas::{AtlasHandle, FontId};
 use crate::render::{NinePatch, SliceInsets};
 
@@ -112,13 +112,11 @@ pub struct Style {
     pub scrollbar_size: i32,
     /// Minimum length of scrollbar thumbs and width of slider thumbs.
     pub thumb_size: i32,
-    /// Typed state tables used by built-in widgets, containers, menus, and window chrome.
-    pub appearances: AppearanceCatalog,
-    /// Typed foreground tables resolved with the same semantic roles and states as appearances.
+    /// Unified background and foreground visuals used by built-in UI parts.
     ///
-    /// A foreground colors text and semantic glyphs; it never changes background geometry or
-    /// substitutes for an appearance PNG. Theme files can override either half independently.
-    pub foregrounds: ForegroundCatalog,
+    /// Each semantic role and interaction state resolves one complete value, so background art
+    /// and its adjacent text or glyph color cannot drift into independently configured catalogs.
+    pub visuals: VisualCatalog,
     /// Accent used for focused widget fills, menu selection, and the universal focus outline.
     ///
     /// Focus is an interaction scope rather than a control-family color, so this named value
@@ -171,22 +169,18 @@ impl Style {
         let window_focus_color = Color { r: 0, g: 120, b: 215, a: 255 };
         let menu_background = Color { r: 50, g: 50, b: 50, a: 255 };
         let disabled_background_color = colors[ControlColor::WindowBG as usize];
-        let foregrounds = ForegroundCatalog::from_flat_palette(
-            colors[ControlColor::Text as usize],
-            colors[ControlColor::TitleText as usize],
-            Color { r: 230, g: 230, b: 230, a: 255 },
-            colors[ControlColor::Text as usize],
-            colors[ControlColor::TitleText as usize],
-        );
-        // Build the catalog from the same concrete flat values stored below. JSON theme loading
-        // follows this identical fallback constructor before replacing explicitly supplied PNGs.
-        let appearances = AppearanceCatalog::from_flat_palette(
+        // Build complete visuals from the same concrete flat values stored below. JSON theme
+        // loading follows this identical fallback constructor before replacing authored states.
+        let visuals = VisualCatalog::from_flat_palette(
             SliceInsets::uniform(1),
             colors,
             focus_color,
             window_focus_color,
             menu_background,
             disabled_background_color,
+            Color { r: 230, g: 230, b: 230, a: 255 },
+            colors[ControlColor::Text as usize],
+            colors[ControlColor::TitleText as usize],
         );
         Self {
             font,
@@ -205,8 +199,7 @@ impl Style {
             window_border: SliceInsets::uniform(1),
             scrollbar_size: 12,
             thumb_size: 8,
-            appearances,
-            foregrounds,
+            visuals,
             focus_color,
             window_focus_color,
             menu_background,
@@ -226,7 +219,7 @@ impl Style {
             && atlas.contains_font(self.mono_font)
             && self.icons.belongs_to(atlas)
             && self
-                .appearances
+                .visuals
                 .patches()
                 .filter_map(NinePatch::image_content)
                 .all(|image| atlas.contains_icon(image.icon))
@@ -242,14 +235,14 @@ impl Style {
 
     /// Returns the exact patch assigned to one semantic role and visual state.
     pub fn appearance(&self, role: AppearanceRole, state: VisualState) -> NinePatch {
-        // AppearanceCatalog guarantees both enum-indexed tables are complete.
-        self.appearances.resolve(role, state)
+        // VisualCatalog guarantees both enum-indexed table layers are complete.
+        self.visuals.resolve(role, state).patch
     }
 
     /// Returns the exact foreground assigned to one semantic role and visual state.
     pub fn foreground(&self, role: AppearanceRole, state: VisualState) -> Color {
-        // ForegroundCatalog guarantees the same total enum-indexed lookup contract as appearances.
-        self.foregrounds.resolve(role, state)
+        // The foreground is selected from the same concrete value as its background patch.
+        self.visuals.resolve(role, state).foreground
     }
 
     /// Returns the concrete font ID for the provided semantic role.
@@ -332,9 +325,9 @@ mod tests {
         candidates[10].icons.open_folder = foreign.icons.open_folder;
         candidates[11].icons.closed_folder = foreign.icons.closed_folder;
         candidates[12].icons.file = foreign.icons.file;
-        candidates[13].appearances.set(
+        candidates[13].visuals.set_patches(
             AppearanceRole::Button,
-            crate::StatefulAppearance::all(NinePatch::image(
+            crate::StateTable::filled(NinePatch::image(
                 SliceInsets::ZERO,
                 crate::NinePatchImage::new(foreign.icons.close, SliceInsets::ZERO, Color { r: 255, g: 255, b: 255, a: 255 }),
             )),
@@ -360,13 +353,13 @@ mod tests {
     fn frame_insets_normalize_each_component_without_changing_cells() {
         let atlas = make_test_atlas(&[(FontRole::Body.atlas_name(), 12)]);
         let style = Style {
-            appearances: {
-                let mut appearances = Style::from_atlas(&atlas).appearances;
-                appearances.set(
+            visuals: {
+                let mut visuals = Style::from_atlas(&atlas).visuals;
+                visuals.set_patches(
                     AppearanceRole::GenericFrame,
-                    crate::StatefulAppearance::all(NinePatch::framed(SliceInsets::new(-4, 2, -3, 5), Color { r: 10, g: 20, b: 30, a: 255 }, None)),
+                    crate::StateTable::filled(NinePatch::framed(SliceInsets::new(-4, 2, -3, 5), Color { r: 10, g: 20, b: 30, a: 255 }, None)),
                 );
-                appearances
+                visuals
             },
             ..Style::from_atlas(&atlas)
         };

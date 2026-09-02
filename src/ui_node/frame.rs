@@ -161,9 +161,7 @@ mod tests {
     /// Replaces the generic frame role used by the frame geometry under test.
     fn with_frame(mut style: Style, patch: NinePatch) -> Style {
         // Tests mutate the same concrete catalog entry that production generic framing resolves.
-        style
-            .appearances
-            .set(crate::AppearanceRole::GenericFrame, crate::StatefulAppearance::all(patch));
+        style.visuals.set_patches(crate::AppearanceRole::GenericFrame, crate::StateTable::filled(patch));
         style
     }
 

@@ -38,7 +38,7 @@ use std::{
 
 use serde::Deserialize;
 
-use super::{AppearanceCatalog, AppearanceRole, FontRole, ForegroundCatalog, Style, VisualState};
+use super::{AppearanceRole, FontRole, Style, VisualCatalog, VisualState};
 use crate::{
     atlas::{
         AtlasHandle,
@@ -358,42 +358,48 @@ impl ThemeDefinition {
         assert!(style.belongs_to(&atlas), "theme base style contains font or icon IDs from another atlas");
         // Apply palette and metric overrides before constructing fallbacks, so every omitted PNG
         // state reflects the JSON theme's own flat colors rather than the built-in default palette.
-        self.style.apply(&mut style);
+        let (menu_foreground, disabled_foreground, disabled_title_foreground) = self.style.apply(&mut style);
         let frame_insets = self.style.frame_insets.map(InsetsDocument::into_insets).unwrap_or_else(|| style.frame_insets());
         validate_non_negative("generic_frame", "style.frame_insets", frame_insets)?;
         validate_non_negative("window_content", "style.window_content_insets", style.window_content_insets)?;
         validate_non_negative("window_frame", "style.window_border", style.window_border)?;
-        style.appearances = AppearanceCatalog::from_flat_palette(
+        style.visuals = VisualCatalog::from_flat_palette(
             frame_insets,
             style.colors,
             style.focus_color,
             style.window_focus_color,
             style.menu_background,
             style.disabled_background_color,
+            menu_foreground,
+            disabled_foreground,
+            disabled_title_foreground,
         );
         for (name, document) in self.appearances {
             let role = AppearanceRole::from_json_name(name.as_str()).ok_or_else(|| ThemeLoadError::UnknownAppearance { name: name.clone() })?;
-            let mut appearance = style.appearances.get(role);
-            let mut foregrounds = style.foregrounds.get(role);
+            let mut visuals = style.visuals.get(role);
             let destination_insets = document
                 .insets
                 .map(InsetsDocument::into_insets)
-                .unwrap_or_else(|| appearance.get(VisualState::Normal).insets);
+                .unwrap_or_else(|| visuals.get(VisualState::Normal).patch.insets);
             validate_non_negative(name.as_str(), "insets", destination_insets)?;
 
             // Role-level insets also apply to states that intentionally omit a PNG and retain their
             // flat fallback, keeping layout stable across hover/focus transitions.
             for state in VisualState::ALL {
-                appearance.set(state, appearance.get(state).with_insets(destination_insets));
+                let mut visual = *visuals.get(state);
+                visual.patch = visual.patch.with_insets(destination_insets);
+                visuals.set(state, visual);
             }
             for (state, state_document) in document.states() {
                 let Some(state_document) = state_document else {
                     continue;
                 };
                 if let Some(foreground) = state_document.foreground {
-                    // Foreground overrides are independent from image presence: a flat fallback
-                    // can still use white selected text or a subdued disabled glyph.
-                    foregrounds.set(state, foreground.into_color());
+                    // A foreground can change without image artwork, but remains stored in the
+                    // same complete visual as the state's background patch.
+                    let mut visual = *visuals.get(state);
+                    visual.foreground = foreground.into_color();
+                    visuals.set(state, visual);
                 }
                 let Some(relative_path) = state_document.png.as_ref() else {
                     continue;
@@ -410,10 +416,11 @@ impl ThemeDefinition {
                     .map(ColorDocument::into_color)
                     .unwrap_or(Color { r: 255, g: 255, b: 255, a: 255 });
                 let image = NinePatchImage::new(icon, source_insets, tint);
-                appearance.set(state, NinePatch::image(destination_insets, image));
+                let mut visual = *visuals.get(state);
+                visual.patch = NinePatch::image(destination_insets, image);
+                visuals.set(state, visual);
             }
-            style.appearances.set(role, appearance);
-            style.foregrounds.set(role, foregrounds);
+            style.visuals.set(role, visuals);
         }
 
         // Retain atlas and style as the only public unit that can be safely selected later.
@@ -509,8 +516,8 @@ struct StyleDocument {
 }
 
 impl StyleDocument {
-    /// Applies every present scalar and color field to one atlas-bound Style.
-    fn apply(&self, style: &mut Style) {
+    /// Applies present fields and returns foreground inputs for visual fallback construction.
+    fn apply(&self, style: &mut Style) -> (Color, Color, Color) {
         // Keep assignment explicit so the strict JSON schema and public Style fields cannot drift
         // through reflection or stringly typed mutation.
         assign_if_some(&mut style.default_cell_width, self.default_cell_width);
@@ -535,7 +542,9 @@ impl StyleDocument {
         }
         assign_if_some(&mut style.scrollbar_size, self.scrollbar_size);
         assign_if_some(&mut style.thumb_size, self.thumb_size);
-        self.colors.apply(style);
+        // Palette application returns the three foreground values that are not legacy numeric
+        // palette slots; the installer consumes them immediately into one VisualCatalog.
+        self.colors.apply(style)
     }
 }
 
@@ -606,8 +615,8 @@ struct ColorPaletteDocument {
 }
 
 impl ColorPaletteDocument {
-    /// Applies every supplied semantic color to its concrete Style destination.
-    fn apply(&self, style: &mut Style) {
+    /// Applies supplied palette fields and returns foregrounds needed by fallback construction.
+    fn apply(&self, style: &mut Style) -> (Color, Color, Color) {
         // Read fallback-only foreground values before changing the palette. Omitted values preserve
         // the atlas-derived style's corresponding concrete role/state rather than inventing a
         // second default inside the loader.
@@ -642,13 +651,9 @@ impl ColorPaletteDocument {
         assign_color(&mut style.focus_color, self.focus);
         assign_color(&mut style.window_focus_color, self.window_focus);
         assign_color(&mut style.menu_background, self.menu_background);
-        style.foregrounds = ForegroundCatalog::from_flat_palette(
-            style.colors[ControlColor::Text as usize],
-            style.colors[ControlColor::TitleText as usize],
-            menu_foreground,
-            disabled_text,
-            disabled_title_text,
-        );
+        // The caller immediately rebuilds one unified VisualCatalog from the updated colors.
+        // Returning this small concrete tuple avoids retaining a second foreground catalog.
+        (menu_foreground, disabled_text, disabled_title_text)
     }
 }
 

@@ -2124,7 +2124,7 @@ impl State {
                 AppearanceRole::MenuItem,
                 AppearanceRole::MenuItemSelected,
             ] {
-                self.style.foregrounds.set_state(role, VisualState::Normal, color);
+                self.style.visuals.set_foreground(role, VisualState::Normal, color);
             }
             self.style_dirty = true;
             return;

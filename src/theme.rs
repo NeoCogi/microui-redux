@@ -40,7 +40,7 @@ mod style;
 mod tables;
 mod typography;
 
-pub use appearance::{AppearanceCatalog, ForegroundCatalog, StatefulAppearance, StatefulColor};
+pub use appearance::{StatefulVisual, Visual, VisualCatalog};
 pub use crate::render::{Color, color};
 pub use icons::ThemeIcons;
 #[cfg(feature = "theme-json")]

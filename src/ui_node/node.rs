@@ -78,7 +78,7 @@ impl MeasurementStyleKey {
             title_height: style.title_height,
             scrollbar_size: style.scrollbar_size,
             thumb_size: style.thumb_size,
-            appearance_insets: style.appearances.measurement_insets(),
+            appearance_insets: style.visuals.measurement_insets(),
         }
     }
 }

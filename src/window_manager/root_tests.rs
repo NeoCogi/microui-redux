@@ -36,9 +36,8 @@ use crate::{
     ControlColor, Custom, Color, CustomParameters, Constraints, Context, DecimalPrecision, Dimensioni, Disclosure, DisclosureParameters, Ui, Grid,
     GridParameters, Key, KeyEvent, KeyboardBehavior, Linear, LinearItem, LinearParameters, Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters,
     MenuItemSubmitted, MouseButton, Node, NinePatch, ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Slider,
-    SliderParameters, StatefulAppearance, StatefulColor, Style, TextArea, TextAreaParameters, Textbox, TextboxChanged, TextBlock, TextBlockParameters,
-    TextboxParameters, TrackSize, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, VisualState, WidgetUpdateCtx, Modifiers,
-    WidgetFillOption,
+    SliderParameters, StateTable, Style, TextArea, TextAreaParameters, Textbox, TextboxChanged, TextBlock, TextBlockParameters, TextboxParameters, TrackSize,
+    TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, VisualState, WidgetUpdateCtx, Modifiers, WidgetFillOption,
 };
 use crate::render::{FrameInfo, RenderError};
 use std::{
@@ -828,10 +827,10 @@ fn active_window_and_only_its_remembered_widget_use_style_focus_accents() {
         style.window_focus_color,
         Some(style.colors[ControlColor::WindowBG as usize]),
     );
-    style.appearances.set(AppearanceRole::WindowFrameActive, StatefulAppearance::all(active_frame));
-    style.appearances.set(
+    style.visuals.set_patches(AppearanceRole::WindowFrameActive, StateTable::filled(active_frame));
+    style.visuals.set_patches(
         AppearanceRole::WindowTitleActive,
-        StatefulAppearance::all(NinePatch::solid(style.window_focus_color)),
+        StateTable::filled(NinePatch::solid(style.window_focus_color)),
     );
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
@@ -900,11 +899,11 @@ fn modal_dialog_uses_its_own_active_frame_role() {
     let dialog_frame_color = color(83, 109, 149, 255);
     let mut style = test_style(&atlas);
     style
-        .appearances
-        .set(AppearanceRole::WindowFrameActive, StatefulAppearance::all(NinePatch::solid(window_frame_color)));
+        .visuals
+        .set_patches(AppearanceRole::WindowFrameActive, StateTable::filled(NinePatch::solid(window_frame_color)));
     style
-        .appearances
-        .set(AppearanceRole::DialogFrameActive, StatefulAppearance::all(NinePatch::solid(dialog_frame_color)));
+        .visuals
+        .set_patches(AppearanceRole::DialogFrameActive, StateTable::filled(NinePatch::solid(dialog_frame_color)));
 
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
@@ -949,19 +948,18 @@ fn deactivated_window_keeps_enabled_child_widget_appearance() {
     let enabled_text_color = color(199, 211, 223, 255);
     let disabled_text_color = color(227, 233, 239, 255);
     let mut style = test_style(&atlas);
-    let mut button_foreground = StatefulColor::all(enabled_text_color);
+    let mut button_foreground = StateTable::filled(enabled_text_color);
     button_foreground.set(VisualState::Disabled, disabled_text_color);
-    style.foregrounds.set(AppearanceRole::Button, button_foreground);
+    style.visuals.set_foregrounds(AppearanceRole::Button, button_foreground);
     style
-        .appearances
-        .set(AppearanceRole::WindowFrame, StatefulAppearance::all(NinePatch::solid(passive_window_color)));
-    style.appearances.set(
-        AppearanceRole::WindowFrameActive,
-        StatefulAppearance::all(NinePatch::solid(active_window_color)),
-    );
-    let mut button = StatefulAppearance::all(NinePatch::solid(enabled_control_color));
+        .visuals
+        .set_patches(AppearanceRole::WindowFrame, StateTable::filled(NinePatch::solid(passive_window_color)));
+    style
+        .visuals
+        .set_patches(AppearanceRole::WindowFrameActive, StateTable::filled(NinePatch::solid(active_window_color)));
+    let mut button = StateTable::filled(NinePatch::solid(enabled_control_color));
     button.set(VisualState::Disabled, NinePatch::solid(disabled_control_color));
-    style.appearances.set(AppearanceRole::Button, button);
+    style.visuals.set_patches(AppearanceRole::Button, button);
 
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
@@ -1019,7 +1017,7 @@ fn external_widget_images_use_color_preserving_white_tint() {
     let mut style = ctx.style().clone();
     // Reproduce the classic themes' black control text. This formerly multiplied every external
     // image channel by zero even though the same texture was correct under the light default text.
-    style.foregrounds.set(AppearanceRole::Button, StatefulColor::all(color(0, 0, 0, 255)));
+    style.visuals.set_foregrounds(AppearanceRole::Button, StateTable::filled(color(0, 0, 0, 255)));
     ctx.set_style(style);
     let texture = ctx.load_image_rgba(2, 2, &[255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255]);
     let (_, image_button) = Button::create(ButtonParameters::with_image(
@@ -1064,27 +1062,31 @@ fn disabled_window_propagates_disabled_presentation_and_rejects_input() {
     let disabled_control_text_color = color(227, 233, 239, 255);
     let mut style = test_style(&atlas);
 
-    let mut passive_frame = style.appearances.get(AppearanceRole::WindowFrame);
-    passive_frame.set(VisualState::Disabled, NinePatch::solid(disabled_frame_color));
-    style.appearances.set(AppearanceRole::WindowFrame, passive_frame);
-    let mut active_frame = style.appearances.get(AppearanceRole::WindowFrameActive);
-    active_frame.set(VisualState::Disabled, NinePatch::solid(forbidden_active_frame_color));
-    style.appearances.set(AppearanceRole::WindowFrameActive, active_frame);
-    let mut close = style.appearances.get(AppearanceRole::WindowCloseButton);
-    close.set(VisualState::Disabled, NinePatch::solid(disabled_caption_color));
-    style.appearances.set(AppearanceRole::WindowCloseButton, close);
-    let mut menu_bar = style.appearances.get(AppearanceRole::MenuBar);
-    menu_bar.set(VisualState::Disabled, NinePatch::solid(disabled_menu_color));
-    style.appearances.set(AppearanceRole::MenuBar, menu_bar);
-    let mut menu_title_text = style.foregrounds.get(AppearanceRole::MenuTitle);
-    menu_title_text.set(VisualState::Disabled, disabled_menu_text_color);
-    style.foregrounds.set(AppearanceRole::MenuTitle, menu_title_text);
-    let mut checkbox_box = style.appearances.get(AppearanceRole::Checkbox);
-    checkbox_box.set(VisualState::Disabled, NinePatch::solid(disabled_control_color));
-    style.appearances.set(AppearanceRole::Checkbox, checkbox_box);
-    let mut checkbox_text = style.foregrounds.get(AppearanceRole::Checkbox);
-    checkbox_text.set(VisualState::Disabled, disabled_control_text_color);
-    style.foregrounds.set(AppearanceRole::Checkbox, checkbox_text);
+    style
+        .visuals
+        .set_patch(AppearanceRole::WindowFrame, VisualState::Disabled, NinePatch::solid(disabled_frame_color));
+    style.visuals.set_patch(
+        AppearanceRole::WindowFrameActive,
+        VisualState::Disabled,
+        NinePatch::solid(forbidden_active_frame_color),
+    );
+    style.visuals.set_patch(
+        AppearanceRole::WindowCloseButton,
+        VisualState::Disabled,
+        NinePatch::solid(disabled_caption_color),
+    );
+    style
+        .visuals
+        .set_patch(AppearanceRole::MenuBar, VisualState::Disabled, NinePatch::solid(disabled_menu_color));
+    style
+        .visuals
+        .set_foreground(AppearanceRole::MenuTitle, VisualState::Disabled, disabled_menu_text_color);
+    style
+        .visuals
+        .set_patch(AppearanceRole::Checkbox, VisualState::Disabled, NinePatch::solid(disabled_control_color));
+    style
+        .visuals
+        .set_foreground(AppearanceRole::Checkbox, VisualState::Disabled, disabled_control_text_color);
 
     let (checkbox, checkbox_node) = Checkbox::create(CheckboxParameters::new("disabled child", false));
     let checkbox_id = checkbox_node.id();
@@ -1237,16 +1239,16 @@ fn window_and_container_backgrounds_ignore_hover_state_artwork() {
     let panel_normal = color(59, 61, 67, 255);
     let panel_hover = color(71, 73, 79, 255);
 
-    let mut window = StatefulAppearance::all(NinePatch::framed(insets, border, Some(window_normal)));
+    let mut window = StateTable::filled(NinePatch::framed(insets, border, Some(window_normal)));
     window.set(VisualState::Hovered, NinePatch::framed(insets, border, Some(window_hover)));
     window.set(VisualState::Pressed, NinePatch::framed(insets, border, Some(window_hover)));
-    style.appearances.set(AppearanceRole::WindowFrame, window);
-    style.appearances.set(AppearanceRole::WindowFrameActive, window);
+    style.visuals.set_patches(AppearanceRole::WindowFrame, window);
+    style.visuals.set_patches(AppearanceRole::WindowFrameActive, window);
 
-    let mut panel = StatefulAppearance::all(NinePatch::framed(insets, border, Some(panel_normal)));
+    let mut panel = StateTable::filled(NinePatch::framed(insets, border, Some(panel_normal)));
     panel.set(VisualState::Hovered, NinePatch::framed(insets, border, Some(panel_hover)));
     panel.set(VisualState::Pressed, NinePatch::framed(insets, border, Some(panel_hover)));
-    style.appearances.set(AppearanceRole::Panel, panel);
+    style.visuals.set_patches(AppearanceRole::Panel, panel);
 
     let (_, content) = ScrollArea::create(ScrollAreaParameters::new(
         ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL,
@@ -1295,10 +1297,9 @@ fn tab_focused_disclosure_uses_focus_fill_in_addition_to_the_shared_outline() {
         window_focus_color: color(109, 127, 149, 255),
         ..test_style(&atlas)
     };
-    let row = style.appearances.get(AppearanceRole::DisclosureHeader);
-    let mut focused_row = row;
-    focused_row.set(VisualState::Focused, NinePatch::solid(style.focus_color));
-    style.appearances.set(AppearanceRole::DisclosureHeader, focused_row);
+    style
+        .visuals
+        .set_patch(AppearanceRole::DisclosureHeader, VisualState::Focused, NinePatch::solid(style.focus_color));
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
     ctx.set_style(style.clone());
@@ -2127,11 +2128,11 @@ fn combo_popup_choice_hover_resolves_the_list_item_hovered_focused_appearance() 
     let hovered_color = color(71, 83, 97, 255);
     let focused_color = color(109, 127, 149, 255);
     let hovered_focused_color = color(173, 191, 211, 255);
-    let mut item_appearance = StatefulAppearance::all(NinePatch::solid(normal_color));
+    let mut item_appearance = StateTable::filled(NinePatch::solid(normal_color));
     item_appearance.set(VisualState::Hovered, NinePatch::solid(hovered_color));
     item_appearance.set(VisualState::Focused, NinePatch::solid(focused_color));
     item_appearance.set(VisualState::HoveredFocused, NinePatch::solid(hovered_focused_color));
-    style.appearances.set(AppearanceRole::ListItem, item_appearance);
+    style.visuals.set_patches(AppearanceRole::ListItem, item_appearance);
     let (_, item_node) = ListItem::create(ListItemParameters::new("Apple"));
     let item_id = item_node.id();
     let (_, popup_body) = Linear::create(LinearParameters::vertical([item_node]));
@@ -3367,9 +3368,9 @@ fn right_bottom_and_corner_resize_only_their_declared_axes_with_thick_borders() 
     let atlas = test_atlas();
     let mut style = test_style(&atlas);
     let insets = crate::SliceInsets::new(3, 4, 5, 6);
-    let frame = StatefulAppearance::all(NinePatch::framed(insets, color(10, 20, 30, 255), Some(color(40, 50, 60, 255))));
-    style.appearances.set(AppearanceRole::WindowFrame, frame);
-    style.appearances.set(AppearanceRole::WindowFrameActive, frame);
+    let frame = StateTable::filled(NinePatch::framed(insets, color(10, 20, 30, 255), Some(color(40, 50, 60, 255))));
+    style.visuals.set_patches(AppearanceRole::WindowFrame, frame);
+    style.visuals.set_patches(AppearanceRole::WindowFrameActive, frame);
     // Structural resize thickness is independent from the frame artwork's fixed corner span.
     style.window_border = insets;
     let grip_size = style.scrollbar_size;
@@ -4409,9 +4410,9 @@ fn application_popup_uses_the_semantic_popup_frame_instead_of_window_border_chro
     let popup_fill = color(211, 213, 217, 255);
     style.window_border = crate::SliceInsets::uniform(7);
     style.window_content_insets = crate::SliceInsets::ZERO;
-    style.appearances.set(
+    style.visuals.set_patches(
         AppearanceRole::MenuPopup,
-        StatefulAppearance::all(NinePatch::framed(popup_insets, popup_border, Some(popup_fill))),
+        StateTable::filled(NinePatch::framed(popup_insets, popup_border, Some(popup_fill))),
     );
     let content = desired_size_node(30, 20);
     let content_id = content.id();

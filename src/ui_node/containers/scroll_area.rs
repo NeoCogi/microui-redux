@@ -1046,9 +1046,9 @@ mod tests {
             ..crate::test_support::test_style(&atlas)
         };
         let frame_insets = crate::SliceInsets::uniform(3);
-        style.appearances.set(
+        style.visuals.set_patches(
             crate::AppearanceRole::Panel,
-            crate::StatefulAppearance::all(crate::NinePatch::framed(
+            crate::StateTable::filled(crate::NinePatch::framed(
                 frame_insets,
                 crate::color(1, 2, 3, 255),
                 Some(crate::color(4, 5, 6, 255)),

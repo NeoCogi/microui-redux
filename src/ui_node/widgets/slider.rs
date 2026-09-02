@@ -793,7 +793,7 @@ mod tests {
         let frame = style
             .appearance(crate::AppearanceRole::SliderThumb, crate::VisualState::Normal)
             .with_insets(crate::SliceInsets::ZERO);
-        style.appearances.set(crate::AppearanceRole::SliderThumb, crate::StatefulAppearance::all(frame));
+        style.visuals.set_patches(crate::AppearanceRole::SliderThumb, crate::StateTable::filled(frame));
         let mut slider =
             SliderBuilder::create_widget(SliderParameters::new(Real::MAX / 2.0, 0.0, Real::MAX).expect("a maximum finite range span must remain usable"));
         let bounds = rect(0, 0, 100, 20);
