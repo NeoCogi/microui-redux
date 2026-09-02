@@ -81,6 +81,8 @@ impl SkinRevision {
 
 /// Horizontal alignment policy for manager-owned window title text.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "theme-json", derive(serde::Deserialize))]
+#[cfg_attr(feature = "theme-json", serde(rename_all = "snake_case"))]
 pub enum WindowTitleAlignment {
     /// Uses the available title span from its leading edge.
     #[default]
@@ -91,6 +93,8 @@ pub enum WindowTitleAlignment {
 
 /// Edge selected for one manager-owned caption button.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "theme-json", derive(serde::Deserialize))]
+#[cfg_attr(feature = "theme-json", serde(rename_all = "snake_case"))]
 pub enum CaptionButtonSide {
     /// Allocates the button from the title's leading edge.
     Leading,
@@ -101,6 +105,8 @@ pub enum CaptionButtonSide {
 
 /// Data recipe controlling manager-owned caption button geometry and presentation.
 #[derive(Copy, Clone)]
+#[cfg_attr(feature = "theme-json", derive(serde::Deserialize))]
+#[cfg_attr(feature = "theme-json", serde(default, deny_unknown_fields))]
 pub struct CaptionButtonsSkin {
     /// Edge used by the close button.
     pub close_side: CaptionButtonSide,
@@ -119,8 +125,26 @@ pub struct CaptionButtonsSkin {
     pub show_without_activation: bool,
 }
 
+impl Default for CaptionButtonsSkin {
+    /// Returns the conventional trailing-edge caption-button policy.
+    fn default() -> Self {
+        // Keep the independently deserializable caption recipe identical to the standard window
+        // chrome constructor rather than maintaining a second set of implicit JSON defaults.
+        Self {
+            close_side: CaptionButtonSide::Trailing,
+            minimize_side: CaptionButtonSide::Trailing,
+            maximize_side: CaptionButtonSide::Trailing,
+            extent_inset: 0,
+            minimum_extent: 0,
+            show_without_activation: true,
+        }
+    }
+}
+
 /// Optional flat field painted behind active centered title text.
 #[derive(Copy, Clone)]
+#[cfg_attr(feature = "theme-json", derive(serde::Deserialize))]
+#[cfg_attr(feature = "theme-json", serde(deny_unknown_fields))]
 pub struct TitleBackdropSkin {
     /// Flat background color interrupting title artwork behind the measured text.
     pub color: Color,
@@ -130,6 +154,8 @@ pub struct TitleBackdropSkin {
 
 /// Scalar geometry shared by layout and built-in widget measurement.
 #[derive(Copy, Clone)]
+#[cfg_attr(feature = "theme-json", derive(serde::Deserialize))]
+#[cfg_attr(feature = "theme-json", serde(default, deny_unknown_fields))]
 pub struct SkinMetrics {
     /// Default width used by layouts when no preferred width is supplied.
     pub default_cell_width: i32,
@@ -159,8 +185,29 @@ pub struct SkinMetrics {
     pub thumb_size: i32,
 }
 
+impl Default for SkinMetrics {
+    /// Returns the standard layout metrics used by a newly constructed skin.
+    fn default() -> Self {
+        // One concrete default supplies both programmatic skins and omitted JSON fields, removing
+        // the former loader-owned optional mirror and its separate assignment table.
+        Self {
+            default_cell_width: 68,
+            padding: 5,
+            window_content_insets: SliceInsets::uniform(5),
+            spacing: 4,
+            indent: 24,
+            title_height: 24,
+            window_border: SliceInsets::uniform(1),
+            scrollbar_size: 12,
+            thumb_size: 8,
+        }
+    }
+}
+
 /// Manager-owned window chrome policy selected by the resolved skin.
 #[derive(Copy, Clone)]
+#[cfg_attr(feature = "theme-json", derive(serde::Deserialize))]
+#[cfg_attr(feature = "theme-json", serde(default, deny_unknown_fields))]
 pub struct WindowChromeSkin {
     /// Alignment and caption-bank reservation policy for title text.
     pub title_alignment: WindowTitleAlignment,
@@ -279,17 +326,7 @@ impl Skin {
         let appearances = AppearanceCatalog::from_flat_palette(SliceInsets::uniform(1), &palette);
         Self {
             revision: SkinRevision::allocate(),
-            metrics: SkinMetrics {
-                default_cell_width: 68,
-                padding: 5,
-                window_content_insets: SliceInsets::uniform(5),
-                spacing: 4,
-                indent: 24,
-                title_height: 24,
-                window_border: SliceInsets::uniform(1),
-                scrollbar_size: 12,
-                thumb_size: 8,
-            },
+            metrics: SkinMetrics::default(),
             appearances,
             font_roles,
             icon_roles,

@@ -44,6 +44,21 @@ pub struct Color {
     pub a: u8,
 }
 
+#[cfg(feature = "theme-json")]
+impl<'de> serde::Deserialize<'de> for Color {
+    /// Decodes the schema's compact `[red, green, blue, alpha]` byte representation.
+    fn deserialize<Deserializer>(deserializer: Deserializer) -> Result<Self, Deserializer::Error>
+    where
+        Deserializer: serde::Deserializer<'de>,
+    {
+        // Delegate length and byte-range validation to Serde's fixed array implementation. The
+        // conversion then constructs the exact renderer value without an intermediate theme-only
+        // color type or a field-by-field loader mapping.
+        let [r, g, b, a] = <[u8; 4] as serde::Deserialize>::deserialize(deserializer)?;
+        Ok(Self { r, g, b, a })
+    }
+}
+
 /// Convenience constructor for [`Color`].
 pub fn color(r: u8, g: u8, b: u8, a: u8) -> Color {
     Color { r, g, b, a }

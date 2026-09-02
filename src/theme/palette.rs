@@ -15,6 +15,8 @@ use crate::Color;
 /// complete [`crate::Visual`] values avoids the former shadow color array that could disagree with
 /// what widgets actually painted.
 #[derive(Copy, Clone)]
+#[cfg_attr(feature = "theme-json", derive(serde::Deserialize))]
+#[cfg_attr(feature = "theme-json", serde(default, deny_unknown_fields))]
 pub struct FlatPalette {
     /// Ordinary control text and semantic glyph color.
     pub text: Color,

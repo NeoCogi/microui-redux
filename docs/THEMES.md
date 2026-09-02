@@ -44,21 +44,25 @@ the theme directories must remain available beside the repository sources at run
     "mono": { "path": "mono.ttf", "size": 14 }
   },
   "skin": {
-    "padding": 4,
-    "window_content_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
-    "spacing": 4,
-    "title_height": 20,
-    "window_chrome_layout": "trailing_buttons",
-    "frame_insets": { "left": 1, "top": 1, "right": 1, "bottom": 1 },
-    "colors": {
+    "metrics": {
+      "padding": 4,
+      "window_content_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
+      "spacing": 4,
+      "title_height": 20
+    },
+    "fallback_frame_insets": { "left": 1, "top": 1, "right": 1, "bottom": 1 },
+    "palette": {
       "text": [0, 0, 0, 255],
       "border": [0, 0, 0, 255],
       "button": [192, 192, 192, 255],
-      "button_hover": [208, 208, 208, 255],
+      "button_hovered": [208, 208, 208, 255],
       "control_focus": [0, 0, 0, 255],
       "selection_background": [0, 0, 128, 255],
       "selection_foreground": [255, 255, 255, 255],
       "window_active": [0, 0, 128, 255]
+    },
+    "window_chrome": {
+      "title_alignment": "leading"
     }
   },
   "appearances": {
@@ -116,7 +120,7 @@ opposing sides proportionally for tiny destinations.
 
 ## Skin fields
 
-The optional `skin` object accepts these integer metrics:
+The optional `skin.metrics` object is the concrete `SkinMetrics` value and accepts:
 
 - `default_cell_width`
 - `padding`
@@ -124,17 +128,17 @@ The optional `skin` object accepts these integer metrics:
 - `spacing`
 - `indent`
 - `title_height`
-- `window_chrome_layout` (`trailing_buttons` or `classic_mac`)
 - `window_border` (`left`, `top`, `right`, and `bottom` structural edge thicknesses)
 - `scrollbar_size`
 - `thumb_size`
-- `frame_insets`
 
-The optional `colors` object accepts RGBA byte arrays under these keys:
+The optional `skin.fallback_frame_insets` value supplies `left`, `top`, `right`, and `bottom`
+destination geometry while constructing flat fallback patches. The optional `skin.palette` object
+is the concrete `FlatPalette` and accepts RGBA byte arrays under these keys:
 
-- `text`, `border`, `window_background`, `title_background`, `title_text`
-- `disabled_text`, `disabled_background`, `disabled_title_text`
-- `panel_background`, `button`, `button_hover`, `input`, `input_hover`
+- `text`, `border`, `window_background`, `title_background`, `title_foreground`
+- `disabled_foreground`, `disabled_background`, `disabled_title_foreground`
+- `panel_background`, `button`, `button_hovered`, `input`, `input_hovered`
 - `scrollbar_track`, `scrollbar_thumb`, `control_focus`
 - `selection_background`, `selection_foreground`, `window_active`
 - `menu_foreground`, `menu_background`
@@ -143,6 +147,12 @@ These colors construct Skin's complete family catalogs before any per-state PNG 
 override is installed. Each family role/state cell is one concrete `Visual { patch, foreground }`;
 background and foreground cannot drift through parallel catalogs, and no erased or string-keyed
 payload participates at runtime.
+
+The optional `skin.window_chrome` object is the concrete `WindowChromeSkin` recipe. It accepts
+`title_alignment` (`leading` or `centered`), a `captions` object containing `close_side`,
+`minimize_side`, `maximize_side`, `extent_inset`, `minimum_extent`, and
+`show_without_activation`, and an optional `active_title_backdrop` containing `color` and
+`horizontal_padding`. Omitted fields use the same concrete defaults as programmatic skins.
 
 Each theme is one self-contained document. Schema version 1 has no parent links, overlays, or merge
 rules; an `extends` field is rejected like any other unknown field. Optional values select the
@@ -202,8 +212,8 @@ own domains rather than being encoded as duplicate role names.
 body and border resolve the normal appearance while the pointer moves across them. Losing
 top-level activation selects the `base` state of `chrome.window_frame`, `chrome.dialog_frame`, and
 `chrome.title` but does not rewrite enabled child widgets. A disabled widget or subtree
-resolves `disabled` independently of activation; its foreground uses `disabled_text` (or
-`disabled_title_text` for chrome), and omitted PNG states use
+resolves `disabled` independently of activation; its foreground uses `disabled_foreground` (or
+`disabled_title_foreground` for chrome), and omitted PNG states use
 `disabled_background` as their flat fallback. The ordinary frame pair and modal dialog pair also
 use normal center artwork for the application body even when a resize edge is hovered or captured.
 Interactive descendants, resize borders, caption controls, and the title remain free to resolve
@@ -252,14 +262,13 @@ control state's `foreground`. Image-backed caption faces that already contain th
 set `foreground` alpha to zero. There are no separate caption-glyph roles or window-chrome switch,
 so the same role/state visual fully describes each control without special handling in the loader.
 
-`skin.window_chrome_layout` selects concrete platform geometry without changing the semantic
-caption roles. `trailing_buttons` preserves the ordinary left-aligned title and places every
-caption control at the trailing edge. `classic_mac` centers the title, places a compact close box
-at the leading edge, places compact zoom/windowshade controls at the trailing edge, and omits those
-faces from base titles. Classic Mac caption PNGs are complete faces, so this layout does not
-show an additional manager-owned symbol because those states use a transparent foreground. The
-JSON enum is compiled once into a concrete `WindowChromeSkin` data recipe; manager code does not
-branch on a theme or platform mode.
+`skin.window_chrome` supplies exact platform geometry without a loader-owned preset enum. A
+conventional theme may omit it and receive leading text with trailing caption buttons. The bundled
+Mac theme directly selects centered text, a compact leading close box, trailing
+zoom/windowshade controls, and an active-title backdrop. Its caption PNGs are complete faces, so
+these states use a transparent foreground and do not show an additional manager-owned symbol. The
+manager consumes only the concrete `WindowChromeSkin` fields and never branches on a theme or
+platform mode.
 
 Minimize hides the retained window and emits `WindowEvent::Minimized`; the same `WindowHandle` can
 be shown again. Maximize saves the exact normal outer rectangle, tracks the complete inherited

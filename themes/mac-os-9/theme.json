@@ -11,31 +11,32 @@
     "mono": { "path": "../../assets/CONSOLE.ttf", "size": 14 }
   },
   "skin": {
-    "default_cell_width": 96,
-    "padding": 5,
-    "window_content_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
-    "spacing": 5,
-    "indent": 16,
-    "title_height": 18,
-    "window_chrome_layout": "classic_mac",
-    "window_border": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
-    "scrollbar_size": 16,
-    "thumb_size": 16,
-    "frame_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
-    "colors": {
+    "metrics": {
+      "default_cell_width": 96,
+      "padding": 5,
+      "window_content_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
+      "spacing": 5,
+      "indent": 16,
+      "title_height": 18,
+      "window_border": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
+      "scrollbar_size": 16,
+      "thumb_size": 16
+    },
+    "fallback_frame_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
+    "palette": {
       "text": [0, 0, 0, 255],
       "border": [0, 0, 0, 255],
       "window_background": [221, 221, 221, 255],
       "title_background": [221, 221, 221, 255],
-      "title_text": [0, 0, 0, 255],
-      "disabled_text": [119, 119, 119, 255],
+      "title_foreground": [0, 0, 0, 255],
+      "disabled_foreground": [119, 119, 119, 255],
       "disabled_background": [221, 221, 221, 255],
-      "disabled_title_text": [119, 119, 119, 255],
+      "disabled_title_foreground": [119, 119, 119, 255],
       "panel_background": [255, 255, 255, 255],
       "button": [221, 221, 221, 255],
-      "button_hover": [221, 221, 221, 255],
+      "button_hovered": [221, 221, 221, 255],
       "input": [255, 255, 255, 255],
-      "input_hover": [255, 255, 255, 255],
+      "input_hovered": [255, 255, 255, 255],
       "scrollbar_track": [221, 221, 221, 255],
       "scrollbar_thumb": [221, 221, 221, 255],
       "control_focus": [0, 0, 0, 255],
@@ -44,6 +45,21 @@
       "window_active": [221, 221, 221, 255],
       "menu_foreground": [0, 0, 0, 255],
       "menu_background": [221, 221, 221, 255]
+    },
+    "window_chrome": {
+      "title_alignment": "centered",
+      "captions": {
+        "close_side": "leading",
+        "minimize_side": "trailing",
+        "maximize_side": "trailing",
+        "extent_inset": 6,
+        "minimum_extent": 1,
+        "show_without_activation": false
+      },
+      "active_title_backdrop": {
+        "color": [221, 221, 221, 255],
+        "horizontal_padding": 4
+      }
     }
   },
   "appearances": {

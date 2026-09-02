@@ -41,6 +41,8 @@ use crate::{Color, IconId, Recti};
 /// boundaries and normalized to zero when geometry is resolved, keeping malformed skin input from
 /// producing inverted rectangles.
 #[derive(Copy, Clone, Debug, Default)]
+#[cfg_attr(feature = "theme-json", derive(serde::Deserialize))]
+#[cfg_attr(feature = "theme-json", serde(deny_unknown_fields))]
 pub struct SliceInsets {
     /// Width of the left column.
     pub left: i32,

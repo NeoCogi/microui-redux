@@ -39,7 +39,8 @@ use std::{
 use serde::Deserialize;
 
 use super::{
-    ChromeRole, ChromeState, ControlRole, ControlState, FlatPalette, FontRole, MenuRole, MenuState, PointerState, Skin, SkinBundle, SurfaceRole, SurfaceState,
+    ChromeRole, ChromeState, ControlRole, ControlState, FlatPalette, FontRole, MenuRole, MenuState, PointerState, Skin, SkinBundle, SkinMetrics, SurfaceRole,
+    SurfaceState, WindowChromeSkin,
 };
 use crate::{
     atlas::{
@@ -237,7 +238,7 @@ pub(crate) struct ThemeDefinition {
     fonts: Option<FontCatalogDocument>,
     /// Sparse scalar and flat-color overrides applied to the built-in skin.
     #[serde(default)]
-    skin: SkinDocument,
+    skin: ThemeSkinDocument,
     /// Sparse appearance overrides applied after flat fallback construction.
     #[serde(default)]
     appearances: AppearanceCatalogDocument,
@@ -427,14 +428,13 @@ impl ThemeDefinition {
         assert!(skin.belongs_to(&atlas), "theme base skin contains image capabilities from another atlas");
         // Apply palette and metric overrides before constructing fallbacks, so every omitted PNG
         // state reflects the JSON theme's own flat colors rather than the built-in default palette.
-        let mut palette = FlatPalette::default();
-        self.skin.apply(&mut skin, &mut palette);
-        let frame_insets = self.skin.frame_insets.map(InsetsDocument::into_insets).unwrap_or_else(|| skin.frame_insets());
-        validate_non_negative("generic_frame", "skin.frame_insets", frame_insets)?;
+        skin.metrics = self.skin.metrics;
+        skin.window_chrome = self.skin.window_chrome;
+        let frame_insets = self.skin.fallback_frame_insets;
+        validate_non_negative("generic_frame", "skin.fallback_frame_insets", frame_insets)?;
         validate_non_negative("window_content", "skin.metrics.window_content_insets", skin.metrics.window_content_insets)?;
         validate_non_negative("window_frame", "skin.metrics.window_border", skin.metrics.window_border)?;
-        skin.replace_flat_visuals(frame_insets, &palette);
-        skin.window_chrome.set_backdrop_color(palette.title_background);
+        skin.replace_flat_visuals(frame_insets, &self.skin.palette);
         for (role, document) in &self.appearances.surface {
             install_appearance(
                 &mut skin,
@@ -512,7 +512,7 @@ fn install_appearance<const N: usize, State: Copy>(
     atlas: &AtlasHandle,
     images: &BTreeMap<PathBuf, IconId>,
     name: &str,
-    authored_insets: Option<InsetsDocument>,
+    authored_insets: Option<SliceInsets>,
     base_state: State,
     states: [(State, Option<&StateDocument>); N],
     get: impl Fn(&Skin, State) -> super::Visual,
@@ -520,9 +520,7 @@ fn install_appearance<const N: usize, State: Copy>(
 ) -> Result<(), ThemeLoadError> {
     // Insets are role-wide so layout cannot shift between states. If the author omits them, retain
     // the family compiler's base-state geometry before applying optional per-state artwork.
-    let destination_insets = authored_insets
-        .map(InsetsDocument::into_insets)
-        .unwrap_or_else(|| get(skin, base_state).patch.insets);
+    let destination_insets = authored_insets.unwrap_or_else(|| get(skin, base_state).patch.insets);
     validate_non_negative(name, "insets", destination_insets)?;
 
     for (state, authored) in states {
@@ -535,14 +533,14 @@ fn install_appearance<const N: usize, State: Copy>(
         };
         if let Some(foreground) = authored.foreground {
             // Foreground and background remain one complete runtime value at the mutation boundary.
-            visual.foreground = foreground.into_color();
+            visual.foreground = foreground;
         }
         if let Some(path) = &authored.png {
-            let source_insets = authored.source_insets.map(InsetsDocument::into_insets).unwrap_or(destination_insets);
+            let source_insets = authored.source_insets.unwrap_or(destination_insets);
             let icon = *images.get(path).expect("every declared theme PNG must have one baked atlas capability");
             let image_size = atlas.get_icon_size(icon);
             validate_source_insets(name, source_insets, image_size.width, image_size.height)?;
-            let tint = authored.tint.map(ColorDocument::into_color).unwrap_or(Color { r: 255, g: 255, b: 255, a: 255 });
+            let tint = authored.tint.unwrap_or(Color { r: 255, g: 255, b: 255, a: 255 });
             visual.patch = NinePatch::image(destination_insets, NinePatchImage::new(icon, source_insets, tint));
         }
         set(skin, state, visual);
@@ -615,164 +613,34 @@ impl FontDocument {
     }
 }
 
-/// Optional skin metrics and colors applied before appearance fallback construction.
-#[derive(Default, Deserialize)]
+/// Concrete runtime skin inputs applied before sparse appearance overrides.
+///
+/// The wrapper exists only to group independent runtime values in JSON. It does not mirror their
+/// fields, translate names, or provide another customization API.
+#[derive(Deserialize)]
 #[serde(default, deny_unknown_fields)]
-struct SkinDocument {
-    /// Default layout cell width override.
-    default_cell_width: Option<i32>,
-    /// General widget inner padding override.
-    padding: Option<i32>,
-    /// Independent application-body inset applied after root-owned title and menu chrome.
-    window_content_insets: Option<InsetsDocument>,
-    /// Layout spacing override.
-    spacing: Option<i32>,
-    /// Nested-content indentation override.
-    indent: Option<i32>,
-    /// Window title height override.
-    title_height: Option<i32>,
-    /// Optional platform-oriented title and caption-button arrangement.
-    window_chrome_layout: Option<WindowChromeLayoutDocument>,
-    /// Structural window-edge thickness independent from frame-art corner spans.
-    window_border: Option<InsetsDocument>,
-    /// Scrollbar cross-axis thickness override.
-    scrollbar_size: Option<i32>,
-    /// Minimum slider and scrollbar thumb size override.
-    thumb_size: Option<i32>,
-    /// Structural fallback frame insets.
-    frame_insets: Option<InsetsDocument>,
-    /// Optional semantic flat palette overrides.
-    colors: ColorPaletteDocument,
+struct ThemeSkinDocument {
+    /// Layout values consumed directly by the runtime skin.
+    metrics: SkinMetrics,
+    /// Shared destination geometry used while compiling flat fallback patches.
+    fallback_frame_insets: SliceInsets,
+    /// Concrete semantic colors compiled into the complete fallback appearance catalog.
+    palette: FlatPalette,
+    /// Exact manager-owned title and caption-button policy.
+    window_chrome: WindowChromeSkin,
 }
 
-impl SkinDocument {
-    /// Applies present fields and returns foreground inputs for visual fallback construction.
-    fn apply(&self, skin: &mut Skin, palette: &mut FlatPalette) {
-        // Keep assignment explicit so the strict JSON schema and public Skin fields cannot drift
-        // through reflection or stringly typed mutation.
-        assign_if_some(&mut skin.metrics.default_cell_width, self.default_cell_width);
-        assign_if_some(&mut skin.metrics.padding, self.padding);
-        if let Some(window_content_insets) = self.window_content_insets {
-            // Root layout consumes the concrete four-edge value directly, so asymmetric theme
-            // insets require no erased metric map or widget-specific special casing.
-            skin.metrics.window_content_insets = window_content_insets.into_insets();
+impl Default for ThemeSkinDocument {
+    /// Returns the same concrete skin inputs used by `Skin::from_atlas`.
+    fn default() -> Self {
+        // Container-level Serde defaults copy from this complete value. Missing JSON fields cannot
+        // therefore drift from programmatic defaults or require optional mirror fields.
+        Self {
+            metrics: SkinMetrics::default(),
+            fallback_frame_insets: SliceInsets::uniform(1),
+            palette: FlatPalette::default(),
+            window_chrome: WindowChromeSkin::default(),
         }
-        assign_if_some(&mut skin.metrics.spacing, self.spacing);
-        assign_if_some(&mut skin.metrics.indent, self.indent);
-        assign_if_some(&mut skin.metrics.title_height, self.title_height);
-        if let Some(window_chrome_layout) = self.window_chrome_layout {
-            // The schema enum converts once into the public runtime enum, keeping deserialization
-            // details out of Skin when JSON support is not compiled.
-            skin.window_chrome = window_chrome_layout.into_skin(crate::Color { r: 0, g: 0, b: 0, a: 0 });
-        }
-        if let Some(window_border) = self.window_border {
-            // Keep the schema-to-runtime conversion explicit because negative components are
-            // rejected by installation before they can affect layout or hit testing.
-            skin.metrics.window_border = window_border.into_insets();
-        }
-        assign_if_some(&mut skin.metrics.scrollbar_size, self.scrollbar_size);
-        assign_if_some(&mut skin.metrics.thumb_size, self.thumb_size);
-        // The authored palette remains compiler input and is consumed into visuals by install.
-        self.colors.apply(palette);
-    }
-}
-
-/// Strict JSON spelling for the two supported manager-owned window chrome arrangements.
-#[derive(Copy, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum WindowChromeLayoutDocument {
-    /// Conventional left title with all caption controls at the trailing edge.
-    TrailingButtons,
-    /// Platinum-style centered title with a leading close box and compact trailing controls.
-    ClassicMac,
-}
-
-impl WindowChromeLayoutDocument {
-    /// Converts one schema value into its complete data-driven runtime recipe.
-    const fn into_skin(self, title_backdrop: crate::Color) -> crate::WindowChromeSkin {
-        // Exhaustive matching keeps a future schema spelling from silently inheriting an unrelated
-        // runtime policy.
-        match self {
-            Self::TrailingButtons => crate::WindowChromeSkin::trailing_buttons(),
-            Self::ClassicMac => crate::WindowChromeSkin::classic_mac(title_backdrop),
-        }
-    }
-}
-
-/// Optional flat colors named by semantic use rather than numeric palette slots.
-#[derive(Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct ColorPaletteDocument {
-    /// Ordinary control text.
-    text: Option<ColorDocument>,
-    /// Generic frame border.
-    border: Option<ColorDocument>,
-    /// Window body background.
-    window_background: Option<ColorDocument>,
-    /// Base window title background used when the active chrome role is not selected.
-    title_background: Option<ColorDocument>,
-    /// Window title text.
-    title_text: Option<ColorDocument>,
-    /// Text and semantic icon color used by disabled widgets and windows.
-    disabled_text: Option<ColorDocument>,
-    /// Shared flat background and control fill used by disabled widgets and windows.
-    disabled_background: Option<ColorDocument>,
-    /// Window title and caption-symbol color used by disabled chrome.
-    disabled_title_text: Option<ColorDocument>,
-    /// Panel and viewport background.
-    panel_background: Option<ColorDocument>,
-    /// Ordinary button fill.
-    button: Option<ColorDocument>,
-    /// Hovered button fill.
-    button_hover: Option<ColorDocument>,
-    /// Ordinary input fill.
-    input: Option<ColorDocument>,
-    /// Hovered input fill.
-    input_hover: Option<ColorDocument>,
-    /// Scrollbar track fill.
-    scrollbar_track: Option<ColorDocument>,
-    /// Scrollbar thumb fill.
-    scrollbar_thumb: Option<ColorDocument>,
-    /// Focused control border or fill accent.
-    control_focus: Option<ColorDocument>,
-    /// Background used by interactive or selected item rows.
-    selection_background: Option<ColorDocument>,
-    /// Text and glyph color used over selected item rows.
-    selection_foreground: Option<ColorDocument>,
-    /// Active window frame and title accent.
-    window_active: Option<ColorDocument>,
-    /// Menu text and marker color.
-    menu_foreground: Option<ColorDocument>,
-    /// Menu bar and popup background.
-    menu_background: Option<ColorDocument>,
-}
-
-impl ColorPaletteDocument {
-    /// Applies supplied palette fields and returns foregrounds needed by fallback construction.
-    fn apply(&self, palette: &mut FlatPalette) {
-        // Assign every authored semantic color directly to a named compiler input. The resulting
-        // palette is consumed immediately and never retained beside the resolved visual catalog.
-        assign_color(&mut palette.text, self.text);
-        assign_color(&mut palette.border, self.border);
-        assign_color(&mut palette.window_background, self.window_background);
-        assign_color(&mut palette.title_background, self.title_background);
-        assign_color(&mut palette.title_foreground, self.title_text);
-        assign_color(&mut palette.disabled_foreground, self.disabled_text);
-        assign_color(&mut palette.disabled_background, self.disabled_background);
-        assign_color(&mut palette.disabled_title_foreground, self.disabled_title_text);
-        assign_color(&mut palette.panel_background, self.panel_background);
-        assign_color(&mut palette.button, self.button);
-        assign_color(&mut palette.button_hovered, self.button_hover);
-        assign_color(&mut palette.input, self.input);
-        assign_color(&mut palette.input_hovered, self.input_hover);
-        assign_color(&mut palette.scrollbar_track, self.scrollbar_track);
-        assign_color(&mut palette.scrollbar_thumb, self.scrollbar_thumb);
-        assign_color(&mut palette.control_focus, self.control_focus);
-        assign_color(&mut palette.selection_background, self.selection_background);
-        assign_color(&mut palette.selection_foreground, self.selection_foreground);
-        assign_color(&mut palette.window_active, self.window_active);
-        assign_color(&mut palette.menu_foreground, self.menu_foreground);
-        assign_color(&mut palette.menu_background, self.menu_background);
     }
 }
 
@@ -781,7 +649,7 @@ impl ColorPaletteDocument {
 #[serde(default, deny_unknown_fields)]
 struct SurfaceAppearanceDocument {
     /// Destination-space outer row and column sizes shared by both states.
-    insets: Option<InsetsDocument>,
+    insets: Option<SliceInsets>,
     /// Enabled structural appearance.
     normal: Option<StateDocument>,
     /// Disabled structural appearance.
@@ -833,7 +701,7 @@ impl PointerAppearanceDocument {
 #[serde(default, deny_unknown_fields)]
 struct ControlAppearanceDocument {
     /// Destination-space outer row and column sizes shared by every control state.
-    insets: Option<InsetsDocument>,
+    insets: Option<SliceInsets>,
     /// Disabled appearance, with no contradictory pointer or focus substate.
     disabled: Option<StateDocument>,
     /// Pointer appearances while the control is enabled without keyboard focus.
@@ -877,7 +745,7 @@ impl ControlAppearanceDocument {
 #[serde(default, deny_unknown_fields)]
 struct MenuAppearanceDocument {
     /// Destination-space outer row and column sizes shared by every menu state.
-    insets: Option<InsetsDocument>,
+    insets: Option<SliceInsets>,
     /// Enabled menu appearance without transient selection.
     normal: Option<StateDocument>,
     /// Pointer-hover selection appearance.
@@ -934,7 +802,7 @@ impl MenuAppearanceDocument {
 #[serde(default, deny_unknown_fields)]
 struct ChromeAppearanceDocument {
     /// Destination-space outer row and column sizes shared by every chrome state.
-    insets: Option<InsetsDocument>,
+    insets: Option<SliceInsets>,
     /// Enabled chrome appearance without window activation.
     base: Option<StateDocument>,
     /// Enabled chrome appearance with window activation.
@@ -972,13 +840,13 @@ impl ChromeAppearanceDocument {
 #[serde(default, deny_unknown_fields)]
 struct StateDocument {
     /// Optional text and semantic-glyph color for this exact role and state.
-    foreground: Option<ColorDocument>,
+    foreground: Option<Color>,
     /// PNG path relative to the containing JSON file; absence keeps the flat fallback.
     png: Option<PathBuf>,
     /// Source-space PNG slices; defaults to the role's destination insets.
-    source_insets: Option<InsetsDocument>,
+    source_insets: Option<SliceInsets>,
     /// Optional RGBA modulation; defaults to opaque white.
-    tint: Option<ColorDocument>,
+    tint: Option<Color>,
 }
 
 impl StateDocument {
@@ -987,48 +855,6 @@ impl StateDocument {
         // Only an authored image needs path ownership; flat states remain allocation-free.
         if let Some(path) = &mut self.png {
             *path = directory.join(path.as_path());
-        }
-    }
-}
-
-/// Four explicit slice components used in JSON documents.
-#[derive(Copy, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct InsetsDocument {
-    /// Left fixed column width.
-    left: i32,
-    /// Top fixed row height.
-    top: i32,
-    /// Right fixed column width.
-    right: i32,
-    /// Bottom fixed row height.
-    bottom: i32,
-}
-
-impl InsetsDocument {
-    /// Converts the schema value into the renderer's concrete inset type.
-    const fn into_insets(self) -> SliceInsets {
-        // Preserve exact values so the validation helper can report malformed negative input.
-        SliceInsets::new(self.left, self.top, self.right, self.bottom)
-    }
-}
-
-/// One exact RGBA array in JSON.
-#[derive(Copy, Clone, Deserialize)]
-struct ColorDocument(
-    /// Red, green, blue, and alpha channels in byte order.
-    [u8; 4],
-);
-
-impl ColorDocument {
-    /// Converts the JSON byte tuple into the crate's public color value.
-    const fn into_color(self) -> Color {
-        // Array length and channel ranges were enforced by serde before this conversion.
-        Color {
-            r: self.0[0],
-            g: self.0[1],
-            b: self.0[2],
-            a: self.0[3],
         }
     }
 }
@@ -1049,22 +875,6 @@ fn visit_present_states<const N: usize, State: Copy>(states: [(State, Option<&St
         if let Some(state) = state {
             visit(state);
         }
-    }
-}
-
-/// Assigns one optional copy value without hiding field-to-field schema mapping.
-fn assign_if_some<T: Copy>(destination: &mut T, value: Option<T>) {
-    // Omitted JSON fields deliberately preserve the atlas-derived base Skin value.
-    if let Some(value) = value {
-        *destination = value;
-    }
-}
-
-/// Assigns one optional JSON color to a concrete public color field.
-fn assign_color(destination: &mut Color, value: Option<ColorDocument>) {
-    // Keep color conversion centralized so every palette field uses identical channel ordering.
-    if let Some(value) = value {
-        *destination = value.into_color();
     }
 }
 
@@ -1132,9 +942,9 @@ mod tests {
                 "schema_version": 1,
                 "name": "Flat only",
                 "skin": {
-                    "colors": {
+                    "palette": {
                         "button": [1, 2, 3, 255],
-                        "button_hover": [4, 5, 6, 255],
+                        "button_hovered": [4, 5, 6, 255],
                         "disabled_background": [7, 8, 9, 255]
                     }
                 },
@@ -1187,7 +997,7 @@ mod tests {
             r#"{
                 "schema_version": 1,
                 "name": "Foreground states",
-                "skin": { "colors": { "menu_foreground": [1, 2, 3, 255] } },
+                "skin": { "palette": { "menu_foreground": [1, 2, 3, 255] } },
                 "appearances": {
                     "menu": {
                         "item": {
