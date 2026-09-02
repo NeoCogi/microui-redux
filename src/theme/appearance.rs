@@ -75,26 +75,6 @@ pub(crate) fn visuals_from_flat_palette(frame_insets: SliceInsets, palette: &Fla
         ])
     };
 
-    let foregrounds_for = |role| match role {
-        AppearanceRole::Control(ControlRole::Item) => interactive_foregrounds(text, palette.disabled_foreground),
-        AppearanceRole::Menu(MenuRole::Title) | AppearanceRole::Menu(MenuRole::Item) => {
-            interactive_foregrounds(palette.menu_foreground, palette.disabled_foreground)
-        }
-        AppearanceRole::Menu(MenuRole::TitleOpen) => selected_foregrounds(palette.disabled_foreground),
-        AppearanceRole::Menu(MenuRole::Bar) | AppearanceRole::Menu(MenuRole::Popup) => menu_foregrounds,
-        AppearanceRole::Chrome(ChromeRole::Title)
-        | AppearanceRole::Chrome(ChromeRole::TitleActive)
-        | AppearanceRole::Chrome(ChromeRole::CloseButton)
-        | AppearanceRole::Chrome(ChromeRole::MinimizeButton)
-        | AppearanceRole::Chrome(ChromeRole::MaximizeButton)
-        | AppearanceRole::Chrome(ChromeRole::RestoreButton)
-        | AppearanceRole::Chrome(ChromeRole::CloseGlyph)
-        | AppearanceRole::Chrome(ChromeRole::MinimizeGlyph)
-        | AppearanceRole::Chrome(ChromeRole::MaximizeGlyph)
-        | AppearanceRole::Chrome(ChromeRole::RestoreGlyph) => title_foregrounds,
-        _ => body_foregrounds,
-    };
-
     let combine = |patches: StateTable<NinePatch>, foregrounds: StateTable<Color>| {
         StateTable::new(std::array::from_fn(|index| {
             let state = VisualState::ALL[index];
@@ -139,64 +119,66 @@ pub(crate) fn visuals_from_flat_palette(frame_insets: SliceInsets, palette: &Fla
         framed(palette.disabled_background),
     );
 
-    let default = Visual::new(NinePatch::solid(transparent), text);
-    // The nested fixed tables make every role/state pair present by construction. The table is
-    // intentionally private to Skin so public callers cannot split a Visual into two updates.
-    let mut catalog = RoleTable::filled(StateTable::filled(default));
-    let mut assign = |role, patches| catalog.set(role, combine(patches, foregrounds_for(role)));
-
-    assign(AppearanceRole::Surface(SurfaceRole::GenericFrame), StateTable::filled(hollow));
-    assign(
-        AppearanceRole::Surface(SurfaceRole::Panel),
-        with_disabled(StateTable::filled(framed(palette.panel_background)), framed(palette.disabled_background)),
-    );
-    assign(AppearanceRole::Control(ControlRole::Button), button);
-    assign(AppearanceRole::Control(ControlRole::Checkbox), input);
-    assign(AppearanceRole::Control(ControlRole::TextInput), input);
-    assign(AppearanceRole::Control(ControlRole::Item), highlight);
-    assign(AppearanceRole::Control(ControlRole::Combo), button);
-    assign(AppearanceRole::Control(ControlRole::SliderTrack), input);
-    assign(AppearanceRole::Control(ControlRole::SliderThumb), button);
-    assign(
-        AppearanceRole::Control(ControlRole::ScrollbarTrack),
-        with_disabled(StateTable::filled(solid(palette.scrollbar_track)), solid(palette.disabled_background)),
-    );
-    assign(
-        AppearanceRole::Control(ControlRole::ScrollbarThumb),
-        with_disabled(StateTable::filled(solid(palette.scrollbar_thumb)), solid(palette.disabled_background)),
-    );
-    assign(
-        AppearanceRole::Menu(MenuRole::Bar),
-        with_disabled(StateTable::filled(solid(palette.menu_background)), solid(palette.disabled_background)),
-    );
-    assign(AppearanceRole::Menu(MenuRole::Title), highlight);
-    assign(AppearanceRole::Menu(MenuRole::TitleOpen), selected);
-    assign(
-        AppearanceRole::Menu(MenuRole::Popup),
-        with_disabled(StateTable::filled(framed(palette.menu_background)), framed(palette.disabled_background)),
-    );
-    assign(AppearanceRole::Menu(MenuRole::Item), highlight);
-
     let active_window = StateTable::filled(NinePatch::framed(
         frame_insets.at_least(1),
         palette.window_active,
         Some(palette.window_background),
     ));
-    assign(AppearanceRole::Chrome(ChromeRole::WindowFrame), window);
-    assign(AppearanceRole::Chrome(ChromeRole::WindowFrameActive), active_window);
-    assign(AppearanceRole::Chrome(ChromeRole::DialogFrame), window);
-    assign(AppearanceRole::Chrome(ChromeRole::DialogFrameActive), active_window);
-    assign(AppearanceRole::Chrome(ChromeRole::Title), StateTable::filled(solid(palette.title_background)));
-    assign(
-        AppearanceRole::Chrome(ChromeRole::TitleActive),
-        StateTable::filled(solid(palette.window_active)),
-    );
-    assign(AppearanceRole::Chrome(ChromeRole::CloseButton), button);
-    assign(AppearanceRole::Chrome(ChromeRole::MinimizeButton), button);
-    assign(AppearanceRole::Chrome(ChromeRole::MaximizeButton), button);
-    assign(AppearanceRole::Chrome(ChromeRole::RestoreButton), button);
-    assign(AppearanceRole::Chrome(ChromeRole::ResizeGrip), input);
-    catalog
+
+    // Construct each role exactly once, with its background and foreground policy adjacent. The
+    // exhaustive family matches make new roles a compile error here instead of silently inheriting
+    // the generic default that the former initialize-then-overwrite implementation provided.
+    RoleTable::from_fn(|role| {
+        let (patches, foregrounds) = match role {
+            AppearanceRole::Surface(role) => match role {
+                SurfaceRole::GenericFrame => (StateTable::filled(hollow), body_foregrounds),
+                SurfaceRole::Panel => (
+                    with_disabled(StateTable::filled(framed(palette.panel_background)), framed(palette.disabled_background)),
+                    body_foregrounds,
+                ),
+            },
+            AppearanceRole::Control(role) => match role {
+                ControlRole::Button | ControlRole::Combo | ControlRole::SliderThumb => (button, body_foregrounds),
+                ControlRole::Checkbox | ControlRole::TextInput | ControlRole::SliderTrack => (input, body_foregrounds),
+                ControlRole::Item => (highlight, interactive_foregrounds(text, palette.disabled_foreground)),
+                ControlRole::ScrollbarTrack => (
+                    with_disabled(StateTable::filled(solid(palette.scrollbar_track)), solid(palette.disabled_background)),
+                    body_foregrounds,
+                ),
+                ControlRole::ScrollbarThumb => (
+                    with_disabled(StateTable::filled(solid(palette.scrollbar_thumb)), solid(palette.disabled_background)),
+                    body_foregrounds,
+                ),
+            },
+            AppearanceRole::Menu(role) => match role {
+                MenuRole::Bar => (
+                    with_disabled(StateTable::filled(solid(palette.menu_background)), solid(palette.disabled_background)),
+                    menu_foregrounds,
+                ),
+                MenuRole::Title => (highlight, interactive_foregrounds(palette.menu_foreground, palette.disabled_foreground)),
+                MenuRole::TitleOpen => (selected, selected_foregrounds(palette.disabled_foreground)),
+                MenuRole::Popup => (
+                    with_disabled(StateTable::filled(framed(palette.menu_background)), framed(palette.disabled_background)),
+                    menu_foregrounds,
+                ),
+                MenuRole::Item => (highlight, interactive_foregrounds(palette.menu_foreground, palette.disabled_foreground)),
+            },
+            AppearanceRole::Chrome(role) => match role {
+                ChromeRole::WindowFrame | ChromeRole::DialogFrame => (window, body_foregrounds),
+                ChromeRole::WindowFrameActive | ChromeRole::DialogFrameActive => (active_window, body_foregrounds),
+                ChromeRole::Title => (StateTable::filled(solid(palette.title_background)), title_foregrounds),
+                ChromeRole::TitleActive => (StateTable::filled(solid(palette.window_active)), title_foregrounds),
+                ChromeRole::CloseButton | ChromeRole::MinimizeButton | ChromeRole::MaximizeButton | ChromeRole::RestoreButton => (button, title_foregrounds),
+                ChromeRole::ResizeGrip => (input, body_foregrounds),
+                // Flat fallback skins draw caption glyphs procedurally. These transparent values
+                // reserve image-backed glyph roles for authored themes without drawing a duplicate.
+                ChromeRole::CloseGlyph | ChromeRole::MinimizeGlyph | ChromeRole::MaximizeGlyph | ChromeRole::RestoreGlyph => {
+                    (StateTable::filled(solid(transparent)), StateTable::filled(text))
+                }
+            },
+        };
+        combine(patches, foregrounds)
+    })
 }
 
 #[cfg(test)]
