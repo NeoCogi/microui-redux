@@ -75,7 +75,7 @@ pub struct TextBlockParameters {
 }
 
 impl crate::LeafWidget for TextBlock {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+    fn measure(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         self.preferred_size_widget(style, atlas, constraints)
     }
 }
@@ -142,7 +142,7 @@ impl TextBlock {
     }
 
     /// Measures wrapped display text using the available width when requested.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+    fn preferred_size_widget(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         if self.text.is_empty() {
             return Dimensioni::new(0, 0);
         }
@@ -165,7 +165,7 @@ impl TextBlock {
         }
 
         let bounds = ctx.local_rect();
-        let font = ctx.style().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font_choice(self.font);
         let color = ctx.foreground(AppearanceRole::GenericFrame);
         let line_height = ctx.atlas().get_font_height(font) as i32;
         let baseline = ctx.atlas().get_font_baseline(font);

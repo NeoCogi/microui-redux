@@ -134,9 +134,9 @@
 //! ordinary windows while preserving each window's focused widget. F10 or an unchorded Alt tap
 //! transfers routing temporarily to the owning window's intrinsic menu without discarding
 //! application widget focus.
-//! Only the current keyboard scope paints that remembered focus: [`Style::focus_color`] supplies
+//! Only the current keyboard scope paints that remembered focus: [`Skin::focus_color`] supplies
 //! focused control fills, menu selection, and the final clipped widget outline, while
-//! [`Style::window_focus_color`] supplies the active title and framed-window outline.
+//! [`Skin::window_focus_color`] supplies the active title and framed-window outline.
 //!
 //! # Text encoding and glyph coverage
 //!
@@ -281,8 +281,8 @@ pub mod prelude {
     };
     pub use crate::math::{expand_rect, rect, vec2};
     pub use crate::theme::{
-        AppearanceRole, Color, ControlColor, FontChoice, FontRole, RoleTable, StateTable, StatefulVisual, Style, ThemeIcons, Visual, VisualCatalog,
-        VisualState, WindowChromeLayout, color,
+        AppearanceRole, Color, FlatPalette, FontChoice, FontRole, RoleTable, Skin, SkinEffects, SkinFonts, SkinMetrics, SkinResources, StateTable,
+        StatefulVisual, ThemeIcons, Visual, VisualCatalog, VisualState, WindowChromeLayout, WindowChromeSkin, color,
     };
     #[cfg(feature = "theme-json")]
     pub use crate::theme::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};
@@ -314,8 +314,8 @@ pub use input::{Key, KeyEvent, KeyState, Modifiers, MouseButton};
 pub use math::{expand_rect, rect, vec2};
 pub use render::{AtlasUploadError, NinePatch, NinePatchCell, NinePatchCells, NinePatchContent, NinePatchImage, SliceInsets, TextureError, TextureId};
 pub use theme::{
-    AppearanceRole, Color, ControlColor, FontChoice, FontRole, RoleTable, StateTable, StatefulVisual, Style, ThemeIcons, Visual, VisualCatalog, VisualState,
-    WindowChromeLayout, color,
+    AppearanceRole, Color, FlatPalette, FontChoice, FontRole, RoleTable, Skin, SkinEffects, SkinFonts, SkinMetrics, SkinResources, StateTable, StatefulVisual,
+    ThemeIcons, Visual, VisualCatalog, VisualState, WindowChromeLayout, WindowChromeSkin, color,
 };
 #[cfg(feature = "theme-json")]
 pub use theme::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};

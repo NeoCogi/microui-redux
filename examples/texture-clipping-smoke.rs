@@ -238,7 +238,7 @@ impl Widget for TextureClippingProbe {
 }
 
 impl LeafWidget for TextureClippingProbe {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn measure(&self, _style: &Skin, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(64, 64)
     }
 }
@@ -266,9 +266,11 @@ fn main() -> Result<(), String> {
 
     // Keep the window background out of the recording log so the assertions isolate the widget's
     // atlas/texture ordering while still exercising the retained public rendering path.
-    let mut style = ctx.style().clone();
-    style.colors[ControlColor::WindowBG as usize] = color(0, 0, 0, 0);
-    ctx.set_style(style);
+    let mut style = ctx.skin().clone();
+    let mut palette = FlatPalette::default();
+    palette.window_background = color(0, 0, 0, 0);
+    style.apply_flat_palette(palette);
+    ctx.set_skin(style);
 
     let dimensions = Dimensioni::new(64, 64);
     let info = FrameInfo::try_new(dimensions, color(0, 0, 0, 255)).map_err(|error| error.to_string())?;

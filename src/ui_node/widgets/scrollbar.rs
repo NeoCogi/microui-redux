@@ -424,7 +424,7 @@ impl Widget for Scrollbar {
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         // Resolve one geometry snapshot from this widget's local allocation so hit testing and drag
         // conversion use the exact same track and thumb for the complete event.
-        let geometry = self.geometry(ctx.local_rect(), ctx.style().thumb_size.max(0));
+        let geometry = self.geometry(ctx.local_rect(), ctx.skin().metrics.thumb_size.max(0));
         let previous = self.offset;
         match input {
             Some(UiInputEvent::MouseDown { pos, button }) if button.intersects(MouseButton::LEFT) && geometry.track().contains_point(*pos) => {
@@ -454,7 +454,7 @@ impl Widget for Scrollbar {
         // Rebuild geometry from the paint allocation and the same semantic range used by update.
         // Hidden composite children never reach this phase, while mounted zero-range bars display a
         // full-length thumb that communicates the absence of overflow.
-        let geometry = self.geometry(ctx.local_rect(), ctx.style().thumb_size.max(0));
+        let geometry = self.geometry(ctx.local_rect(), ctx.skin().metrics.thumb_size.max(0));
         let _ = ctx.draw_appearance(AppearanceRole::ScrollbarTrack, geometry.track());
         let _ = ctx.draw_appearance(AppearanceRole::ScrollbarThumb, geometry.thumb());
     }
@@ -462,10 +462,10 @@ impl Widget for Scrollbar {
 
 impl crate::LeafWidget for Scrollbar {
     /// Reports zero length along the scroll axis and style-owned thickness across it.
-    fn measure(&self, style: &crate::Style, _atlas: &crate::AtlasHandle, _constraints: crate::Constraints) -> Dimensioni {
+    fn measure(&self, style: &crate::Skin, _atlas: &crate::AtlasHandle, _constraints: crate::Constraints) -> Dimensioni {
         // A containing layout supplies track length explicitly; intrinsic measurement contributes
         // only the cross-axis thickness required by standalone layout composition.
-        let thickness = style.scrollbar_size.max(0);
+        let thickness = style.metrics.scrollbar_size.max(0);
         match self.axis {
             ScrollbarAxis::Horizontal => Dimensioni::new(0, thickness),
             ScrollbarAxis::Vertical => Dimensioni::new(thickness, 0),

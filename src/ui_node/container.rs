@@ -31,7 +31,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::math::RectExt;
-use crate::{Constraints, Dimensioni, Recti, SliceInsets, Style, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption};
+use crate::{Constraints, Dimensioni, Recti, SliceInsets, Skin, TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption};
 
 use super::{ChildParticipation, Children, NodeLayout, NodeRuntime, UiRuntime, WidgetStorage};
 
@@ -41,19 +41,19 @@ use super::{ChildParticipation, Children, NodeLayout, NodeRuntime, UiRuntime, Wi
 /// only derived geometry. Neither a [`Node`](crate::Node) nor the child collection crosses the
 /// public container-widget boundary.
 pub struct MeasureCtx<'a> {
-    style: &'a Style,
+    style: &'a Skin,
     atlas: &'a crate::AtlasHandle,
     children: &'a mut Children,
 }
 
 impl<'a> MeasureCtx<'a> {
     /// Creates one runtime-scoped measurement context.
-    pub(crate) fn new(style: &'a Style, atlas: &'a crate::AtlasHandle, children: &'a mut Children) -> Self {
+    pub(crate) fn new(style: &'a Skin, atlas: &'a crate::AtlasHandle, children: &'a mut Children) -> Self {
         Self { style, atlas, children }
     }
 
     /// Returns the active UI style.
-    pub fn style(&self) -> &Style {
+    pub fn skin(&self) -> &Skin {
         self.style
     }
 
@@ -186,7 +186,7 @@ impl Container {
     }
 
     /// Resolves frame insets and measures content under one typed-runtime borrow.
-    pub(crate) fn measure_content_with_frame(&mut self, style: &Style, atlas: &crate::AtlasHandle, constraints: Constraints) -> (SliceInsets, Dimensioni) {
+    pub(crate) fn measure_content_with_frame(&mut self, style: &Skin, atlas: &crate::AtlasHandle, constraints: Constraints) -> (SliceInsets, Dimensioni) {
         let mut children = self
             .children
             .try_borrow_mut()
@@ -226,18 +226,18 @@ impl Container {
         f(&mut widget.widget)
     }
 
-    pub(crate) fn style_override(&self) -> Option<Style> {
+    pub(crate) fn style_override(&self) -> Option<Skin> {
         self.widget.try_borrow().unwrap_or_else(|_| typed_container_borrow_conflict()).style_override()
     }
 
-    pub(crate) fn set_style_override(&mut self, style_override: Option<Style>) {
+    pub(crate) fn set_style_override(&mut self, style_override: Option<Skin>) {
         self.widget
             .try_borrow_mut()
             .unwrap_or_else(|_| typed_container_borrow_conflict())
             .set_style_override(style_override);
     }
 
-    pub(crate) fn resolve_style(&self, inherited: &Style) -> Style {
+    pub(crate) fn resolve_style(&self, inherited: &Skin) -> Skin {
         self.widget
             .try_borrow()
             .unwrap_or_else(|_| typed_container_borrow_conflict())
@@ -279,7 +279,7 @@ fn typed_container_borrow_conflict() -> ! {
 /// results. It never lends a node or permits topology mutation.
 pub struct ContainerLayoutCtx<'a> {
     runtime: &'a mut UiRuntime,
-    style: &'a Style,
+    style: &'a Skin,
     atlas: &'a crate::AtlasHandle,
     content: Recti,
     current: &'a mut NodeRuntime,
@@ -289,7 +289,7 @@ impl ContainerLayoutCtx<'_> {
     /// Creates one runtime-scoped placement context.
     pub(crate) fn new<'a>(
         runtime: &'a mut UiRuntime,
-        style: &'a Style,
+        style: &'a Skin,
         atlas: &'a crate::AtlasHandle,
         content: Recti,
         current: &'a mut NodeRuntime,
@@ -300,7 +300,7 @@ impl ContainerLayoutCtx<'_> {
     }
 
     /// Returns the active UI style.
-    pub fn style(&self) -> &Style {
+    pub fn skin(&self) -> &Skin {
         self.style
     }
 

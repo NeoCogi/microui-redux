@@ -290,7 +290,7 @@ impl Surface {
     }
 
     /// Measures automatic axes and lays out the application tree in the derived body.
-    fn layout(&mut self, menu_bar: Option<&mut MenuSurface>, frame_kind: RootFrameKind, style: &Style, atlas: &crate::AtlasHandle, clip: Recti) {
+    fn layout(&mut self, menu_bar: Option<&mut MenuSurface>, frame_kind: RootFrameKind, style: &Skin, atlas: &crate::AtlasHandle, clip: Recti) {
         // Commit the inherited surface boundary before any concrete body sees it. Every later
         // manager-owned hit or paint path reads this same snapshot until the next complete layout.
         self.clip = clip;
@@ -364,7 +364,7 @@ impl Surface {
 
 impl SurfaceBody {
     /// Measures either concrete body without type erasure.
-    fn measure(&mut self, style: &Style, atlas: &crate::AtlasHandle, constraints: crate::Constraints) -> Dimensioni {
+    fn measure(&mut self, style: &Skin, atlas: &crate::AtlasHandle, constraints: crate::Constraints) -> Dimensioni {
         match self {
             Self::Widgets { root, runtime } => runtime.measure_tree_root(root, style, atlas, constraints),
             Self::Menu(menu) => menu.measure(style, atlas),
@@ -372,7 +372,7 @@ impl SurfaceBody {
     }
 
     /// Commits one body allocation through the concrete variant.
-    fn layout(&mut self, style: &Style, atlas: &crate::AtlasHandle, rect: Recti, viewport: Recti) {
+    fn layout(&mut self, style: &Skin, atlas: &crate::AtlasHandle, rect: Recti, viewport: Recti) {
         match self {
             Self::Widgets { root, runtime } => runtime.layout_tree_root(root, style, atlas.clone(), rect, viewport),
             Self::Menu(menu) => menu.layout(rect, viewport),
@@ -438,7 +438,7 @@ impl SurfaceBody {
     }
 
     /// Routes drag continuation or release to the captured application node, if this is a widget body.
-    fn route_captured_pointer(&mut self, style: &Style, mouse_buttons: MouseButton, event: &UiInputEvent) -> Option<bool> {
+    fn route_captured_pointer(&mut self, style: &Skin, mouse_buttons: MouseButton, event: &UiInputEvent) -> Option<bool> {
         let Self::Widgets { root, runtime } = self else {
             return None;
         };
@@ -451,7 +451,7 @@ impl SurfaceBody {
     }
 
     /// Routes one ordinary widget hit and records any resulting capture transition.
-    fn route_pointer(&mut self, style: &Style, event: &UiInputEvent, mouse_buttons: MouseButton) -> Option<crate::ui_node::RuntimeNodeId> {
+    fn route_pointer(&mut self, style: &Skin, event: &UiInputEvent, mouse_buttons: MouseButton) -> Option<crate::ui_node::RuntimeNodeId> {
         let Self::Widgets { root, runtime } = self else {
             return None;
         };
@@ -462,7 +462,7 @@ impl SurfaceBody {
     }
 
     /// Routes keyboard/text input only to application widget bodies.
-    fn route_focus(&mut self, style: &Style, event: &UiInputEvent) {
+    fn route_focus(&mut self, style: &Skin, event: &UiInputEvent) {
         if let Self::Widgets { root, runtime } = self {
             runtime.route_focus_input_event(std::slice::from_mut(root), style, event);
         }
@@ -477,7 +477,7 @@ impl SurfaceBody {
     }
 
     /// Updates widget bodies; menu state is committed synchronously by direct pointer routing.
-    fn update(&mut self, style: &Style, atlas: crate::AtlasHandle, input: crate::input::InputSnapshot) {
+    fn update(&mut self, style: &Skin, atlas: crate::AtlasHandle, input: crate::input::InputSnapshot) {
         if let Self::Widgets { root, runtime } = self {
             runtime.update_tree_root(root, style, atlas, input);
         }
@@ -487,7 +487,7 @@ impl SurfaceBody {
     fn paint(
         &mut self,
         display_list: &mut crate::render::DisplayList,
-        style: &Style,
+        style: &Skin,
         atlas: &crate::AtlasHandle,
         focus_visible: bool,
         window_active: bool,
@@ -814,7 +814,7 @@ impl SurfaceNode {
     }
 
     /// Lays out this node and its optional root-owned menu bar through concrete bodies.
-    fn layout(&mut self, style: &Style, atlas: &crate::AtlasHandle, viewport: Recti) {
+    fn layout(&mut self, style: &Skin, atlas: &crate::AtlasHandle, viewport: Recti) {
         let maximized = self.root().is_some_and(|root| root.restore_rect.is_some());
         if maximized {
             // Follow the effective viewport on every layout so native drawable or ancestor-clip
@@ -2620,7 +2620,7 @@ impl WindowManager {
     fn update_eligible_widget_trees(&mut self, atlas: &crate::AtlasHandle, input: crate::input::InputSnapshot) {
         // Copy the resolved style once, matching event-driven traversal, then use the forest's
         // shared visible order so modal scope and popup ownership have one eligibility policy.
-        let style = self.style.clone();
+        let style = self.skin.clone();
         let modal = self.surfaces.active_modal_root();
         for index in 0..self.surfaces.visible_order.len() {
             let key = self.surfaces.visible_order[index];
@@ -2680,7 +2680,7 @@ impl WindowManager {
     fn layout(&mut self, viewport: Recti, atlas: &crate::AtlasHandle) {
         self.sync_menu_presentation();
         self.surfaces.rebuild_visible_order();
-        let style = self.style.clone();
+        let style = self.skin.clone();
         for index in 0..self.surfaces.nodes.len() {
             let key = self.surfaces.nodes[index].key;
             if !self.surfaces.visible_order.contains(&key) {
@@ -2712,7 +2712,7 @@ impl WindowManager {
     fn update_for_event(&mut self, atlas: &crate::AtlasHandle, event: &UiInputEvent, input: crate::input::InputSnapshot) {
         // Resolve event-wide dismissal and menu-toggle context before selecting a recipient. An
         // outside press may change the visible forest and must do so before hit testing below.
-        let style = self.style.clone();
+        let style = self.skin.clone();
         let popup_keyboard_handled = self.route_application_popup_keyboard(event);
         let menu_keyboard_handled = !popup_keyboard_handled && self.route_menu_keyboard(event);
         let window_keyboard_handled = !popup_keyboard_handled && !menu_keyboard_handled && self.route_window_keyboard(event);
@@ -2850,7 +2850,7 @@ impl WindowManager {
             if !handled && let Some(surface) = pointer {
                 handled = match surface {
                     SurfaceKey::Root(root) => {
-                        let caption_controls_visible = pointer_owner_was_active || style.window_chrome_layout != crate::WindowChromeLayout::ClassicMac;
+                        let caption_controls_visible = pointer_owner_was_active || style.chrome.layout != crate::WindowChromeLayout::ClassicMac;
                         self.route_chrome_event(root, event, caption_controls_visible)
                     }
                     SurfaceKey::Popup(_) => false,
@@ -2914,7 +2914,7 @@ impl WindowManager {
     }
 
     /// Records one ordinary root family with each parent's application content below its children.
-    fn paint_root_tree(&mut self, root: RootId, style: &Style, atlas: &crate::AtlasHandle, focus_surface: Option<SurfaceKey>, active_window: Option<RootId>) {
+    fn paint_root_tree(&mut self, root: RootId, style: &Skin, atlas: &crate::AtlasHandle, focus_surface: Option<SurfaceKey>, active_window: Option<RootId>) {
         {
             // A short node borrow records the base before recursion. Releasing it here lets direct
             // child calls borrow arbitrary later forest entries without unsafe aliasing or mirrors.
@@ -3008,7 +3008,7 @@ impl WindowManager {
     }
 
     /// Records the sole active popup path in parent-to-child order at its inherited transient tier.
-    fn paint_active_popup_path(&mut self, style: &Style, atlas: &crate::AtlasHandle, focus_surface: Option<SurfaceKey>) {
+    fn paint_active_popup_path(&mut self, style: &Skin, atlas: &crate::AtlasHandle, focus_surface: Option<SurfaceKey>) {
         // `visible_order` materializes only the active popup ancestry. Filtering it reuses that
         // allocation and preserves the existing parent-first popup paint contract.
         for index in 0..self.surfaces.visible_order.len() {
@@ -3069,7 +3069,7 @@ impl WindowManager {
         // widen a structurally clipped child back to the full drawable viewport.
         self.display_list.clear();
         self.surfaces.rebuild_visible_order();
-        let style = self.style.clone();
+        let style = self.skin.clone();
         let active_mode = self.active_popup_owner().and_then(|owner| self.surfaces.stacking_mode(owner));
         // A menu owns keyboard presentation without discarding application focus. Otherwise the
         // same surface selected by routing is the only runtime allowed to paint remembered focus.

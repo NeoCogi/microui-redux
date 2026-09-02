@@ -63,7 +63,7 @@ bitflags! {
     #[derive(Copy, Clone)]
     /// Options fixed when a retained scroll area is constructed.
     pub struct ScrollAreaOption : u32 {
-        /// Gives the scroll area a Style-owned outer border and inset content area.
+        /// Gives the scroll area a Skin-owned outer border and inset content area.
         const FRAME = 1024;
         /// Enables scrolling and scrollbars initially.
         const ENABLE_SCROLL = 32;
@@ -441,10 +441,10 @@ impl ScrollArea {
 }
 
 impl ContainerWidget for ScrollArea {
-    /// Measures content through the surface and includes Style-owned viewport padding.
+    /// Measures content through the surface and includes Skin-owned viewport padding.
     fn measure(&self, ctx: &mut MeasureCtx<'_>, constraints: crate::Constraints) -> Dimensioni {
         // Scrollbars are responsive affordances and do not inflate intrinsic composite size.
-        let padding = ctx.style().padding.max(0);
+        let padding = ctx.skin().metrics.padding.max(0);
         // inset = leading_padding + trailing_padding = padding * 2.
         let inset = padding.saturating_mul(2);
         let content_width = match constraints.width {
@@ -458,13 +458,13 @@ impl ContainerWidget for ScrollArea {
         Dimensioni::new(content.width.saturating_add(inset), content.height.saturating_add(inset))
     }
 
-    /// Places Style-padded content and any required scrollbars inside the local surface.
+    /// Places Skin-padded content and any required scrollbars inside the local surface.
     fn place(&mut self, ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, rect: Recti) {
         // All committed summary geometry is parent-local; child scrollbar geometry passed to each
         // widget is normalized to that child's own local track by configure_bar.
         let surface = Recti::new(0, 0, rect.width.max(0), rect.height.max(0));
-        let padding = ctx.style().padding.max(0);
-        let bar_size = ctx.style().scrollbar_size.max(0);
+        let padding = ctx.skin().metrics.padding.max(0);
+        let bar_size = ctx.skin().metrics.scrollbar_size.max(0);
         let enabled = self.scrolling_enabled;
         let requested = Vec2i::new(ScrollArea::axis_offset(&self.horizontal), ScrollArea::axis_offset(&self.vertical));
         let bars_usable = enabled && bar_size > 0 && surface.width > 0 && surface.height > 0;
@@ -489,7 +489,7 @@ impl ContainerWidget for ScrollArea {
                 surface.width.saturating_sub(vertical_width).max(0),
                 surface.height.saturating_sub(horizontal_height).max(0),
             );
-            // Inset content by the global Style padding while keeping scrollbar tracks adjacent to
+            // Inset content by the global Skin padding while keeping scrollbar tracks adjacent to
             // the complete body.
             let view = inset_rect(body, padding);
             let preferred = ctx
@@ -659,7 +659,7 @@ mod tests {
     use crate::input::Input;
     use crate::test_support::{AllocationMeasurement, test_atlas};
     use crate::ui_node::UiRuntime;
-    use crate::{Custom, CustomParameters, Linear, LinearItem, LinearParameters, MouseButton, Style, TextBlock, TextBlockParameters, TextWrap, UNCLIPPED_RECT};
+    use crate::{Custom, CustomParameters, Linear, LinearItem, LinearParameters, MouseButton, Skin, TextBlock, TextBlockParameters, TextWrap, UNCLIPPED_RECT};
 
     /// Test leaf whose desired size is content behavior rather than a generic node policy.
     struct FixedContent(Dimensioni);
@@ -675,7 +675,7 @@ mod tests {
     }
 
     impl crate::LeafWidget for FixedContent {
-        fn measure(&self, _style: &crate::Style, _atlas: &crate::AtlasHandle, _constraints: crate::Constraints) -> Dimensioni {
+        fn measure(&self, _style: &crate::Skin, _atlas: &crate::AtlasHandle, _constraints: crate::Constraints) -> Dimensioni {
             self.0
         }
     }
@@ -716,7 +716,7 @@ mod tests {
     /// `style` must contain resource IDs resolved from `atlas`; accepting the handle explicitly
     /// keeps this helper from creating a second, incompatible ownership domain behind the test's
     /// back.
-    fn laid_out_geometry(child_size: Dimensioni, surface: Recti, style: Style, atlas: &crate::AtlasHandle, requested_offset: Vec2i) -> ScrollAreaGeometry {
+    fn laid_out_geometry(child_size: Dimensioni, surface: Recti, style: Skin, atlas: &crate::AtlasHandle, requested_offset: Vec2i) -> ScrollAreaGeometry {
         let child = fixed_content(child_size);
         let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child));
         scroll.try_update(|state| state.set_offset(requested_offset)).unwrap();
@@ -758,11 +758,10 @@ mod tests {
         let child_id = child.id();
         let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child));
         let atlas = test_atlas();
-        let style = Style {
-            padding: 0,
-            scrollbar_size: 10,
-            ..crate::test_support::test_style(&atlas)
-        };
+        let style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
+            metrics.padding = 0;
+            metrics.scrollbar_size = 10;
+        });
         let viewport = Recti::new(0, 0, 100, 80);
         let mut runtime = UiRuntime::new();
 
@@ -789,11 +788,10 @@ mod tests {
         let child = fixed_content(Dimensioni::new(200, 300));
         let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child));
         let atlas = test_atlas();
-        let style = Style {
-            padding: 0,
-            scrollbar_size: 10,
-            ..crate::test_support::test_style(&atlas)
-        };
+        let style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
+            metrics.padding = 0;
+            metrics.scrollbar_size = 10;
+        });
         let viewport = Recti::new(0, 0, 100, 100);
         let mut runtime = UiRuntime::new();
         runtime.begin_update();
@@ -825,12 +823,11 @@ mod tests {
         assert_eq!(root.debug_node_count(), 1_005, "all retained row nodes remain owned by their column");
 
         let atlas = test_atlas();
-        let style = Style {
-            padding: 0,
-            spacing: 2,
-            scrollbar_size: 10,
-            ..crate::test_support::test_style(&atlas)
-        };
+        let style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
+            metrics.padding = 0;
+            metrics.spacing = 2;
+            metrics.scrollbar_size = 10;
+        });
         let viewport = Recti::new(0, 0, 200, 120);
         let mut runtime = UiRuntime::new();
         runtime.begin_update();
@@ -860,11 +857,10 @@ mod tests {
         let child = fixed_content(Dimensioni::new(200, 200));
         let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child));
         let atlas = test_atlas();
-        let style = Style {
-            padding: 0,
-            scrollbar_size: 10,
-            ..crate::test_support::test_style(&atlas)
-        };
+        let style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
+            metrics.padding = 0;
+            metrics.scrollbar_size = 10;
+        });
         let outer = Recti::new(0, 0, 100, 100);
         let mut runtime = UiRuntime::new();
 
@@ -892,21 +888,20 @@ mod tests {
         assert_eq!(runtime.debug_capture_target(), None);
     }
 
-    /// Verifies Style padding and perpendicular scrollbar overflow converge together.
+    /// Verifies Skin padding and perpendicular scrollbar overflow converge together.
     #[test]
     fn padding_and_mutually_induced_bars_converge_from_logical_content_extent() {
         // Ten pixels of padding on both sides leaves an eighty-pixel viewport for the child.
         let surface = Recti::new(0, 0, 100, 100);
         let atlas = test_atlas();
-        let style = crate::test_support::test_style(&atlas);
+        let style = crate::test_support::test_skin(&atlas);
         let fits = laid_out_geometry(
             Dimensioni::new(80, 80),
             surface,
-            Style {
-                padding: 10,
-                scrollbar_size: 10,
-                ..style.clone()
-            },
+            style.clone().with_metrics(|metrics| {
+                metrics.padding = 10;
+                metrics.scrollbar_size = 10;
+            }),
             &atlas,
             Vec2i::default(),
         );
@@ -919,7 +914,10 @@ mod tests {
         let induced = laid_out_geometry(
             Dimensioni::new(95, 101),
             surface,
-            Style { padding: 0, scrollbar_size: 10, ..style },
+            style.with_metrics(|metrics| {
+                metrics.padding = 0;
+                metrics.scrollbar_size = 10;
+            }),
             &atlas,
             Vec2i::default(),
         );
@@ -940,11 +938,10 @@ mod tests {
         );
         let (_, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, Node::container(content)));
         let atlas = test_atlas();
-        let style = Style {
-            padding: 0,
-            scrollbar_size: 10,
-            ..crate::test_support::test_style(&atlas)
-        };
+        let style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
+            metrics.padding = 0;
+            metrics.scrollbar_size = 10;
+        });
 
         let mut runtime = UiRuntime::new();
         runtime.begin_update();
@@ -968,12 +965,11 @@ mod tests {
         ]));
         let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, row));
         let atlas = test_atlas();
-        let style = Style {
-            padding: 0,
-            spacing: 4,
-            scrollbar_size: 10,
-            ..crate::test_support::test_style(&atlas)
-        };
+        let style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
+            metrics.padding = 0;
+            metrics.spacing = 4;
+            metrics.scrollbar_size = 10;
+        });
 
         let mut runtime = UiRuntime::new();
         runtime.begin_update();
@@ -982,17 +978,20 @@ mod tests {
         assert_eq!(scroll.try_read(|state| state.geometry.horizontal.is_none()), Some(true));
         let text_rect = runtime.node_rect(std::slice::from_ref(&root), text_id).unwrap();
         assert_eq!(text_rect.width, 56);
-        assert!(text_rect.height > atlas.get_font_height(style.font) as i32);
+        assert!(text_rect.height > atlas.get_font_height(style.resources.fonts.body) as i32);
     }
 
     #[test]
     fn placement_clamps_requested_offsets_after_content_or_viewport_changes() {
         let atlas = test_atlas();
-        let style = crate::test_support::test_style(&atlas);
+        let style = crate::test_support::test_skin(&atlas);
         let geometry = laid_out_geometry(
             Dimensioni::new(120, 130),
             Recti::new(0, 0, 100, 100),
-            Style { padding: 0, scrollbar_size: 10, ..style },
+            style.with_metrics(|metrics| {
+                metrics.padding = 0;
+                metrics.scrollbar_size = 10;
+            }),
             &atlas,
             Vec2i::new(500, 500),
         );
@@ -1006,11 +1005,10 @@ mod tests {
         let (text, child) = TextBlock::create(TextBlockParameters::new(&wide_line));
         let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::ENABLE_SCROLL, child));
         let atlas = test_atlas();
-        let style = Style {
-            padding: 0,
-            scrollbar_size: 10,
-            ..crate::test_support::test_style(&atlas)
-        };
+        let style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
+            metrics.padding = 0;
+            metrics.scrollbar_size = 10;
+        });
         let surface = Recti::new(0, 0, 100, 80);
         let mut runtime = UiRuntime::new();
 
@@ -1040,11 +1038,10 @@ mod tests {
         let (scroll, mut root) = ScrollArea::create(ScrollAreaParameters::new(ScrollAreaOption::FRAME | ScrollAreaOption::ENABLE_SCROLL, child));
         let mut runtime = UiRuntime::new();
         let atlas = test_atlas();
-        let mut style = Style {
-            padding: 5,
-            scrollbar_size: 10,
-            ..crate::test_support::test_style(&atlas)
-        };
+        let mut style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
+            metrics.padding = 5;
+            metrics.scrollbar_size = 10;
+        });
         let frame_insets = crate::SliceInsets::uniform(3);
         style.visuals.set_patches(
             crate::AppearanceRole::Panel,
@@ -1063,7 +1060,10 @@ mod tests {
         assert_eq!((allocation_before.x, allocation_before.y), (0, 0));
         assert_eq!(
             (screen_before.x, screen_before.y),
-            (outer.x + frame_insets.left + style.padding, outer.y + frame_insets.top + style.padding)
+            (
+                outer.x + frame_insets.left + style.metrics.padding,
+                outer.y + frame_insets.top + style.metrics.padding
+            )
         );
 
         scroll.try_update(|state| state.set_offset(Vec2i::new(0, 12))).unwrap();

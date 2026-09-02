@@ -31,12 +31,12 @@
 //! Tests for behavior shared across built-in widgets.
 
 use super::*;
-use crate::test_support::{test_atlas as make_test_atlas, test_style};
+use crate::test_support::{test_atlas as make_test_atlas, test_skin};
 use std::rc::Rc;
 
 fn run_click<W: Widget>(widget: &mut W) {
     let atlas = make_test_atlas();
-    let style = test_style(&atlas);
+    let style = test_skin(&atlas);
     let bounds = rect(0, 0, 100, 20);
     let mut ctx = WidgetUpdateCtx::new_with_interaction(bounds, bounds, &style, &atlas, true, true, true, true, true, MouseButton::LEFT, Modifiers::NONE);
     widget.update(&mut ctx, None)
@@ -45,32 +45,32 @@ fn run_click<W: Widget>(widget: &mut W) {
 #[test]
 fn image_widgets_measure_external_texture_dimensions() {
     let atlas = make_test_atlas();
-    let style = test_style(&atlas);
+    let style = test_skin(&atlas);
     let texture = TextureId::new_test(7, 13, 5);
 
     let button = ButtonBuilder::create_widget(ButtonParameters::with_image("aa", Some(texture), WidgetOption::FRAME, WidgetFillOption::ALL));
     let button_size = button.measure(&style, &atlas, Constraints::unbounded());
 
-    assert_eq!(button_size.width, style.padding * 2 + texture.width() + style.padding + 16);
+    assert_eq!(button_size.width, style.metrics.padding * 2 + texture.width() + style.metrics.padding + 16);
     assert_eq!(button_size.height, 14);
 
     let list_box = ListBoxBuilder::create_widget(ListBoxParameters::new("a", Some(texture)));
     let list_size = list_box.measure(&style, &atlas, Constraints::unbounded());
 
-    assert_eq!(list_size.width, style.padding * 2 + texture.width() + style.padding + 8);
+    assert_eq!(list_size.width, style.metrics.padding * 2 + texture.width() + style.metrics.padding + 8);
     assert_eq!(list_size.height, 14);
 }
 
 #[test]
 fn inline_image_placement_keeps_visual_and_text_rects_separate() {
-    // This geometry helper does not query the atlas directly, but its Style still carries typed
+    // This geometry helper does not query the atlas directly, but its Skin still carries typed
     // atlas capabilities and therefore must be constructed from a real ownership domain.
     let atlas = make_test_atlas();
-    let style = test_style(&atlas);
+    let style = test_skin(&atlas);
     let placement = place_inline_content(rect(10, 20, 60, 18), &style, "aa", Some(Dimensioni::new(13, 5)));
     let visual = placement.visual.expect("visual rect");
 
-    assert_eq!(visual.x, 10 + style.padding);
+    assert_eq!(visual.x, 10 + style.metrics.padding);
     assert_eq!(visual.width, 13);
     assert!(placement.text.x >= visual.x + visual.width);
     assert!(placement.text.width > 0);
@@ -79,7 +79,7 @@ fn inline_image_placement_keeps_visual_and_text_rects_separate() {
 #[test]
 fn combo_run_toggles_open_state() {
     let atlas = make_test_atlas();
-    let style = Rc::new(test_style(&atlas));
+    let style = Rc::new(test_skin(&atlas));
     let mut combo = ComboBuilder::create_widget(ComboParameters::new());
     let rect = rect(0, 0, 100, 20);
     let mut ctx = WidgetUpdateCtx::new_with_interaction(
@@ -124,7 +124,7 @@ fn combo_submission_carries_update_anchor_while_paint_remains_observational() {
     }
 
     let atlas = make_test_atlas();
-    let style = test_style(&atlas);
+    let style = test_skin(&atlas);
     let mut combo = ComboBuilder::create_widget(ComboParameters::new());
     let mut dispatcher = crate::event::WidgetEventDispatcher::new();
     dispatcher.subscribe(combo.submitted(), record).unwrap();

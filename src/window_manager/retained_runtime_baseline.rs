@@ -41,7 +41,7 @@
 //! for comparison only and deliberately have no platform-dependent pass threshold.
 
 use crate::render::FrameInfo;
-use crate::test_support::{AllocationCount, AllocationMeasurement, NoopRenderer, test_atlas, test_style};
+use crate::test_support::{AllocationCount, AllocationMeasurement, NoopRenderer, test_atlas, test_skin};
 use crate::ui_node::{RuntimeMetrics, UiRuntime};
 use crate::{
     Button, ButtonParameters, Context, Dimensioni, Key, KeyEvent, Linear, LinearParameters, Modifiers, Node, ScrollArea, ScrollAreaOption,
@@ -221,7 +221,7 @@ fn measure_focus_routing(name: &'static str, application_nodes: usize, build: im
     let atlas = test_atlas();
     // Focus routing consults the same typed font and icon capabilities as layout, so resolve the
     // benchmark style from the handle transferred into this runtime's retained tree.
-    let style = test_style(&atlas);
+    let style = test_skin(&atlas);
     let viewport = rect(0, 0, 600, 440);
     runtime.layout_tree_root(&mut root, &style, atlas, viewport, viewport);
 

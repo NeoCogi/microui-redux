@@ -31,7 +31,7 @@
 //! Shared fixtures, renderer recordings, and no-op helpers used by unit tests.
 
 use crate::render::{FrameError, FrameInfo, RendererBackend, RendererFrame, TextureError, Vertex};
-use crate::{AtlasHandle, AtlasSource, AtlasUploadError, CharEntry, FontEntry, Recti, SourceFormat, Style, TextureId, Vec2i};
+use crate::{AtlasHandle, AtlasSource, AtlasUploadError, CharEntry, FontEntry, Recti, SourceFormat, Skin, TextureId, Vec2i};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -135,7 +135,7 @@ const ICON_NAMES: [&str; 9] = [
 
 /// Constructs the standard immutable atlas shared within one test's ownership domain.
 pub(crate) fn test_atlas() -> AtlasHandle {
-    // Use the required semantic body name so Context and Style exercise production construction.
+    // Use the required semantic body name so Context and Skin exercise production construction.
     test_atlas_with_font_sizes(&[("body", 10)])
 }
 
@@ -197,10 +197,10 @@ pub(crate) fn test_atlas_with_font_sizes(fonts: &[(&str, usize)]) -> AtlasHandle
 }
 
 /// Constructs a resolved style whose resource capabilities belong to `atlas`.
-pub(crate) fn test_style(atlas: &AtlasHandle) -> Style {
+pub(crate) fn test_skin(atlas: &AtlasHandle) -> Skin {
     // Tests must retain and pass this same handle allocation; reconstructing identical metadata is
     // intentionally a different ownership domain after atlas IDs become scoped.
-    Style::from_atlas(atlas)
+    Skin::from_atlas(atlas)
 }
 
 pub(crate) struct NoopRenderer {

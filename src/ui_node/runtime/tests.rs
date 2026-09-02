@@ -69,8 +69,8 @@ struct StyleProbe {
 }
 
 impl StyleProbe {
-    fn observe(style: &Style) -> (i32, i32) {
-        (style.padding, style.spacing)
+    fn observe(style: &Skin) -> (i32, i32) {
+        (style.metrics.padding, style.metrics.spacing)
     }
 }
 
@@ -80,16 +80,16 @@ impl Widget for StyleProbe {
     }
 
     fn update(&mut self, ctx: &mut WidgetUpdateCtx<'_>, _input: Option<&UiInputEvent>) {
-        self.observations.update.set(Self::observe(ctx.style()));
+        self.observations.update.set(Self::observe(ctx.skin()));
     }
 
     fn paint(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        self.observations.paint.set(Self::observe(ctx.style()));
+        self.observations.paint.set(Self::observe(ctx.skin()));
     }
 }
 
 impl crate::LeafWidget for StyleProbe {
-    fn measure(&self, style: &Style, _atlas: &crate::AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn measure(&self, style: &Skin, _atlas: &crate::AtlasHandle, _constraints: Constraints) -> Dimensioni {
         self.observations.measure.set(Self::observe(style));
         Dimensioni::new(10, 10)
     }
@@ -134,7 +134,7 @@ impl Widget for Probe {
 }
 
 impl crate::LeafWidget for Probe {
-    fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn measure(&self, _style: &Skin, _atlas: &crate::AtlasHandle, _constraints: Constraints) -> Dimensioni {
         self.counts.measures.set(self.counts.measures.get() + 1);
         Dimensioni::new(17, 13)
     }
@@ -159,7 +159,7 @@ impl Widget for FocusProbe {
 }
 
 impl crate::LeafWidget for FocusProbe {
-    fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn measure(&self, _style: &Skin, _atlas: &crate::AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(20, 20)
     }
 }
@@ -305,12 +305,12 @@ impl Widget for CrossSubtreeRemover {
 }
 
 impl crate::LeafWidget for CrossSubtreeRemover {
-    fn measure(&self, _style: &Style, _atlas: &crate::AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn measure(&self, _style: &Skin, _atlas: &crate::AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(10, 10)
     }
 }
 
-fn layout_root(runtime: &mut UiRuntime, root: &mut Node, style: &Style, atlas: crate::AtlasHandle) {
+fn layout_root(runtime: &mut UiRuntime, root: &mut Node, style: &Skin, atlas: crate::AtlasHandle) {
     runtime.layout_tree_root(root, style, atlas, Recti::new(10, 20, 80, 60), Recti::new(0, 0, 320, 240));
 }
 
@@ -358,10 +358,7 @@ fn demo_flex_row_geometry_is_preserved_as_an_explicit_baseline() {
         LinearItem::fixed(last, 109),
     ]));
     let atlas = test_atlas();
-    let style = Style {
-        spacing: 4,
-        ..crate::test_support::test_style(&atlas)
-    };
+    let style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| metrics.spacing = 4);
     let mut runtime = UiRuntime::new();
     runtime.begin_update();
     runtime.layout_tree_root(&mut root, &style, atlas.clone(), Recti::new(0, 0, 400, 40), Recti::new(0, 0, 400, 40));
@@ -383,10 +380,7 @@ fn calculator_flex_geometry_is_preserved_as_an_explicit_baseline() {
         LinearItem::flex(keypad, 3.0),
     ]));
     let atlas = test_atlas();
-    let style = Style {
-        spacing: 4,
-        ..crate::test_support::test_style(&atlas)
-    };
+    let style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| metrics.spacing = 4);
     let mut runtime = UiRuntime::new();
     runtime.begin_update();
     runtime.layout_tree_root(&mut root, &style, atlas.clone(), Recti::new(0, 0, 320, 420), Recti::new(0, 0, 320, 420));
@@ -409,10 +403,7 @@ fn calculator_keypad_grid_fills_its_nested_linear_allocation() {
         LinearItem::flex(keypad_row, 0.8),
     ]));
     let atlas = test_atlas();
-    let style = Style {
-        spacing: 4,
-        ..crate::test_support::test_style(&atlas)
-    };
+    let style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| metrics.spacing = 4);
     let mut runtime = UiRuntime::new();
     runtime.begin_update();
     runtime.layout_tree_root(&mut root, &style, atlas.clone(), Recti::new(0, 0, 320, 420), Recti::new(0, 0, 320, 420));
@@ -467,10 +458,7 @@ fn demo_weight_grid_fills_remaining_height_and_preserves_one_to_two_heights() {
         LinearItem::flex(grid, 1.0),
     ]));
     let atlas = test_atlas();
-    let style = Style {
-        spacing: 4,
-        ..crate::test_support::test_style(&atlas)
-    };
+    let style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| metrics.spacing = 4);
     let mut runtime = UiRuntime::new();
     runtime.begin_update();
     runtime.layout_tree_root(&mut root, &style, atlas.clone(), Recti::new(0, 0, 268, 216), Recti::new(0, 0, 268, 216));
@@ -497,10 +485,7 @@ fn demo_column_bottom_margin_geometry_is_preserved_as_an_explicit_baseline() {
         LinearItem::fixed(spacer, 24),
     ]));
     let atlas = test_atlas();
-    let style = Style {
-        spacing: 0,
-        ..crate::test_support::test_style(&atlas)
-    };
+    let style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| metrics.spacing = 0);
     let mut runtime = UiRuntime::new();
     runtime.begin_update();
     runtime.layout_tree_root(&mut root, &style, atlas.clone(), Recti::new(0, 0, 400, 300), Recti::new(0, 0, 400, 300));
@@ -515,7 +500,7 @@ fn leaf_layout_reuses_one_authoritative_widget_measurement() {
     let mut root = Node::widget(probe);
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
@@ -533,7 +518,7 @@ fn subtree_measurement_is_reused_within_one_layout_pass() {
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
 
@@ -549,7 +534,7 @@ fn retained_measurement_cache_survives_layout_passes_and_invalidates_ancestors()
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
@@ -574,7 +559,7 @@ fn child_topology_mutation_invalidates_its_container_through_the_typed_update() 
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
@@ -600,7 +585,7 @@ fn measurement_cache_keeps_constraints_distinct_within_one_pass() {
     let (_, mut root) = crate::Linear::create(crate::LinearParameters::vertical([Node::widget(probe)]));
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
 
@@ -620,7 +605,7 @@ fn common_phases_are_parent_first_and_siblings_are_forward() {
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
@@ -652,18 +637,16 @@ fn container_style_cascades_and_child_override_replaces_it_in_every_phase() {
     };
     let (child, child_node) = Node::typed_widget(child);
     let (container, _) = TraversalContainer::new([child_node], Rc::new(RefCell::new(Vec::new())));
-    let container_style = Style {
-        padding: 17,
-        spacing: 19,
-        ..crate::test_support::test_style(&atlas)
-    };
+    let container_style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
+        metrics.padding = 17;
+        metrics.spacing = 19;
+    });
     let mut root = Node::container(container).with_style_override(container_style);
 
-    let style = Style {
-        padding: 3,
-        spacing: 5,
-        ..crate::test_support::test_style(&atlas)
-    };
+    let style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
+        metrics.padding = 3;
+        metrics.spacing = 5;
+    });
     let mut runtime = UiRuntime::new();
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
@@ -674,15 +657,14 @@ fn container_style_cascades_and_child_override_replaces_it_in_every_phase() {
     assert_eq!(observations.update.get(), (17, 19));
     assert_eq!(observations.paint.get(), (17, 19));
 
-    let child_style = Style {
-        padding: 29,
-        spacing: 31,
-        ..crate::test_support::test_style(&atlas)
-    };
+    let child_style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
+        metrics.padding = 29;
+        metrics.spacing = 31;
+    });
     child.try_set_style_override(child_style).unwrap();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
     assert_eq!(observations.measure.get(), (29, 31));
-    assert_eq!(child.try_style_override().flatten().unwrap().spacing, 31);
+    assert_eq!(child.try_style_override().flatten().unwrap().metrics.spacing, 31);
 
     child.try_clear_style_override().unwrap();
     layout_root(&mut runtime, &mut root, &style, atlas);
@@ -701,7 +683,7 @@ fn consumed_event_conservatively_invalidates_recipient_and_ancestors() {
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
@@ -729,7 +711,7 @@ fn layout_participation_filters_descendants_after_state_changes() {
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
@@ -754,7 +736,7 @@ fn overlapping_pointer_routing_visits_siblings_in_reverse_z_order() {
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
@@ -786,7 +768,7 @@ fn pointer_target_selection_uses_reverse_sibling_paint_order() {
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
@@ -813,7 +795,7 @@ fn no_interact_node_is_transparent_to_pointer_target_selection() {
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
@@ -841,7 +823,7 @@ fn composite_header_is_targeted_as_a_real_child_surface() {
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
@@ -881,7 +863,7 @@ fn ignored_topmost_pointer_target_never_exposes_a_covered_sibling() {
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
@@ -917,7 +899,7 @@ fn focusable_widget_retains_focus_after_pointer_capture_ends() {
     let id = root.id();
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
@@ -978,7 +960,7 @@ fn sequential_focus_uses_retained_order_wraps_and_skips_ineligible_nodes() {
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
@@ -1010,7 +992,7 @@ fn focus_preserving_pointer_target_captures_without_replacing_keyboard_focus() {
     let mut root = Node::container(container);
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     // Commit geometry before installing a valid existing focus identity and routing the press.
     runtime.begin_update();
@@ -1041,7 +1023,7 @@ fn captured_container_receives_direct_drag_while_capture_is_active() {
     let id = root.id();
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
@@ -1087,7 +1069,7 @@ fn routing_time_release_exposes_inactive_state_during_that_event_update() {
     let id = root.id();
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
@@ -1122,7 +1104,7 @@ fn a_new_press_after_release_starts_a_distinct_capture_event() {
     let id = root.id();
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
@@ -1168,7 +1150,7 @@ fn ancestor_gate_clears_targets_and_next_active_update_reconciles_local_mode() {
     let mut root = Node::container(gate);
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
@@ -1219,7 +1201,7 @@ fn removed_target_does_not_notify_or_transfer_state_to_same_index_replacement() 
     let mut root = Node::container(parent);
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());
@@ -1290,7 +1272,7 @@ fn cross_subtree_removal_during_update_sanitizes_before_later_delivery() {
     let mut root = Node::container(root_container);
     let mut runtime = UiRuntime::new();
     let atlas = test_atlas();
-    let style = crate::test_support::test_style(&atlas);
+    let style = crate::test_support::test_skin(&atlas);
 
     runtime.begin_update();
     layout_root(&mut runtime, &mut root, &style, atlas.clone());

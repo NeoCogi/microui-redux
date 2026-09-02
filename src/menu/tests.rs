@@ -31,7 +31,7 @@
 
 use super::*;
 
-use crate::test_support::{test_atlas, test_style};
+use crate::test_support::{test_atlas, test_skin};
 use crate::ui_node::text_layout::control_text_position_with_font;
 
 /// Proves that an explicitly empty bar cannot reserve a blank interactive strip.
@@ -40,7 +40,7 @@ fn empty_bar_has_zero_geometry() {
     // All later phases consume this same cached layout, so zero measurement also means no slot can
     // paint, hit, or anchor a popup even if the surrounding linear shell stretches horizontally.
     let atlas = test_atlas();
-    let style = test_style(&atlas);
+    let style = test_skin(&atlas);
     let layout = layout_bar(&[], &style, &atlas, Vec::new());
     assert_eq!((layout.size.width, layout.size.height), (0, 0));
     assert!(layout.slots.is_empty());
@@ -53,11 +53,11 @@ fn popup_text_region_separates_labels_from_shortcuts_and_submenu_arrows() {
     // Use deterministic test-atlas glyph advances and include both trailing-content variants in
     // one popup so production layout must choose shared label and trailing maxima.
     let atlas = test_atlas();
-    let style = test_style(&atlas);
+    let style = test_skin(&atlas);
     let (_, item) = MenuItem::create(MenuItemParameters::new("aaaa").shortcut_hint("bbbb"));
     let rows = vec![MenuSlot::Item(item.record), MenuSlot::Branch { label: "aaaaaa".into() }];
     let layout = layout_popup(&rows, &style, &atlas, Vec::new());
-    let padding = style.padding.max(1);
+    let padding = style.metrics.padding.max(1);
 
     // The item label and right-aligned shortcut are positioned by the same production helper and
     // clipped by the same production region. Their measured extents must fit without intersecting.
@@ -78,7 +78,7 @@ fn popup_text_region_separates_labels_from_shortcuts_and_submenu_arrows() {
     let branch_region = text_region(branch_row, layout.marker_width);
     let branch_size = atlas.get_text_size(item_font, "aaaaaa");
     let branch_position = control_text_position_with_font(&style, &atlas, item_font, "aaaaaa", branch_region, WidgetOption::NONE);
-    let arrow_size = atlas.get_icon_size(style.icons.expand);
+    let arrow_size = atlas.get_icon_size(style.resources.icons.expand);
     let arrow = trailing_rect(branch_region, arrow_size, padding);
     let branch_right = branch_position.x + branch_size.width;
     assert_eq!((item_region.x, item_region.width), (branch_region.x, branch_region.width));

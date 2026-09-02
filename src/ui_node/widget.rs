@@ -61,7 +61,7 @@ use rs_math3d::Dimensioni;
 
 use crate::atlas::AtlasHandle;
 use crate::input::{Key, Modifiers};
-use crate::theme::{AppearanceRole, Style};
+use crate::theme::{AppearanceRole, Skin};
 use crate::Constraints;
 use super::UiInputEvent;
 pub use super::widget_context::{WidgetPaintCtx, WidgetUpdateCtx};
@@ -72,7 +72,7 @@ pub use super::widget_context::{WidgetPaintCtx, WidgetUpdateCtx};
 /// traversal later consumes it and invalidates node-local caches on the recursive call stack.
 pub(crate) struct WidgetStorage<W: ?Sized> {
     measurement_dirty: bool,
-    style_override: Option<Style>,
+    style_override: Option<Skin>,
     pub(crate) widget: W,
 }
 
@@ -87,16 +87,16 @@ impl<W> WidgetStorage<W> {
 }
 
 impl<W: ?Sized> WidgetStorage<W> {
-    pub(crate) fn style_override(&self) -> Option<Style> {
+    pub(crate) fn style_override(&self) -> Option<Skin> {
         self.style_override.clone()
     }
 
-    pub(crate) fn set_style_override(&mut self, style_override: Option<Style>) {
+    pub(crate) fn set_style_override(&mut self, style_override: Option<Skin>) {
         self.style_override = style_override;
         self.mark_measurement_dirty();
     }
 
-    pub(crate) fn resolve_style(&self, inherited: &Style) -> Style {
+    pub(crate) fn resolve_style(&self, inherited: &Skin) -> Skin {
         self.style_override.clone().unwrap_or_else(|| inherited.clone())
     }
 
@@ -132,7 +132,7 @@ bitflags! {
     #[derive(Copy, Clone)]
     /// Widget-specific options that influence layout and interactivity.
     pub struct WidgetOption : u32 {
-        /// Gives the widget a Style-owned outer border and inset content rectangle.
+        /// Gives the widget a Skin-owned outer border and inset content rectangle.
         const FRAME = 512;
         /// Consumes scroll input while the widget is hovered.
         const GRAB_SCROLL = 32;
@@ -336,7 +336,7 @@ impl<W: Widget + 'static> TypedWidgetHandle<W> {
     ///
     /// The outer [`Option`] reports whether the retained widget is alive and available; the inner
     /// value is `None` when the widget currently inherits its complete parent style.
-    pub fn try_style_override(&self) -> Option<Option<Style>> {
+    pub fn try_style_override(&self) -> Option<Option<Skin>> {
         let widget = self.widget.upgrade()?;
         let widget = widget.try_borrow().ok()?;
         Some(widget.style_override())
@@ -346,7 +346,7 @@ impl<W: Widget + 'static> TypedWidgetHandle<W> {
     ///
     /// Container overrides cascade to descendants. A descendant's own override replaces the
     /// inherited style for that descendant and its subtree.
-    pub fn try_set_style_override(&self, style_override: Style) -> Option<()> {
+    pub fn try_set_style_override(&self, style_override: Skin) -> Option<()> {
         let widget = self.widget.upgrade()?;
         let mut widget = widget.try_borrow_mut().ok()?;
         widget.set_style_override(Some(style_override));
@@ -447,7 +447,7 @@ pub trait Widget {
 /// query. Returned components are clamped to zero before the node's frame is applied.
 pub trait LeafWidget: Widget {
     /// Returns this leaf's preferred content size.
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni;
+    fn measure(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni;
 }
 
 impl Widget for WidgetOption {
@@ -460,12 +460,12 @@ impl Widget for WidgetOption {
 }
 
 impl LeafWidget for WidgetOption {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn measure(&self, style: &Skin, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         // Internal placeholder widgets reserve enough room for text or an expand icon.
-        let padding = style.padding.max(0);
+        let padding = style.metrics.padding.max(0);
         let vertical_pad = max(1, padding / 2);
-        let font_height = atlas.get_font_height(style.font) as i32;
-        let icon_height = atlas.get_icon_size(style.icons.expand_down).height;
+        let font_height = atlas.get_font_height(style.resources.fonts.body) as i32;
+        let icon_height = atlas.get_icon_size(style.resources.icons.expand_down).height;
         let content = max(font_height, icon_height).max(0);
         // Valid font metrics and application style values may independently reach i32 limits;
         // preferred geometry clamps rather than wrapping before the parent applies constraints.
@@ -540,7 +540,7 @@ mod widget_tests {
     }
 
     impl LeafWidget for TestWidget {
-        fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+        fn measure(&self, _style: &Skin, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
             Dimensioni::new(1, 1)
         }
     }

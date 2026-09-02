@@ -48,7 +48,7 @@ pub struct CustomParameters {
 }
 
 impl crate::LeafWidget for Custom {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+    fn measure(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         self.preferred_size_widget(style, atlas, constraints)
     }
 }
@@ -108,8 +108,8 @@ impl Custom {
     }
 
     /// Measures the custom widget's debug label as its default preferred size.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
-        let padding = style.padding.max(0);
+    fn preferred_size_widget(&self, style: &Skin, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+        let padding = style.metrics.padding.max(0);
         let text_w = if self.name.is_empty() {
             0
         } else {

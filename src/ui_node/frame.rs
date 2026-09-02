@@ -29,7 +29,7 @@
 //
 
 use crate::render::Painter;
-use crate::{AppearanceRole, AvailableSpace, Constraints, Dimensioni, NinePatch, Recti, SliceInsets, Style, VisualState};
+use crate::{AppearanceRole, AvailableSpace, Constraints, Dimensioni, NinePatch, Recti, SliceInsets, Skin, VisualState};
 
 /// Geometry derived from one authoritative outer allocation.
 #[derive(Copy, Clone, Debug)]
@@ -46,7 +46,7 @@ impl FrameGeometry {
 }
 
 /// Resolves the border box and its derived content rectangle.
-pub(crate) fn frame_geometry(outer: Recti, role: Option<AppearanceRole>, style: &Style) -> FrameGeometry {
+pub(crate) fn frame_geometry(outer: Recti, role: Option<AppearanceRole>, style: &Skin) -> FrameGeometry {
     // A non-framed node uses zero insets. A framed node uses its semantic normal-state geometry;
     // every interaction state for one role is required to preserve those destination insets.
     let insets = role
@@ -156,10 +156,10 @@ mod tests {
     use super::*;
     use crate::{Color, color};
     use crate::render::DisplayList;
-    use crate::test_support::{test_atlas, test_style};
+    use crate::test_support::{test_atlas, test_skin};
 
     /// Replaces the generic frame role used by the frame geometry under test.
-    fn with_frame(mut style: Style, patch: NinePatch) -> Style {
+    fn with_frame(mut style: Skin, patch: NinePatch) -> Skin {
         // Tests mutate the same concrete catalog entry that production generic framing resolves.
         style.visuals.set_patches(crate::AppearanceRole::GenericFrame, crate::StateTable::filled(patch));
         style
@@ -168,7 +168,7 @@ mod tests {
     #[test]
     fn frame_geometry_derives_inside_content() {
         let atlas = test_atlas();
-        let style = with_frame(test_style(&atlas), NinePatch::framed(SliceInsets::uniform(2), color(1, 2, 3, 255), None));
+        let style = with_frame(test_skin(&atlas), NinePatch::framed(SliceInsets::uniform(2), color(1, 2, 3, 255), None));
         let geometry = frame_geometry(Recti::new(10, 20, 30, 40), Some(crate::AppearanceRole::GenericFrame), &style);
         assert_eq!(rect_tuple(geometry.outer), (10, 20, 30, 40));
         assert_eq!(geometry.content.map(rect_tuple), Some((12, 22, 26, 36)));
@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn zero_width_frame_keeps_the_complete_content_rect() {
         let atlas = test_atlas();
-        let style = with_frame(test_style(&atlas), NinePatch::framed(SliceInsets::ZERO, color(1, 2, 3, 255), None));
+        let style = with_frame(test_skin(&atlas), NinePatch::framed(SliceInsets::ZERO, color(1, 2, 3, 255), None));
         let outer = Recti::new(10, 20, 30, 40);
         let geometry = frame_geometry(outer, Some(crate::AppearanceRole::GenericFrame), &style);
         assert_eq!(geometry.content.map(rect_tuple), Some(rect_tuple(outer)));
@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn transparent_border_keeps_structural_inset() {
         let atlas = test_atlas();
-        let style = with_frame(test_style(&atlas), NinePatch::framed(SliceInsets::uniform(1), color(0, 0, 0, 0), None));
+        let style = with_frame(test_skin(&atlas), NinePatch::framed(SliceInsets::uniform(1), color(0, 0, 0, 0), None));
         assert_eq!(
             frame_geometry(Recti::new(4, 5, 8, 7), Some(crate::AppearanceRole::GenericFrame), &style)
                 .content
@@ -198,7 +198,7 @@ mod tests {
     #[test]
     fn tiny_frame_has_no_content() {
         let atlas = test_atlas();
-        let style = test_style(&atlas);
+        let style = test_skin(&atlas);
         assert!(
             frame_geometry(Recti::new(7, 8, 2, 10), Some(crate::AppearanceRole::GenericFrame), &style)
                 .content

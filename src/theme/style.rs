@@ -50,9 +50,9 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 //
-//! Atlas-bound UI style values used across the crate.
+//! Resolved, structured, atlas-bound skin values used across the crate.
 
-use super::{AppearanceRole, Color, ControlColor, FontChoice, FontRole, ThemeIcons, VisualCatalog, VisualState};
+use super::{AppearanceRole, Color, FlatPalette, FontChoice, FontRole, ThemeIcons, VisualCatalog, VisualState};
 use crate::atlas::{AtlasHandle, FontId};
 use crate::render::{NinePatch, SliceInsets};
 
@@ -66,21 +66,33 @@ pub enum WindowChromeLayout {
     ClassicMac,
 }
 
-#[derive(Clone)]
-/// Collection of visual constants that drive widget appearance.
-pub struct Style {
+/// Resolved font capabilities used by semantic typography roles.
+#[derive(Copy, Clone)]
+pub struct SkinFonts {
     /// Default body font used for general text rendering.
-    pub font: FontId,
+    pub body: FontId,
     /// Font used for compact supporting text.
-    pub small_font: FontId,
+    pub small: FontId,
     /// Font used for window titles and similar chrome text.
-    pub title_font: FontId,
+    pub title: FontId,
     /// Font used for larger display text.
-    pub heading_font: FontId,
+    pub heading: FontId,
     /// Font used for monospace-style text.
-    pub mono_font: FontId,
-    /// Semantic icons used by built-in widgets and chrome.
+    pub mono: FontId,
+}
+
+/// Atlas-bound capabilities referenced by built-in widget painting.
+#[derive(Copy, Clone)]
+pub struct SkinResources {
+    /// Semantic font capabilities resolved from the skin atlas.
+    pub fonts: SkinFonts,
+    /// Semantic icon capabilities resolved from the skin atlas.
     pub icons: ThemeIcons,
+}
+
+/// Scalar geometry shared by layout and built-in widget measurement.
+#[derive(Copy, Clone)]
+pub struct SkinMetrics {
     /// Default width used by layouts when no preferred width is supplied.
     pub default_cell_width: i32,
     /// Inner padding applied to most widgets.
@@ -97,11 +109,6 @@ pub struct Style {
     pub indent: i32,
     /// Height of window title bars.
     pub title_height: i32,
-    /// Platform-oriented title alignment and caption-button arrangement.
-    ///
-    /// This controls geometry only. Button faces, title stripes, and every interaction state remain
-    /// ordinary typed appearance roles supplied by the active theme.
-    pub window_chrome_layout: WindowChromeLayout,
     /// Structural thickness reserved for each top-level window border edge.
     ///
     /// This is deliberately independent from the fixed corner span in the window-frame
@@ -112,33 +119,51 @@ pub struct Style {
     pub scrollbar_size: i32,
     /// Minimum length of scrollbar thumbs and width of slider thumbs.
     pub thumb_size: i32,
+}
+
+/// Manager-owned window chrome policy selected by the resolved skin.
+#[derive(Copy, Clone)]
+pub struct WindowChromeSkin {
+    /// Platform-oriented title alignment and caption-button arrangement.
+    ///
+    /// This controls geometry only. Button faces, title stripes, and every interaction state remain
+    /// ordinary typed appearance roles supplied by the active skin.
+    pub layout: WindowChromeLayout,
+    /// Flat label field painted behind centered active-title text when requested by the layout.
+    pub title_backdrop: Color,
+}
+
+/// Paint effects that are not themselves semantic role/state visuals.
+#[derive(Copy, Clone)]
+pub struct SkinEffects {
+    /// Accent used by the universal keyboard-focus outline.
+    pub focus_outline: Color,
+    /// Accent used by manager-owned active-window outlines.
+    pub window_activation: Color,
+}
+
+/// Complete resolved runtime skin installed with one matching atlas.
+///
+/// A `Skin` contains only values consumed at runtime. Flat palettes and serialized authoring data
+/// are compiled into these concrete fields and are not retained as alternate sources of truth.
+#[derive(Clone)]
+pub struct Skin {
+    /// Atlas-bound fonts and semantic icons.
+    pub resources: SkinResources,
+    /// Layout and widget geometry values.
+    pub metrics: SkinMetrics,
     /// Unified background and foreground visuals used by built-in UI parts.
     ///
     /// Each semantic role and interaction state resolves one complete value, so background art
     /// and its adjacent text or glyph color cannot drift into independently configured catalogs.
     pub visuals: VisualCatalog,
-    /// Accent used for focused widget fills, menu selection, and the universal focus outline.
-    ///
-    /// Focus is an interaction scope rather than a control-family color, so this named value
-    /// replaces the former button/base focus entries in [`Self::colors`].
-    pub focus_color: Color,
-    /// Accent used for the active window title and framed outer outline.
-    ///
-    /// Keeping window activation separate lets themes distinguish application chrome from the
-    /// focused control within that window even when both defaults use the same accent.
-    pub window_focus_color: Color,
-    /// Background color used by menu bars, popup menus, and cascading submenus.
-    pub menu_background: Color,
-    /// Shared flat fallback fill used by disabled backgrounds and controls.
-    ///
-    /// Image-backed themes normally replace individual Disabled patches, while this value keeps
-    /// omitted roles and entirely flat themes visually coherent without requiring a PNG.
-    pub disabled_background_color: Color,
-    /// Palette of [`crate::ControlColor`] entries.
-    pub colors: [Color; 12],
+    /// Non-catalog focus and activation effects.
+    pub effects: SkinEffects,
+    /// Window-title and caption-control arrangement.
+    pub chrome: WindowChromeSkin,
 }
 
-impl Style {
+impl Skin {
     /// Constructs the default visual metrics and resolves every retained asset from `atlas`.
     ///
     /// The required `body` font and semantic theme icon names form the standard Context atlas
@@ -150,74 +175,80 @@ impl Style {
     pub fn from_atlas(atlas: &AtlasHandle) -> Self {
         // Resolve the required body capability first so every optional role has one valid,
         // owner-matched fallback instead of an ownerless default identifier.
-        let font = atlas.font_id(FontRole::Body.atlas_name()).expect("atlas does not contain required font `body`");
-        let colors = [
-            Color { r: 230, g: 230, b: 230, a: 255 },
-            Color { r: 25, g: 25, b: 25, a: 255 },
-            Color { r: 50, g: 50, b: 50, a: 255 },
-            Color { r: 25, g: 25, b: 25, a: 255 },
-            Color { r: 240, g: 240, b: 240, a: 255 },
-            Color { r: 0, g: 0, b: 0, a: 0 },
-            Color { r: 75, g: 75, b: 75, a: 255 },
-            Color { r: 95, g: 95, b: 95, a: 255 },
-            Color { r: 30, g: 30, b: 30, a: 255 },
-            Color { r: 35, g: 35, b: 35, a: 255 },
-            Color { r: 43, g: 43, b: 43, a: 255 },
-            Color { r: 30, g: 30, b: 30, a: 255 },
-        ];
-        let focus_color = Color { r: 0, g: 120, b: 215, a: 255 };
-        let window_focus_color = Color { r: 0, g: 120, b: 215, a: 255 };
-        let menu_background = Color { r: 50, g: 50, b: 50, a: 255 };
-        let disabled_background_color = colors[ControlColor::WindowBG as usize];
+        let body = atlas.font_id(FontRole::Body.atlas_name()).expect("atlas does not contain required font `body`");
+        let palette = FlatPalette::default();
         // Build complete visuals from the same concrete flat values stored below. JSON theme
         // loading follows this identical fallback constructor before replacing authored states.
-        let visuals = VisualCatalog::from_flat_palette(
-            SliceInsets::uniform(1),
-            colors,
-            focus_color,
-            window_focus_color,
-            menu_background,
-            disabled_background_color,
-            Color { r: 230, g: 230, b: 230, a: 255 },
-            colors[ControlColor::Text as usize],
-            colors[ControlColor::TitleText as usize],
-        );
+        let visuals = VisualCatalog::from_flat_palette(SliceInsets::uniform(1), &palette);
         Self {
-            font,
-            small_font: atlas.font_id(FontRole::Small.atlas_name()).unwrap_or(font),
-            title_font: atlas.font_id(FontRole::Title.atlas_name()).unwrap_or(font),
-            heading_font: atlas.font_id(FontRole::Heading.atlas_name()).unwrap_or(font),
-            mono_font: atlas.font_id(FontRole::Mono.atlas_name()).unwrap_or(font),
-            icons: ThemeIcons::from_atlas(atlas),
-            default_cell_width: 68,
-            padding: 5,
-            window_content_insets: SliceInsets::uniform(5),
-            spacing: 4,
-            indent: 24,
-            title_height: 24,
-            window_chrome_layout: WindowChromeLayout::TrailingButtons,
-            window_border: SliceInsets::uniform(1),
-            scrollbar_size: 12,
-            thumb_size: 8,
+            resources: SkinResources {
+                fonts: SkinFonts {
+                    body,
+                    small: atlas.font_id(FontRole::Small.atlas_name()).unwrap_or(body),
+                    title: atlas.font_id(FontRole::Title.atlas_name()).unwrap_or(body),
+                    heading: atlas.font_id(FontRole::Heading.atlas_name()).unwrap_or(body),
+                    mono: atlas.font_id(FontRole::Mono.atlas_name()).unwrap_or(body),
+                },
+                icons: ThemeIcons::from_atlas(atlas),
+            },
+            metrics: SkinMetrics {
+                default_cell_width: 68,
+                padding: 5,
+                window_content_insets: SliceInsets::uniform(5),
+                spacing: 4,
+                indent: 24,
+                title_height: 24,
+                window_border: SliceInsets::uniform(1),
+                scrollbar_size: 12,
+                thumb_size: 8,
+            },
             visuals,
-            focus_color,
-            window_focus_color,
-            menu_background,
-            disabled_background_color,
-            colors,
+            effects: SkinEffects {
+                focus_outline: palette.focus,
+                window_activation: palette.window_focus,
+            },
+            chrome: WindowChromeSkin {
+                layout: WindowChromeLayout::TrailingButtons,
+                title_backdrop: palette.title_background,
+            },
         }
+    }
+
+    /// Replaces flat visual fallbacks and related effects from one authored palette.
+    ///
+    /// This operation is intended for builders and live skin editors. It compiles the palette
+    /// immediately into the resolved catalog rather than retaining the palette as shadow state.
+    pub fn apply_flat_palette(&mut self, palette: FlatPalette) {
+        // Preserve the currently selected generic frame geometry while replacing all flat paint
+        // values. Callers that need different frame geometry can update that typed visual after.
+        let frame_insets = self.frame_insets();
+        self.visuals = VisualCatalog::from_flat_palette(frame_insets, &palette);
+        self.effects.focus_outline = palette.focus;
+        self.effects.window_activation = palette.window_focus;
+        self.chrome.title_backdrop = palette.title_background;
+    }
+
+    /// Applies a concrete metrics edit and returns the resulting skin.
+    ///
+    /// The closure keeps grouped metrics construction concise in programmatic skins and tests
+    /// without restoring a flat duplicate field surface on `Skin`.
+    pub fn with_metrics(mut self, configure: impl FnOnce(&mut SkinMetrics)) -> Self {
+        // Metrics are plain concrete values, so configuration is immediate and cannot be retained
+        // as an erased callback or deferred mutation.
+        configure(&mut self.metrics);
+        self
     }
 
     /// Reports whether every retained font and icon capability belongs to `atlas`.
     pub(crate) fn belongs_to(&self, atlas: &AtlasHandle) -> bool {
         // List each concrete field so a new style asset cannot bypass validation through erased or
         // reflective storage. Ordinary scalar theme values need no atlas validation.
-        atlas.contains_font(self.font)
-            && atlas.contains_font(self.small_font)
-            && atlas.contains_font(self.title_font)
-            && atlas.contains_font(self.heading_font)
-            && atlas.contains_font(self.mono_font)
-            && self.icons.belongs_to(atlas)
+        atlas.contains_font(self.resources.fonts.body)
+            && atlas.contains_font(self.resources.fonts.small)
+            && atlas.contains_font(self.resources.fonts.title)
+            && atlas.contains_font(self.resources.fonts.heading)
+            && atlas.contains_font(self.resources.fonts.mono)
+            && self.resources.icons.belongs_to(atlas)
             && self
                 .visuals
                 .patches()
@@ -226,7 +257,6 @@ impl Style {
     }
 
     /// Returns normalized structural frame insets shared by measurement and placement.
-    #[cfg(any(feature = "theme-json", test))]
     pub(crate) fn frame_insets(&self) -> SliceInsets {
         // NinePatch owns normalization so layout and renderer geometry cannot disagree on negative
         // application-provided style components.
@@ -248,11 +278,11 @@ impl Style {
     /// Returns the concrete font ID for the provided semantic role.
     pub fn resolve_font_role(&self, role: FontRole) -> FontId {
         match role {
-            FontRole::Body => self.font,
-            FontRole::Small => self.small_font,
-            FontRole::Title => self.title_font,
-            FontRole::Heading => self.heading_font,
-            FontRole::Mono => self.mono_font,
+            FontRole::Body => self.resources.fonts.body,
+            FontRole::Small => self.resources.fonts.small,
+            FontRole::Title => self.resources.fonts.title,
+            FontRole::Heading => self.resources.fonts.heading,
+            FontRole::Mono => self.resources.fonts.mono,
         }
     }
 
@@ -290,13 +320,13 @@ mod tests {
             (FontRole::Title.atlas_name(), 16),
         ]);
 
-        let style = Style::from_atlas(&atlas);
+        let style = Skin::from_atlas(&atlas);
 
-        assert_eq!(style.font, atlas.font_id(FontRole::Body.atlas_name()).unwrap());
-        assert_eq!(style.small_font, atlas.font_id(FontRole::Small.atlas_name()).unwrap());
-        assert_eq!(style.title_font, atlas.font_id(FontRole::Title.atlas_name()).unwrap());
-        assert_eq!(style.heading_font, atlas.font_id(FontRole::Heading.atlas_name()).unwrap());
-        assert_eq!(style.mono_font, style.font);
+        assert_eq!(style.resources.fonts.body, atlas.font_id(FontRole::Body.atlas_name()).unwrap());
+        assert_eq!(style.resources.fonts.small, atlas.font_id(FontRole::Small.atlas_name()).unwrap());
+        assert_eq!(style.resources.fonts.title, atlas.font_id(FontRole::Title.atlas_name()).unwrap());
+        assert_eq!(style.resources.fonts.heading, atlas.font_id(FontRole::Heading.atlas_name()).unwrap());
+        assert_eq!(style.resources.fonts.mono, style.resources.fonts.body);
         assert!(style.belongs_to(&atlas));
     }
 
@@ -305,31 +335,31 @@ mod tests {
     fn belongs_to_rejects_each_foreign_font_icon_and_appearance_capability() {
         let local_atlas = make_test_atlas(&[(FontRole::Body.atlas_name(), 12)]);
         let foreign_atlas = make_test_atlas(&[(FontRole::Body.atlas_name(), 12)]);
-        let local = Style::from_atlas(&local_atlas);
-        let foreign = Style::from_atlas(&foreign_atlas);
+        let local = Skin::from_atlas(&local_atlas);
+        let foreign = Skin::from_atlas(&foreign_atlas);
 
         // Each candidate differs from the valid local style in exactly one capability. Keeping the
         // cases explicit makes a newly added field fail this regression until belongs_to validates
         // it, without introducing erased reflection or `Any`-based field traversal.
-        let mut candidates: [Style; 14] = std::array::from_fn(|_| local.clone());
-        candidates[0].font = foreign.font;
-        candidates[1].small_font = foreign.small_font;
-        candidates[2].title_font = foreign.title_font;
-        candidates[3].heading_font = foreign.heading_font;
-        candidates[4].mono_font = foreign.mono_font;
-        candidates[5].icons.close = foreign.icons.close;
-        candidates[6].icons.expand = foreign.icons.expand;
-        candidates[7].icons.collapse = foreign.icons.collapse;
-        candidates[8].icons.check = foreign.icons.check;
-        candidates[9].icons.expand_down = foreign.icons.expand_down;
-        candidates[10].icons.open_folder = foreign.icons.open_folder;
-        candidates[11].icons.closed_folder = foreign.icons.closed_folder;
-        candidates[12].icons.file = foreign.icons.file;
+        let mut candidates: [Skin; 14] = std::array::from_fn(|_| local.clone());
+        candidates[0].resources.fonts.body = foreign.resources.fonts.body;
+        candidates[1].resources.fonts.small = foreign.resources.fonts.small;
+        candidates[2].resources.fonts.title = foreign.resources.fonts.title;
+        candidates[3].resources.fonts.heading = foreign.resources.fonts.heading;
+        candidates[4].resources.fonts.mono = foreign.resources.fonts.mono;
+        candidates[5].resources.icons.close = foreign.resources.icons.close;
+        candidates[6].resources.icons.expand = foreign.resources.icons.expand;
+        candidates[7].resources.icons.collapse = foreign.resources.icons.collapse;
+        candidates[8].resources.icons.check = foreign.resources.icons.check;
+        candidates[9].resources.icons.expand_down = foreign.resources.icons.expand_down;
+        candidates[10].resources.icons.open_folder = foreign.resources.icons.open_folder;
+        candidates[11].resources.icons.closed_folder = foreign.resources.icons.closed_folder;
+        candidates[12].resources.icons.file = foreign.resources.icons.file;
         candidates[13].visuals.set_patches(
             AppearanceRole::Button,
             crate::StateTable::filled(NinePatch::image(
                 SliceInsets::ZERO,
-                crate::NinePatchImage::new(foreign.icons.close, SliceInsets::ZERO, Color { r: 255, g: 255, b: 255, a: 255 }),
+                crate::NinePatchImage::new(foreign.resources.icons.close, SliceInsets::ZERO, Color { r: 255, g: 255, b: 255, a: 255 }),
             )),
         );
 
@@ -345,23 +375,23 @@ mod tests {
         let atlas = make_test_atlas(&[("caption", 12)]);
 
         // Even though slot zero is a valid font, its unrelated name cannot satisfy the body role.
-        let _ = Style::from_atlas(&atlas);
+        let _ = Skin::from_atlas(&atlas);
     }
 
     /// Verifies frame normalization remains independent of atlas-bound asset construction.
     #[test]
     fn frame_insets_normalize_each_component_without_changing_cells() {
         let atlas = make_test_atlas(&[(FontRole::Body.atlas_name(), 12)]);
-        let style = Style {
+        let style = Skin {
             visuals: {
-                let mut visuals = Style::from_atlas(&atlas).visuals;
+                let mut visuals = Skin::from_atlas(&atlas).visuals;
                 visuals.set_patches(
                     AppearanceRole::GenericFrame,
                     crate::StateTable::filled(NinePatch::framed(SliceInsets::new(-4, 2, -3, 5), Color { r: 10, g: 20, b: 30, a: 255 }, None)),
                 );
                 visuals
             },
-            ..Style::from_atlas(&atlas)
+            ..Skin::from_atlas(&atlas)
         };
         let insets = style.frame_insets();
 

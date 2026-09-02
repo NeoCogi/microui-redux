@@ -38,19 +38,19 @@ use std::{
 
 use serde::Deserialize;
 
-use super::{AppearanceRole, FontRole, Style, VisualCatalog, VisualState};
+use super::{AppearanceRole, FlatPalette, FontRole, Skin, VisualCatalog, VisualState};
 use crate::{
     atlas::{
         AtlasHandle,
         builder::{Builder, BuilderError},
     },
-    Color, ControlColor, IconId, ImageError, ImageSource, NinePatch, NinePatchImage, SliceInsets,
+    Color, IconId, ImageError, ImageSource, NinePatch, NinePatchImage, SliceInsets,
 };
 
 /// Theme-file schema version understood by this crate release.
 pub const THEME_SCHEMA_VERSION: u32 = 1;
 
-/// A loaded theme with its display name, rebuilt resource atlas, and complete resolved style.
+/// A loaded theme with its display name, rebuilt resource atlas, and complete resolved skin.
 ///
 /// Fonts, semantic icons, and PNG state artwork share one immutable atlas. Install this complete
 /// bundle through [`crate::Context::set_theme`] so renderer pixels and every atlas-scoped
@@ -61,17 +61,17 @@ pub struct LoadedTheme {
     name: String,
     /// Immutable atlas containing semantic icons, fonts, and deduplicated theme-state artwork.
     atlas: AtlasHandle,
-    /// Atlas-bound style containing resolved state-artwork capabilities.
-    style: Style,
+    /// Atlas-bound skin containing resolved state-artwork capabilities.
+    skin: Skin,
 }
 
 impl LoadedTheme {
     /// Creates a loaded theme after schema resolution and atlas construction have succeeded.
-    pub(crate) fn new(name: String, atlas: AtlasHandle, style: Style) -> Self {
-        // The loader constructs Style from this exact atlas, making the ownership assertion an
+    pub(crate) fn new(name: String, atlas: AtlasHandle, skin: Skin) -> Self {
+        // The loader constructs Skin from this exact atlas, making the ownership assertion an
         // internal invariant rather than a runtime condition deferred until rendering.
-        debug_assert!(style.belongs_to(&atlas));
-        Self { name, atlas, style }
+        debug_assert!(skin.belongs_to(&atlas));
+        Self { name, atlas, skin }
     }
 
     /// Captures an already resolved atlas/style pair as one installable named theme.
@@ -83,11 +83,11 @@ impl LoadedTheme {
     /// # Panics
     ///
     /// Panics if `name` is empty or the style contains a font or icon from another atlas.
-    pub fn from_style(name: impl Into<String>, atlas: AtlasHandle, style: Style) -> Self {
+    pub fn from_skin(name: impl Into<String>, atlas: AtlasHandle, skin: Skin) -> Self {
         let name = name.into();
         assert!(!name.trim().is_empty(), "theme name must not be empty");
-        assert!(style.belongs_to(&atlas), "theme style contains font or icon IDs from another atlas");
-        Self { name, atlas, style }
+        assert!(skin.belongs_to(&atlas), "theme skin contains font or icon IDs from another atlas");
+        Self { name, atlas, skin }
     }
 
     /// Returns the human-readable theme name from the JSON file.
@@ -95,9 +95,9 @@ impl LoadedTheme {
         self.name.as_str()
     }
 
-    /// Borrows the complete resolved style without transferring atlas capabilities.
-    pub fn style(&self) -> &Style {
-        &self.style
+    /// Borrows the complete resolved skin without transferring atlas capabilities.
+    pub fn skin(&self) -> &Skin {
+        &self.skin
     }
 
     /// Returns the immutable atlas containing this theme's fonts and semantic icons.
@@ -235,7 +235,7 @@ pub(crate) struct ThemeAtlas {
 }
 
 impl ThemeAtlas {
-    /// Borrows the immutable atlas used to construct the matching base [`Style`].
+    /// Borrows the immutable atlas used to construct the matching base [`Skin`].
     pub(crate) fn atlas(&self) -> &AtlasHandle {
         // Installation consumes this intermediate later; exposing only a shared handle here keeps
         // the path-to-capability table inseparable from the atlas that minted its IDs.
@@ -351,29 +351,23 @@ impl ThemeDefinition {
     }
 
     /// Resolves flat fallbacks and binds explicitly supplied PNG states to baked atlas regions.
-    pub(crate) fn install(self, theme_atlas: ThemeAtlas, mut style: Style) -> Result<LoadedTheme, ThemeLoadError> {
+    pub(crate) fn install(self, theme_atlas: ThemeAtlas, mut style: Skin) -> Result<LoadedTheme, ThemeLoadError> {
         let ThemeAtlas { atlas, images } = theme_atlas;
-        // Installation may only bind appearance icons onto a Style created for this exact atlas;
+        // Installation may only bind appearance icons onto a Skin created for this exact atlas;
         // enforcing that here prevents a LoadedTheme from ever containing mixed resources.
         assert!(style.belongs_to(&atlas), "theme base style contains font or icon IDs from another atlas");
         // Apply palette and metric overrides before constructing fallbacks, so every omitted PNG
         // state reflects the JSON theme's own flat colors rather than the built-in default palette.
-        let (menu_foreground, disabled_foreground, disabled_title_foreground) = self.style.apply(&mut style);
+        let mut palette = FlatPalette::default();
+        self.style.apply(&mut style, &mut palette);
         let frame_insets = self.style.frame_insets.map(InsetsDocument::into_insets).unwrap_or_else(|| style.frame_insets());
         validate_non_negative("generic_frame", "style.frame_insets", frame_insets)?;
-        validate_non_negative("window_content", "style.window_content_insets", style.window_content_insets)?;
-        validate_non_negative("window_frame", "style.window_border", style.window_border)?;
-        style.visuals = VisualCatalog::from_flat_palette(
-            frame_insets,
-            style.colors,
-            style.focus_color,
-            style.window_focus_color,
-            style.menu_background,
-            style.disabled_background_color,
-            menu_foreground,
-            disabled_foreground,
-            disabled_title_foreground,
-        );
+        validate_non_negative("window_content", "style.metrics.window_content_insets", style.metrics.window_content_insets)?;
+        validate_non_negative("window_frame", "style.metrics.window_border", style.metrics.window_border)?;
+        style.visuals = VisualCatalog::from_flat_palette(frame_insets, &palette);
+        style.effects.focus_outline = palette.focus;
+        style.effects.window_activation = palette.window_focus;
+        style.chrome.title_backdrop = palette.title_background;
         for (name, document) in self.appearances {
             let role = AppearanceRole::from_json_name(name.as_str()).ok_or_else(|| ThemeLoadError::UnknownAppearance { name: name.clone() })?;
             let mut visuals = style.visuals.get(role);
@@ -517,34 +511,33 @@ struct StyleDocument {
 
 impl StyleDocument {
     /// Applies present fields and returns foreground inputs for visual fallback construction.
-    fn apply(&self, style: &mut Style) -> (Color, Color, Color) {
-        // Keep assignment explicit so the strict JSON schema and public Style fields cannot drift
+    fn apply(&self, style: &mut Skin, palette: &mut FlatPalette) {
+        // Keep assignment explicit so the strict JSON schema and public Skin fields cannot drift
         // through reflection or stringly typed mutation.
-        assign_if_some(&mut style.default_cell_width, self.default_cell_width);
-        assign_if_some(&mut style.padding, self.padding);
+        assign_if_some(&mut style.metrics.default_cell_width, self.default_cell_width);
+        assign_if_some(&mut style.metrics.padding, self.padding);
         if let Some(window_content_insets) = self.window_content_insets {
             // Root layout consumes the concrete four-edge value directly, so asymmetric theme
             // insets require no erased metric map or widget-specific special casing.
-            style.window_content_insets = window_content_insets.into_insets();
+            style.metrics.window_content_insets = window_content_insets.into_insets();
         }
-        assign_if_some(&mut style.spacing, self.spacing);
-        assign_if_some(&mut style.indent, self.indent);
-        assign_if_some(&mut style.title_height, self.title_height);
+        assign_if_some(&mut style.metrics.spacing, self.spacing);
+        assign_if_some(&mut style.metrics.indent, self.indent);
+        assign_if_some(&mut style.metrics.title_height, self.title_height);
         if let Some(window_chrome_layout) = self.window_chrome_layout {
             // The schema enum converts once into the public runtime enum, keeping deserialization
-            // details out of Style when JSON support is not compiled.
-            style.window_chrome_layout = window_chrome_layout.into_layout();
+            // details out of Skin when JSON support is not compiled.
+            style.chrome.layout = window_chrome_layout.into_layout();
         }
         if let Some(window_border) = self.window_border {
             // Keep the schema-to-runtime conversion explicit because negative components are
             // rejected by installation before they can affect layout or hit testing.
-            style.window_border = window_border.into_insets();
+            style.metrics.window_border = window_border.into_insets();
         }
-        assign_if_some(&mut style.scrollbar_size, self.scrollbar_size);
-        assign_if_some(&mut style.thumb_size, self.thumb_size);
-        // Palette application returns the three foreground values that are not legacy numeric
-        // palette slots; the installer consumes them immediately into one VisualCatalog.
-        self.colors.apply(style)
+        assign_if_some(&mut style.metrics.scrollbar_size, self.scrollbar_size);
+        assign_if_some(&mut style.metrics.thumb_size, self.thumb_size);
+        // The authored palette remains compiler input and is consumed into visuals by install.
+        self.colors.apply(palette);
     }
 }
 
@@ -616,44 +609,28 @@ struct ColorPaletteDocument {
 
 impl ColorPaletteDocument {
     /// Applies supplied palette fields and returns foregrounds needed by fallback construction.
-    fn apply(&self, style: &mut Style) -> (Color, Color, Color) {
-        // Read fallback-only foreground values before changing the palette. Omitted values preserve
-        // the atlas-derived style's corresponding concrete role/state rather than inventing a
-        // second default inside the loader.
-        let menu_foreground = self
-            .menu_foreground
-            .map(ColorDocument::into_color)
-            .unwrap_or_else(|| style.foreground(AppearanceRole::MenuItem, VisualState::Normal));
-        let disabled_text = self
-            .disabled_text
-            .map(ColorDocument::into_color)
-            .unwrap_or_else(|| style.foreground(AppearanceRole::Button, VisualState::Disabled));
-        let disabled_title_text = self
-            .disabled_title_text
-            .map(ColorDocument::into_color)
-            .unwrap_or_else(|| style.foreground(AppearanceRole::WindowTitle, VisualState::Disabled));
-
-        // Existing ControlColor storage remains public, so map every background and base text
-        // field explicitly before rebuilding the typed foreground fallbacks below.
-        assign_color(&mut style.colors[ControlColor::Text as usize], self.text);
-        assign_color(&mut style.colors[ControlColor::Border as usize], self.border);
-        assign_color(&mut style.colors[ControlColor::WindowBG as usize], self.window_background);
-        assign_color(&mut style.colors[ControlColor::TitleBG as usize], self.title_background);
-        assign_color(&mut style.colors[ControlColor::TitleText as usize], self.title_text);
-        assign_color(&mut style.disabled_background_color, self.disabled_background);
-        assign_color(&mut style.colors[ControlColor::PanelBG as usize], self.panel_background);
-        assign_color(&mut style.colors[ControlColor::Button as usize], self.button);
-        assign_color(&mut style.colors[ControlColor::ButtonHover as usize], self.button_hover);
-        assign_color(&mut style.colors[ControlColor::Base as usize], self.input);
-        assign_color(&mut style.colors[ControlColor::BaseHover as usize], self.input_hover);
-        assign_color(&mut style.colors[ControlColor::ScrollBase as usize], self.scrollbar_track);
-        assign_color(&mut style.colors[ControlColor::ScrollThumb as usize], self.scrollbar_thumb);
-        assign_color(&mut style.focus_color, self.focus);
-        assign_color(&mut style.window_focus_color, self.window_focus);
-        assign_color(&mut style.menu_background, self.menu_background);
-        // The caller immediately rebuilds one unified VisualCatalog from the updated colors.
-        // Returning this small concrete tuple avoids retaining a second foreground catalog.
-        (menu_foreground, disabled_text, disabled_title_text)
+    fn apply(&self, palette: &mut FlatPalette) {
+        // Assign every authored semantic color directly to a named compiler input. The resulting
+        // palette is consumed immediately and never retained beside the resolved visual catalog.
+        assign_color(&mut palette.text, self.text);
+        assign_color(&mut palette.border, self.border);
+        assign_color(&mut palette.window_background, self.window_background);
+        assign_color(&mut palette.title_background, self.title_background);
+        assign_color(&mut palette.title_foreground, self.title_text);
+        assign_color(&mut palette.disabled_foreground, self.disabled_text);
+        assign_color(&mut palette.disabled_background, self.disabled_background);
+        assign_color(&mut palette.disabled_title_foreground, self.disabled_title_text);
+        assign_color(&mut palette.panel_background, self.panel_background);
+        assign_color(&mut palette.button, self.button);
+        assign_color(&mut palette.button_hovered, self.button_hover);
+        assign_color(&mut palette.input, self.input);
+        assign_color(&mut palette.input_hovered, self.input_hover);
+        assign_color(&mut palette.scrollbar_track, self.scrollbar_track);
+        assign_color(&mut palette.scrollbar_thumb, self.scrollbar_thumb);
+        assign_color(&mut palette.focus, self.focus);
+        assign_color(&mut palette.window_focus, self.window_focus);
+        assign_color(&mut palette.menu_foreground, self.menu_foreground);
+        assign_color(&mut palette.menu_background, self.menu_background);
     }
 }
 
@@ -753,7 +730,7 @@ impl ColorDocument {
 
 /// Assigns one optional copy value without hiding field-to-field schema mapping.
 fn assign_if_some<T: Copy>(destination: &mut T, value: Option<T>) {
-    // Omitted JSON fields deliberately preserve the atlas-derived base Style value.
+    // Omitted JSON fields deliberately preserve the atlas-derived base Skin value.
     if let Some(value) = value {
         *destination = value;
     }
@@ -815,7 +792,7 @@ mod tests {
         let definition = ThemeDefinition::read(path.as_path()).expect("bundled theme JSON must remain valid");
         let theme_atlas = definition.build_atlas(&test_atlas()).expect("bundled theme resource atlas must build");
         let image_count = theme_atlas.images.len();
-        let style = Style::from_atlas(theme_atlas.atlas());
+        let style = Skin::from_atlas(theme_atlas.atlas());
         let loaded = definition
             .install(theme_atlas, style)
             .expect("bundled theme PNGs must install from baked regions");
@@ -844,12 +821,12 @@ mod tests {
         .expect("test definition must match the strict schema");
         let atlas = test_atlas();
         let theme_atlas = document.build_atlas(&atlas).expect("flat theme must retain the base atlas");
-        let style = Style::from_atlas(theme_atlas.atlas());
+        let style = Skin::from_atlas(theme_atlas.atlas());
         let loaded = document.install(theme_atlas, style).expect("flat-only theme must install");
 
-        let normal = loaded.style().appearance(AppearanceRole::Button, VisualState::Normal);
-        let hovered = loaded.style().appearance(AppearanceRole::Button, VisualState::Hovered);
-        let disabled = loaded.style().appearance(AppearanceRole::Button, VisualState::Disabled);
+        let normal = loaded.skin().appearance(AppearanceRole::Button, VisualState::Normal);
+        let hovered = loaded.skin().appearance(AppearanceRole::Button, VisualState::Hovered);
+        let disabled = loaded.skin().appearance(AppearanceRole::Button, VisualState::Disabled);
         assert_eq!(normal.insets.left, 2);
         assert!(matches!(
             normal.content,
@@ -887,12 +864,12 @@ mod tests {
         .expect("foreground-only states must match the strict schema");
         let atlas = test_atlas();
         let theme_atlas = document.build_atlas(&atlas).expect("foreground-only theme must retain the base atlas");
-        let style = Style::from_atlas(theme_atlas.atlas());
+        let style = Skin::from_atlas(theme_atlas.atlas());
         let loaded = document.install(theme_atlas, style).expect("foreground-only theme must install");
 
-        let normal = loaded.style().foreground(AppearanceRole::MenuItem, VisualState::Normal);
-        let hovered = loaded.style().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
-        let disabled = loaded.style().foreground(AppearanceRole::MenuItem, VisualState::Disabled);
+        let normal = loaded.skin().foreground(AppearanceRole::MenuItem, VisualState::Normal);
+        let hovered = loaded.skin().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
+        let disabled = loaded.skin().foreground(AppearanceRole::MenuItem, VisualState::Disabled);
         assert_eq!((normal.r, normal.g, normal.b, normal.a), (1, 2, 3, 255));
         assert_eq!((hovered.r, hovered.g, hovered.b, hovered.a), (250, 251, 252, 255));
         assert_eq!((disabled.r, disabled.g, disabled.b, disabled.a), (90, 91, 92, 255));
@@ -946,14 +923,14 @@ mod tests {
             "the theme atlas must contain exactly its five semantic font roles"
         );
         assert_eq!(atlas.get_font_size(atlas.font_id("heading").unwrap()), 18);
-        let insets = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
+        let insets = loaded.skin().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (4, 4, 4, 4));
         assert!(matches!(
-            loaded.style().appearance(AppearanceRole::Button, VisualState::Disabled).content,
+            loaded.skin().appearance(AppearanceRole::Button, VisualState::Disabled).content,
             crate::NinePatchContent::Image { .. }
         ));
         assert!(matches!(
-            loaded.style().appearance(AppearanceRole::DialogFrameActive, VisualState::Normal).content,
+            loaded.skin().appearance(AppearanceRole::DialogFrameActive, VisualState::Normal).content,
             crate::NinePatchContent::Image { .. }
         ));
     }
@@ -964,11 +941,11 @@ mod tests {
         let (loaded, images) = install_bundled_theme("themes/windows-3.11/theme.json");
         assert_eq!(loaded.name(), "Windows 3.11 for Workgroups");
         assert_eq!(images, 21, "each shared PNG path must be baked exactly once");
-        let insets = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
+        let insets = loaded.skin().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (23, 23, 23, 23));
-        let border = loaded.style().window_border;
+        let border = loaded.skin().metrics.window_border;
         assert_eq!((border.left, border.top, border.right, border.bottom), (4, 4, 4, 4));
-        let content = loaded.style().window_content_insets;
+        let content = loaded.skin().metrics.window_content_insets;
         assert_eq!(
             (content.left, content.top, content.right, content.bottom),
             (0, 0, 0, 0),
@@ -977,10 +954,10 @@ mod tests {
         // Ordinary windows retain their long L-corner bitmap. Only modal dialogs use the uniform
         // four-pixel blue focus frame visible around period Windows 3.11 dialog boxes.
         assert!(matches!(
-            loaded.style().appearance(AppearanceRole::WindowFrameActive, VisualState::Normal).content,
+            loaded.skin().appearance(AppearanceRole::WindowFrameActive, VisualState::Normal).content,
             crate::NinePatchContent::Image { .. }
         ));
-        let dialog_frame = loaded.style().appearance(AppearanceRole::DialogFrameActive, VisualState::Normal);
+        let dialog_frame = loaded.skin().appearance(AppearanceRole::DialogFrameActive, VisualState::Normal);
         assert_eq!(
             (
                 dialog_frame.insets.left,
@@ -996,7 +973,7 @@ mod tests {
                 if matches!(cells.top, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (0, 0, 170, 255))
                     && matches!(cells.center, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (195, 199, 203, 255))
         ));
-        let menu_popup = loaded.style().appearance(AppearanceRole::MenuPopup, VisualState::Normal);
+        let menu_popup = loaded.skin().appearance(AppearanceRole::MenuPopup, VisualState::Normal);
         assert_eq!(
             (menu_popup.insets.left, menu_popup.insets.top, menu_popup.insets.right, menu_popup.insets.bottom),
             (2, 2, 2, 2)
@@ -1008,15 +985,15 @@ mod tests {
                     && matches!(cells.center, crate::NinePatchCell::Color { color } if (color.r, color.g, color.b, color.a) == (255, 255, 255, 255))
         ));
         assert!(matches!(
-            loaded.style().appearance(AppearanceRole::WindowTitle, VisualState::Pressed).content,
+            loaded.skin().appearance(AppearanceRole::WindowTitle, VisualState::Pressed).content,
             crate::NinePatchContent::Image { .. }
         ));
         assert!(matches!(
-            loaded.style().appearance(AppearanceRole::WindowTitleActive, VisualState::Pressed).content,
+            loaded.skin().appearance(AppearanceRole::WindowTitleActive, VisualState::Pressed).content,
             crate::NinePatchContent::Image { .. }
         ));
         assert!(matches!(
-            loaded.style().appearance(AppearanceRole::WindowTitle, VisualState::Disabled).content,
+            loaded.skin().appearance(AppearanceRole::WindowTitle, VisualState::Disabled).content,
             crate::NinePatchContent::Image { .. }
         ));
         for state in [
@@ -1029,14 +1006,14 @@ mod tests {
         ] {
             // Passive Windows 3.11 titles are white and require black text, while selected blue
             // titles retain white text for every enabled interaction combination.
-            let passive = loaded.style().foreground(AppearanceRole::WindowTitle, state);
-            let active = loaded.style().foreground(AppearanceRole::WindowTitleActive, state);
+            let passive = loaded.skin().foreground(AppearanceRole::WindowTitle, state);
+            let active = loaded.skin().foreground(AppearanceRole::WindowTitleActive, state);
             assert_eq!((passive.r, passive.g, passive.b, passive.a), (0, 0, 0, 255));
             assert_eq!((active.r, active.g, active.b, active.a), (255, 255, 255, 255));
         }
-        let disabled_title = loaded.style().foreground(AppearanceRole::WindowTitle, VisualState::Disabled);
+        let disabled_title = loaded.skin().foreground(AppearanceRole::WindowTitle, VisualState::Disabled);
         assert_eq!((disabled_title.r, disabled_title.g, disabled_title.b, disabled_title.a), (125, 125, 125, 255));
-        let minimize_glyph = loaded.style().appearance(AppearanceRole::WindowMinimizeGlyph, VisualState::Normal);
+        let minimize_glyph = loaded.skin().appearance(AppearanceRole::WindowMinimizeGlyph, VisualState::Normal);
         let crate::NinePatchContent::Image { image: minimize_image } = minimize_glyph.content else {
             panic!("Windows 3.11 minimize glyph must use baked artwork");
         };
@@ -1051,31 +1028,31 @@ mod tests {
             AppearanceRole::WindowMaximizeButton,
             AppearanceRole::WindowRestoreButton,
         ] {
-            let normal = loaded.style().appearance(role, VisualState::Normal);
-            let disabled = loaded.style().appearance(role, VisualState::Disabled);
+            let normal = loaded.skin().appearance(role, VisualState::Normal);
+            let disabled = loaded.skin().appearance(role, VisualState::Disabled);
             assert!(matches!(
                 (normal.content, disabled.content),
                 (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: disabled })
                     if normal.icon == disabled.icon
             ));
         }
-        let selected_text = loaded.style().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
+        let selected_text = loaded.skin().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
         assert_eq!((selected_text.r, selected_text.g, selected_text.b, selected_text.a), (255, 255, 255, 255));
         // Checked menu rows retain their marker without becoming permanently highlighted. The
         // normal patch must therefore remain transparent over the white popup panel, while an
         // actual hover still selects the authored blue bitmap and contrasting white foreground.
-        let checked_normal = loaded.style().appearance(AppearanceRole::MenuItemSelected, VisualState::Normal);
+        let checked_normal = loaded.skin().appearance(AppearanceRole::MenuItemSelected, VisualState::Normal);
         assert!(matches!(
             checked_normal.content,
             crate::NinePatchContent::Flat { cells }
                 if matches!(cells.center, crate::NinePatchCell::Empty)
         ));
         assert!(matches!(
-            loaded.style().appearance(AppearanceRole::MenuItemSelected, VisualState::Hovered).content,
+            loaded.skin().appearance(AppearanceRole::MenuItemSelected, VisualState::Hovered).content,
             crate::NinePatchContent::Image { .. }
         ));
-        let checked_normal_text = loaded.style().foreground(AppearanceRole::MenuItemSelected, VisualState::Normal);
-        let checked_hovered_text = loaded.style().foreground(AppearanceRole::MenuItemSelected, VisualState::Hovered);
+        let checked_normal_text = loaded.skin().foreground(AppearanceRole::MenuItemSelected, VisualState::Normal);
+        let checked_hovered_text = loaded.skin().foreground(AppearanceRole::MenuItemSelected, VisualState::Hovered);
         assert_eq!(
             (checked_normal_text.r, checked_normal_text.g, checked_normal_text.b, checked_normal_text.a),
             (0, 0, 0, 255)
@@ -1084,14 +1061,14 @@ mod tests {
             (checked_hovered_text.r, checked_hovered_text.g, checked_hovered_text.b, checked_hovered_text.a),
             (255, 255, 255, 255)
         );
-        let focus = loaded.style().focus_color;
+        let focus = loaded.skin().effects.focus_outline;
         assert_eq!(
             (focus.r, focus.g, focus.b, focus.a),
             (0, 0, 0, 255),
             "period control focus must preserve black combo and slider frames"
         );
-        let slider_normal = loaded.style().appearance(AppearanceRole::SliderTrack, VisualState::Normal);
-        let slider_focused = loaded.style().appearance(AppearanceRole::SliderTrack, VisualState::Focused);
+        let slider_normal = loaded.skin().appearance(AppearanceRole::SliderTrack, VisualState::Normal);
+        let slider_focused = loaded.skin().appearance(AppearanceRole::SliderTrack, VisualState::Focused);
         assert!(matches!(
             (slider_normal.content, slider_focused.content),
             (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: focused })
@@ -1107,10 +1084,10 @@ mod tests {
             // Combo popup choices are ordinary retained ListItems. Their complete interactive
             // state ladder must therefore carry both blue selection art and contrasting text.
             assert!(matches!(
-                loaded.style().appearance(AppearanceRole::ListItem, state).content,
+                loaded.skin().appearance(AppearanceRole::ListItem, state).content,
                 crate::NinePatchContent::Image { .. }
             ));
-            let foreground = loaded.style().foreground(AppearanceRole::ListItem, state);
+            let foreground = loaded.skin().foreground(AppearanceRole::ListItem, state);
             assert_eq!((foreground.r, foreground.g, foreground.b, foreground.a), (255, 255, 255, 255));
         }
     }
@@ -1121,35 +1098,35 @@ mod tests {
         let (loaded, images) = install_bundled_theme("themes/mac-os-9/theme.json");
         assert_eq!(loaded.name(), "Mac OS 9");
         assert_eq!(images, 24, "each shared PNG path must be baked exactly once");
-        assert_eq!(loaded.style().window_chrome_layout, crate::WindowChromeLayout::ClassicMac);
-        assert_eq!(loaded.style().title_height, 18);
-        let content = loaded.style().window_content_insets;
+        assert_eq!(loaded.skin().chrome.layout, crate::WindowChromeLayout::ClassicMac);
+        assert_eq!(loaded.skin().metrics.title_height, 18);
+        let content = loaded.skin().metrics.window_content_insets;
         assert_eq!(
             (content.left, content.top, content.right, content.bottom),
             (0, 0, 0, 0),
             "Platinum windows expose their complete application body below root chrome"
         );
-        let insets = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
+        let insets = loaded.skin().appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (3, 3, 3, 3));
-        let active_title = loaded.style().appearance(AppearanceRole::WindowTitleActive, VisualState::Pressed);
+        let active_title = loaded.skin().appearance(AppearanceRole::WindowTitleActive, VisualState::Pressed);
         let crate::NinePatchContent::Image { image: active_title_image } = active_title.content else {
             panic!("Mac OS 9 active title must use baked artwork");
         };
         let active_title_size = loaded.atlas().get_icon_size(active_title_image.icon);
         assert_eq!((active_title_size.width, active_title_size.height), (8, 18));
         assert!(matches!(
-            loaded.style().appearance(AppearanceRole::Button, VisualState::Disabled).content,
+            loaded.skin().appearance(AppearanceRole::Button, VisualState::Disabled).content,
             crate::NinePatchContent::Image { .. }
         ));
         assert!(matches!(
-            loaded.style().appearance(AppearanceRole::DialogFrameActive, VisualState::Normal).content,
+            loaded.skin().appearance(AppearanceRole::DialogFrameActive, VisualState::Normal).content,
             crate::NinePatchContent::Image { .. }
         ));
 
         // Hovering or pressing a passive frame must not borrow the darker active-frame bitmap.
         // This guards the Platinum distinction before the manager supplies the active role.
-        let normal_frame = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Normal);
-        let pressed_frame = loaded.style().appearance(AppearanceRole::WindowFrame, VisualState::Pressed);
+        let normal_frame = loaded.skin().appearance(AppearanceRole::WindowFrame, VisualState::Normal);
+        let pressed_frame = loaded.skin().appearance(AppearanceRole::WindowFrame, VisualState::Pressed);
         assert!(matches!(
             (normal_frame.content, pressed_frame.content),
             (crate::NinePatchContent::Image { image: normal }, crate::NinePatchContent::Image { image: pressed })
@@ -1158,8 +1135,8 @@ mod tests {
 
         // The Mac layout consumes complete caption-face images and does not overlay generic
         // Windows glyphs. Pressed artwork remains a distinct upload for visible inset feedback.
-        let close = loaded.style().appearance(AppearanceRole::WindowCloseButton, VisualState::Normal);
-        let close_pressed = loaded.style().appearance(AppearanceRole::WindowCloseButton, VisualState::Pressed);
+        let close = loaded.skin().appearance(AppearanceRole::WindowCloseButton, VisualState::Normal);
+        let close_pressed = loaded.skin().appearance(AppearanceRole::WindowCloseButton, VisualState::Pressed);
         let (crate::NinePatchContent::Image { image: close_image }, crate::NinePatchContent::Image { image: pressed_image }) =
             (close.content, close_pressed.content)
         else {
@@ -1171,13 +1148,13 @@ mod tests {
 
         // Platinum popup selection uses black image-backed rows with white foreground text, while
         // the popup itself retains its authored thick black and beveled frame.
-        let menu_popup = loaded.style().appearance(AppearanceRole::MenuPopup, VisualState::Normal);
+        let menu_popup = loaded.skin().appearance(AppearanceRole::MenuPopup, VisualState::Normal);
         let crate::NinePatchContent::Image { image: menu_popup_image } = menu_popup.content else {
             panic!("Mac OS 9 popup must use baked artwork");
         };
         let menu_popup_size = loaded.atlas().get_icon_size(menu_popup_image.icon);
         assert_eq!((menu_popup_size.width, menu_popup_size.height), (7, 7));
-        let selected_text = loaded.style().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
+        let selected_text = loaded.skin().foreground(AppearanceRole::MenuItem, VisualState::Hovered);
         assert_eq!((selected_text.r, selected_text.g, selected_text.b, selected_text.a), (255, 255, 255, 255));
     }
 }

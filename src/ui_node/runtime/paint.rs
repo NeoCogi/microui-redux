@@ -42,9 +42,9 @@ struct FocusIndicator {
     rect: Recti,
     /// Traversal-derived screen clip that prevents the outline escaping scroll or parent clips.
     clip: Recti,
-    /// Resolved per-node Style accent, including a widget-local style override when present.
+    /// Resolved per-node Skin accent, including a widget-local style override when present.
     color: crate::Color,
-    /// Inside-aligned stroke width shared with ordinary Style-owned frames.
+    /// Inside-aligned stroke width shared with ordinary Skin-owned frames.
     width: i32,
 }
 
@@ -66,7 +66,7 @@ impl UiRuntime {
         &mut self,
         root: &mut Node,
         display_list: &mut DisplayList,
-        style: &Style,
+        style: &Skin,
         atlas: crate::AtlasHandle,
         focus_visible: bool,
         window_active: bool,
@@ -96,7 +96,7 @@ impl UiRuntime {
         node: &mut Node,
         parent_transform: Transform,
         display_list: &mut DisplayList,
-        style: &Style,
+        style: &Skin,
         atlas: crate::AtlasHandle,
         focus_visible: bool,
         window_active: bool,
@@ -141,7 +141,7 @@ impl UiRuntime {
         let mut focus_indicator = focused.then_some(FocusIndicator {
             rect: screen_rect,
             clip: screen_clip,
-            color: style.focus_color,
+            color: style.effects.focus_outline,
             width: frame_role
                 .map(|role| style.appearance(role, crate::VisualState::Normal).insets.maximum_component())
                 .unwrap_or(1)

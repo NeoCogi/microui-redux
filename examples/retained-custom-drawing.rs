@@ -129,7 +129,7 @@ impl Widget for RetainedPaint {
 }
 
 impl LeafWidget for RetainedPaint {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn measure(&self, _style: &Skin, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(96, 48)
     }
 }

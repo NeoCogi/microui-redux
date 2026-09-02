@@ -50,7 +50,7 @@ pub struct NumberParameters {
 }
 
 impl crate::LeafWidget for Number {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+    fn measure(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         self.preferred_size_widget(style, atlas, constraints)
     }
 }
@@ -154,13 +154,13 @@ impl Number {
     }
 
     /// Measures the formatted number label.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn preferred_size_widget(&self, style: &Skin, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         number_preferred_size(style, atlas, self.font, self.value, self.precision, 0, 0)
     }
 
     /// Updates number value from shift-click text entry or horizontal drag.
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
-        let font = ctx.style().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font_choice(self.font);
         let last = self.value;
         if !self.edit.editing {
             // Construction guarantees one non-negative direction policy: Up increases and Down
@@ -191,7 +191,7 @@ impl Number {
 
     /// Paints either the inline numeric editor or the formatted value.
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        let font = ctx.style().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font_choice(self.font);
         if self.edit.editing {
             number_textbox_paint(ctx, &self.edit, font);
             return;

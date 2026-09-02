@@ -35,7 +35,7 @@ use crate::math::RectExt;
 
 impl UiRuntime {
     /// Measures one already-borrowed node through the authoritative private node path.
-    pub(in crate::ui_node) fn measure_node(&self, node: &mut Node, style: &Style, atlas: &crate::AtlasHandle, constraints: Constraints) -> Dimensioni {
+    pub(in crate::ui_node) fn measure_node(&self, node: &mut Node, style: &Skin, atlas: &crate::AtlasHandle, constraints: Constraints) -> Dimensioni {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.measures += 1);
         // Node::measure is the only place that adds frame geometry; containers receive the same
@@ -43,14 +43,14 @@ impl UiRuntime {
         node.measure(style, atlas, constraints)
     }
 
-    fn measure_node_for_layout(&self, node: &mut Node, style: &Style, atlas: &crate::AtlasHandle, constraints: Constraints) -> (Dimensioni, bool) {
+    fn measure_node_for_layout(&self, node: &mut Node, style: &Skin, atlas: &crate::AtlasHandle, constraints: Constraints) -> (Dimensioni, bool) {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.measures += 1);
         node.measure_with_cache_status(style, atlas, constraints)
     }
 
     /// Assigns one exact parent-owned rectangle through direct widget/container dispatch.
-    pub(in crate::ui_node) fn layout_node_ref(&mut self, node: &mut Node, style: &Style, atlas: &crate::AtlasHandle, rect: Recti) -> Dimensioni {
+    pub(in crate::ui_node) fn layout_node_ref(&mut self, node: &mut Node, style: &Skin, atlas: &crate::AtlasHandle, rect: Recti) -> Dimensioni {
         let frame_role = node_frame_role(node);
         // Preserve the measure/layout phase contract while keeping the parent's rectangle
         // authoritative. Sizing relationships live in the parent container, never on Node.
@@ -65,7 +65,7 @@ impl UiRuntime {
     fn layout_node_outer_ref(
         &mut self,
         node: &mut Node,
-        style: &Style,
+        style: &Skin,
         atlas: &crate::AtlasHandle,
         frame_role: Option<crate::AppearanceRole>,
         outer: Recti,

@@ -31,7 +31,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    AppearanceRole, AtlasHandle, ChildParticipation, Container, ContainerWidget, Dimensioni, MeasureCtx, Recti, Style, TypedWidgetHandle, UiInputEvent,
+    AppearanceRole, AtlasHandle, ChildParticipation, Container, ContainerWidget, Dimensioni, MeasureCtx, Recti, Skin, TypedWidgetHandle, UiInputEvent,
     VisualState, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
@@ -180,9 +180,9 @@ impl Disclosure {
     const HEADER: usize = 0;
     const BODY: usize = 1;
 
-    fn indent(&self, style: &Style) -> i32 {
+    fn indent(&self, style: &Skin) -> i32 {
         if matches!(self.variant, DisclosureVariant::Tree) {
-            style.indent.max(0)
+            style.metrics.indent.max(0)
         } else {
             0
         }
@@ -201,21 +201,21 @@ struct DisclosureHeader {
 
 impl DisclosureHeader {
     /// Measures the complete custom-painted header, including its optional internal frame.
-    fn preferred(&self, style: &Style, atlas: &AtlasHandle) -> Dimensioni {
+    fn preferred(&self, style: &Skin, atlas: &AtlasHandle) -> Dimensioni {
         // Resolve icon and text metrics independently, then build the one-row content preference.
-        let padding = style.padding.max(0);
+        let padding = style.metrics.padding.max(0);
         let vertical_pad = (padding / 2).max(1);
-        let font_height = atlas.get_font_height(style.font) as i32;
+        let font_height = atlas.get_font_height(style.resources.fonts.body) as i32;
         // Expansion changes only presentation state, not the header's retained allocation. Reserve
         // the component-wise maximum of both possible icons so toggling cannot clip a larger
         // collapse image or require a state-dependent measurement invalidation.
-        let expand_icon = atlas.get_icon_size(style.icons.expand);
-        let collapse_icon = atlas.get_icon_size(style.icons.collapse);
+        let expand_icon = atlas.get_icon_size(style.resources.icons.expand);
+        let collapse_icon = atlas.get_icon_size(style.resources.icons.collapse);
         let icon = Dimensioni::new(expand_icon.width.max(collapse_icon.width), expand_icon.height.max(collapse_icon.height));
         let text_width = if self.label.is_empty() {
             0
         } else {
-            atlas.get_text_size(style.font, &self.label).width
+            atlas.get_text_size(style.resources.fonts.body, &self.label).width
         };
         let content_height = font_height.max(icon.height).max(0).saturating_add(vertical_pad.saturating_mul(2));
         let icon_width = content_height.saturating_sub(padding).max(icon.width).max(0);
@@ -280,15 +280,19 @@ impl Widget for DisclosureHeader {
         };
         let text_color = ctx.foreground(foreground_role);
         ctx.draw_icon(
-            if expanded { ctx.style().icons.collapse } else { ctx.style().icons.expand },
+            if expanded {
+                ctx.skin().resources.icons.collapse
+            } else {
+                ctx.skin().resources.icons.expand
+            },
             Recti::new(row.x, row.y, row.height, row.height),
             text_color,
         );
         // text_offset = row_height - padding.
-        let offset = row.height.saturating_sub(ctx.style().padding);
+        let offset = row.height.saturating_sub(ctx.skin().metrics.padding);
         // text_x = row_x + text_offset; text_width = row_width - text_offset.
         let text_rect = Recti::new(row.x.saturating_add(offset), row.y, row.width.saturating_sub(offset), row.height);
-        ctx.draw_control_text_with_font(ctx.style().font, &self.label, text_rect, foreground_role, self.opt);
+        ctx.draw_control_text_with_font(ctx.skin().resources.fonts.body, &self.label, text_rect, foreground_role, self.opt);
     }
 
     // Framing belongs to the header sub-rectangle, not the complete descendant allocation.
@@ -307,7 +311,7 @@ impl Widget for DisclosureHeader {
 }
 
 impl crate::LeafWidget for DisclosureHeader {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, _constraints: crate::Constraints) -> Dimensioni {
+    fn measure(&self, style: &Skin, atlas: &AtlasHandle, _constraints: crate::Constraints) -> Dimensioni {
         // Header content is intrinsically one line and does not stretch to the offered bound.
         self.preferred(style, atlas)
     }
@@ -321,8 +325,8 @@ impl ContainerWidget for Disclosure {
         if !self.expanded {
             return header;
         }
-        let indent = self.indent(ctx.style());
-        let spacing = ctx.style().spacing.max(0);
+        let indent = self.indent(ctx.skin());
+        let spacing = ctx.skin().metrics.spacing.max(0);
         let body_constraints = crate::Constraints::new(
             constraints.width.shrink(indent),
             constraints.height.shrink(header.height.saturating_add(spacing)),
@@ -352,8 +356,8 @@ impl ContainerWidget for Disclosure {
         };
         let _ = ctx.set_child_participation(children, Self::BODY, participation);
         if self.expanded {
-            let indent = self.indent(ctx.style());
-            let spacing = ctx.style().spacing.max(0);
+            let indent = self.indent(ctx.skin());
+            let spacing = ctx.skin().metrics.spacing.max(0);
             // body_origin = container_origin + (indent, header_height + spacing).
             let body_x = rect.x.saturating_add(indent);
             let body_y = rect.y.saturating_add(header_height).saturating_add(spacing);
@@ -477,7 +481,7 @@ mod tests {
     #[test]
     fn header_measurement_reserves_the_larger_expand_or_collapse_icon() {
         let atlas = asymmetric_disclosure_atlas();
-        let style = Style { padding: 0, ..Style::from_atlas(&atlas) };
+        let style = Skin::from_atlas(&atlas).with_metrics(|metrics| metrics.padding = 0);
         let (_, container) = create_container(DisclosureParameters::tree("", false, std::iter::empty::<LinearItem>()));
         let mut root = Node::container(container);
         let mut runtime = crate::ui_node::UiRuntime::new();

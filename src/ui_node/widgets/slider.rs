@@ -77,7 +77,7 @@ pub struct SliderParameters {
 }
 
 impl crate::LeafWidget for Slider {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+    fn measure(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         self.preferred_size_widget(style, atlas, constraints)
     }
 }
@@ -189,15 +189,15 @@ impl Slider {
     }
 
     /// Measures the slider track plus formatted value label.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
-        let thumb_size = style.thumb_size.max(0);
+    fn preferred_size_widget(&self, style: &Skin, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+        let thumb_size = style.metrics.thumb_size.max(0);
         number_preferred_size(style, atlas, self.font, self.value, self.precision, thumb_size, thumb_size)
     }
 
     /// Updates slider value from shift-click text entry, scroll, or pointer drag.
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
         let base = ctx.local_rect();
-        let font = ctx.style().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font_choice(self.font);
         let last = self.value;
         let mut value = last;
         if !self.edit.editing {
@@ -268,7 +268,7 @@ impl Slider {
 
     /// Paints either the inline numeric editor or the slider track/thumb/value label.
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        let font = ctx.style().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font_choice(self.font);
         if self.edit.editing {
             number_textbox_paint(ctx, &self.edit, font);
             return;
@@ -282,7 +282,7 @@ impl Slider {
         // Measurement already treats negative theme thumb sizes as zero. Paint applies the same
         // normalization and uses saturated extent arithmetic so either public style or layout
         // input may span the i32 domain without panicking.
-        let width = ctx.style().thumb_size.max(0);
+        let width = ctx.skin().metrics.thumb_size.max(0);
         let available = base.width.max(0).saturating_sub(width);
         let x = if self.low != self.high && available > 0 {
             // Resolve the normalized numeric position in f64 before multiplying by pixel width.
@@ -436,13 +436,13 @@ mod tests {
     //! Tests for slider and numeric editing behavior.
 
     use super::*;
-    use crate::test_support::{test_atlas as make_test_atlas, test_style};
+    use crate::test_support::{test_atlas as make_test_atlas, test_skin};
     use crate::ui_node::{UiInputEvent, widget_context::localize_event};
     use crate::{Number, NumberBuilder, NumberParameters};
 
     fn run_slider_once(slider: &mut Slider, rect: Recti, events: Vec<UiInputEvent>, hovered: bool, focused: bool, active: bool, scroll: Option<Vec2i>) {
         let atlas = make_test_atlas();
-        let style = test_style(&atlas);
+        let style = test_skin(&atlas);
         let held = if active { MouseButton::LEFT } else { MouseButton::NONE };
         let mut events = events
             .into_iter()
@@ -459,7 +459,7 @@ mod tests {
 
     fn run_number_once(number: &mut Number, events: Vec<UiInputEvent>) {
         let atlas = make_test_atlas();
-        let style = test_style(&atlas);
+        let style = test_skin(&atlas);
         let bounds = rect(0, 0, 100, 20);
         for event in &events {
             let mut ctx = WidgetUpdateCtx::new_with_interaction(
@@ -663,7 +663,7 @@ mod tests {
     #[test]
     fn slider_zero_range_keeps_value() {
         let atlas = make_test_atlas();
-        let style = test_style(&atlas);
+        let style = test_skin(&atlas);
 
         let mut slider = SliderBuilder::create_widget(SliderParameters::new(5.0, 5.0, 5.0).expect("equal finite bounds form a valid inert slider"));
         let rect = rect(0, 0, 100, 20);
@@ -715,7 +715,7 @@ mod tests {
     #[test]
     fn slider_uses_widget_local_mouse_position() {
         let atlas = make_test_atlas();
-        let style = test_style(&atlas);
+        let style = test_skin(&atlas);
 
         let mut slider = SliderBuilder::create_widget(SliderParameters::new(0.0, 0.0, 100.0).expect("finite ascending slider parameters must validate"));
         let rect = rect(40, 20, 100, 20);
@@ -787,9 +787,9 @@ mod tests {
     #[test]
     fn slider_thumb_midpoint_does_not_overflow_a_large_finite_range() {
         let atlas = make_test_atlas();
-        let mut style = test_style(&atlas);
+        let mut style = test_skin(&atlas);
         // A borderless ten-pixel thumb records one unambiguous fill rectangle at the computed x.
-        style.thumb_size = 10;
+        style.metrics.thumb_size = 10;
         let frame = style
             .appearance(crate::AppearanceRole::SliderThumb, crate::VisualState::Normal)
             .with_insets(crate::SliceInsets::ZERO);
@@ -916,8 +916,8 @@ mod tests {
     #[test]
     fn negative_extreme_thumb_size_keeps_slider_paint_total() {
         let atlas = make_test_atlas();
-        let mut style = test_style(&atlas);
-        style.thumb_size = i32::MIN;
+        let mut style = test_skin(&atlas);
+        style.metrics.thumb_size = i32::MIN;
         let mut slider = SliderBuilder::create_widget(SliderParameters::new(0.5, 0.0, 1.0).expect("finite ascending slider parameters must validate"));
         let bounds = rect(0, 0, 100, 20);
         let mut display_list = crate::render::DisplayList::new();

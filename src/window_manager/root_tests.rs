@@ -30,14 +30,14 @@
 
 use super::*;
 
-use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, test_atlas, test_style};
+use crate::test_support::{AllocationMeasurement, NoopRenderer, RenderEvent, recording_backend, test_atlas, test_skin};
 use crate::{
     color, rect, AppearanceRole, AtlasHandle, Button, ButtonParameters, ButtonSubmitted, Checkbox, CheckboxParameters, Combo, ComboParameters, ComboSubmitted,
-    ControlColor, Custom, Color, CustomParameters, Constraints, Context, DecimalPrecision, Dimensioni, Disclosure, DisclosureParameters, Ui, Grid,
-    GridParameters, Key, KeyEvent, KeyboardBehavior, Linear, LinearItem, LinearParameters, Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters,
-    MenuItemSubmitted, MouseButton, Node, NinePatch, ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Slider,
-    SliderParameters, StateTable, Style, TextArea, TextAreaParameters, Textbox, TextboxChanged, TextBlock, TextBlockParameters, TextboxParameters, TrackSize,
-    TypedWidgetHandle, UiInputEvent, Vec2i, Widget, WidgetOption, WidgetPaintCtx, VisualState, WidgetUpdateCtx, Modifiers, WidgetFillOption,
+    Custom, Color, CustomParameters, Constraints, Context, DecimalPrecision, Dimensioni, Disclosure, DisclosureParameters, Ui, Grid, GridParameters, Key,
+    KeyEvent, KeyboardBehavior, Linear, LinearItem, LinearParameters, Menu, MenuBar, MenuItem, MenuItemMark, MenuItemParameters, MenuItemSubmitted,
+    MouseButton, Node, NinePatch, ScrollArea, ScrollAreaOption, ListItem, ListItemParameters, ScrollAreaParameters, Slider, SliderParameters, StateTable, Skin,
+    TextArea, TextAreaParameters, Textbox, TextboxChanged, TextBlock, TextBlockParameters, TextboxParameters, TrackSize, TypedWidgetHandle, UiInputEvent,
+    Vec2i, Widget, WidgetOption, WidgetPaintCtx, VisualState, WidgetUpdateCtx, Modifiers, WidgetFillOption,
 };
 use crate::render::{FrameInfo, RenderError};
 use std::{
@@ -142,7 +142,7 @@ fn frame_info(dimensions: Dimensioni) -> FrameInfo {
     FrameInfo::try_new(dimensions, color(0, 0, 0, 255)).unwrap()
 }
 
-/// Converts a Style color into the byte representation recorded by the renderer fixture.
+/// Converts a Skin color into the byte representation recorded by the renderer fixture.
 fn recorded_color(color: Color) -> [u8; 4] {
     // Rendering preserves the public eight-bit color channels without normalization loss.
     [color.r, color.g, color.b, color.a]
@@ -157,7 +157,7 @@ fn atlas_quad_color(event: &RenderEvent) -> Option<[u8; 4]> {
     vertices.iter().all(|vertex| vertex.color == color).then_some(color)
 }
 
-/// Collects atlas quads whose complete tint matches one semantic Style color.
+/// Collects atlas quads whose complete tint matches one semantic Skin color.
 fn atlas_quads_with_color(events: &[RenderEvent], color: Color) -> Vec<&RenderEvent> {
     let expected = recorded_color(color);
     events.iter().filter(|event| atlas_quad_color(event) == Some(expected)).collect()
@@ -182,7 +182,7 @@ impl Widget for DesiredSize {
 }
 
 impl crate::LeafWidget for DesiredSize {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn measure(&self, _style: &Skin, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         self.0
     }
 }
@@ -209,13 +209,12 @@ impl Widget for CompleteStyleMeasureProbe {
 }
 
 impl crate::LeafWidget for CompleteStyleMeasureProbe {
-    /// Derives preferred width from the complete public Style passed to custom leaf measurement.
-    fn measure(&self, style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
-        // `menu_background` was intentionally absent from MeasurementStyleKey. Observing it here
-        // proves global replacement invalidates custom measurements rather than merely the fields
-        // currently used for sizing by built-in widgets.
+    /// Derives preferred width from the complete public Skin passed to custom leaf measurement.
+    fn measure(&self, style: &Skin, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+        // Foreground color is intentionally absent from MeasurementStyleKey. Observing it here
+        // proves global replacement invalidates custom measurements beyond built-in size fields.
         self.measures.set(self.measures.get() + 1);
-        Dimensioni::new(i32::from(style.menu_background.r).max(1), 10)
+        Dimensioni::new(i32::from(style.foreground(AppearanceRole::MenuPopup, VisualState::Normal).r).max(1), 10)
     }
 }
 
@@ -295,7 +294,7 @@ impl Widget for OrderedProbe {
 }
 
 impl crate::LeafWidget for OrderedProbe {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn measure(&self, _style: &Skin, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         self.measures.set(self.measures.get() + 1);
         Dimensioni::new(80, 60)
     }
@@ -347,7 +346,7 @@ impl Widget for CommitProbe {
 }
 
 impl crate::LeafWidget for CommitProbe {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn measure(&self, _style: &Skin, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(40, self.intrinsic_height)
     }
 }
@@ -389,7 +388,7 @@ impl Widget for SiblingMutationProbe {
 }
 
 impl crate::LeafWidget for SiblingMutationProbe {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn measure(&self, _style: &Skin, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(20, 10)
     }
 }
@@ -418,7 +417,7 @@ impl Widget for CountedProbe {
 }
 
 impl crate::LeafWidget for CountedProbe {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn measure(&self, _style: &Skin, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(20, 10)
     }
 }
@@ -465,7 +464,7 @@ impl Widget for TopologyMutator {
 }
 
 impl crate::LeafWidget for TopologyMutator {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn measure(&self, _style: &Skin, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(20, 10)
     }
 }
@@ -814,27 +813,25 @@ fn tab_focused_builtins_share_windows_activation_and_arrow_adjustment() {
 
 #[test]
 fn active_window_and_only_its_remembered_widget_use_style_focus_accents() {
-    // Preserve one atlas identity across backend construction and the customized Style so the
+    // Preserve one atlas identity across backend construction and the customized Skin so the
     // focus-color assertions cannot accidentally rely on globally meaningful resource slots.
     let atlas = test_atlas();
-    let mut style = Style {
-        focus_color: color(7, 17, 29, 255),
-        window_focus_color: color(31, 47, 61, 255),
-        ..test_style(&atlas)
-    };
+    let mut style = test_skin(&atlas);
+    style.effects.focus_outline = color(7, 17, 29, 255);
+    style.effects.window_activation = color(31, 47, 61, 255);
     let active_frame = NinePatch::framed(
         style.appearance(AppearanceRole::WindowFrame, VisualState::Normal).insets,
-        style.window_focus_color,
-        Some(style.colors[ControlColor::WindowBG as usize]),
+        style.effects.window_activation,
+        None,
     );
     style.visuals.set_patches(AppearanceRole::WindowFrameActive, StateTable::filled(active_frame));
     style.visuals.set_patches(
         AppearanceRole::WindowTitleActive,
-        StateTable::filled(NinePatch::solid(style.window_focus_color)),
+        StateTable::filled(NinePatch::solid(style.effects.window_activation)),
     );
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
-    ctx.set_style(style.clone());
+    ctx.set_skin(style.clone());
 
     let (_, first_node) = OrderedProbe::create(WidgetOption::NONE);
     let first_id = first_node.id();
@@ -860,7 +857,7 @@ fn active_window_and_only_its_remembered_widget_use_style_focus_accents() {
     log.clear();
     ctx.frame(frame_info(dimensions)).render_ui().unwrap();
     let events = log.snapshot();
-    let widget_focus = atlas_quads_with_color(&events, style.focus_color);
+    let widget_focus = atlas_quads_with_color(&events, style.effects.focus_outline);
     assert_eq!(
         widget_focus.len(),
         8,
@@ -874,7 +871,7 @@ fn active_window_and_only_its_remembered_widget_use_style_focus_accents() {
         "the inactive second runtime must not expose its remembered focus"
     );
 
-    let window_focus = atlas_quads_with_color(&events, style.window_focus_color);
+    let window_focus = atlas_quads_with_color(&events, style.effects.window_activation);
     assert_eq!(
         window_focus.len(),
         9,
@@ -897,7 +894,7 @@ fn modal_dialog_uses_its_own_active_frame_role() {
     let atlas = test_atlas();
     let window_frame_color = color(11, 37, 71, 255);
     let dialog_frame_color = color(83, 109, 149, 255);
-    let mut style = test_style(&atlas);
+    let mut style = test_skin(&atlas);
     style
         .visuals
         .set_patches(AppearanceRole::WindowFrameActive, StateTable::filled(NinePatch::solid(window_frame_color)));
@@ -907,7 +904,7 @@ fn modal_dialog_uses_its_own_active_frame_role() {
 
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
-    ctx.set_style(style);
+    ctx.set_skin(style);
     let owner = ctx.ui().create_window(Window::new("ordinary window", rect(20, 20, 180, 130), empty_content()));
     let dialog = ctx
         .ui()
@@ -947,7 +944,7 @@ fn deactivated_window_keeps_enabled_child_widget_appearance() {
     let disabled_control_color = color(157, 173, 191, 255);
     let enabled_text_color = color(199, 211, 223, 255);
     let disabled_text_color = color(227, 233, 239, 255);
-    let mut style = test_style(&atlas);
+    let mut style = test_skin(&atlas);
     let mut button_foreground = StateTable::filled(enabled_text_color);
     button_foreground.set(VisualState::Disabled, disabled_text_color);
     style.visuals.set_foregrounds(AppearanceRole::Button, button_foreground);
@@ -963,7 +960,7 @@ fn deactivated_window_keeps_enabled_child_widget_appearance() {
 
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
-    ctx.set_style(style);
+    ctx.set_skin(style);
     let (_, first_node) = Button::create(ButtonParameters::new("active child"));
     let first_id = first_node.id();
     let (_, second_node) = Button::create(ButtonParameters::new("passive child"));
@@ -1014,11 +1011,11 @@ fn external_widget_images_use_color_preserving_white_tint() {
     let atlas = test_atlas();
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
-    let mut style = ctx.style().clone();
+    let mut style = ctx.skin().clone();
     // Reproduce the classic themes' black control text. This formerly multiplied every external
     // image channel by zero even though the same texture was correct under the light default text.
     style.visuals.set_foregrounds(AppearanceRole::Button, StateTable::filled(color(0, 0, 0, 255)));
-    ctx.set_style(style);
+    ctx.set_skin(style);
     let texture = ctx.load_image_rgba(2, 2, &[255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255]);
     let (_, image_button) = Button::create(ButtonParameters::with_image(
         "colored image",
@@ -1060,7 +1057,7 @@ fn disabled_window_propagates_disabled_presentation_and_rejects_input() {
     let disabled_menu_text_color = color(173, 181, 193, 255);
     let disabled_control_color = color(199, 207, 217, 255);
     let disabled_control_text_color = color(227, 233, 239, 255);
-    let mut style = test_style(&atlas);
+    let mut style = test_skin(&atlas);
 
     style
         .visuals
@@ -1092,7 +1089,7 @@ fn disabled_window_propagates_disabled_presentation_and_rejects_input() {
     let checkbox_id = checkbox_node.id();
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
-    ctx.set_style(style);
+    ctx.set_skin(style);
     let root = ctx
         .ui()
         .create_window(Window::new("disabled window", rect(30, 25, 190, 130), checkbox_node).menu_bar(MenuBar::new([Menu::new("File")])));
@@ -1231,7 +1228,7 @@ fn window_and_container_backgrounds_ignore_hover_state_artwork() {
     // recorded hover tint therefore proves a body or passive container resolved interactive art;
     // legitimate resize-edge overlay painting continues to use the shared border tint.
     let atlas = test_atlas();
-    let mut style = test_style(&atlas);
+    let mut style = test_skin(&atlas);
     let insets = crate::SliceInsets::uniform(2);
     let border = color(17, 19, 23, 255);
     let window_normal = color(31, 37, 41, 255);
@@ -1256,7 +1253,7 @@ fn window_and_container_backgrounds_ignore_hover_state_artwork() {
     ));
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
-    ctx.set_style(style);
+    ctx.set_skin(style);
     let root = ctx.ui().create_window(Window::new("passive backgrounds", rect(30, 30, 160, 120), content));
     ctx.ui().set_window_options(&root, WindowOption::FRAME | WindowOption::NO_TITLE).unwrap();
     let dimensions = Dimensioni::new(320, 240);
@@ -1292,17 +1289,17 @@ fn window_and_container_backgrounds_ignore_hover_state_artwork() {
 fn tab_focused_disclosure_uses_focus_fill_in_addition_to_the_shared_outline() {
     // Resolve the customized palette from the exact atlas moved into the recording backend.
     let atlas = test_atlas();
-    let mut style = Style {
-        focus_color: color(67, 83, 101, 255),
-        window_focus_color: color(109, 127, 149, 255),
-        ..test_style(&atlas)
-    };
-    style
-        .visuals
-        .set_patch(AppearanceRole::DisclosureHeader, VisualState::Focused, NinePatch::solid(style.focus_color));
+    let mut style = test_skin(&atlas);
+    style.effects.focus_outline = color(67, 83, 101, 255);
+    style.effects.window_activation = color(109, 127, 149, 255);
+    style.visuals.set_patch(
+        AppearanceRole::DisclosureHeader,
+        VisualState::Focused,
+        NinePatch::solid(style.effects.focus_outline),
+    );
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
-    ctx.set_style(style.clone());
+    ctx.set_skin(style.clone());
 
     let (_, disclosure) = Disclosure::create(DisclosureParameters::tree("focused tree row", false, std::iter::empty::<LinearItem>()));
     let root = ctx.ui().create_window(Window::new("disclosure", rect(20, 20, 180, 100), disclosure));
@@ -1317,7 +1314,7 @@ fn tab_focused_disclosure_uses_focus_fill_in_addition_to_the_shared_outline() {
     log.clear();
     ctx.frame(frame_info(dimensions)).render_ui().unwrap();
     let events = log.snapshot();
-    let focus_quads = atlas_quads_with_color(&events, style.focus_color);
+    let focus_quads = atlas_quads_with_color(&events, style.effects.focus_outline);
     assert_eq!(
         focus_quads.len(),
         9,
@@ -1331,12 +1328,11 @@ fn empty_public_update_consumes_programmatic_text_area_caret_reveal() {
     let document = (0..20).map(|index| format!("line {index}")).collect::<Vec<_>>().join("\n");
     let (text_area, content) = TextArea::create(TextAreaParameters::new(document));
     let mut ctx = context();
-    let style = Style {
-        padding: 0,
-        scrollbar_size: 10,
-        ..ctx.style().clone()
-    };
-    ctx.set_style(style);
+    let style = ctx.skin().clone().with_metrics(|metrics| {
+        metrics.padding = 0;
+        metrics.scrollbar_size = 10;
+    });
+    ctx.set_skin(style);
     let root = ctx.ui().create_window(Window::new("text area", rect(10, 10, 100, 60), content));
     ctx.ui()
         .set_window_options(&root, WindowOption::FRAME | WindowOption::NO_TITLE | WindowOption::NO_RESIZE)
@@ -1374,17 +1370,19 @@ fn global_style_replacement_invalidates_measurements_in_hidden_surfaces() {
     assert_eq!(measures.get(), warmed, "unchanged style and constraints must retain the cached preference");
 
     // Replace only a value that the former partial style key omitted while the tree is hidden.
-    // Revealing it later must not revive the entry measured under the previous complete Style.
+    // Revealing it later must not revive the entry measured under the previous complete Skin.
     ctx.ui().set_window_visible(&window, false).unwrap();
-    let mut replacement = ctx.style().clone();
-    replacement.menu_background.r = replacement.menu_background.r.wrapping_add(1);
-    ctx.set_style(replacement);
+    let mut replacement = ctx.skin().clone();
+    let mut foreground = replacement.foreground(AppearanceRole::MenuPopup, VisualState::Normal);
+    foreground.r = foreground.r.wrapping_add(1);
+    replacement.visuals.set_foreground(AppearanceRole::MenuPopup, VisualState::Normal, foreground);
+    ctx.set_skin(replacement);
     ctx.update_ui(dimensions);
     assert_eq!(measures.get(), warmed, "hidden widget trees must not be traversed during the style commit");
 
     ctx.ui().set_window_visible(&window, true).unwrap();
     ctx.update_ui(dimensions);
-    assert!(measures.get() > warmed, "revealed content must measure against the replacement Style");
+    assert!(measures.get() > warmed, "revealed content must measure against the replacement Skin");
 }
 
 #[test]
@@ -2123,7 +2121,7 @@ fn typed_events_keep_composed_combo_and_popup_state_synchronized() {
 #[test]
 fn combo_popup_choice_hover_resolves_the_list_item_hovered_focused_appearance() {
     let atlas = test_atlas();
-    let mut style = test_style(&atlas);
+    let mut style = test_skin(&atlas);
     let normal_color = color(17, 29, 43, 255);
     let hovered_color = color(71, 83, 97, 255);
     let focused_color = color(109, 127, 149, 255);
@@ -2138,7 +2136,7 @@ fn combo_popup_choice_hover_resolves_the_list_item_hovered_focused_appearance() 
     let (_, popup_body) = Linear::create(LinearParameters::vertical([item_node]));
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
-    ctx.set_style(style);
+    ctx.set_skin(style);
     let owner = ctx.ui().create_window(Window::new("combo owner", rect(20, 20, 140, 60), empty_content()));
     let popup = ctx.ui().create_popup(&owner, "combo choices", popup_body).unwrap();
     ctx.ui()
@@ -3366,16 +3364,16 @@ fn right_bottom_and_corner_resize_only_their_declared_axes_with_thick_borders() 
     }
 
     let atlas = test_atlas();
-    let mut style = test_style(&atlas);
+    let mut style = test_skin(&atlas);
     let insets = crate::SliceInsets::new(3, 4, 5, 6);
     let frame = StateTable::filled(NinePatch::framed(insets, color(10, 20, 30, 255), Some(color(40, 50, 60, 255))));
     style.visuals.set_patches(AppearanceRole::WindowFrame, frame);
     style.visuals.set_patches(AppearanceRole::WindowFrameActive, frame);
     // Structural resize thickness is independent from the frame artwork's fixed corner span.
-    style.window_border = insets;
-    let grip_size = style.scrollbar_size;
+    style.metrics.window_border = insets;
+    let grip_size = style.metrics.scrollbar_size;
     let mut ctx = Context::new_test(NoopRenderer { atlas }, Dimensioni::new(360, 260));
-    ctx.set_style(style);
+    ctx.set_skin(style);
     let root = ctx.ui().create_window(Window::new("resizable", rect(30, 30, 140, 100), empty_content()));
     ctx.ui().set_window_options(&root, WindowOption::FRAME | WindowOption::NO_TITLE).unwrap();
     let dimensions = Dimensioni::new(360, 260);
@@ -3479,11 +3477,11 @@ fn positive_caption_flags_minimize_maximize_follow_viewport_and_restore_exactly(
 #[test]
 fn classic_mac_chrome_places_compact_close_and_trailing_controls_on_opposite_edges() {
     let atlas = test_atlas();
-    let mut style = test_style(&atlas);
-    style.window_chrome_layout = crate::WindowChromeLayout::ClassicMac;
-    style.title_height = 24;
+    let mut style = test_skin(&atlas);
+    style.chrome.layout = crate::WindowChromeLayout::ClassicMac;
+    style.metrics.title_height = 24;
     let mut ctx = Context::new_test(NoopRenderer { atlas }, Dimensioni::new(360, 260));
-    ctx.set_style(style);
+    ctx.set_skin(style);
     let root = ctx
         .ui()
         .create_window(Window::new("centered Platinum title", rect(30, 35, 190, 120), empty_content()));
@@ -3516,11 +3514,11 @@ fn classic_mac_chrome_places_compact_close_and_trailing_controls_on_opposite_edg
 #[test]
 fn passive_classic_mac_caption_reserve_activates_title_without_triggering_hidden_button() {
     let atlas = test_atlas();
-    let mut style = test_style(&atlas);
-    style.window_chrome_layout = crate::WindowChromeLayout::ClassicMac;
+    let mut style = test_skin(&atlas);
+    style.chrome.layout = crate::WindowChromeLayout::ClassicMac;
     let dimensions = Dimensioni::new(460, 260);
     let mut ctx = Context::new_test(NoopRenderer { atlas }, dimensions);
-    ctx.set_style(style);
+    ctx.set_skin(style);
     let passive = ctx.ui().create_window(Window::new("passive", rect(20, 25, 170, 120), empty_content()));
     let active = ctx.ui().create_window(Window::new("active", rect(240, 25, 170, 120), empty_content()));
     ctx.update_ui(dimensions);
@@ -3643,7 +3641,7 @@ fn declarative_menu_popups_follow_heading_and_submenu_edges_when_the_window_move
     // Both popup levels use MenuPopup as their sole shell and place compact rows directly inside
     // it. Root padding and WindowFrame must not create a second inset at either menu depth.
     let popup_rows = ctx.debug_active_menu_row_rects();
-    let border = ctx.style().appearance(AppearanceRole::MenuPopup, VisualState::Normal).insets.left;
+    let border = ctx.skin().appearance(AppearanceRole::MenuPopup, VisualState::Normal).insets.left;
     for (popup, rows) in open_popups.iter().zip(&popup_rows) {
         let first = rows.first().expect("each declared test menu must contain a row");
         let last = rows.last().unwrap();
@@ -4344,10 +4342,10 @@ fn no_padding_option_makes_chromeless_root_content_edge_to_edge() {
 #[test]
 fn window_content_insets_control_each_application_body_edge_without_changing_widget_padding() {
     let mut ctx = context();
-    let mut style = ctx.style().clone();
-    let widget_padding = style.padding;
-    style.window_content_insets = crate::SliceInsets::new(2, 3, 5, 7);
-    ctx.set_style(style);
+    let mut style = ctx.skin().clone();
+    let widget_padding = style.metrics.padding;
+    style.metrics.window_content_insets = crate::SliceInsets::new(2, 3, 5, 7);
+    ctx.set_skin(style);
     let outer = rect(10, 20, 100, 80);
     let root = ctx.ui().create_window(Window::new("insets", outer, empty_content()));
     ctx.ui().set_window_options(&root, WindowOption::NO_TITLE | WindowOption::NO_RESIZE).unwrap();
@@ -4356,7 +4354,7 @@ fn window_content_insets_control_each_application_body_edge_without_changing_wid
 
     let body = ctx.debug_root_body(root.id()).unwrap();
     assert_eq!((body.x, body.y, body.width, body.height), (12, 23, 93, 70));
-    assert_eq!(ctx.style().padding, widget_padding, "root body geometry must not mutate control padding");
+    assert_eq!(ctx.skin().metrics.padding, widget_padding, "root body geometry must not mutate control padding");
 }
 
 #[test]
@@ -4404,12 +4402,12 @@ fn auto_height_preserves_popup_width_and_stretches_column_items() {
 #[test]
 fn application_popup_uses_the_semantic_popup_frame_instead_of_window_border_chrome() {
     let atlas = test_atlas();
-    let mut style = test_style(&atlas);
+    let mut style = test_skin(&atlas);
     let popup_insets = crate::SliceInsets::uniform(2);
     let popup_border = color(3, 5, 7, 255);
     let popup_fill = color(211, 213, 217, 255);
-    style.window_border = crate::SliceInsets::uniform(7);
-    style.window_content_insets = crate::SliceInsets::ZERO;
+    style.metrics.window_border = crate::SliceInsets::uniform(7);
+    style.metrics.window_content_insets = crate::SliceInsets::ZERO;
     style.visuals.set_patches(
         AppearanceRole::MenuPopup,
         StateTable::filled(NinePatch::framed(popup_insets, popup_border, Some(popup_fill))),
@@ -4418,7 +4416,7 @@ fn application_popup_uses_the_semantic_popup_frame_instead_of_window_border_chro
     let content_id = content.id();
     let (backend, log) = recording_backend(atlas);
     let mut ctx = Context::<_>::new(backend);
-    ctx.set_style(style);
+    ctx.set_skin(style);
     let owner = ctx.ui().create_window(Window::new("owner", rect(10, 10, 80, 50), empty_content()));
     ctx.ui()
         .set_window_options(&owner, WindowOption::NO_TITLE | WindowOption::NO_RESIZE | WindowOption::NO_PADDING)

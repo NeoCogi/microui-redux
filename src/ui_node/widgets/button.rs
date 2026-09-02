@@ -63,7 +63,7 @@ pub enum ButtonContent {
 }
 
 impl crate::LeafWidget for Button {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+    fn measure(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         self.preferred_size_widget(style, atlas, constraints)
     }
 }
@@ -173,7 +173,7 @@ impl Button {
     }
 
     /// Measures the label and optional visual content.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+    fn preferred_size_widget(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         match &self.content {
             ButtonContent::Text { label, icon } => {
                 let visual = icon.map(|icon| atlas.get_icon_size(icon));
@@ -202,12 +202,12 @@ impl Button {
             // allocation. An unframed button asks for only the role's stretchable center payload.
             ctx.draw_appearance_center(AppearanceRole::Button, rect);
         }
-        let font = ctx.style().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font_choice(self.font);
         match &self.content {
             ButtonContent::Text { label, icon } => {
                 // Text/icon buttons use atlas icon metrics when placing the inline visual.
                 let visual_size = icon.map(|icon| ctx.atlas().get_icon_size(icon));
-                let placement = place_inline_content(rect, ctx.style(), label, visual_size);
+                let placement = place_inline_content(rect, ctx.skin(), label, visual_size);
                 if !label.is_empty() {
                     ctx.draw_control_text_with_font(font, label, placement.text, AppearanceRole::Button, self.opt);
                 }
@@ -218,7 +218,7 @@ impl Button {
             }
             ButtonContent::Image { label, image } => {
                 let visual_size = image.map(TextureId::size);
-                let placement = place_inline_content(rect, ctx.style(), label, visual_size);
+                let placement = place_inline_content(rect, ctx.skin(), label, visual_size);
                 if !label.is_empty() {
                     ctx.draw_control_text_with_font(font, label, placement.text, AppearanceRole::Button, self.opt);
                 }
@@ -233,7 +233,7 @@ impl Button {
                 let placement = if visual_size.is_some() {
                     place_scaled_visual_content(rect, visual_size)
                 } else {
-                    place_inline_content(rect, ctx.style(), label, visual_size)
+                    place_inline_content(rect, ctx.skin(), label, visual_size)
                 };
                 if !label.is_empty() {
                     ctx.draw_control_text_with_font(font, label, placement.text, AppearanceRole::Button, self.opt);

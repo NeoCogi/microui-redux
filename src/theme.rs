@@ -45,8 +45,8 @@ pub use crate::render::{Color, color};
 pub use icons::ThemeIcons;
 #[cfg(feature = "theme-json")]
 pub use loader::{LoadedTheme, THEME_SCHEMA_VERSION, ThemeLoadError};
-pub use palette::ControlColor;
+pub use palette::FlatPalette;
 pub use roles::{AppearanceRole, VisualState};
-pub use style::{Style, WindowChromeLayout};
+pub use style::{Skin, SkinEffects, SkinFonts, SkinMetrics, SkinResources, WindowChromeLayout, WindowChromeSkin};
 pub use tables::{RoleTable, StateTable};
 pub use typography::{FontChoice, FontRole};

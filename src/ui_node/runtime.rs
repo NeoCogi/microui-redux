@@ -45,7 +45,7 @@ use crate::input::InputSnapshot;
 use crate::math::RectExt;
 // Re-exported into the private paint implementation and runtime tests through `super::*`.
 use crate::render::DisplayList;
-use crate::{Constraints, Dimensioni, MouseButton, Recti, Style, UNCLIPPED_RECT, Vec2i};
+use crate::{Constraints, Dimensioni, MouseButton, Recti, Skin, UNCLIPPED_RECT, Vec2i};
 #[cfg(test)]
 use std::cell::Cell;
 
@@ -127,13 +127,13 @@ impl UiRuntime {
     /// Measures one persistent root node for auto-size without introducing a parallel projection.
     ///
     /// Root chrome owns the conversion from application constraints to the final outer extent.
-    pub(crate) fn measure_tree_root(&mut self, root: &mut Node, style: &Style, atlas: &crate::AtlasHandle, constraints: Constraints) -> Dimensioni {
+    pub(crate) fn measure_tree_root(&mut self, root: &mut Node, style: &Skin, atlas: &crate::AtlasHandle, constraints: Constraints) -> Dimensioni {
         root.synchronize_measurement_invalidation();
         self.measure_node(root, style, atlas, constraints)
     }
 
     /// Lays out one persistent root node at its authoritative screen-space rectangle.
-    pub(crate) fn layout_tree_root(&mut self, root: &mut Node, style: &Style, atlas: crate::AtlasHandle, outer: Recti, viewport: Recti) {
+    pub(crate) fn layout_tree_root(&mut self, root: &mut Node, style: &Skin, atlas: crate::AtlasHandle, outer: Recti, viewport: Recti) {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.tree_layouts += 1);
         root.synchronize_measurement_invalidation();
@@ -147,7 +147,7 @@ impl UiRuntime {
     }
 
     /// Updates one persistent root node and its eligible descendants.
-    pub(crate) fn update_tree_root(&mut self, root: &mut Node, style: &Style, atlas: crate::AtlasHandle, input: InputSnapshot) {
+    pub(crate) fn update_tree_root(&mut self, root: &mut Node, style: &Skin, atlas: crate::AtlasHandle, input: InputSnapshot) {
         // Update is parent-first and consumes at most one event previously routed to one identity.
         self.update_node_ref(root, self.root_transform, style, atlas, input);
         // Topology may change during update; remove identities whose retained path no longer
@@ -192,7 +192,7 @@ impl UiRuntime {
     pub(crate) fn route_captured_pointer_input_event(
         &mut self,
         roots: &mut [Node],
-        style: &Style,
+        style: &Skin,
         mouse_buttons: MouseButton,
         event: &UiInputEvent,
     ) -> Option<bool> {
@@ -202,7 +202,7 @@ impl UiRuntime {
     }
 
     /// Routes keyboard or text input directly to the current valid focus owner.
-    pub(crate) fn route_focus_input_event(&mut self, roots: &mut [Node], style: &Style, event: &UiInputEvent) -> bool {
+    pub(crate) fn route_focus_input_event(&mut self, roots: &mut [Node], style: &Skin, event: &UiInputEvent) -> bool {
         self.input_router.route_focus_input_event(roots, self.root_transform, style, event)
     }
 
@@ -220,7 +220,7 @@ impl UiRuntime {
     pub(crate) fn route_input_event_to_node_ref(
         &mut self,
         node: &mut Node,
-        style: &Style,
+        style: &Skin,
         event: &UiInputEvent,
     ) -> Option<(RuntimeNodeId, input_router::RouteResult)> {
         self.input_router.route_input_event_to_node_ref(node, self.root_transform, style, event)

@@ -38,7 +38,7 @@ use microui_redux::prelude::{
 };
 use microui_redux::{
     color, rect, AtlasHandle, AtlasSource, AtlasUploadError, CharEntry, Constraints, Context, Disclosure, DisclosureParameters, FontChoice, FontEntry, Grid,
-    GridParameters, ImageError, Linear, LinearParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SourceFormat, Style, SurfaceMutationError,
+    GridParameters, ImageError, Linear, LinearParameters, ScrollArea, ScrollAreaOption, ScrollAreaParameters, SourceFormat, Skin, SurfaceMutationError,
     TextureError, TextureId, ThemeIcons,
 };
 
@@ -151,24 +151,24 @@ fn downstream_style_and_theme_are_constructed_from_atlas_capabilities() {
     let mut context = context();
     let atlas = context.atlas();
     let icons = ThemeIcons::from_atlas(&atlas);
-    let mut style = Style::from_atlas(&atlas);
+    let mut style = Skin::from_atlas(&atlas);
 
     // Public lookups and semantic construction must agree on the exact opaque capabilities.
-    assert_eq!(style.font, atlas.font_id("body").unwrap());
+    assert_eq!(style.resources.fonts.body, atlas.font_id("body").unwrap());
     assert_eq!(icons.close, atlas.icon_id("close").unwrap());
-    assert_eq!(FontChoice::id(style.font).resolve(&style), style.font);
+    assert_eq!(FontChoice::id(style.resources.fonts.body).resolve(&style), style.resources.fonts.body);
 
     // Scalar customization preserves those IDs; Context accepts the complete style by value.
-    style.padding = 9;
-    context.set_style(style);
-    assert_eq!(context.style().padding, 9);
-    assert_eq!(context.style().icons, icons);
+    style.metrics.padding = 9;
+    context.set_skin(style);
+    assert_eq!(context.skin().metrics.padding, 9);
+    assert_eq!(context.skin().resources.icons, icons);
 
     // A style from separately reconstructed identical metadata carries a different AtlasId and is
     // rejected at the Context mutation boundary rather than aliasing same-slot resources.
     let foreign_context = context_with_state::<()>();
-    let foreign_style = foreign_context.style().clone();
-    let foreign_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| context.set_style(foreign_style)));
+    let foreign_style = foreign_context.skin().clone();
+    let foreign_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| context.set_skin(foreign_style)));
     assert!(foreign_result.is_err());
 }
 
@@ -387,7 +387,7 @@ impl Widget for ExternalLeaf {
 }
 
 impl LeafWidget for ExternalLeaf {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn measure(&self, _style: &Skin, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(12, 9)
     }
 }

@@ -300,7 +300,7 @@ impl TextArea {
     }
 
     /// Measures intrinsic editable text using the wrapping width supplied by ScrollArea.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+    fn preferred_size_widget(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         // Resolve word wrapping against a bounded viewport width while leaving unwrapped content
         // intrinsically wide enough to create horizontal overflow.
         let font = style.resolve_font_choice(self.font);
@@ -334,7 +334,7 @@ impl TextArea {
             self.interaction.preferred_x = None;
             self.reset_preferred_x = false;
         }
-        let font = ctx.style().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font_choice(self.font);
         let outcome = textarea_update(ctx, input, self, font);
 
         // Emit complete immutable snapshots after the semantic update has committed cursor and text.
@@ -353,7 +353,7 @@ impl TextArea {
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
         // ScrollArea has already applied translation and clipping before this child paint phase, so
         // the editor records no offset arithmetic or scrollbar operations.
-        let font = ctx.style().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font_choice(self.font);
         textarea_paint(ctx, self, font);
     }
 }
@@ -709,7 +709,7 @@ impl Widget for TextArea {
 
 impl LeafWidget for TextArea {
     /// Measures intrinsic editable text content for the containing scroll surface.
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+    fn measure(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         // Delegate to the phase-independent measurement helper used by composition and tests.
         self.preferred_size_widget(style, atlas, constraints)
     }
@@ -719,7 +719,7 @@ impl LeafWidget for TextArea {
 mod tests {
     use super::*;
     use crate::input::Input;
-    use crate::test_support::{test_atlas, test_style};
+    use crate::test_support::{test_atlas, test_skin};
     use crate::ui_node::UiRuntime;
     use crate::UNCLIPPED_RECT;
 
@@ -756,7 +756,7 @@ mod tests {
         // allocation and focused interaction snapshot. Supplying bounds lets wrapping regressions
         // exercise the same update path without mounting the surrounding scroll area.
         let atlas = test_atlas();
-        let style = test_style(&atlas);
+        let style = test_skin(&atlas);
         let mut modifiers = Modifiers::NONE;
         for event in &input {
             if let UiInputEvent::Key { event } = event {
@@ -822,7 +822,7 @@ mod tests {
         let mut text_area = TextArea::new_editor(TextAreaParameters::new("_ __").wrap(TextWrap::Word));
         text_area.set_cursor(0);
         let atlas = test_atlas();
-        let style = test_style(&atlas);
+        let style = test_skin(&atlas);
         let bounds = Recti::new(0, 0, 16, 30);
         let down = UiInputEvent::Key {
             event: KeyEvent::pressed(Key::ArrowDown, Modifiers::NONE),
@@ -930,7 +930,7 @@ mod tests {
         // Resolve both stored affinities against the actual wrapped layout, proving that equal
         // public byte cursors paint and reveal on the two intended visual lines.
         let atlas = test_atlas();
-        let style = test_style(&atlas);
+        let style = test_skin(&atlas);
         let font = style.resolve_font_choice(from_continuation.font);
         let layout = textarea_layout(bounds, &atlas, &from_continuation, font);
         assert_eq!(line_index_for_cursor(&layout.lines, 2, from_continuation.interaction.caret_affinity), 1);
@@ -1010,11 +1010,10 @@ mod tests {
         let document = (0..20).map(|index| format!("line {index}")).collect::<Vec<_>>().join("\n");
         let (text_area, mut root) = TextArea::create(TextAreaParameters::new(document.clone()).scroll_options(ScrollAreaOption::ENABLE_SCROLL));
         let atlas = test_atlas();
-        let style = Style {
-            padding: 0,
-            scrollbar_size: 10,
-            ..test_style(&atlas)
-        };
+        let style = test_skin(&atlas).with_metrics(|metrics| {
+            metrics.padding = 0;
+            metrics.scrollbar_size = 10;
+        });
         let viewport = Recti::new(0, 0, 100, 60);
         let mut runtime = UiRuntime::new();
         let mut input = Input::default();
@@ -1087,11 +1086,10 @@ mod tests {
         let document = (0..20).map(|index| format!("line {index}")).collect::<Vec<_>>().join("\n");
         let (text_area, mut root) = TextArea::create(TextAreaParameters::new(document).scroll_options(ScrollAreaOption::ENABLE_SCROLL));
         let atlas = test_atlas();
-        let style = Style {
-            padding: 0,
-            scrollbar_size: 10,
-            ..test_style(&atlas)
-        };
+        let style = test_skin(&atlas).with_metrics(|metrics| {
+            metrics.padding = 0;
+            metrics.scrollbar_size = 10;
+        });
         let viewport = Recti::new(0, 0, 100, 60);
         let mut runtime = UiRuntime::new();
         runtime.begin_update();
@@ -1124,11 +1122,10 @@ mod tests {
         let document = (0..20).map(|index| format!("line {index}"));
         let (text_area, mut root) = TextArea::create(TextAreaParameters::new(document.collect::<Vec<_>>().join("\n")));
         let atlas = test_atlas();
-        let style = Style {
-            padding: 0,
-            scrollbar_size: 10,
-            ..test_style(&atlas)
-        };
+        let style = test_skin(&atlas).with_metrics(|metrics| {
+            metrics.padding = 0;
+            metrics.scrollbar_size = 10;
+        });
         let viewport = Recti::new(0, 0, 100, 60);
         let mut runtime = UiRuntime::new();
 

@@ -46,7 +46,7 @@ pub struct ListBoxParameters {
 }
 
 impl crate::LeafWidget for ListBox {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+    fn measure(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         self.preferred_size_widget(style, atlas, constraints)
     }
 }
@@ -114,7 +114,7 @@ impl ListBox {
     }
 
     /// Measures list-box inline label and optional image.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn preferred_size_widget(&self, style: &Skin, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         let visual = self.image.map(TextureId::size);
         inline_content_size(style, atlas, self.font, &self.label, visual)
     }
@@ -126,9 +126,9 @@ impl ListBox {
             ctx.draw_appearance_center(AppearanceRole::Button, rect);
         }
         let visual_size = self.image.map(TextureId::size);
-        let placement = place_inline_content(rect, ctx.style(), &self.label, visual_size);
+        let placement = place_inline_content(rect, ctx.skin(), &self.label, visual_size);
         if !self.label.is_empty() {
-            let font = ctx.style().resolve_font_choice(self.font);
+            let font = ctx.skin().resolve_font_choice(self.font);
             ctx.draw_control_text_with_font(font, &self.label, placement.text, AppearanceRole::Button, self.opt);
         }
         if let (Some(image), Some(visual)) = (self.image, placement.visual) {

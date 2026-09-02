@@ -1,74 +1,86 @@
 //
-// Copyright 2023-Present (c) Raja Lehtihet & Wael El Oraiby
+// Copyright 2026-Present (c) Raja Lehtihet & Wael El Oraiby
 //
 // Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are met:
-//
-// 1. Redistributions of source code must retain the above copyright notice,
-// this list of conditions and the following disclaimer.
-//
-// 2. Redistributions in binary form must reproduce the above copyright notice,
-// this list of conditions and the following disclaimer in the documentation
-// and/or other materials provided with the distribution.
-//
-// 3. Neither the name of the copyright holder nor the names of its contributors
-// may be used to endorse or promote products derived from this software without
-// specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-// POSSIBILITY OF SUCH DAMAGE.
+// modification, are permitted provided that the conditions in LICENSE are met.
 //
 
-//! Semantic color roles used by built-in controls.
+//! Atlas-independent flat colors consumed while constructing a resolved [`crate::Skin`].
 
-#[derive(PartialEq, Copy, Clone)]
-#[repr(u32)]
-/// Identifiers for each of the built-in style colors.
-pub enum ControlColor {
-    /// Number of color entries in [`crate::Style::colors`].
-    Max = 12,
-    /// Thumb of scrollbars.
-    ScrollThumb = 11,
-    /// Base frame of scrollbars.
-    ScrollBase = 10,
-    /// Base color while the pointer hovers the widget.
-    BaseHover = 9,
-    /// Default base color.
-    Base = 8,
-    /// Button color while the pointer hovers the widget.
-    ButtonHover = 7,
-    /// Default button color.
-    Button = 6,
-    /// Panel background color.
-    PanelBG = 5,
-    /// Window title text color.
-    TitleText = 4,
-    /// Window title background color.
-    TitleBG = 3,
-    /// Window background color.
-    WindowBG = 2,
-    /// Outline/border color.
-    Border = 1,
-    /// Default text color.
-    Text = 0,
+use crate::Color;
+
+/// Named flat colors used as inputs to visual-catalog construction.
+///
+/// A palette is an authoring value, not retained runtime skin state. Compiling it eagerly into
+/// complete [`crate::Visual`] values avoids the former shadow color array that could disagree with
+/// what widgets actually painted.
+#[derive(Copy, Clone)]
+pub struct FlatPalette {
+    /// Ordinary control text and semantic glyph color.
+    pub text: Color,
+    /// Generic flat frame and control border color.
+    pub border: Color,
+    /// Window and dialog client-area background.
+    pub window_background: Color,
+    /// Passive window title background.
+    pub title_background: Color,
+    /// Window title and caption foreground.
+    pub title_foreground: Color,
+    /// Panel and scroll-viewport background.
+    pub panel_background: Color,
+    /// Ordinary raised-control fill.
+    pub button: Color,
+    /// Hovered raised-control fill.
+    pub button_hovered: Color,
+    /// Ordinary recessed-control fill.
+    pub input: Color,
+    /// Hovered recessed-control fill.
+    pub input_hovered: Color,
+    /// Scrollbar track fill.
+    pub scrollbar_track: Color,
+    /// Scrollbar thumb fill.
+    pub scrollbar_thumb: Color,
+    /// Focused control fill and outline accent.
+    pub focus: Color,
+    /// Active window frame and title accent.
+    pub window_focus: Color,
+    /// Menu text and marker foreground.
+    pub menu_foreground: Color,
+    /// Menu bar and popup background.
+    pub menu_background: Color,
+    /// Disabled control and client-area background.
+    pub disabled_background: Color,
+    /// Disabled body, menu, and control foreground.
+    pub disabled_foreground: Color,
+    /// Disabled title and caption foreground.
+    pub disabled_title_foreground: Color,
 }
 
-impl ControlColor {
-    /// Promotes the enum to the hover variant when relevant.
-    pub fn hover(&mut self) {
-        *self = match self {
-            Self::Base => Self::BaseHover,
-            Self::Button => Self::ButtonHover,
-            _ => *self,
+impl Default for FlatPalette {
+    /// Returns the crate's neutral dark flat-skin recipe.
+    fn default() -> Self {
+        // Every value is named at construction, preventing positional palette indices from leaking
+        // into loaders, editors, or widget paint code.
+        Self {
+            text: Color { r: 230, g: 230, b: 230, a: 255 },
+            border: Color { r: 25, g: 25, b: 25, a: 255 },
+            window_background: Color { r: 50, g: 50, b: 50, a: 255 },
+            title_background: Color { r: 25, g: 25, b: 25, a: 255 },
+            title_foreground: Color { r: 240, g: 240, b: 240, a: 255 },
+            panel_background: Color { r: 0, g: 0, b: 0, a: 0 },
+            button: Color { r: 75, g: 75, b: 75, a: 255 },
+            button_hovered: Color { r: 95, g: 95, b: 95, a: 255 },
+            input: Color { r: 30, g: 30, b: 30, a: 255 },
+            input_hovered: Color { r: 35, g: 35, b: 35, a: 255 },
+            scrollbar_track: Color { r: 43, g: 43, b: 43, a: 255 },
+            scrollbar_thumb: Color { r: 30, g: 30, b: 30, a: 255 },
+            focus: Color { r: 0, g: 120, b: 215, a: 255 },
+            window_focus: Color { r: 0, g: 120, b: 215, a: 255 },
+            menu_foreground: Color { r: 230, g: 230, b: 230, a: 255 },
+            menu_background: Color { r: 50, g: 50, b: 50, a: 255 },
+            disabled_background: Color { r: 50, g: 50, b: 50, a: 255 },
+            disabled_foreground: Color { r: 230, g: 230, b: 230, a: 255 },
+            disabled_title_foreground: Color { r: 240, g: 240, b: 240, a: 255 },
         }
     }
 }

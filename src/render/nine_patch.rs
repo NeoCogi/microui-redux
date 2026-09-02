@@ -29,7 +29,7 @@
 
 //! Concrete three-by-three patch descriptions and destination geometry.
 //!
-//! A patch is deliberately a small value rather than an erased paint callback. Style code can
+//! A patch is deliberately a small value rather than an erased paint callback. Skin code can
 //! therefore describe a background with nine typed cells, the display list can retain that exact
 //! description, and the renderer can expand it without consulting a widget or theme registry.
 
@@ -204,7 +204,7 @@ impl NinePatchImage {
     /// Creates one explicitly sliced atlas-image description.
     pub const fn new(icon: IconId, source_insets: SliceInsets, tint: Color) -> Self {
         // Retain the capability rather than raw UV coordinates. Atlas ownership validation and
-        // rectangle lookup can then remain centralized at Style and renderer boundaries.
+        // rectangle lookup can then remain centralized at Skin and renderer boundaries.
         Self { icon, source_insets, tint }
     }
 }

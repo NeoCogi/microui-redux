@@ -45,7 +45,7 @@ pub struct ColorSwatchParameters {
 }
 
 impl crate::LeafWidget for ColorSwatch {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+    fn measure(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         self.preferred_size_widget(style, atlas, constraints)
     }
 }
@@ -116,8 +116,8 @@ impl ColorSwatch {
     }
 
     /// Measures a square-ish color swatch with a text-friendly default height.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
-        let padding = style.padding.max(0);
+    fn preferred_size_widget(&self, style: &Skin, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+        let padding = style.metrics.padding.max(0);
         let font = style.resolve_font_choice(self.font);
         let label_width = if self.label.is_empty() {
             0
@@ -136,7 +136,7 @@ impl ColorSwatch {
         let rect = ctx.local_rect();
         ctx.draw_rect(rect, self.fill);
         if !self.label.is_empty() {
-            let font = ctx.style().resolve_font_choice(self.font);
+            let font = ctx.skin().resolve_font_choice(self.font);
             ctx.draw_control_text_with_font(font, self.label.as_str(), rect, AppearanceRole::Button, self.opt);
         }
     }

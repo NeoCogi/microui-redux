@@ -59,7 +59,7 @@ use crate::math::RectExt;
 use crate::render::{DisplayList, Painter, TextureId};
 use crate::input::{Modifiers, MouseButton};
 use crate::{KeyboardAction, KeyboardBehavior, WidgetOption};
-use crate::theme::{AppearanceRole, Color, Style, VisualState};
+use crate::theme::{AppearanceRole, Color, Skin, VisualState};
 use crate::ui_node::text_layout::control_text_position_with_font;
 
 use super::UiInputEvent;
@@ -103,8 +103,8 @@ struct WidgetContextData<'a> {
     content_rect: Recti,
     /// Effective screen-space clip derived by retained traversal.
     screen_clip: Recti,
-    /// Style used by built-in widget layout and paint helpers.
-    style: &'a Style,
+    /// Skin used by built-in widget layout and paint helpers.
+    style: &'a Skin,
     /// Atlas used for text and icon metrics.
     atlas: &'a AtlasHandle,
     /// Whether the routed pointer is currently over this widget.
@@ -122,7 +122,7 @@ impl<'a> WidgetContextData<'a> {
     fn new(
         content_rect: Recti,
         screen_clip: Recti,
-        style: &'a Style,
+        style: &'a Skin,
         atlas: &'a AtlasHandle,
         hovered: bool,
         focused: bool,
@@ -180,7 +180,7 @@ impl<'a> WidgetUpdateCtx<'a> {
     pub(crate) fn new_with_interaction(
         rect: Recti,
         screen_clip: Recti,
-        style: &'a Style,
+        style: &'a Skin,
         atlas: &'a AtlasHandle,
         in_hover_root: bool,
         hovered: bool,
@@ -210,7 +210,7 @@ impl<'a> WidgetUpdateCtx<'a> {
     pub(crate) fn new_with_content_geometry(
         content_rect: Recti,
         screen_clip: Recti,
-        style: &'a Style,
+        style: &'a Skin,
         atlas: &'a AtlasHandle,
         in_hover_root: bool,
         hovered: bool,
@@ -286,8 +286,8 @@ impl<'a> WidgetUpdateCtx<'a> {
         self.modifiers
     }
 
-    /// Returns this widget's resolved style for update logic.
-    pub fn style(&self) -> &Style {
+    /// Returns this widget's resolved skin for update logic.
+    pub fn skin(&self) -> &Skin {
         self.common.style
     }
 
@@ -327,7 +327,7 @@ impl<'a> WidgetPaintCtx<'a> {
         content_rect: Recti,
         display_list: &'a mut DisplayList,
         screen_clip: Recti,
-        style: &'a Style,
+        style: &'a Skin,
         atlas: &'a AtlasHandle,
         enabled: bool,
         hovered: bool,
@@ -415,8 +415,8 @@ impl<'a> WidgetPaintCtx<'a> {
         Painter::for_widget(&mut *self.display_list, screen_content_bounds, screen_clip)
     }
 
-    /// Returns this widget's resolved style.
-    pub fn style(&self) -> &Style {
+    /// Returns this widget's resolved skin.
+    pub fn skin(&self) -> &Skin {
         self.common.style
     }
 
@@ -546,7 +546,7 @@ mod tests {
     #[test]
     fn paint_visual_state_uses_enabled_hover_focus_and_visible_capture() {
         let atlas = crate::test_support::test_atlas();
-        let style = crate::test_support::test_style(&atlas);
+        let style = crate::test_support::test_skin(&atlas);
         let bounds = Recti::new(0, 0, 20, 10);
         let mut list = DisplayList::new();
 

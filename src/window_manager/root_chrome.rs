@@ -39,7 +39,7 @@ use std::fmt;
 
 use crate::math::RectExt;
 use crate::render::Painter;
-use crate::{AppearanceRole, AtlasHandle, ControlColor, Dimensioni, Recti, Style, VisualState, WidgetEventPortHandle, WindowChromeLayout, WindowOption};
+use crate::{AppearanceRole, AtlasHandle, Dimensioni, Recti, Skin, VisualState, WidgetEventPortHandle, WindowChromeLayout, WindowOption};
 
 /// Active pointer gesture owned by manager-rendered window chrome.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -257,12 +257,12 @@ pub(super) enum RootFrameKind {
 
 impl RootFrameKind {
     /// Returns the structural client inset associated with this frame family.
-    fn structural_insets(self, style: &Style) -> crate::SliceInsets {
+    fn structural_insets(self, style: &Skin) -> crate::SliceInsets {
         // Windows and dialogs retain the dedicated resize-border metric because their decorative
         // corner artwork may be much larger. Popups do not resize, so their semantic patch insets
         // directly define both the visible black outline and the content rectangle behind it.
         match self {
-            Self::Window | Self::Dialog => style.window_border.normalized(),
+            Self::Window | Self::Dialog => style.metrics.window_border.normalized(),
             Self::Popup => style.appearance(AppearanceRole::MenuPopup, VisualState::Normal).insets.normalized(),
         }
     }
@@ -346,7 +346,7 @@ pub(super) fn root_chrome_geometry(
     name: &str,
     options: WindowOption,
     frame_kind: RootFrameKind,
-    style: &Style,
+    style: &Skin,
     atlas: &AtlasHandle,
 ) -> RootChromeGeometry {
     // Application-body insets belong to root chrome rather than the descendant layout tree.
@@ -354,7 +354,7 @@ pub(super) fn root_chrome_geometry(
     let content_insets = if options.intersects(WindowOption::NO_PADDING) {
         crate::SliceInsets::ZERO
     } else {
-        style.window_content_insets.normalized()
+        style.metrics.window_content_insets.normalized()
     };
     let title_height = root_titlebar_height(style, atlas);
     let frame = if options.intersects(WindowOption::FRAME) {
@@ -369,7 +369,7 @@ pub(super) fn root_chrome_geometry(
     let vertical_content_extent = content_insets.vertical_extent();
     // Title text and caption controls still use the ordinary widget metric for internal breathing
     // room; changing application-body insets must not collapse title composition.
-    let title_padding_extent = style.padding.max(0).saturating_mul(2);
+    let title_padding_extent = style.metrics.padding.max(0).saturating_mul(2);
     let menu_width = menu_intrinsic.map(|size| size.width.max(0)).unwrap_or(0);
     let menu_height = menu_intrinsic.map(|size| size.height.max(0)).unwrap_or(0);
     let auto_width = options.intersects(WindowOption::AUTO_WIDTH);
@@ -382,8 +382,8 @@ pub(super) fn root_chrome_geometry(
         let close_count = i32::from(!options.intersects(WindowOption::NO_CLOSE));
         let trailing_count =
             i32::from(options.intersects(WindowOption::MINIMIZE_BUTTON)).saturating_add(i32::from(options.intersects(WindowOption::MAXIMIZE_BUTTON)));
-        let caption_extent = root_caption_extent(style.window_chrome_layout, title_height);
-        let caption_width = match style.window_chrome_layout {
+        let caption_extent = root_caption_extent(style.chrome.layout, title_height);
+        let caption_width = match style.chrome.layout {
             WindowChromeLayout::TrailingButtons => caption_extent.saturating_mul(close_count.saturating_add(trailing_count)),
             WindowChromeLayout::ClassicMac => {
                 // Centered titles reserve equal space on both sides using the larger control bank.
@@ -393,7 +393,7 @@ pub(super) fn root_chrome_geometry(
             }
         };
         let title_minimum_width = atlas
-            .get_text_size(style.title_font, name)
+            .get_text_size(style.resources.fonts.title, name)
             .width
             .saturating_add(caption_width)
             .saturating_add(title_padding_extent);
@@ -430,9 +430,9 @@ pub(super) fn root_chrome_geometry(
     let title =
         (!options.intersects(WindowOption::NO_TITLE)).then(|| Recti::new(client.x, client.y, client.width.max(0), title_height.min(client.height.max(0))));
     let (close, maximize, minimize) = if let Some(title) = title {
-        let extent = root_caption_extent(style.window_chrome_layout, title.height).min(title.height.max(0));
+        let extent = root_caption_extent(style.chrome.layout, title.height).min(title.height.max(0));
         let button_y = title.y.saturating_add(title.height.saturating_sub(extent).max(0) / 2);
-        match style.window_chrome_layout {
+        match style.chrome.layout {
             WindowChromeLayout::TrailingButtons => {
                 // Conventional chrome allocates close/maximize/minimize from the trailing edge.
                 let mut trailing_x = title.x.saturating_add(title.width);
@@ -491,6 +491,7 @@ pub(super) fn root_chrome_geometry(
         let right_thickness = frame.right.max(1).min(outer.width.max(0));
         let bottom_thickness = frame.bottom.max(1).min(outer.height.max(0));
         let corner_size = style
+            .metrics
             .scrollbar_size
             .max(right_thickness)
             .max(bottom_thickness)
@@ -594,21 +595,21 @@ fn root_title_text_rect(title: Recti, geometry: RootChromeGeometry, layout: Wind
 }
 
 /// Returns a title height large enough for the configured title font and padding.
-fn root_titlebar_height(style: &Style, atlas: &AtlasHandle) -> i32 {
+fn root_titlebar_height(style: &Skin, atlas: &AtlasHandle) -> i32 {
     // The style value acts as a minimum rather than allowing text to escape a too-short title.
-    let font_height = atlas.get_font_height(style.title_font) as i32;
-    let vertical_padding = (style.padding.max(0) / 2).max(1);
+    let font_height = atlas.get_font_height(style.resources.fonts.title) as i32;
+    let vertical_padding = (style.metrics.padding.max(0) / 2).max(1);
     let text_height = font_height.saturating_add(vertical_padding.saturating_mul(2));
-    style.title_height.max(text_height)
+    style.metrics.title_height.max(text_height)
 }
 
 /// Resolves window, dialog, or popup artwork while preserving each family's frame geometry.
-fn root_frame_patch(style: &Style, frame_kind: RootFrameKind, active: bool, state: VisualState) -> crate::NinePatch {
+fn root_frame_patch(style: &Skin, frame_kind: RootFrameKind, active: bool, state: VisualState) -> crate::NinePatch {
     // Each root kind's passive frame artwork is the visual corner-span authority for both of its
     // activation variants. Keeping the ordinary, dialog, and popup families independent allows a
     // classic theme to combine long L-shaped window corners, a thick dialog outline, and a compact
     // black transient frame without geometry or artwork leaking between them.
-    // Structural client and resize thickness lives in Style::window_border, so long transparent L
+    // Structural client and resize thickness lives in Skin::window_border, so long transparent L
     // corners do not enlarge the client inset. Matching active visual insets still prevents focus
     // changes from moving or scaling the corner art itself.
     let (passive_role, active_role) = match frame_kind {
@@ -626,7 +627,7 @@ pub(super) fn record_root_background(
     display_list: &mut crate::render::DisplayList,
     viewport: Recti,
     rect: Recti,
-    style: &Style,
+    style: &Skin,
     frame_kind: RootFrameKind,
     active_frame: bool,
     enabled: bool,
@@ -653,7 +654,7 @@ pub(super) fn record_root_overlay(
     options: WindowOption,
     name: &str,
     geometry: RootChromeGeometry,
-    style: &Style,
+    style: &Skin,
     atlas: &AtlasHandle,
     frame_kind: RootFrameKind,
     active: bool,
@@ -694,28 +695,28 @@ pub(super) fn record_root_overlay(
             title,
             style.appearance(role, chrome_state(visual.part_state(RootChromePart::Title))),
         );
-        let text = root_title_text_rect(title, geometry, style.window_chrome_layout);
+        let text = root_title_text_rect(title, geometry, style.chrome.layout);
         if text.width > 0 && text.height > 0 {
             let state = chrome_state(visual.part_state(RootChromePart::Title));
             let color = style.foreground(role, state);
-            let options = match style.window_chrome_layout {
+            let options = match style.chrome.layout {
                 WindowChromeLayout::TrailingButtons => crate::WidgetOption::NONE,
                 WindowChromeLayout::ClassicMac => crate::WidgetOption::ALIGN_CENTER,
             };
-            let position = crate::ui_node::text_layout::control_text_position_with_font(style, atlas, style.title_font, name, text, options);
-            if chrome_active && style.window_chrome_layout == WindowChromeLayout::ClassicMac {
+            let position = crate::ui_node::text_layout::control_text_position_with_font(style, atlas, style.resources.fonts.title, name, text, options);
+            if chrome_active && style.chrome.layout == WindowChromeLayout::ClassicMac {
                 // Platinum interrupts the active racing stripes with a flat label field. Paint only
                 // the measured title span plus compact horizontal breathing room so stripes remain
                 // visible on both sides and long titles still clip inside their symmetric reserve.
-                let measured = atlas.get_text_size(style.title_font, name);
+                let measured = atlas.get_text_size(style.resources.fonts.title, name);
                 let desired_label = Recti::new(position.x.saturating_sub(4), title.y, measured.width.saturating_add(8), title.height);
                 if let Some(label) = desired_label.positive_intersection(text) {
-                    painter.fill_rect(label, style.colors[ControlColor::TitleBG as usize]);
+                    painter.fill_rect(label, style.chrome.title_backdrop);
                 }
             }
-            painter.with_clip(text, |painter| painter.text(style.title_font, name, position, color));
+            painter.with_clip(text, |painter| painter.text(style.resources.fonts.title, name, position, color));
         }
-        if chrome_active || style.window_chrome_layout != WindowChromeLayout::ClassicMac {
+        if chrome_active || style.chrome.layout != WindowChromeLayout::ClassicMac {
             // Classic Mac OS removes caption boxes from passive titles rather than presenting them
             // as disabled heavy frames. Conventional layouts retain their historical visible faces.
             for button in [RootCaptionButton::Minimize, RootCaptionButton::Maximize, RootCaptionButton::Close] {
@@ -743,7 +744,7 @@ fn paint_caption_button(
     painter: &mut Painter<'_>,
     rect: Recti,
     button: RootCaptionButton,
-    style: &Style,
+    style: &Skin,
     atlas: &AtlasHandle,
     window_active: bool,
     window_enabled: bool,
@@ -771,7 +772,7 @@ fn paint_caption_button(
     let Some(content) = crate::ui_node::frame::paint_internal_frame(painter, rect, style.appearance(role, state)) else {
         return;
     };
-    if style.window_chrome_layout == WindowChromeLayout::ClassicMac {
+    if style.chrome.layout == WindowChromeLayout::ClassicMac {
         // Platinum caption PNGs contain their complete period-specific box marks. Skipping the
         // generic semantic glyph layer prevents Windows-style X, underscore, and outlined-square
         // symbols from being superimposed on those compact controls.
@@ -801,8 +802,8 @@ fn paint_caption_button(
     let color = style.foreground(role, state);
     match button {
         RootCaptionButton::Close => {
-            // Close retains the atlas icon already required by every Style and test atlas.
-            painter.icon(style.icons.close, content, color);
+            // Close retains the atlas icon already required by every Skin and test atlas.
+            painter.icon(style.resources.icons.close, content, color);
         }
         RootCaptionButton::Minimize => {
             // A centered lower horizontal stroke supplies a deterministic flat fallback over either

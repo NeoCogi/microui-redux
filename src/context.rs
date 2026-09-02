@@ -40,7 +40,7 @@ use crate::window_manager::{LayerBinding, PopupHandle, SurfaceCreationError, Sur
 #[cfg(test)]
 use crate::window_manager::RootId;
 use crate::render::{CustomRenderArgs, CustomRenderHandle, CustomRenderRegistryError, FrameInfo, RenderError, Renderer, RendererBackend};
-use crate::{AtlasHandle, Dimensioni, ImageSource, KeyEvent, MouseButton, Node, Recti, Style, TextureError, TextureId};
+use crate::{AtlasHandle, Dimensioni, ImageSource, KeyEvent, MouseButton, Node, Recti, Skin, TextureError, TextureId};
 #[cfg(feature = "theme-json")]
 use crate::{LoadedTheme, ThemeLoadError};
 #[cfg(feature = "theme-json")]
@@ -268,10 +268,10 @@ impl<'a> Ui<'a> {
         self.window_manager.debug_active_popup_names()
     }
 
-    /// Returns the resolved UI style currently used by the owning context.
-    pub fn style(&self) -> &Style {
-        // The manager owns the resolved style used by layout, input presentation, and paint.
-        self.window_manager.style()
+    /// Returns the resolved UI skin currently used by the owning context.
+    pub fn skin(&self) -> &Skin {
+        // The manager owns the resolved skin used by layout, input presentation, and paint.
+        self.window_manager.skin()
     }
 }
 
@@ -352,10 +352,10 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         // The backend supplies the sole atlas; style construction mints every retained font and
         // icon capability from that exact allocation before WindowManager can retain them.
         let renderer = Renderer::new(backend);
-        let style = Style::from_atlas(&renderer.atlas());
+        let skin = Skin::from_atlas(&renderer.atlas());
         Self {
             renderer,
-            window_manager: WindowManager::new(style),
+            window_manager: WindowManager::new(skin),
             widget_event_dispatcher: crate::event::WidgetEventDispatcher::new(),
             #[cfg(test)]
             test_dimensions: Dimensioni::new(1, 1),
@@ -542,7 +542,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     }
 }
 
-// Style, backend callbacks, and renderer resources.
+// Skin, backend callbacks, and renderer resources.
 
 impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// Registers one backend-specific callback for retained custom-render nodes.
@@ -568,27 +568,27 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         self.renderer.unregister_custom_renderer(handle)
     }
 
-    /// Replaces the current UI style.
+    /// Replaces the current UI skin.
     ///
     /// Every font and icon capability must originate from this Context's atlas. Start from
-    /// `context.style().clone()` when changing scalar values, or use [`Style::from_atlas`] with the handle
+    /// `context.skin().clone()` when changing scalar values, or use [`Skin::from_atlas`] with the handle
     /// returned by [`Context::atlas`].
     ///
     /// # Panics
     ///
     /// Panics when any font, semantic icon, or appearance-image capability belongs to another
     /// atlas allocation.
-    pub fn set_style(&mut self, style: Style) {
-        // Style ownership includes fonts, semantic icons, and every image-backed nine-patch, so a
+    pub fn set_skin(&mut self, skin: Skin) {
+        // Skin ownership includes fonts, semantic icons, and every image-backed nine-patch, so a
         // single concrete check covers the complete immutable atlas resource vocabulary.
-        assert!(style.belongs_to(&self.renderer.atlas()), "style contains font or icon IDs from another atlas");
-        self.window_manager.set_style(style);
+        assert!(skin.belongs_to(&self.renderer.atlas()), "skin contains font or icon IDs from another atlas");
+        self.window_manager.set_skin(skin);
     }
 
     /// Replaces the renderer atlas and installs the matching loaded theme as one transaction.
     ///
-    /// The backend uploads the theme atlas before this Context publishes its new Style. If upload
-    /// fails, both the previous renderer atlas and previous Style remain active. Theme artwork is
+    /// The backend uploads the theme atlas before this Context publishes its new Skin. If upload
+    /// fails, both the previous renderer atlas and previous Skin remain active. Theme artwork is
     /// baked into that same atlas, so no secondary texture transaction is required.
     ///
     /// # Errors
@@ -598,27 +598,27 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     ///
     /// # Panics
     ///
-    /// Panics if any capability in the bundle's Style does not belong to its own atlas.
+    /// Panics if any capability in the bundle's Skin does not belong to its own atlas.
     #[cfg(feature = "theme-json")]
     pub fn set_theme(&mut self, theme: &LoadedTheme) -> Result<(), crate::AtlasUploadError> {
         let atlas = theme.atlas();
-        assert!(theme.style().belongs_to(&atlas), "theme style contains font or icon IDs from another atlas");
+        assert!(theme.skin().belongs_to(&atlas), "theme skin contains font or icon IDs from another atlas");
         // Renderer commits the backend texture and its CPU lookup cache first. Publishing the
-        // cloned Style last makes a returned error a complete no-op at Context level.
+        // cloned Skin last makes a returned error a complete no-op at Context level.
         self.renderer.replace_atlas(atlas)?;
-        self.window_manager.set_style(theme.style().clone());
+        self.window_manager.set_skin(theme.skin().clone());
         Ok(())
     }
 
-    /// Returns the resolved UI style currently used by this context.
-    pub fn style(&self) -> &Style {
-        self.window_manager.style()
+    /// Returns the resolved UI skin currently used by this context.
+    pub fn skin(&self) -> &Skin {
+        self.window_manager.skin()
     }
 
     /// Returns the immutable atlas capability supplied by this context's rendering backend.
     ///
     /// Applications use this handle to resolve named fonts/icons and to construct a compatible
-    /// [`Style`]. Frame execution and resource bookkeeping remain context-owned implementation
+    /// [`Skin`]. Frame execution and resource bookkeeping remain context-owned implementation
     /// details; custom GPU work continues through [`Context::register_custom_renderer`].
     pub fn atlas(&self) -> AtlasHandle {
         // AtlasHandle is a cheap shared capability. Returning a clone avoids exposing the internal
@@ -703,7 +703,7 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         // applications preload several bundles and choose one later without repeated file I/O.
         let definition = crate::theme::loader::ThemeDefinition::read(path.as_ref())?;
         let theme_atlas = definition.build_atlas(&self.renderer.atlas())?;
-        let base = Style::from_atlas(theme_atlas.atlas());
+        let base = Skin::from_atlas(theme_atlas.atlas());
         definition.install(theme_atlas, base)
     }
 }
@@ -1044,9 +1044,9 @@ mod theme_tests {
     fn set_theme_replaces_atlas_and_style_together() {
         let initial = test_atlas();
         let replacement = test_atlas();
-        let replacement_style = Style::from_atlas(&replacement);
-        let replacement_font = replacement_style.font;
-        let theme = LoadedTheme::from_style("Replacement", replacement.clone(), replacement_style);
+        let replacement_style = Skin::from_atlas(&replacement);
+        let replacement_font = replacement_style.resources.fonts.body;
+        let theme = LoadedTheme::from_skin("Replacement", replacement.clone(), replacement_style);
         let mut context = Context::<ThemeAtlasBackend>::new(ThemeAtlasBackend {
             atlas: initial.clone(),
             reject_replacement: false,
@@ -1056,16 +1056,16 @@ mod theme_tests {
 
         assert!(context.atlas().ptr_eq(&replacement));
         assert!(!context.atlas().ptr_eq(&initial));
-        assert_eq!(context.style().font, replacement_font);
+        assert_eq!(context.skin().resources.fonts.body, replacement_font);
     }
 
     /// Verifies an atlas upload error leaves both sides of the active theme pair unchanged.
     #[test]
     fn set_theme_failure_preserves_previous_atlas_and_style() {
         let initial = test_atlas();
-        let initial_font = Style::from_atlas(&initial).font;
+        let initial_font = Skin::from_atlas(&initial).resources.fonts.body;
         let replacement = test_atlas();
-        let theme = LoadedTheme::from_style("Rejected", replacement.clone(), Style::from_atlas(&replacement));
+        let theme = LoadedTheme::from_skin("Rejected", replacement.clone(), Skin::from_atlas(&replacement));
         let mut context = Context::<ThemeAtlasBackend>::new(ThemeAtlasBackend {
             atlas: initial.clone(),
             reject_replacement: true,
@@ -1075,6 +1075,6 @@ mod theme_tests {
 
         assert_eq!(error, AtlasUploadError::new("fixture rejected atlas"));
         assert!(context.atlas().ptr_eq(&initial));
-        assert_eq!(context.style().font, initial_font);
+        assert_eq!(context.skin().resources.fonts.body, initial_font);
     }
 }

@@ -216,7 +216,7 @@ pub(super) fn number_label(value: Real, precision: DecimalPrecision) -> String {
 
 /// Computes preferred size for numeric widgets with optional visual affordance width.
 pub(super) fn number_preferred_size(
-    style: &Style,
+    style: &Skin,
     atlas: &AtlasHandle,
     font: FontChoice,
     value: Real,
@@ -227,7 +227,7 @@ pub(super) fn number_preferred_size(
     let label = number_label(value, precision);
     let resolved_font = style.resolve_font_choice(font);
     let text_w = atlas.get_text_size(resolved_font, label.as_str()).width;
-    let padding = style.padding.max(0);
+    let padding = style.metrics.padding.max(0);
     let vertical_pad = (padding / 2).max(1);
     let font_height = atlas.get_font_height(resolved_font) as i32;
     // Preferred sizes saturate because text metrics, visual hints, and style padding are independent

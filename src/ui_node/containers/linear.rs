@@ -34,7 +34,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::ui_node::children::ChildrenHandle;
 use crate::{
-    AtlasHandle, AvailableSpace, Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, Dimensioni, MeasureCtx, Node, Recti, Style, TrackSize,
+    AtlasHandle, AvailableSpace, Children, Constraints, Container, ContainerLayoutCtx, ContainerWidget, Dimensioni, MeasureCtx, Node, Recti, Skin, TrackSize,
     TypedWidgetHandle, UiInputEvent, Widget, WidgetOption, WidgetPaintCtx, WidgetParameters, WidgetUpdateCtx,
 };
 
@@ -666,7 +666,7 @@ fn measure(ctx: &mut MeasureCtx<'_>, state: &Linear, constraints: Constraints) -
         return Dimensioni::default();
     }
     state.debug_assert_synchronized(count);
-    let gap = ctx.style().spacing.max(0);
+    let gap = ctx.skin().metrics.spacing.max(0);
     let main_space = orientation.main_space(constraints);
     let cross_space = orientation.cross_space(constraints);
     let mut resolver = track_resolver_for_measure(ctx, state, orientation, main_space, cross_space, gap);
@@ -678,7 +678,7 @@ fn measure(ctx: &mut MeasureCtx<'_>, state: &Linear, constraints: Constraints) -
         let child = measure_child(ctx, orientation, index, AvailableSpace::Bounded(main), cross_space, placement);
         cross_content = cross_content.max(placement.fixed_cross.unwrap_or_else(|| orientation.cross(child)).max(0));
     }
-    let cross_content = cross_content.max(minimum_content_cross(state.direction, ctx.style(), ctx.atlas()));
+    let cross_content = cross_content.max(minimum_content_cross(state.direction, ctx.skin(), ctx.atlas()));
     let cross = resolve_measured_cross(state.cross_size, cross_content);
     orientation.size(resolver.extent(), cross)
 }
@@ -726,7 +726,7 @@ fn place(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, state: &mut 
         return;
     }
     state.debug_assert_synchronized(count);
-    let gap = ctx.style().spacing.max(0);
+    let gap = ctx.skin().metrics.spacing.max(0);
     let main_space = AvailableSpace::Bounded(orientation.main_extent(rect).max(0));
     let cross_space = AvailableSpace::Bounded(orientation.cross_extent(rect).max(0));
 
@@ -768,7 +768,7 @@ fn place(ctx: &mut ContainerLayoutCtx<'_>, children: &mut Children, state: &mut 
         let child = measure_layout_child(ctx, children, orientation, index, AvailableSpace::Bounded(main), cross_space, spec);
         cross_content = cross_content.max(spec.fixed_cross.unwrap_or_else(|| orientation.cross(child)).max(0));
     }
-    let cross_content = cross_content.max(minimum_content_cross(state.direction, ctx.style(), ctx.atlas()));
+    let cross_content = cross_content.max(minimum_content_cross(state.direction, ctx.skin(), ctx.atlas()));
     let line_cross = resolve_placed_cross(state.cross_size, orientation.cross_extent(rect), cross_content);
 
     let reversed = state.direction.is_reversed();
@@ -837,14 +837,14 @@ impl Widget for Linear {
 }
 
 /// Returns the style-derived cross-axis minimum for an ordinary horizontal control line.
-fn minimum_content_cross(direction: LinearDirection, style: &Style, atlas: &AtlasHandle) -> i32 {
+fn minimum_content_cross(direction: LinearDirection, style: &Skin, atlas: &AtlasHandle) -> i32 {
     // Vertical sequences have no manufactured minimum width. Horizontal sequences retain the
     // established control-row convention of one font line plus symmetric style padding.
     if !direction.is_horizontal() {
         return 0;
     }
-    let padding = style.padding.max(0);
-    (atlas.get_font_height(style.font) as i32)
+    let padding = style.metrics.padding.max(0);
+    (atlas.get_font_height(style.resources.fonts.body) as i32)
         .saturating_add(padding.saturating_mul(2))
         .max(padding.saturating_mul(2))
 }
@@ -899,7 +899,7 @@ mod linear_widget_tests {
         let child = Node::widget(Custom::create(CustomParameters::new("content")));
         let (children, linear) = Linear::mount(LinearParameters::horizontal([child]));
         let atlas = test_atlas();
-        let style = crate::test_support::test_style(&atlas);
+        let style = crate::test_support::test_skin(&atlas);
         let mut children = children.borrow_mut();
         let mut ctx = MeasureCtx::new(&style, &atlas, &mut children);
 

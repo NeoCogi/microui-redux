@@ -33,7 +33,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::math::RectExt;
-use crate::{AtlasHandle, Constraints, Dimensioni, FontId, IconId, LeafWidget, Recti, SliceInsets, Style, TypedWidgetHandle, Widget};
+use crate::{AtlasHandle, Constraints, Dimensioni, FontId, IconId, LeafWidget, Recti, SliceInsets, Skin, TypedWidgetHandle, Widget};
 
 use super::{ChildParticipation, Children, Container, NodeLayout, RuntimeNodeId, WidgetStorage};
 
@@ -59,25 +59,25 @@ pub(crate) struct MeasurementStyleKey {
 }
 
 impl MeasurementStyleKey {
-    pub(crate) fn new(style: &Style) -> Self {
+    pub(crate) fn new(style: &Skin) -> Self {
         // Cache only measurement-observable style values. Colors and cell payloads affect paint,
         // while every role's normalized insets can affect a framed descendant's constraints.
         Self {
-            font: style.font,
-            small_font: style.small_font,
-            title_font: style.title_font,
-            heading_font: style.heading_font,
-            mono_font: style.mono_font,
-            expand_icon: style.icons.expand,
-            expand_down_icon: style.icons.expand_down,
-            check_icon: style.icons.check,
-            default_cell_width: style.default_cell_width,
-            padding: style.padding,
-            spacing: style.spacing,
-            indent: style.indent,
-            title_height: style.title_height,
-            scrollbar_size: style.scrollbar_size,
-            thumb_size: style.thumb_size,
+            font: style.resources.fonts.body,
+            small_font: style.resources.fonts.small,
+            title_font: style.resources.fonts.title,
+            heading_font: style.resources.fonts.heading,
+            mono_font: style.resources.fonts.mono,
+            expand_icon: style.resources.icons.expand,
+            expand_down_icon: style.resources.icons.expand_down,
+            check_icon: style.resources.icons.check,
+            default_cell_width: style.metrics.default_cell_width,
+            padding: style.metrics.padding,
+            spacing: style.metrics.spacing,
+            indent: style.metrics.indent,
+            title_height: style.metrics.title_height,
+            scrollbar_size: style.metrics.scrollbar_size,
+            thumb_size: style.metrics.thumb_size,
             appearance_insets: style.visuals.measurement_insets(),
         }
     }
@@ -279,7 +279,7 @@ impl Node {
     ///
     /// On a leaf the override affects only that widget. On a container the style is also inherited
     /// by every descendant until another descendant supplies its own override.
-    pub fn with_style_override(mut self, style_override: Style) -> Self {
+    pub fn with_style_override(mut self, style_override: Skin) -> Self {
         self.set_style_override(style_override);
         self
     }
@@ -288,7 +288,7 @@ impl Node {
     ///
     /// Once ownership has moved into a retained tree, use the node's [`TypedWidgetHandle`] to
     /// change the override.
-    pub fn set_style_override(&mut self, style_override: Style) {
+    pub fn set_style_override(&mut self, style_override: Skin) {
         self.data.set_style_override(Some(style_override));
     }
 
@@ -298,12 +298,12 @@ impl Node {
     }
 
     /// Returns this node's local style override, if one is installed.
-    pub fn style_override(&self) -> Option<Style> {
+    pub fn style_override(&self) -> Option<Skin> {
         self.data.style_override()
     }
 
     /// Resolves this node's local override against the inherited style.
-    pub(crate) fn resolve_style(&self, inherited: &Style) -> Style {
+    pub(crate) fn resolve_style(&self, inherited: &Skin) -> Skin {
         self.data.resolve_style(inherited)
     }
 
@@ -350,12 +350,12 @@ impl Node {
     }
 
     /// Measures this node's desired outer size. Its parent assigns the later exact allocation.
-    pub(crate) fn measure(&mut self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+    pub(crate) fn measure(&mut self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         self.measure_with_cache_status(style, atlas, constraints).0
     }
 
     /// Measures and reports whether the retained result satisfied this exact query.
-    pub(crate) fn measure_with_cache_status(&mut self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> (Dimensioni, bool) {
+    pub(crate) fn measure_with_cache_status(&mut self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> (Dimensioni, bool) {
         let style = self.resolve_style(style);
         let style = &style;
         let style_key = MeasurementStyleKey::new(style);
@@ -415,13 +415,13 @@ impl Node {
 
     /// Invalidates preferred-size entries for this complete retained subtree.
     ///
-    /// Global style replacement uses this downward traversal because every field of [`Style`] is
+    /// Global style replacement uses this downward traversal because every field of [`Skin`] is
     /// observable by the public [`LeafWidget::measure`] contract. A parent-first style change must
     /// therefore discard descendant entries even when the changed value is purely visual to the
     /// built-in widgets or the subtree is currently hidden.
     pub(crate) fn invalidate_measurement_subtree(&mut self) {
         // Clear the local bounded cache before descending. The traversal owns every child mutably,
-        // so no parallel generation counter or incomplete projection of Style is needed.
+        // so no parallel generation counter or incomplete projection of Skin is needed.
         self.state.invalidate_measurement();
         self.with_children_mut(|children| {
             for child in children.iter_mut() {
@@ -528,14 +528,14 @@ pub(crate) enum NodeKind {
 }
 
 impl NodeKind {
-    pub(crate) fn style_override(&self) -> Option<Style> {
+    pub(crate) fn style_override(&self) -> Option<Skin> {
         match self {
             Self::Widget(node) => node.widget.try_borrow().unwrap_or_else(|_| widget_borrow_conflict()).style_override(),
             Self::Container(container) => container.style_override(),
         }
     }
 
-    pub(crate) fn set_style_override(&mut self, style_override: Option<Style>) {
+    pub(crate) fn set_style_override(&mut self, style_override: Option<Skin>) {
         match self {
             Self::Widget(node) => node
                 .widget
@@ -546,7 +546,7 @@ impl NodeKind {
         }
     }
 
-    pub(crate) fn resolve_style(&self, inherited: &Style) -> Style {
+    pub(crate) fn resolve_style(&self, inherited: &Skin) -> Skin {
         match self {
             Self::Widget(node) => node.widget.try_borrow().unwrap_or_else(|_| widget_borrow_conflict()).resolve_style(inherited),
             Self::Container(container) => container.resolve_style(inherited),
@@ -652,7 +652,7 @@ mod tests {
         let atlas = test_atlas();
         // Resolve the measurement style from the exact handle passed to both measurement and
         // layout so same-slot resources from another atlas can never satisfy this regression.
-        let style = crate::test_support::test_style(&atlas);
+        let style = crate::test_support::test_skin(&atlas);
 
         let preferred = node.measure(&style, &atlas, Constraints::unbounded());
         let mut runtime = crate::ui_node::UiRuntime::new();

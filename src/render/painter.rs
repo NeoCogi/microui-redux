@@ -85,7 +85,7 @@ use rs_math3d::{Recti, Vec2f, Vec2i, color4b};
 /// impl LeafWidget for Swatch {
 ///     fn measure(
 ///         &self,
-///         _style: &Style,
+///         _style: &Skin,
 ///         _atlas: &AtlasHandle,
 ///         _constraints: Constraints,
 ///     ) -> Dimensioni {

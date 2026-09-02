@@ -48,7 +48,7 @@ pub struct ListItemParameters {
 }
 
 impl crate::LeafWidget for ListItem {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+    fn measure(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         self.preferred_size_widget(style, atlas, constraints)
     }
 }
@@ -164,8 +164,8 @@ impl ListItem {
     }
 
     /// Measures the row label and optional icon.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
-        let padding = style.padding.max(0);
+    fn preferred_size_widget(&self, style: &Skin, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+        let padding = style.metrics.padding.max(0);
         let mut width = padding.saturating_mul(2);
         let mut visual_h = 0;
         if let Some(icon) = self.icon {
@@ -190,9 +190,9 @@ impl ListItem {
         let mut text_rect = bounds;
         if let Some(icon) = self.icon {
             // Icons consume the left padding + icon width before the text region starts.
-            let padding = ctx.style().padding.max(0);
+            let padding = ctx.skin().metrics.padding.max(0);
             let icon_size = ctx.atlas().get_icon_size(icon);
-            // Style values and retained allocations can independently reach coordinate limits.
+            // Skin values and retained allocations can independently reach coordinate limits.
             // Saturating the nonnegative extents keeps paint total while preserving ordinary
             // geometry exactly.
             let icon_width = icon_size.width.max(0);
@@ -208,7 +208,7 @@ impl ListItem {
         }
 
         if !self.label.is_empty() {
-            let font = ctx.style().resolve_font_choice(self.font);
+            let font = ctx.skin().resolve_font_choice(self.font);
             ctx.draw_control_text_with_font(font, &self.label, text_rect, AppearanceRole::ListItem, self.opt);
         }
     }
@@ -284,14 +284,14 @@ mod tests {
 
     use super::*;
     use crate::render::DisplayList;
-    use crate::test_support::{test_atlas, test_style};
+    use crate::test_support::{test_atlas, test_skin};
 
     /// Verifies application-provided maximum padding cannot overflow icon or label placement.
     #[test]
     fn extreme_padding_keeps_icon_paint_total() {
         let atlas = test_atlas();
-        let mut style = test_style(&atlas);
-        style.padding = i32::MAX;
+        let mut style = test_skin(&atlas);
+        style.metrics.padding = i32::MAX;
         let icon = atlas.icon_id("check").expect("the shared fixture icon must exist");
         let mut item = ListItemBuilder::create_widget(ListItemParameters::with_icon("item", icon));
         let bounds = rect(0, 0, 20, 20);

@@ -484,7 +484,7 @@ trait GridMeasureCtx {
 
 impl GridMeasureCtx for MeasureCtx<'_> {
     fn spacing(&self) -> i32 {
-        self.style().spacing.max(0)
+        self.skin().metrics.spacing.max(0)
     }
 
     fn measure_child(&mut self, index: usize, constraints: crate::Constraints) -> Option<Dimensioni> {
@@ -499,7 +499,7 @@ struct GridLayoutMeasureCtx<'a, 'runtime> {
 
 impl GridMeasureCtx for GridLayoutMeasureCtx<'_, '_> {
     fn spacing(&self) -> i32 {
-        self.ctx.style().spacing.max(0)
+        self.ctx.skin().metrics.spacing.max(0)
     }
 
     fn measure_child(&mut self, index: usize, constraints: crate::Constraints) -> Option<Dimensioni> {
@@ -536,7 +536,7 @@ impl Widget for Grid {
 /// Columns are resolved before rows because a child's allocated column span is its text-wrapping
 /// bound and therefore affects the preferred height contributed to row tracks.
 fn layout_grid(state: &Grid, children: &mut Children, ctx: &mut ContainerLayoutCtx<'_>, rect: Recti, layout: &mut GridLayout) {
-    let spacing = ctx.style().spacing.max(0);
+    let spacing = ctx.skin().metrics.spacing.max(0);
     // Resolve and retain each column width once for both row measurement and final placement.
     let available_width = AvailableSpace::bounded(rect.width);
     let available_height = AvailableSpace::bounded(rect.height);
@@ -564,7 +564,7 @@ fn layout_grid(state: &Grid, children: &mut Children, ctx: &mut ContainerLayoutC
 /// The pure measurement path resolves scalar column spans on demand when measuring row content.
 /// This costs recomputation but preserves `Widget::measure(&self)` and performs no allocation.
 fn grid_size(ctx: &mut MeasureCtx<'_>, state: &Grid, constraints: crate::Constraints) -> Dimensioni {
-    let spacing = ctx.style().spacing.max(0);
+    let spacing = ctx.skin().metrics.spacing.max(0);
     let (columns, rows) = grid_dimensions(state);
     // Column preferences depend only on intrinsic child widths and Grid column spans.
     let width = measured_tracks(&state.column_tracks, columns, constraints.width, spacing, |index| {
@@ -892,7 +892,7 @@ fn mark_grid_occupied(occupied: &mut Vec<bool>, columns: usize, row: usize, colu
 mod tests {
     use super::*;
     use crate::test_support::test_atlas;
-    use crate::{Style, TypedWidgetHandle};
+    use crate::TypedWidgetHandle;
 
     fn text_node(label: &str) -> (TypedWidgetHandle<crate::TextBlock>, Node) {
         crate::TextBlock::create(crate::TextBlockParameters::new(label))
@@ -1043,19 +1043,18 @@ mod tests {
     #[test]
     fn grid_preferred_tracks_include_spans_spacing_and_explicit_empty_tracks() {
         let atlas = test_atlas();
-        let style = Style {
-            padding: 0,
-            spacing: 2,
-            default_cell_width: 0,
-            ..crate::test_support::test_style(&atlas)
-        };
+        let style = crate::test_support::test_skin(&atlas).with_metrics(|metrics| {
+            metrics.padding = 0;
+            metrics.spacing = 2;
+            metrics.default_cell_width = 0;
+        });
         let columns = [TrackSize::Fixed(10), TrackSize::Content, TrackSize::Flex(1.0)];
-        assert_eq!(contribution_for_track(&columns, 0, 0, 3, style.spacing, 70), 10);
-        assert_eq!(contribution_for_track(&columns, 1, 0, 3, style.spacing, 70), 28);
-        assert_eq!(contribution_for_track(&columns, 2, 0, 3, style.spacing, 70), 28);
+        assert_eq!(contribution_for_track(&columns, 0, 0, 3, style.metrics.spacing, 70), 10);
+        assert_eq!(contribution_for_track(&columns, 1, 0, 3, style.metrics.spacing, 70), 28);
+        assert_eq!(contribution_for_track(&columns, 2, 0, 3, style.metrics.spacing, 70), 28);
         let rows = [TrackSize::Fixed(8), TrackSize::Content];
-        assert_eq!(contribution_for_track(&rows, 0, 0, 2, style.spacing, 40), 8);
-        assert_eq!(contribution_for_track(&rows, 1, 0, 2, style.spacing, 40), 30);
+        assert_eq!(contribution_for_track(&rows, 0, 0, 2, style.metrics.spacing, 40), 8);
+        assert_eq!(contribution_for_track(&rows, 1, 0, 2, style.metrics.spacing, 40), 30);
 
         let mut children = Children::new();
         let topology = Rc::new(RefCell::new(Children::new()));

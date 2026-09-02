@@ -266,7 +266,7 @@ impl FileDialog {
         let current_working_directory = String::new();
         let folders = Vec::new();
         let files = Vec::new();
-        let icons = ctx.style().icons;
+        let icons = ctx.skin().resources.icons;
         let folder_item_port = Rc::new(RefCell::new(WidgetEventPort::new()));
         let file_item_port = Rc::new(RefCell::new(WidgetEventPort::new()));
         let folder_rows = Self::make_folder_rows(&current_working_directory, &folders, icons.closed_folder, &folder_item_port);
@@ -521,7 +521,7 @@ impl FileDialog {
     pub fn open(&mut self, ui: &mut Ui<'_>, request: FileDialogRequest) {
         // Capture theme-owned icons before mutating the retained dialog so model reset and surface
         // visibility remain one transaction through the shared façade.
-        let icons = ui.style().icons;
+        let icons = ui.skin().resources.icons;
         let (title, rect) = self.prepare_open(request, icons);
         ui.set_window_name(&self.window, title)
             .expect("application-owned file-dialog window must remain registered");

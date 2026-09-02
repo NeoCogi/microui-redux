@@ -61,7 +61,7 @@ use bitflags::bitflags;
 use crate::input::Input;
 use crate::menu::MenuBar;
 use crate::render::DisplayList;
-use crate::{Dimensioni, Node, Recti, Style, UiRuntime};
+use crate::{Dimensioni, Node, Recti, Skin, UiRuntime};
 use roots::{SurfaceForest, SurfaceKey};
 mod root_chrome;
 mod roots;
@@ -86,7 +86,7 @@ bitflags! {
         /// Disabled roots continue ordinary update traversal so programmatic state stays current,
         /// but they cannot own pointer, keyboard, popup, move, resize, or caption interactions.
         const DISABLED = 4;
-        /// Gives the surface a Style-owned outer border and inset content area.
+        /// Gives the surface a Skin-owned outer border and inset content area.
         const FRAME = 1024;
         /// Adapts the surface width to its content while retaining its programmed height.
         const AUTO_WIDTH = 256;
@@ -100,7 +100,7 @@ bitflags! {
         const NO_CLOSE = 64;
         /// Prevents the user from resizing the window or dialog.
         const NO_RESIZE = 16;
-        /// Removes the Style-owned inset around surface content.
+        /// Removes the Skin-owned inset around surface content.
         ///
         /// This is useful for edge-to-edge application surfaces whose content, such as a menu bar,
         /// already owns its internal spacing. It is independent of [`Self::FRAME`]: removing the
@@ -236,7 +236,8 @@ pub(crate) struct WindowManager {
     /// Reusable operation storage for window-manager frame and chrome drawing.
     display_list: DisplayList,
     /// Window-manager-owned style used by all roots and scroll areas.
-    style: Style,
+    /// Complete resolved skin shared by every retained surface and manager-owned chrome part.
+    skin: Skin,
 
     /// Concrete ownership forest for independent windows, child windows, dialogs, and popups.
     ///
@@ -274,13 +275,13 @@ pub(crate) struct WindowManager {
 }
 
 impl WindowManager {
-    /// Creates an empty manager with resolved style and no committed UI frame.
-    pub(crate) fn new(style: Style) -> Self {
+    /// Creates an empty manager with a resolved skin and no committed UI frame.
+    pub(crate) fn new(skin: Skin) -> Self {
         // Retained identities come from the process-wide allocator, so manager construction needs
         // no local namespace or counter that could collide with another Context.
         Self {
             display_list: DisplayList::new(),
-            style,
+            skin,
             surfaces: SurfaceForest::new(),
             discard_pointer_capture_tail: false,
             active_surface: None,
@@ -297,18 +298,18 @@ impl WindowManager {
         self.ui_commit = None;
     }
 
-    /// Borrows the resolved style shared by window chrome and application trees.
-    pub(crate) fn style(&self) -> &Style {
+    /// Borrows the resolved skin shared by window chrome and application trees.
+    pub(crate) fn skin(&self) -> &Skin {
         // The manager is the sole style owner used during retained traversal.
-        &self.style
+        &self.skin
     }
 
-    /// Replaces the resolved style and invalidates geometry measured with the old value.
-    pub(crate) fn set_style(&mut self, style: Style) {
-        // LeafWidget::measure receives the complete Style, including values that built-in widgets
+    /// Replaces the resolved skin and invalidates geometry measured with the old value.
+    pub(crate) fn set_skin(&mut self, skin: Skin) {
+        // LeafWidget::measure receives the complete Skin, including values that built-in widgets
         // use only while painting. Clear every retained cache rather than maintaining a partial
         // style fingerprint that cannot represent the public measurement contract.
-        self.style = style;
+        self.skin = skin;
         self.surfaces.invalidate_widget_measurements();
         self.invalidate_ui_commit();
     }

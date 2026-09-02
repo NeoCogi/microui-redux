@@ -75,7 +75,7 @@ pub struct TextboxParameters {
 }
 
 impl crate::LeafWidget for Textbox {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+    fn measure(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         self.preferred_size_widget(style, atlas, constraints)
     }
 }
@@ -240,8 +240,8 @@ impl Textbox {
     }
 
     /// Measures a single-line editor, bounded by available width when supplied.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
-        let padding = style.padding.max(0);
+    fn preferred_size_widget(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+        let padding = style.metrics.padding.max(0);
         let vertical_pad = (padding / 2).max(1);
         let font = style.resolve_font_choice(self.font);
         let font_height = atlas.get_font_height(font) as i32;
@@ -262,7 +262,7 @@ impl Textbox {
 
     /// Applies input and cursor movement for this textbox.
     fn update_widget(&mut self, ctx: &mut WidgetUpdateCtx<'_>, input: Option<&UiInputEvent>) {
-        let font = ctx.style().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font_choice(self.font);
         let outcome = textbox_update(ctx, input, &mut self.buf, &mut self.cursor, self.opt, font);
         let changed = outcome.changed.then(|| TextboxChanged {
             text: self.buf.clone(),
@@ -279,7 +279,7 @@ impl Textbox {
 
     /// Paints the textbox frame, text, and caret.
     fn paint_widget(&mut self, ctx: &mut WidgetPaintCtx<'_>) {
-        let font = ctx.style().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font_choice(self.font);
         textbox_paint(ctx, self.buf.as_str(), self.cursor, self.opt, font);
     }
 }
@@ -368,7 +368,7 @@ pub(crate) fn textbox_update(
     // remains authoritative and continues routing keyboard/text input to its focused node.
 
     let text_metrics = ctx.atlas().get_text_size(font, buf.as_str());
-    let padding = ctx.style().padding;
+    let padding = ctx.skin().metrics.padding;
     let textx = textbox_text_x(r, padding, text_metrics.width);
 
     if ctx.focused() && mouse_pressed.intersects(MouseButton::LEFT) && ctx.mouse_over(r, mouse_pos) {
@@ -412,7 +412,7 @@ pub(crate) fn textbox_paint(ctx: &mut WidgetPaintCtx<'_>, buf: &str, cursor: usi
     let baseline_y = clamp_i64_to_i32(i64::from(texty) + i64::from(metrics.baseline));
 
     let text_metrics = ctx.atlas().get_text_size(font, buf);
-    let padding = ctx.style().padding;
+    let padding = ctx.skin().metrics.padding;
     let textx = textbox_text_x(r, padding, text_metrics.width);
     let cursor_pos = clamp_cursor_boundary(buf, cursor);
     let caret_offset = if cursor_pos == 0 {
@@ -484,7 +484,7 @@ impl WidgetBuilder for TextboxBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{test_atlas, test_style};
+    use crate::test_support::{test_atlas, test_skin};
 
     #[derive(Debug, Eq, PartialEq)]
     enum RecordedEvent {
@@ -509,7 +509,7 @@ mod tests {
 
     fn update_textbox(textbox: &mut Textbox, focused: bool, input: Vec<UiInputEvent>) {
         let atlas = test_atlas();
-        let style = test_style(&atlas);
+        let style = test_skin(&atlas);
         let bounds = rect(0, 0, 120, 20);
         let mut modifiers = Modifiers::NONE;
         for event in &input {

@@ -28,11 +28,11 @@
 // POSSIBILITY OF SUCH DAMAGE.
 //
 
-//! Semantic font selection for UI styles.
+//! Semantic font selection for UI skins.
 
 use crate::atlas::FontId;
 
-use super::Style;
+use super::Skin;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 /// Semantic font roles used by the built-in widgets and default style.
@@ -51,7 +51,7 @@ pub enum FontRole {
 }
 
 impl FontRole {
-    /// Returns the conventional atlas font name resolved by [`Style::from_atlas`].
+    /// Returns the conventional atlas font name resolved by [`Skin::from_atlas`].
     pub fn atlas_name(self) -> &'static str {
         match self {
             Self::Body => "body",
@@ -64,7 +64,7 @@ impl FontRole {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-/// Selects either a semantic font role from [`Style`] or a specific [`FontId`].
+/// Selects either a semantic font role from [`Skin`] or a specific [`FontId`].
 pub enum FontChoice {
     /// Resolve through a [`FontRole`] stored on the style.
     Role(FontRole),
@@ -102,7 +102,7 @@ impl FontChoice {
     }
 
     /// Resolves this choice against `style`.
-    pub fn resolve(self, style: &Style) -> FontId {
+    pub fn resolve(self, style: &Skin) -> FontId {
         style.resolve_font_choice(self)
     }
 }

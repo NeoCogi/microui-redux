@@ -34,7 +34,7 @@ use super::*;
 
 impl UiRuntime {
     /// Updates one already-borrowed node and descendants.
-    pub(super) fn update_node_ref(&mut self, node: &mut Node, parent_transform: Transform, style: &Style, atlas: crate::AtlasHandle, input: InputSnapshot) {
+    pub(super) fn update_node_ref(&mut self, node: &mut Node, parent_transform: Transform, style: &Skin, atlas: crate::AtlasHandle, input: InputSnapshot) {
         #[cfg(test)]
         self.bump_metric(|metrics| metrics.updates += 1);
         let style = node.resolve_style(style);

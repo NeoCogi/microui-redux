@@ -7,7 +7,7 @@
 
 //! Unified background and foreground visuals for every semantic role and interaction state.
 
-use crate::{Color, ControlColor, NinePatch, SliceInsets};
+use crate::{Color, FlatPalette, NinePatch, SliceInsets};
 
 use super::{AppearanceRole, RoleTable, StateTable, VisualState};
 
@@ -135,34 +135,23 @@ impl VisualCatalog {
     }
 
     /// Builds the complete flat fallback catalog used by default and authored skins.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn from_flat_palette(
-        frame_insets: SliceInsets,
-        colors: [Color; 12],
-        focus: Color,
-        window_focus: Color,
-        menu_background: Color,
-        disabled_background: Color,
-        menu_foreground: Color,
-        disabled_foreground: Color,
-        disabled_title_foreground: Color,
-    ) -> Self {
+    pub(crate) fn from_flat_palette(frame_insets: SliceInsets, palette: &FlatPalette) -> Self {
         // Resolve named palette values once and assemble complete Visual values directly. No
         // parallel appearance or foreground catalog exists before or after this construction.
-        let border = colors[ControlColor::Border as usize];
-        let text = colors[ControlColor::Text as usize];
-        let title_text = colors[ControlColor::TitleText as usize];
+        let border = palette.border;
+        let text = palette.text;
+        let title_text = palette.title_foreground;
         let transparent = Color { r: 0, g: 0, b: 0, a: 0 };
         let framed = |fill| NinePatch::framed(frame_insets, border, Some(fill));
         let hollow = NinePatch::framed(frame_insets, border, None);
         let solid = NinePatch::solid;
 
         let mut body_foregrounds = StateTable::filled(text);
-        body_foregrounds.set(VisualState::Disabled, disabled_foreground);
-        let mut menu_foregrounds = StateTable::filled(menu_foreground);
-        menu_foregrounds.set(VisualState::Disabled, disabled_foreground);
+        body_foregrounds.set(VisualState::Disabled, palette.disabled_foreground);
+        let mut menu_foregrounds = StateTable::filled(palette.menu_foreground);
+        menu_foregrounds.set(VisualState::Disabled, palette.disabled_foreground);
         let mut title_foregrounds = StateTable::filled(title_text);
-        title_foregrounds.set(VisualState::Disabled, disabled_title_foreground);
+        title_foregrounds.set(VisualState::Disabled, palette.disabled_title_foreground);
 
         let foregrounds_for = |role| {
             if matches!(
@@ -207,39 +196,39 @@ impl VisualCatalog {
         };
 
         let button = patch_states(
-            framed(colors[ControlColor::Button as usize]),
-            framed(colors[ControlColor::ButtonHover as usize]),
-            framed(colors[ControlColor::Base as usize]),
-            framed(focus),
-            framed(disabled_background),
+            framed(palette.button),
+            framed(palette.button_hovered),
+            framed(palette.input),
+            framed(palette.focus),
+            framed(palette.disabled_background),
         );
         let input = patch_states(
-            framed(colors[ControlColor::Base as usize]),
-            framed(colors[ControlColor::BaseHover as usize]),
-            framed(colors[ControlColor::BaseHover as usize]),
-            framed(focus),
-            framed(disabled_background),
+            framed(palette.input),
+            framed(palette.input_hovered),
+            framed(palette.input_hovered),
+            framed(palette.focus),
+            framed(palette.disabled_background),
         );
         let highlight = patch_states(
             solid(transparent),
-            solid(colors[ControlColor::ButtonHover as usize]),
-            solid(colors[ControlColor::Button as usize]),
-            solid(focus),
+            solid(palette.button_hovered),
+            solid(palette.button),
+            solid(palette.focus),
             solid(transparent),
         );
         let selected = patch_states(
-            solid(focus),
-            solid(colors[ControlColor::ButtonHover as usize]),
-            solid(colors[ControlColor::Button as usize]),
-            solid(focus),
-            solid(disabled_background),
+            solid(palette.focus),
+            solid(palette.button_hovered),
+            solid(palette.button),
+            solid(palette.focus),
+            solid(palette.disabled_background),
         );
         let window = patch_states(
-            framed(colors[ControlColor::WindowBG as usize]),
-            framed(colors[ControlColor::WindowBG as usize]),
-            framed(colors[ControlColor::WindowBG as usize]),
-            framed(colors[ControlColor::WindowBG as usize]),
-            framed(disabled_background),
+            framed(palette.window_background),
+            framed(palette.window_background),
+            framed(palette.window_background),
+            framed(palette.window_background),
+            framed(palette.disabled_background),
         );
 
         let default = Visual::new(NinePatch::solid(transparent), text);
@@ -249,7 +238,7 @@ impl VisualCatalog {
         assign(AppearanceRole::GenericFrame, StateTable::filled(hollow));
         assign(
             AppearanceRole::Panel,
-            with_disabled(StateTable::filled(framed(colors[ControlColor::PanelBG as usize])), framed(disabled_background)),
+            with_disabled(StateTable::filled(framed(palette.panel_background)), framed(palette.disabled_background)),
         );
         assign(AppearanceRole::Button, button);
         assign(AppearanceRole::Checkbox, input);
@@ -262,25 +251,22 @@ impl VisualCatalog {
         assign(AppearanceRole::SliderThumb, button);
         assign(
             AppearanceRole::ScrollbarTrack,
-            with_disabled(StateTable::filled(solid(colors[ControlColor::ScrollBase as usize])), solid(disabled_background)),
+            with_disabled(StateTable::filled(solid(palette.scrollbar_track)), solid(palette.disabled_background)),
         );
         assign(
             AppearanceRole::ScrollbarThumb,
-            with_disabled(
-                StateTable::filled(solid(colors[ControlColor::ScrollThumb as usize])),
-                solid(disabled_background),
-            ),
+            with_disabled(StateTable::filled(solid(palette.scrollbar_thumb)), solid(palette.disabled_background)),
         );
         assign(AppearanceRole::DisclosureHeader, highlight);
         assign(
             AppearanceRole::MenuBar,
-            with_disabled(StateTable::filled(solid(menu_background)), solid(disabled_background)),
+            with_disabled(StateTable::filled(solid(palette.menu_background)), solid(palette.disabled_background)),
         );
         assign(AppearanceRole::MenuTitle, highlight);
         assign(AppearanceRole::MenuTitleOpen, selected);
         assign(
             AppearanceRole::MenuPopup,
-            with_disabled(StateTable::filled(framed(menu_background)), framed(disabled_background)),
+            with_disabled(StateTable::filled(framed(palette.menu_background)), framed(palette.disabled_background)),
         );
         assign(AppearanceRole::MenuItem, highlight);
         // Marker state and interaction state are independent, so a checked row is not permanently
@@ -289,15 +275,15 @@ impl VisualCatalog {
 
         let active_window = StateTable::filled(NinePatch::framed(
             frame_insets.at_least(1),
-            window_focus,
-            Some(colors[ControlColor::WindowBG as usize]),
+            palette.window_focus,
+            Some(palette.window_background),
         ));
         assign(AppearanceRole::WindowFrame, window);
         assign(AppearanceRole::WindowFrameActive, active_window);
         assign(AppearanceRole::DialogFrame, window);
         assign(AppearanceRole::DialogFrameActive, active_window);
-        assign(AppearanceRole::WindowTitle, StateTable::filled(solid(colors[ControlColor::TitleBG as usize])));
-        assign(AppearanceRole::WindowTitleActive, StateTable::filled(solid(window_focus)));
+        assign(AppearanceRole::WindowTitle, StateTable::filled(solid(palette.title_background)));
+        assign(AppearanceRole::WindowTitleActive, StateTable::filled(solid(palette.window_focus)));
         assign(AppearanceRole::WindowCloseButton, button);
         assign(AppearanceRole::WindowMinimizeButton, button);
         assign(AppearanceRole::WindowMaximizeButton, button);

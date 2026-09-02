@@ -478,7 +478,7 @@ impl<Target: 'static> WidgetEventDispatcher<Target> {
         // production Context does. Keeping the handle alive for the complete dispatch also makes
         // the otherwise-unused test capability explicit instead of manufacturing ownerless IDs.
         let atlas = crate::test_support::test_atlas();
-        let style = crate::test_support::test_style(&atlas);
+        let style = crate::test_support::test_skin(&atlas);
         let mut window_manager = crate::window_manager::WindowManager::new(style);
         let mut ui = crate::Ui::new(&mut window_manager);
         self.dispatch_with_context(target, &mut ui)

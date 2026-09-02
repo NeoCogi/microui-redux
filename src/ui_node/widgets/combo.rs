@@ -50,7 +50,7 @@ pub struct ComboParameters {
 }
 
 impl crate::LeafWidget for Combo {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
+    fn measure(&self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> Dimensioni {
         self.preferred_size_widget(style, atlas, constraints)
     }
 }
@@ -291,14 +291,14 @@ impl Combo {
     }
 
     /// Measures the combo header label plus dropdown indicator.
-    fn preferred_size_widget(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
-        let padding = style.padding.max(0);
+    fn preferred_size_widget(&self, style: &Skin, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+        let padding = style.metrics.padding.max(0);
         let text_w = if self.label.is_empty() {
             0
         } else {
             text_size(style, atlas, self.font, self.label.as_str()).width
         };
-        let indicator = atlas.get_icon_size(style.icons.expand_down);
+        let indicator = atlas.get_icon_size(style.resources.icons.expand_down);
         let width = padding.saturating_mul(3).saturating_add(text_w.max(0)).saturating_add(indicator.width.max(0));
         let height = content_height(style, atlas, self.font, indicator.height);
         Dimensioni::new(width, height)
@@ -335,7 +335,7 @@ impl Combo {
     /// Paints the combo header from already-committed retained state.
     fn paint_widget(&self, ctx: &mut WidgetPaintCtx<'_>) {
         let header = ctx.local_rect();
-        let indicator_size = ctx.atlas().get_icon_size(ctx.style().icons.expand_down);
+        let indicator_size = ctx.atlas().get_icon_size(ctx.skin().resources.icons.expand_down);
         let indicator_x = header.x + header.width - indicator_size.width;
         let indicator_y = header.y + ((header.height - indicator_size.height) / 2).max(0);
         let indicator = rect(indicator_x, indicator_y, indicator_size.width, indicator_size.height);
@@ -343,13 +343,13 @@ impl Combo {
         let mut text_rect = header;
         let reserved_width = indicator_size.width;
         text_rect.width = (text_rect.width - reserved_width).max(0);
-        let font = ctx.style().resolve_font_choice(self.font);
+        let font = ctx.skin().resolve_font_choice(self.font);
         ctx.draw_control_text_with_font(font, self.label.as_str(), text_rect, AppearanceRole::Combo, self.opt);
 
         let indicator_content = ctx.draw_appearance(AppearanceRole::Button, indicator);
         let icon_color = ctx.foreground(AppearanceRole::Combo);
         if let Some(indicator_content) = indicator_content {
-            ctx.draw_icon(ctx.style().icons.expand_down, indicator_content, icon_color);
+            ctx.draw_icon(ctx.skin().resources.icons.expand_down, indicator_content, icon_color);
         }
     }
 }

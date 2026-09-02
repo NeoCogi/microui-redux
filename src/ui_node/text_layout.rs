@@ -56,7 +56,7 @@
 //! baseline alignment, and control text placement consistent. Measurement follows
 //! [`AtlasHandle::get_text_size`], including its missing-character fallback.
 use crate::math::clamp_i64_to_i32;
-use crate::{vec2, AtlasHandle, Dimensioni, FontId, Recti, Style, Vec2i, WidgetOption};
+use crate::{vec2, AtlasHandle, Dimensioni, FontId, Recti, Skin, Vec2i, WidgetOption};
 
 /// Controls how text should wrap when rendered inside a container.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -200,9 +200,9 @@ pub(crate) fn text_block_size(lines: &[TextLine], line_height: i32) -> Dimension
 }
 
 /// Computes the top-left text position for a single-line control.
-pub(crate) fn control_text_position_with_font(style: &Style, atlas: &AtlasHandle, font: FontId, text: &str, rect: Recti, opt: WidgetOption) -> Vec2i {
+pub(crate) fn control_text_position_with_font(style: &Skin, atlas: &AtlasHandle, font: FontId, text: &str, rect: Recti, opt: WidgetOption) -> Vec2i {
     let tsize = atlas.get_text_size(font, text);
-    let padding = style.padding;
+    let padding = style.metrics.padding;
     let line_height = atlas.get_font_height(font) as i32;
     let baseline = atlas.get_font_baseline(font);
     let y = baseline_aligned_top(rect, line_height, baseline);

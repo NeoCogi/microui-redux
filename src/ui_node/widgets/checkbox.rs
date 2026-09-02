@@ -54,7 +54,7 @@ pub struct CheckboxParameters {
 }
 
 impl crate::LeafWidget for Checkbox {
-    fn measure(&self, style: &Style, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn measure(&self, style: &Skin, atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         self.preferred_size(style, atlas)
     }
 }
@@ -140,9 +140,9 @@ impl Checkbox {
     }
 
     /// Measures the checkbox square plus optional label.
-    fn preferred_size(&self, style: &Style, atlas: &AtlasHandle) -> Dimensioni {
-        let padding = style.padding.max(0);
-        let check_icon = atlas.get_icon_size(style.icons.check);
+    fn preferred_size(&self, style: &Skin, atlas: &AtlasHandle) -> Dimensioni {
+        let padding = style.metrics.padding.max(0);
+        let check_icon = atlas.get_icon_size(style.resources.icons.check);
         let height = content_height(style, atlas, self.font, check_icon.height);
         let mut width = padding.saturating_mul(2).saturating_add(height.max(0));
         if !self.label.is_empty() {
@@ -162,12 +162,12 @@ impl Checkbox {
         if checked {
             let color = ctx.foreground(role);
             if let Some(box_content) = box_content {
-                ctx.draw_icon(ctx.style().icons.check, box_content, color);
+                ctx.draw_icon(ctx.skin().resources.icons.check, box_content, color);
             }
         }
         let text_rect = rect(bounds.x + box_rect.width, bounds.y, bounds.width - box_rect.width, bounds.height);
         if !self.label.is_empty() {
-            let font = ctx.style().resolve_font_choice(self.font);
+            let font = ctx.skin().resolve_font_choice(self.font);
             ctx.draw_control_text_with_font(font, &self.label, text_rect, role, self.opt);
         }
     }

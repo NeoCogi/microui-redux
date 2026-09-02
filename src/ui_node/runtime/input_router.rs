@@ -394,7 +394,7 @@ impl InputRouter {
     }
 
     /// Routes one keyboard/text event to the focused node.
-    pub(super) fn route_focus_input_event(&mut self, roots: &mut [Node], root_transform: Transform, style: &Style, event: &UiInputEvent) -> bool {
+    pub(super) fn route_focus_input_event(&mut self, roots: &mut [Node], root_transform: Transform, style: &Skin, event: &UiInputEvent) -> bool {
         // Sanitization is the single authoritative eligibility check for this transaction. It
         // clears focus unless the identity still exists beneath active, intersecting ancestors and
         // the target itself remains interactive and focusable.
@@ -440,7 +440,7 @@ impl InputRouter {
         &mut self,
         roots: &mut [Node],
         root_transform: Transform,
-        style: &Style,
+        style: &Skin,
         mouse_buttons: MouseButton,
         event: &UiInputEvent,
     ) -> Option<bool> {
@@ -489,7 +489,7 @@ impl InputRouter {
         &mut self,
         node: &mut Node,
         parent_transform: Transform,
-        style: &Style,
+        style: &Skin,
         event: &UiInputEvent,
     ) -> Option<(RuntimeNodeId, RouteResult)> {
         let pos = event.position()?;
@@ -547,7 +547,7 @@ impl InputRouter {
         current: &mut Node,
         target: RuntimeNodeId,
         parent_transform: Transform,
-        style: &Style,
+        style: &Skin,
         event: &UiInputEvent,
     ) -> Option<(RuntimeNodeId, RouteResult)> {
         let style = current.resolve_style(style);
@@ -585,7 +585,7 @@ impl InputRouter {
         roots: &mut [Node],
         target: RuntimeNodeId,
         root_transform: Transform,
-        style: &Style,
+        style: &Skin,
         event: &UiInputEvent,
     ) -> RouteResult {
         // Roots are independent transform origins; stop as soon as the unique target is found.
@@ -605,7 +605,7 @@ impl InputRouter {
         current: &mut Node,
         target: RuntimeNodeId,
         parent_transform: Transform,
-        style: &Style,
+        style: &Skin,
         event: &UiInputEvent,
     ) -> Option<RouteResult> {
         let style = current.resolve_style(style);
@@ -625,7 +625,7 @@ impl InputRouter {
     }
 
     /// Routes an event to exactly one borrowed node without traversing descendants.
-    fn route_input_event_to_node_only_ref(&mut self, node: &mut Node, parent_transform: Transform, style: &Style, event: &UiInputEvent) -> RouteResult {
+    fn route_input_event_to_node_only_ref(&mut self, node: &mut Node, parent_transform: Transform, style: &Skin, event: &UiInputEvent) -> RouteResult {
         #[cfg(test)]
         {
             self.routed_input_routes += 1;

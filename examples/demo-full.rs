@@ -206,7 +206,7 @@ impl Widget for Grid3dWidget {
 
 impl LeafWidget for Grid3dWidget {
     /// Supplies a small intrinsic size; the fullscreen window's flex layout expands it to fit.
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn measure(&self, _style: &Skin, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(80, 24)
     }
 }
@@ -347,7 +347,7 @@ impl Widget for PainterDemo {
 }
 
 impl LeafWidget for PainterDemo {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn measure(&self, _style: &Skin, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(240, 200)
     }
 }
@@ -814,7 +814,7 @@ impl Widget for FalloffEditor {
 }
 
 impl LeafWidget for FalloffEditor {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn measure(&self, _style: &Skin, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(300, 220)
     }
 }
@@ -929,7 +929,7 @@ impl Widget for SuzanneWidget {
 }
 
 impl LeafWidget for SuzanneWidget {
-    fn measure(&self, _style: &Style, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
+    fn measure(&self, _style: &Skin, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
         Dimensioni::new(80, 24)
     }
 }
@@ -1181,7 +1181,7 @@ impl DemoTheme {
     const fn label(self) -> &'static str {
         // Keep labels exhaustive so a new theme cannot appear without user-visible identification.
         match self {
-            Self::Default => "Default Style",
+            Self::Default => "Default Skin",
             Self::Windows311 => "Windows 3.11",
             Self::Windows95 => "Windows 95",
             Self::MacOs9 => "Mac OS 9",
@@ -1193,7 +1193,7 @@ impl DemoTheme {
 struct DemoThemes {
     /// Complete installable themes indexed by [`DemoTheme`].
     themes: [LoadedTheme; DemoTheme::ALL.len()],
-    /// Current base selection before any live Style Editor changes.
+    /// Current base selection before any live Skin Editor changes.
     selected: DemoTheme,
     /// Theme whose atlas is currently published by the renderer backend.
     installed: DemoTheme,
@@ -1204,7 +1204,7 @@ impl DemoThemes {
     fn load(context: &mut Context<SelectedBackend, State>) -> Self {
         // Theme loading bakes each unique PNG into its candidate atlas and leaves the installed
         // Context style alone. Retaining every bundle permits switching without later file I/O.
-        let default = LoadedTheme::from_style("Default Style", context.atlas(), context.style().clone());
+        let default = LoadedTheme::from_skin("Default Skin", context.atlas(), context.skin().clone());
         let windows_311_path = demo_asset_path("themes/windows-3.11/theme.json");
         let windows_311 = context
             .load_theme_file(windows_311_path.as_path())
@@ -1225,22 +1225,22 @@ impl DemoThemes {
     }
 
     /// Borrows the style associated with the current typed selection.
-    fn selected_style(&self) -> &Style {
+    fn selected_skin(&self) -> &Skin {
         // Index conversion remains centralized on the enum rather than leaking numeric slots.
-        self.themes[self.selected.index()].style()
+        self.themes[self.selected.index()].skin()
     }
 
     /// Changes the base selection and returns an editable copy for application state.
-    fn select(&mut self, selection: DemoTheme) -> Style {
-        // State's Style Editor intentionally mutates a clone; pristine bundled choices stay reusable.
+    fn select(&mut self, selection: DemoTheme) -> Skin {
+        // State's Skin Editor intentionally mutates a clone; pristine bundled choices stay reusable.
         self.selected = selection;
-        self.themes[selection.index()].style().clone()
+        self.themes[selection.index()].skin().clone()
     }
 
-    /// Installs a newly selected atlas/style bundle before the editable Style copy is published.
+    /// Installs a newly selected atlas/style bundle before the editable Skin copy is published.
     fn install_selected(&mut self, context: &mut Context<SelectedBackend, State>) {
         if self.installed == self.selected {
-            // Style Editor changes do not require a GPU atlas upload while the base theme is stable.
+            // Skin Editor changes do not require a GPU atlas upload while the base theme is stable.
             return;
         }
         context
@@ -1461,11 +1461,16 @@ struct State {
     style_color_swatch_states: [TypedWidgetHandle<ColorSwatch>; 16],
     window_info_value_states: [TypedWidgetHandle<ListItem>; 3],
     /// Editable copy of the currently selected base theme.
-    style: Style,
+    style: Skin,
+    /// Atlas-independent flat recipe used only by the demo's live skin editor.
+    ///
+    /// The recipe is compiled into `style` after each edit and is never installed in Context as a
+    /// second runtime color source.
+    style_palette: FlatPalette,
     /// Whether the editable style differs from the last value published to the Context.
     ///
     /// Publishing invalidates every retained measurement cache, so animation frames must not call
-    /// `Context::set_style` unless a theme selector or Style Editor input actually changed it.
+    /// `Context::set_skin` unless a theme selector or Skin Editor input actually changed it.
     style_dirty: bool,
     /// Pristine Context-bound atlas/style bundles used by the demo theme selector.
     themes: DemoThemes,
@@ -1714,7 +1719,8 @@ impl State {
             .font(FontRole::Body.into()),
         );
         // Begin with an editable copy of the ordinary atlas-derived default selection.
-        let style = themes.selected_style().clone();
+        let style = themes.selected_skin().clone();
+        let style_palette = FlatPalette::default();
         let (demo_content, demo_node) = root_content();
         let (style_content, style_node) = root_content();
         let (log_content, log_node) = root_content();
@@ -1780,7 +1786,7 @@ impl State {
             .expect("demo window must expose framed minimize and maximize chrome");
         let _style_root = ctx
             .ui()
-            .create_child_window(&grid_root, Window::new("Style Editor", rect(350, 250, 300, 240), style_node))
+            .create_child_window(&grid_root, Window::new("Skin Editor", rect(350, 250, 300, 240), style_node))
             .expect("grid root must own the style editor");
         let _log_root = ctx
             .ui()
@@ -1998,6 +2004,7 @@ impl State {
             style_color_swatch_states,
             window_info_value_states,
             style,
+            style_palette,
             style_dirty: false,
             themes,
             theme_menu_items: menu_items.themes,
@@ -2027,7 +2034,7 @@ impl State {
             background_swatch_state,
         };
         state.sync_background_controls_from_bg();
-        state.sync_style_controls_from_style();
+        state.sync_skin_controls_from_skin();
         state.build_root_contents(runtimes, root_contents);
         state
     }
@@ -2104,36 +2111,23 @@ impl State {
 
     fn style_color_changed(&mut self, index: &usize, event: &SliderChanged) {
         let color_index = *index / 4;
-        if color_index == 14 {
-            // The editor's compact menu swatch represents the ordinary menu foreground. Preserve
-            // state-specific selected, pressed, and disabled colors while updating the
-            // Normal entry shared by each concrete menu role.
-            let mut color = self.style.foreground(AppearanceRole::MenuItem, VisualState::Normal);
-            let value = event.value as u8;
-            match *index % 4 {
-                0 => color.r = value,
-                1 => color.g = value,
-                2 => color.b = value,
-                _ => color.a = value,
-            }
-            for role in [
-                AppearanceRole::MenuBar,
-                AppearanceRole::MenuTitle,
-                AppearanceRole::MenuTitleOpen,
-                AppearanceRole::MenuPopup,
-                AppearanceRole::MenuItem,
-                AppearanceRole::MenuItemSelected,
-            ] {
-                self.style.visuals.set_foreground(role, VisualState::Normal, color);
-            }
-            self.style_dirty = true;
-            return;
-        }
         let color = match color_index {
-            0..=11 => &mut self.style.colors[color_index],
-            12 => &mut self.style.focus_color,
-            13 => &mut self.style.window_focus_color,
-            15 => &mut self.style.menu_background,
+            0 => &mut self.style_palette.text,
+            1 => &mut self.style_palette.border,
+            2 => &mut self.style_palette.window_background,
+            3 => &mut self.style_palette.title_background,
+            4 => &mut self.style_palette.title_foreground,
+            5 => &mut self.style_palette.panel_background,
+            6 => &mut self.style_palette.button,
+            7 => &mut self.style_palette.button_hovered,
+            8 => &mut self.style_palette.input,
+            9 => &mut self.style_palette.input_hovered,
+            10 => &mut self.style_palette.scrollbar_track,
+            11 => &mut self.style_palette.scrollbar_thumb,
+            12 => &mut self.style_palette.focus,
+            13 => &mut self.style_palette.window_focus,
+            14 => &mut self.style_palette.menu_foreground,
+            15 => &mut self.style_palette.menu_background,
             _ => return,
         };
         let value = event.value as u8;
@@ -2143,16 +2137,18 @@ impl State {
             2 => color.b = value,
             _ => color.a = value,
         }
+        // Compile the complete named palette so every edited swatch changes what widgets paint.
+        self.style.apply_flat_palette(self.style_palette);
         self.style_dirty = true;
     }
 
     fn style_value_changed(&mut self, index: &usize, event: &SliderChanged) {
         match index {
-            0 => self.style.padding = event.value as i32,
-            1 => self.style.spacing = event.value as i32,
-            2 => self.style.title_height = event.value as i32,
-            3 => self.style.thumb_size = event.value as i32,
-            4 => self.style.scrollbar_size = event.value as i32,
+            0 => self.style.metrics.padding = event.value as i32,
+            1 => self.style.metrics.spacing = event.value as i32,
+            2 => self.style.metrics.title_height = event.value as i32,
+            3 => self.style.metrics.thumb_size = event.value as i32,
+            4 => self.style.metrics.scrollbar_size = event.value as i32,
             _ => unreachable!("style value slider index is bounded by construction"),
         }
         self.style_dirty = true;
@@ -2364,7 +2360,7 @@ impl State {
             .menu_item_mut(&self.menu_compact_spacing)
             .expect("compact-spacing menu item unavailable")
             .mark = MenuItemMark::Radio(!comfortable);
-        self.style.spacing = spacing;
+        self.style.metrics.spacing = spacing;
         self.style_dirty = true;
         set_slider_value(&self.style_value_slider_states[1], spacing as Real);
         self.write_log(if comfortable {
@@ -2382,9 +2378,10 @@ impl State {
             context.menu_item_mut(item).expect("theme menu item unavailable").mark = MenuItemMark::Radio(candidate == selection);
         }
         self.style = self.themes.select(selection);
+        self.style_palette = FlatPalette::default();
         self.style_dirty = true;
-        // The Style Editor edits this new copy rather than stale values from the preceding theme.
-        self.sync_style_controls_from_style();
+        // The Skin Editor edits this new copy rather than stale values from the preceding theme.
+        self.sync_skin_controls_from_skin();
         self.write_log(format!("Selected theme: {}", selection.label()).as_str());
     }
 
@@ -2455,14 +2452,26 @@ impl State {
             .expect("background swatch state unavailable");
     }
 
-    fn sync_style_controls_from_style(&mut self) {
-        let colors = self.style.colors.into_iter().chain([
-            self.style.focus_color,
-            self.style.window_focus_color,
-            self.style.foreground(AppearanceRole::MenuItem, VisualState::Normal),
-            self.style.menu_background,
-        ]);
-        for (i, color) in colors.enumerate() {
+    fn sync_skin_controls_from_skin(&mut self) {
+        let colors = [
+            self.style_palette.text,
+            self.style_palette.border,
+            self.style_palette.window_background,
+            self.style_palette.title_background,
+            self.style_palette.title_foreground,
+            self.style_palette.panel_background,
+            self.style_palette.button,
+            self.style_palette.button_hovered,
+            self.style_palette.input,
+            self.style_palette.input_hovered,
+            self.style_palette.scrollbar_track,
+            self.style_palette.scrollbar_thumb,
+            self.style_palette.focus,
+            self.style_palette.window_focus,
+            self.style_palette.menu_foreground,
+            self.style_palette.menu_background,
+        ];
+        for (i, color) in colors.into_iter().enumerate() {
             let slider_base = i * 4;
             set_slider_value(&self.style_color_slider_states[slider_base], color.r as Real);
             set_slider_value(&self.style_color_slider_states[slider_base + 1], color.g as Real);
@@ -2472,11 +2481,11 @@ impl State {
                 .try_update(|swatch| swatch.set_fill(color))
                 .expect("style swatch state unavailable");
         }
-        set_slider_value(&self.style_value_slider_states[0], self.style.padding as Real);
-        set_slider_value(&self.style_value_slider_states[1], self.style.spacing as Real);
-        set_slider_value(&self.style_value_slider_states[2], self.style.title_height as Real);
-        set_slider_value(&self.style_value_slider_states[3], self.style.thumb_size as Real);
-        set_slider_value(&self.style_value_slider_states[4], self.style.scrollbar_size as Real);
+        set_slider_value(&self.style_value_slider_states[0], self.style.metrics.padding as Real);
+        set_slider_value(&self.style_value_slider_states[1], self.style.metrics.spacing as Real);
+        set_slider_value(&self.style_value_slider_states[2], self.style.metrics.title_height as Real);
+        set_slider_value(&self.style_value_slider_states[3], self.style.metrics.thumb_size as Real);
+        set_slider_value(&self.style_value_slider_states[4], self.style.metrics.scrollbar_size as Real);
     }
 
     fn write_log(&mut self, text: &str) {
@@ -2889,19 +2898,31 @@ impl State {
             // measurement caches and the layout commit produced by the preceding update.
             return;
         }
-        let colors = self.style.colors.into_iter().chain([
-            self.style.focus_color,
-            self.style.window_focus_color,
-            self.style.foreground(AppearanceRole::MenuItem, VisualState::Normal),
-            self.style.menu_background,
-        ]);
+        let colors = [
+            self.style_palette.text,
+            self.style_palette.border,
+            self.style_palette.window_background,
+            self.style_palette.title_background,
+            self.style_palette.title_foreground,
+            self.style_palette.panel_background,
+            self.style_palette.button,
+            self.style_palette.button_hovered,
+            self.style_palette.input,
+            self.style_palette.input_hovered,
+            self.style_palette.scrollbar_track,
+            self.style_palette.scrollbar_thumb,
+            self.style_palette.focus,
+            self.style_palette.window_focus,
+            self.style_palette.menu_foreground,
+            self.style_palette.menu_background,
+        ];
         for (swatch, color) in self.style_color_swatch_states.iter().zip(colors) {
             swatch.try_update(|swatch| swatch.set_fill(color)).expect("style swatch state unavailable");
         }
         // A changed base theme swaps its font atlas first; live scalar/color edits then publish a
         // clone whose font and icon capabilities are guaranteed to belong to that active atlas.
         self.themes.install_selected(ctx);
-        ctx.set_style(self.style.clone());
+        ctx.set_skin(self.style.clone());
         self.style_dirty = false;
     }
 
