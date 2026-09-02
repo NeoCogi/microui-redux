@@ -54,5 +54,6 @@ pub use patch::{SkinEffectsPatch, SkinMetricsPatch, SkinPatch, VisualPatch, Visu
 pub use resources::ResourceCatalog;
 pub use roles::{AppearanceRole, VisualState};
 pub use style::{CaptionButtonSide, CaptionButtonsSkin, Skin, SkinEffects, SkinMetrics, TitleBackdropSkin, WindowChromeSkin, WindowTitleAlignment};
+pub(crate) use style::SkinRevision;
 pub use tables::{RoleTable, StateTable};
 pub use typography::{FontRef, FontRole};

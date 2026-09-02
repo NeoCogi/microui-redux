@@ -935,17 +935,6 @@ impl SurfaceForest {
         })
     }
 
-    /// Invalidates every retained widget measurement after replacing the manager-owned style.
-    pub(super) fn invalidate_widget_measurements(&mut self) {
-        // Visit authoritative storage rather than visible_order. A hidden window can be revealed
-        // after the style change and must not revive a preferred size measured under the old style.
-        for node in &mut self.nodes {
-            if let SurfaceBody::Widgets { root, .. } = &mut node.surface.body {
-                root.invalidate_measurement_subtree();
-            }
-        }
-    }
-
     /// Inserts a root at the newest point in global activation chronology.
     fn insert_root(&mut self, node: SurfaceNode) {
         debug_assert!(matches!(node.key, SurfaceKey::Root(_)) && node.root().is_some());

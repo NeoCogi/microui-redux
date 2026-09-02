@@ -56,6 +56,26 @@ use super::{AppearanceRole, Color, FlatPalette, FontRef, FontRole, IconRole, Ski
 use crate::atlas::{AtlasHandle, FontId};
 use crate::render::{NinePatch, SliceInsets};
 
+/// Opaque identity of one immutable skin value installed through a [`crate::SkinBundle`].
+///
+/// Retained measurement caches compare this concrete token rather than mirroring selected Skin
+/// fields or holding atlas pointers. The process-wide allocator never reuses a value, so an old
+/// cache entry cannot match a later skin even when both happen to contain equal metrics.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub(crate) struct SkinRevision(
+    /// Non-reused process identity kept private to the skinning subsystem.
+    crate::identity::ProcessUniqueId,
+);
+
+impl SkinRevision {
+    /// Allocates a revision for one newly constructed or newly bundled skin value.
+    fn allocate() -> Self {
+        // The identity source is shared with other capability domains but the wrapper prevents a
+        // renderer, node, or surface identity from entering measurement-cache comparisons.
+        Self(crate::identity::ProcessUniqueId::allocate())
+    }
+}
+
 /// Horizontal alignment policy for manager-owned window title text.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub enum WindowTitleAlignment {
@@ -220,6 +240,8 @@ pub struct SkinEffects {
 /// are compiled into these concrete fields and are not retained as alternate sources of truth.
 #[derive(Clone)]
 pub struct Skin {
+    /// Exact generation used by retained caches; refreshed whenever a bundle takes ownership.
+    revision: SkinRevision,
     /// Layout and widget geometry values.
     pub metrics: SkinMetrics,
     /// Unified background and foreground visuals used by built-in UI parts.
@@ -254,6 +276,7 @@ impl Skin {
         // loading follows this identical fallback constructor before replacing authored states.
         let visuals = VisualCatalog::from_flat_palette(SliceInsets::uniform(1), &palette);
         Self {
+            revision: SkinRevision::allocate(),
             metrics: SkinMetrics {
                 default_cell_width: 68,
                 padding: 5,
@@ -272,6 +295,19 @@ impl Skin {
             },
             chrome: WindowChromeSkin::trailing_buttons(),
         }
+    }
+
+    /// Returns the opaque generation associated with this complete skin value.
+    pub(crate) const fn revision(&self) -> SkinRevision {
+        // Copies are safe because a revision is an immutable identity, not a mutable counter.
+        self.revision
+    }
+
+    /// Assigns a fresh generation when a bundle takes ownership of this skin.
+    pub(crate) fn refresh_revision(&mut self) {
+        // Public Skin fields remain ordinary concrete values. The bundle boundary is the one place
+        // that turns their completed combination into a new cacheable immutable generation.
+        self.revision = SkinRevision::allocate();
     }
 
     /// Replaces flat visual fallbacks and related effects from one authored palette.

@@ -54,7 +54,7 @@ impl SkinBundle {
     ///
     /// Panics when the atlas lacks a required semantic resource or an image-backed skin visual
     /// contains a capability minted by another atlas allocation.
-    pub fn new(atlas: AtlasHandle, skin: Skin) -> Self {
+    pub fn new(atlas: AtlasHandle, mut skin: Skin) -> Self {
         // Validate stable semantic resource names even though they are resolved lazily. This keeps
         // a successfully constructed bundle total for every built-in measure and paint operation.
         let _ = skin.resolve_font_role(&atlas, crate::FontRole::Body);
@@ -64,6 +64,9 @@ impl SkinBundle {
         // Image visuals are the only allocation-bound values retained inside Skin after stable
         // font/icon references replaced widget-owned IDs.
         assert!(skin.belongs_to(&atlas), "skin contains image capabilities from another atlas");
+        // Bundle construction publishes a completed concrete skin value. Give that value a fresh
+        // identity so retained caches need no partial field fingerprint or atlas-pointer key.
+        skin.refresh_revision();
         Self { atlas, skin }
     }
 
@@ -117,5 +120,17 @@ mod tests {
         // Construction is the sole public pairing boundary, so malformed ownership cannot enter a
         // LoadedTheme or WindowManager and fail later during rendering.
         let _ = SkinBundle::new(local_atlas, skin);
+    }
+
+    /// Verifies bundle clones identify one value while a new pairing starts a new generation.
+    #[test]
+    fn bundle_construction_assigns_one_complete_non_reused_skin_revision() {
+        let atlas = crate::test_support::test_atlas();
+        let first = SkinBundle::from_atlas(atlas.clone());
+        let first_clone = first.clone();
+        let second = SkinBundle::new(atlas, first.skin().clone());
+
+        assert_eq!(first.skin().revision(), first_clone.skin().revision());
+        assert_ne!(first.skin().revision(), second.skin().revision());
     }
 }

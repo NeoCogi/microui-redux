@@ -211,8 +211,8 @@ impl Widget for CompleteStyleMeasureProbe {
 impl crate::LeafWidget for CompleteStyleMeasureProbe {
     /// Derives preferred width from the complete public Skin passed to custom leaf measurement.
     fn measure(&self, style: &Skin, _atlas: &AtlasHandle, _constraints: Constraints) -> Dimensioni {
-        // Foreground color is intentionally absent from MeasurementStyleKey. Observing it here
-        // proves global replacement invalidates custom measurements beyond built-in size fields.
+        // Foreground color is paint-only for built-ins. Observing it here proves the complete skin
+        // revision covers every value visible to a custom widget's public measurement contract.
         self.measures.set(self.measures.get() + 1);
         Dimensioni::new(i32::from(style.foreground(AppearanceRole::MenuPopup, VisualState::Normal).r).max(1), 10)
     }
@@ -1353,7 +1353,7 @@ fn empty_public_update_consumes_programmatic_text_area_caret_reveal() {
 }
 
 #[test]
-fn global_style_replacement_invalidates_measurements_in_hidden_surfaces() {
+fn global_skin_revision_invalidates_measurements_lazily_in_hidden_surfaces() {
     let measures = Rc::new(Cell::new(0));
     let probe = Node::widget(CompleteStyleMeasureProbe {
         measures: measures.clone(),
@@ -1369,8 +1369,8 @@ fn global_style_replacement_invalidates_measurements_in_hidden_surfaces() {
     ctx.update_ui(dimensions);
     assert_eq!(measures.get(), warmed, "unchanged style and constraints must retain the cached preference");
 
-    // Replace only a value that the former partial style key omitted while the tree is hidden.
-    // Revealing it later must not revive the entry measured under the previous complete Skin.
+    // Replace only a visual value while the tree is hidden. Bundle construction assigns the new
+    // complete Skin revision; revealing later must not revive the earlier generation's entry.
     ctx.ui().set_window_visible(&window, false).unwrap();
     let mut replacement = ctx.skin().clone();
     let mut foreground = replacement.foreground(AppearanceRole::MenuPopup, VisualState::Normal);

@@ -311,11 +311,9 @@ impl WindowManager {
 
     /// Replaces the complete skin bundle and invalidates geometry measured with its old pair.
     pub(crate) fn set_skin_bundle(&mut self, bundle: SkinBundle) {
-        // LeafWidget::measure receives the complete Skin, including values that built-in widgets
-        // use only while painting. Clear every retained cache rather than maintaining a partial
-        // style fingerprint that cannot represent the public measurement contract.
+        // Every SkinBundle owns a fresh complete revision. Retained measurement entries compare
+        // that token lazily, so hidden trees need no eager downward invalidation traversal.
         self.bundle = bundle;
-        self.surfaces.invalidate_widget_measurements();
         self.invalidate_ui_commit();
     }
 

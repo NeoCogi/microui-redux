@@ -123,17 +123,6 @@ impl VisualCatalog {
         self.entries.iter().flat_map(StateTable::iter).map(|visual| visual.patch)
     }
 
-    /// Returns each role's normalized normal-state insets for retained measurement identity.
-    pub(crate) fn measurement_insets(&self) -> [[i32; 4]; AppearanceRole::COUNT] {
-        // A container can measure descendants using any role, so the current cache contract needs
-        // all structural patch geometry even though colors and image pixels remain paint-only.
-        std::array::from_fn(|index| {
-            let role = AppearanceRole::ALL[index];
-            let insets = self.resolve(role, VisualState::Normal).patch.insets.normalized();
-            [insets.left, insets.top, insets.right, insets.bottom]
-        })
-    }
-
     /// Builds the complete flat fallback catalog used by default and authored skins.
     pub(crate) fn from_flat_palette(frame_insets: SliceInsets, palette: &FlatPalette) -> Self {
         // Resolve named palette values once and assemble complete Visual values directly. No

@@ -33,60 +33,17 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::math::RectExt;
-use crate::{AtlasHandle, Constraints, Dimensioni, FontId, IconId, LeafWidget, Recti, SliceInsets, Skin, TypedWidgetHandle, Widget};
+use crate::{AtlasHandle, Constraints, Dimensioni, LeafWidget, Recti, SliceInsets, Skin, TypedWidgetHandle, Widget};
 
 use super::{ChildParticipation, Children, Container, NodeLayout, RuntimeNodeId, WidgetStorage};
 
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub(crate) struct MeasurementStyleKey {
-    font: FontId,
-    small_font: FontId,
-    title_font: FontId,
-    heading_font: FontId,
-    mono_font: FontId,
-    expand_icon: IconId,
-    expand_down_icon: IconId,
-    check_icon: IconId,
-    default_cell_width: i32,
-    padding: i32,
-    spacing: i32,
-    indent: i32,
-    title_height: i32,
-    scrollbar_size: i32,
-    thumb_size: i32,
-    /// Normal-state destination insets for every semantic appearance role.
-    appearance_insets: [[i32; 4]; crate::AppearanceRole::COUNT],
-}
-
-impl MeasurementStyleKey {
-    pub(crate) fn new(style: &Skin, atlas: &AtlasHandle) -> Self {
-        // Cache only measurement-observable style values. Colors and cell payloads affect paint,
-        // while every role's normalized insets can affect a framed descendant's constraints.
-        Self {
-            font: style.resolve_font_role(atlas, crate::FontRole::Body),
-            small_font: style.resolve_font_role(atlas, crate::FontRole::Small),
-            title_font: style.resolve_font_role(atlas, crate::FontRole::Title),
-            heading_font: style.resolve_font_role(atlas, crate::FontRole::Heading),
-            mono_font: style.resolve_font_role(atlas, crate::FontRole::Mono),
-            expand_icon: crate::IconRole::Expand.resolve(atlas),
-            expand_down_icon: crate::IconRole::ExpandDown.resolve(atlas),
-            check_icon: crate::IconRole::Check.resolve(atlas),
-            default_cell_width: style.metrics.default_cell_width,
-            padding: style.metrics.padding,
-            spacing: style.metrics.spacing,
-            indent: style.metrics.indent,
-            title_height: style.metrics.title_height,
-            scrollbar_size: style.metrics.scrollbar_size,
-            thumb_size: style.metrics.thumb_size,
-            appearance_insets: style.visuals.measurement_insets(),
-        }
-    }
-}
-
+/// One preferred-size result associated with an exact installed skin generation.
 struct MeasurementEntry {
+    /// Parent-supplied bounds that produced this retained preferred size.
     constraints: Constraints,
-    style: MeasurementStyleKey,
-    atlas: AtlasHandle,
+    /// Complete skin generation observed by the public widget measurement contract.
+    revision: crate::theme::SkinRevision,
+    /// Normalized non-negative outer size returned for this key.
     preferred: Dimensioni,
 }
 
@@ -121,10 +78,13 @@ impl MeasurementCache {
         self.layout_dirty = false;
     }
 
-    fn lookup(&self, constraints: Constraints, style: MeasurementStyleKey, atlas: &AtlasHandle) -> Option<Dimensioni> {
+    /// Returns a retained result only for the exact constraints and complete skin generation.
+    fn lookup(&self, constraints: Constraints, revision: crate::theme::SkinRevision) -> Option<Dimensioni> {
+        // SkinRevision represents all Skin fields and the paired atlas at the bundle boundary, so
+        // no incomplete list of measurement-relevant fields can drift from LeafWidget::measure.
         self.entries
             .iter()
-            .find(|cached| cached.constraints == constraints && cached.style == style && cached.atlas.ptr_eq(atlas))
+            .find(|cached| cached.constraints == constraints && cached.revision == revision)
             .map(|cached| cached.preferred)
     }
 
@@ -358,8 +318,8 @@ impl Node {
     pub(crate) fn measure_with_cache_status(&mut self, style: &Skin, atlas: &AtlasHandle, constraints: Constraints) -> (Dimensioni, bool) {
         let style = self.resolve_style(style);
         let style = &style;
-        let style_key = MeasurementStyleKey::new(style, atlas);
-        if let Some(cached) = self.state.measurement.lookup(constraints, style_key, atlas) {
+        let revision = style.revision();
+        if let Some(cached) = self.state.measurement.lookup(constraints, revision) {
             return (cached, true);
         }
 
@@ -390,12 +350,7 @@ impl Node {
         // the parent consumes this desired size while resolving its own child relationship.
         let preferred_content = Dimensioni::new(measured_content.width.max(0), measured_content.height.max(0));
         let preferred = crate::ui_node::frame::outer_preferred(preferred_content, frame_insets);
-        self.state.measurement.insert(MeasurementEntry {
-            constraints,
-            style: style_key,
-            atlas: atlas.clone(),
-            preferred,
-        });
+        self.state.measurement.insert(MeasurementEntry { constraints, revision, preferred });
         (preferred, false)
     }
 
@@ -411,23 +366,6 @@ impl Node {
             self.state.invalidate_measurement();
         }
         measurement_dirty
-    }
-
-    /// Invalidates preferred-size entries for this complete retained subtree.
-    ///
-    /// Global style replacement uses this downward traversal because every field of [`Skin`] is
-    /// observable by the public [`LeafWidget::measure`] contract. A parent-first style change must
-    /// therefore discard descendant entries even when the changed value is purely visual to the
-    /// built-in widgets or the subtree is currently hidden.
-    pub(crate) fn invalidate_measurement_subtree(&mut self) {
-        // Clear the local bounded cache before descending. The traversal owns every child mutably,
-        // so no parallel generation counter or incomplete projection of Skin is needed.
-        self.state.invalidate_measurement();
-        self.with_children_mut(|children| {
-            for child in children.iter_mut() {
-                child.invalidate_measurement_subtree();
-            }
-        });
     }
 
     /// Reports whether this node or any descendant has uncommitted widget measurement state.

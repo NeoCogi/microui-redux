@@ -326,8 +326,7 @@
 //!
 //! 1. Remove frame insets from constraints before measuring widget content, then add frame geometry
 //!    back to the reported outer desired size.
-//! 2. Cache each node's desired size by exact constraints, measurement-relevant style fields, and
-//!    atlas identity.
+//! 2. Cache each node's desired size by exact constraints and the active complete skin revision.
 //! 3. Before placement, measure under the exact allocated size, normalize the parent's rectangle,
 //!    and derive the node-local framed content rectangle.
 //! 4. Give containers that exact content rectangle. A container resolves its relationships and
@@ -347,8 +346,8 @@
 //!
 //! - `TrackResolver` uses constant auxiliary space. It stores six scalar accumulators rather than
 //!   copying track metadata or resolved extents.
-//! - Each node keeps a bounded four-entry measurement cache. Cache keys include both constraints,
-//!   measurement-relevant style values, and atlas identity. Invalidation clears entries but retains
+//! - Each node keeps a bounded four-entry measurement cache. Cache keys include both constraints
+//!   and the complete `SkinBundle` revision. Local mutation invalidation clears entries but retains
 //!   vector capacity.
 //! - If measurement is cached, allocation is unchanged, and layout is not dirty, runtime skips the
 //!   complete placement subtree.
