@@ -23,7 +23,9 @@ Compared with [microui-rs](https://github.com/neocogi/microui-rs), this crate em
 library types, reusable retained trees, and richer widgets such as custom rendering callbacks,
 dialogs, and a file dialog.
 
-![microui-redux demo with retained windows and controls](res/microui.png)
+| Windows 3.11 | Mac OS 9 |
+| :--: | :--: |
+| ![Retained UI demo using the Windows 3.11 theme](res/microui-windows-3.11.png) | ![Retained UI demo using the Mac OS 9 theme](res/microui-mac-os-9.png) |
 
 ## Getting started
 

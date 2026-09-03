@@ -115,4 +115,6 @@ feature and package-selection arguments; replace `example-glow` with `example-vu
 `example-wgpu` when needed. It requires the nightly `rust-src` component (`rustup component add
 rust-src --toolchain nightly`).
 
-![microui-redux demo with retained windows and controls](../res/microui.png)
+| Windows 3.11 | Mac OS 9 |
+| :--: | :--: |
+| ![Retained UI demo using the Windows 3.11 theme](../res/microui-windows-3.11.png) | ![Retained UI demo using the Mac OS 9 theme](../res/microui-mac-os-9.png) |
