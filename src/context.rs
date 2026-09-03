@@ -731,8 +731,8 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
     /// Loads a versioned JSON theme and bakes every assigned image patch into its immutable atlas.
     ///
     /// Relative image paths are resolved against the JSON file's directory. Missing patch entries
-    /// remain concrete flat-color patches derived from the document's palette. Successfully
-    /// Each unique image path becomes one atlas region, allowing callers to retain several
+    /// remain concrete flat-color patches derived from the document's palette. Each unique image
+    /// path becomes one atlas region, allowing callers to retain several
     /// [`LoadedTheme`] values and switch their complete skin bundles safely.
     ///
     /// # Errors

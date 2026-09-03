@@ -257,7 +257,7 @@ pub trait WidgetParameters: 'static {}
 /// Cloneable, non-owning typed access to one concrete retained widget.
 ///
 /// A [`crate::Node`] owns the only persistent strong reference after construction. Containers and
-/// the runtime retains that widget through an erased leaf or container trait object, while
+/// the runtime retain that widget through an erased leaf or container trait object, while
 /// application code and coordinating widgets may keep this typed weak view. Removing the node
 /// therefore makes every typed handle expire instead of keeping an invisible widget alive.
 pub struct TypedWidgetHandle<W: Widget + 'static> {
