@@ -118,5 +118,6 @@ available on [docs.rs](https://docs.rs/microui-redux).
 
 ## License
 
-The project code is licensed under the [BSD 3-Clause License](LICENSE). Bundled fonts, icons, and
-demo assets retain their original terms; see [asset attribution and licenses](docs/ASSETS.md).
+Project-authored code and assets are licensed under the [BSD 3-Clause License](LICENSE). Portions
+derived from rxi/microui retain its MIT terms, and bundled fonts, icons, and demo assets retain the
+terms recorded in [asset attribution and licenses](docs/ASSETS.md).

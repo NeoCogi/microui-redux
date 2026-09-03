@@ -1,8 +1,10 @@
 # Bundled asset attribution and licenses
 
-The repository's BSD 3-Clause license covers the project code and the facepalm
-demo image described below. The bundled third-party fonts and icons retain their
-original names, authorship, and license terms:
+Project-authored code and assets use the repository's BSD 3-Clause license. Portions derived from
+rxi/microui and bundled third-party assets retain the following names, provenance, and terms:
+
+- **rxi/microui-derived source** — copyright 2020 rxi; licensed under the bundled
+  [MIT License](../LICENSES/MIT.txt). Affected source files also retain the original notice.
 
 - **Open Sans Regular** (`OpenSans-Regular`, stored as `assets/NORMAL.ttf`) and
   **Open Sans Bold** (`OpenSans-Bold`, stored as `assets/BOLD.ttf`) — copyright
@@ -22,6 +24,10 @@ original names, authorship, and license terms:
 - **Facepalm demo image** (`examples/FACEPALM.png`) — copyright Raja Lehtihet &
   Wael El Oraiby; licensed under this repository's
   [BSD 3-Clause license](../LICENSE).
+- **Suzanne demo mesh** (`assets/suzanne.obj`) — exported with Blender 2.80 from Blender's
+  built-in Suzanne test primitive and bundled as project demo data under this repository's
+  [BSD 3-Clause license](../LICENSE). Blender distinguishes its GPL-licensed software from
+  [artwork and data produced with it](https://www.blender.org/about/license/#your-artwork).
 - **Windows 3.11, Windows 95, and Mac OS 9 theme pixels** (`themes/windows-3.11/*.png`,
   `themes/windows-95/*.png`, and `themes/mac-os-9/*.png`) — original artwork authored for this repository and licensed under its
   [BSD 3-Clause license](../LICENSE). The theme-directory READMEs list visual research references;
