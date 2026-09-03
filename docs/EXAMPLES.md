@@ -24,7 +24,8 @@
   layer. Left-drag an exposed part of the grid to rotate its arcball camera, use the mouse
   wheel there to zoom, or choose Grid > Reset View to restore the initial composition. Grid > Minor
   Grid Lines controls its unit-spaced divisions. The Demo Window exposes minimize and
-  maximize/restore caption controls; Grid > Show Demo Window restores it after minimize or close.
+  maximize/restore caption controls; Grid > Show Demo Window makes it visible again after close.
+  Activate its minimize control a second time to restore its expanded height.
   Grid segments are clipped in homogeneous space so
   rotation cannot project behind-camera endpoints into stray lines across the UI. Each `Window`
   transfers its menu bar into direct manager-owned `MenuSurface` values. Menu and ordinary
@@ -76,9 +77,9 @@ Running with only `--features example-backend` will fail intentionally at compil
 Backend features are additive for Cargo tooling. If several are enabled together, examples select
 Glow first, then Vulkan, then WGPU; enable only the backend you want for normal interactive runs.
 
-`demo-full` loads `examples/FACEPALM.png`, `assets/suzanne.obj`, and both directories under
-`themes/` from disk at runtime. Paths are anchored to the Cargo manifest directory, but the files
-must remain present in a source checkout or package.
+`demo-full` loads `examples/FACEPALM.png`, `assets/suzanne.obj`, and all three bundled directories
+under `themes/` from disk at runtime. Paths are anchored to the Cargo manifest directory, but the
+files must remain present in a source checkout or package.
 
 For a smaller release executable with runtime-loaded assets, build without default features and
 enable exactly one backend plus `builder`:
