@@ -82,14 +82,14 @@ under `themes/` from disk at runtime. Paths are anchored to the Cargo manifest d
 files must remain present in a source checkout or package.
 
 For a smaller release executable with runtime-loaded assets, build without default features and
-enable exactly one backend plus `builder`:
+enable exactly one backend plus `theme-json`; that feature enables the required atlas builder:
 
 ```bash
 cargo build \
   --release \
   --example demo-full \
   --no-default-features \
-  --features "example-glow builder theme-json"
+  --features "example-glow theme-json"
 ```
 
 This keeps demo assets outside the executable: fonts/icons are read from `assets/`, the external
@@ -107,7 +107,7 @@ build ID. Normal builds remain on their selected toolchain and platform:
 cargo +nightly build-min-size \
   --example demo-full \
   --no-default-features \
-  --features "example-glow builder theme-json"
+  --features "example-glow theme-json"
 ```
 The executable is written to
 `target/x86_64-unknown-linux-min-size/min-size/examples/demo-full`. The alias accepts ordinary Cargo

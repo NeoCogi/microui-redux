@@ -15,7 +15,7 @@ exclude = ["atlas.png", ".codex", ".codex/**"]
 name = "microui_redux"
 
 [features]
-default = ["builder", "save-to-rust", "theme-json"]
+default = ["save-to-rust", "theme-json"]
 builder = ["dep:fontdue", "dep:png"]
 png_source = ["dep:png"]
 # Versioned JSON definitions and relative image-backed state patches.
