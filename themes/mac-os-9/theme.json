@@ -4,11 +4,21 @@
   "fonts": {
     "texture_width": 512,
     "texture_height": 256,
-    "body": { "path": "../../assets/NORMAL.ttf", "size": 12 },
-    "small": { "path": "../../assets/NORMAL.ttf", "size": 10 },
+    "body": { "path": "../../assets/BOLD.ttf", "size": 12 },
+    "small": { "path": "../../assets/BOLD.ttf", "size": 10 },
     "title": { "path": "../../assets/BOLD.ttf", "size": 12 },
-    "heading": { "path": "../../assets/NORMAL.ttf", "size": 18 },
-    "mono": { "path": "../../assets/CONSOLE.ttf", "size": 14 }
+    "heading": { "path": "../../assets/BOLD.ttf", "size": 18 },
+    "mono": { "path": "../../assets/CONSOLE.ttf", "size": 13 }
+  },
+  "icons": {
+    "close": { "path": "icon-close.png" },
+    "expand": { "path": "icon-expand.png" },
+    "collapse": { "path": "icon-collapse.png" },
+    "check": { "path": "icon-check.png" },
+    "expand_down": { "path": "icon-expand-down.png" },
+    "open_folder": { "path": "icon-open-folder.png" },
+    "closed_folder": { "path": "icon-closed-folder.png" },
+    "file": { "path": "icon-file.png" }
   },
   "skin": {
     "metrics": {

@@ -10,13 +10,16 @@ resize handle. Popup menus use a heavy black perimeter and black selections with
 Controls use chamfered raised faces, recessed white fields, black focus keylines, reversed pressed
 bevels, and softened disabled edges. Disabled and nested enabled/focused pointer sources remain
 independent JSON states even where period Mac OS intentionally gives two states the same restrained
-appearance. The bundled Open Sans and fixed-width fonts are
-freely-licensed approximations for the proprietary Chicago, Charcoal, and Geneva families; all five
-semantic font roles and their sizes are declared by this theme and receive fresh atlas IDs when the
-theme is loaded.
+appearance. Open Sans Bold supplies the dense body, menu, title, and heading typography while
+Fixedsys Excelsior supplies the compact monospaced role. Both are already licensed repository
+assets and approximate the proprietary Charcoal and Monaco faces without redistributing either
+font. All five semantic font roles and their sizes are declared by this theme. The theme also owns
+all eight semantic icon roles through original one-bit mask artwork, so disclosure triangles,
+checks, combo arrows, and file-dialog symbols no longer inherit the application's default icon set.
 
 The visual research references were the
 [Apple Mac OS 8 Human Interface Guidelines](https://dev.os9.ca/techpubs/mac/pdf/HIGOS8Guidelines.pdf),
+[Platinum9 GTK and XFWM theme](https://github.com/grassmunk/Platinum9),
 the [Platinum GTK reconstruction](https://github.com/eyaltoledano/platinum), and the
 [classic-stylesheets Mac OS 9 theme](https://github.com/nielssp/classic-stylesheets). These sources
 were used only to cross-check composition, palette, and integer geometry. No source PNG, CSS, SVG,
@@ -29,7 +32,8 @@ Every PNG in this directory is original BSD-3-Clause project artwork generated b
 cargo run --bin mac_os_9_theme_export -- --output-dir themes/mac-os-9
 ```
 
-The deterministic generator draws only integer-aligned primitive pixels. Control sources use
+The deterministic generator draws only integer-aligned primitive pixels. Semantic icons are
+opaque-white masks whose final color comes from the selected role state. Control sources use
 five-pixel fixed 3x3 spans, recessed sources use four-pixel spans, window frames use three-pixel
 visual spans, and caption faces use four-pixel spans. `style.window_border` independently reserves
 three structural pixels for client layout and one-axis resize hit regions. The active title source

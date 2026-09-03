@@ -1447,6 +1447,30 @@ mod tests {
         assert_eq!(chrome.captions.close_side, crate::CaptionButtonSide::Leading);
         assert!(!chrome.captions.show_without_activation);
         assert_eq!(loaded.bundle().skin().metrics.title_height, 18);
+        for (role, expected_size) in [
+            (FontRole::Body, 12),
+            (FontRole::Small, 10),
+            (FontRole::Title, 12),
+            (FontRole::Heading, 18),
+            (FontRole::Mono, 13),
+        ] {
+            let font = loaded.bundle().skin().resolve_font_role(loaded.bundle().atlas(), role);
+            assert_eq!(loaded.bundle().atlas().get_font_size(font), expected_size);
+        }
+        for (role, expected_size) in [
+            (IconRole::Close, (9, 9)),
+            (IconRole::Expand, (9, 9)),
+            (IconRole::Collapse, (9, 9)),
+            (IconRole::Check, (11, 11)),
+            (IconRole::ExpandDown, (9, 9)),
+            (IconRole::OpenFolder, (16, 16)),
+            (IconRole::ClosedFolder, (16, 16)),
+            (IconRole::File, (16, 16)),
+        ] {
+            let icon = loaded.bundle().skin().resolve_icon_role(loaded.bundle().atlas(), role);
+            let size = loaded.bundle().atlas().get_icon_size(icon);
+            assert_eq!((size.width, size.height), expected_size);
+        }
         let content = loaded.bundle().skin().metrics.window_content_insets;
         assert_eq!(
             (content.left, content.top, content.right, content.bottom),

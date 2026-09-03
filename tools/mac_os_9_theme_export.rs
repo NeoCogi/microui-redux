@@ -213,6 +213,14 @@ fn export_theme(output_dir: &Path) -> Result<(), Box<dyn Error>> {
         ("menu-bar.png", menu_bar()),
         ("menu-popup.png", menu_popup()),
         ("menu-selection.png", Bitmap::new(1, 1, BLACK)),
+        ("icon-close.png", close_icon()),
+        ("icon-expand.png", expand_icon()),
+        ("icon-collapse.png", collapse_icon()),
+        ("icon-check.png", check_icon()),
+        ("icon-expand-down.png", collapse_icon()),
+        ("icon-open-folder.png", open_folder_icon()),
+        ("icon-closed-folder.png", closed_folder_icon()),
+        ("icon-file.png", file_icon()),
     ];
     for (name, bitmap) in images {
         // Each stable filename is also the JSON texture-cache key, so regeneration preserves the
@@ -406,6 +414,108 @@ fn menu_popup() -> Bitmap {
     bitmap.horizontal(2, 4, 4, DARK_SHADOW);
     bitmap.vertical(4, 2, 4, DARK_SHADOW);
     bitmap.set(3, 3, FACE);
+    bitmap
+}
+
+/// Builds a compact mask for the manager's separately painted close glyph.
+fn close_icon() -> Bitmap {
+    let mut bitmap = Bitmap::new(9, 9, TRANSPARENT);
+    // Semantic icons are opaque-white masks because widget paint supplies the state-dependent
+    // content color. Two-pixel diagonals retain a crisp X when the icon is centered or clipped.
+    for coordinate in 2..=6 {
+        bitmap.set(coordinate, coordinate, WHITE);
+        bitmap.set(coordinate + 1, coordinate, WHITE);
+        bitmap.set(8 - coordinate, coordinate, WHITE);
+        bitmap.set(7 - coordinate, coordinate, WHITE);
+    }
+    bitmap
+}
+
+/// Builds the right-facing disclosure and submenu triangle used by collapsed branches.
+fn expand_icon() -> Bitmap {
+    let mut bitmap = Bitmap::new(9, 9, TRANSPARENT);
+    // A stepped one-bit triangle matches Platinum's compact disclosure language and remains
+    // legible in either black normal text or white selected-menu text.
+    for (y, right) in [(1, 2), (2, 3), (3, 5), (4, 7), (5, 5), (6, 3), (7, 2)] {
+        bitmap.horizontal(2, right, y, WHITE);
+    }
+    bitmap
+}
+
+/// Builds the downward disclosure and combo indicator used by expanded branches.
+fn collapse_icon() -> Bitmap {
+    let mut bitmap = Bitmap::new(9, 9, TRANSPARENT);
+    // The broad top and centered point are the vertical counterpart of `expand_icon`; sharing this
+    // source with combo boxes keeps identical semantic arrows identical in the final atlas.
+    for (y, left, right) in [(2, 1, 7), (3, 2, 6), (4, 3, 5), (5, 4, 4)] {
+        bitmap.horizontal(left, right, y, WHITE);
+    }
+    bitmap
+}
+
+/// Builds the angled one-bit check used by checkboxes and checked menu rows.
+fn check_icon() -> Bitmap {
+    let mut bitmap = Bitmap::new(11, 11, TRANSPARENT);
+    // The short rising arm and longer falling arm are deliberately doubled rather than
+    // antialiased, preserving the dense small-scale mark of the original interface.
+    for (x, y) in [(1, 5), (2, 6), (3, 7), (4, 6), (5, 5), (6, 4), (7, 3), (8, 2), (9, 1)] {
+        bitmap.set(x, y, WHITE);
+        bitmap.set(x, y + 1, WHITE);
+    }
+    bitmap
+}
+
+/// Builds a closed-folder outline that remains recognizable under the widget content tint.
+fn closed_folder_icon() -> Bitmap {
+    let mut bitmap = Bitmap::new(16, 16, TRANSPARENT);
+    // Semantic icons currently paint as tinted masks, so the folder uses a strong period outline
+    // instead of embedding colors that the widget could not preserve across selection states.
+    bitmap.horizontal(1, 6, 3, WHITE);
+    bitmap.horizontal(1, 14, 5, WHITE);
+    bitmap.horizontal(1, 14, 13, WHITE);
+    bitmap.vertical(1, 3, 13, WHITE);
+    bitmap.vertical(6, 3, 5, WHITE);
+    bitmap.vertical(14, 5, 13, WHITE);
+    bitmap
+}
+
+/// Builds an open-folder outline with the front leaf lowered toward the viewer.
+fn open_folder_icon() -> Bitmap {
+    let mut bitmap = closed_folder_icon();
+    // Overlay the characteristic open leaf: a sloped upper edge, a lower baseline, and short side
+    // joins. The retained back-tab makes open and closed states related rather than unrelated art.
+    bitmap.horizontal(3, 14, 7, WHITE);
+    bitmap.horizontal(2, 13, 14, WHITE);
+    bitmap.set(2, 8, WHITE);
+    bitmap.set(2, 9, WHITE);
+    bitmap.set(1, 10, WHITE);
+    bitmap.set(1, 11, WHITE);
+    bitmap.set(1, 12, WHITE);
+    bitmap.set(1, 13, WHITE);
+    bitmap.set(14, 8, WHITE);
+    bitmap.set(14, 9, WHITE);
+    bitmap.set(13, 10, WHITE);
+    bitmap.set(13, 11, WHITE);
+    bitmap.set(13, 12, WHITE);
+    bitmap.set(13, 13, WHITE);
+    bitmap
+}
+
+/// Builds the outlined document page used by ordinary file-dialog rows.
+fn file_icon() -> Bitmap {
+    let mut bitmap = Bitmap::new(16, 16, TRANSPARENT);
+    // The clipped upper-right corner and its two-pixel fold distinguish a document from a folder
+    // without relying on color, gradients, or any pixels imported from the reference project.
+    bitmap.horizontal(3, 9, 1, WHITE);
+    bitmap.vertical(3, 1, 14, WHITE);
+    bitmap.horizontal(3, 12, 14, WHITE);
+    bitmap.vertical(12, 4, 14, WHITE);
+    bitmap.set(10, 2, WHITE);
+    bitmap.set(11, 3, WHITE);
+    bitmap.horizontal(9, 12, 4, WHITE);
+    bitmap.vertical(9, 1, 4, WHITE);
+    bitmap.horizontal(5, 10, 7, WHITE);
+    bitmap.horizontal(5, 10, 10, WHITE);
     bitmap
 }
 
