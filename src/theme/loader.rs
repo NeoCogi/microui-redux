@@ -1341,7 +1341,7 @@ mod tests {
         let menu_popup = loaded.bundle().skin().menu(MenuRole::Popup, MenuState::Normal).patch;
         assert_eq!(
             (menu_popup.insets.left, menu_popup.insets.top, menu_popup.insets.right, menu_popup.insets.bottom),
-            (2, 2, 2, 2)
+            (1, 1, 1, 1)
         );
         assert!(matches!(
             menu_popup.content,

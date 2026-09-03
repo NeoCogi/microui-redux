@@ -16,9 +16,8 @@ and examples.
 Focused widget roles and active window roles make the sole keyboard and window scopes visible
 without a second universal outline or exposing remembered focus in nonselected windows.
 
-> **Alpha status:** `0.8.0-alpha.6` is the current alpha of the breaking retained-API
-> redesign. The 0.8 line is not API-compatible with 0.7 and may continue to evolve before the
-> stable 0.8.0 release.
+> **Development status:** `0.8.0` is the current retained-API release. The crate remains pre-1.0,
+> so APIs may continue to evolve in later minor releases.
 
 Compared with [microui-rs](https://github.com/neocogi/microui-rs), this crate embraces standard
 library types, reusable retained trees, and richer widgets such as custom rendering callbacks,
@@ -28,11 +27,11 @@ dialogs, and a file dialog.
 
 ## Getting started
 
-Use the explicit alpha version while the retained API is being evaluated:
+Use the current pre-1.0 release:
 
 ```toml
 [dependencies]
-microui-redux = "0.8.0-alpha.6"
+microui-redux = "0.8.0"
 ```
 
 `microui-redux` does not create a native window or graphics device. Applications provide a

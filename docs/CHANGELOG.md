@@ -3,7 +3,7 @@
 ## Roadmap to Version 0.9
 - [ ] Async/Multi-Threading?
 
-## Version 0.8
+## Version 0.8.0
 
 Version `0.8` is a deliberate retained-API redesign relative to `0.7`. It unifies application
 authoring, input, events, windows, menus, and rendering around uniquely owned retained values; the

@@ -191,8 +191,8 @@
 //! Retained layout is resolved from context-owned UI nodes, container sizing policies, and widget
 //! measurement results.
 //! Retained application logic uses typed weak widget handles returned beside mounted nodes.
-//! The [`retained`] module and repository examples document the 0.8 alpha retained-authoring API.
-//! This release is versioned `0.8.0-alpha.6` and uses one concrete surface forest. Sole parent
+//! The [`retained`] module and repository examples document the 0.8 retained-authoring API.
+//! This release is versioned `0.8.0` and uses one concrete surface forest. Sole parent
 //! edges encode structural child-window, dialog, and popup ownership; forest storage records
 //! chronological window order; and one deepest-popup identity derives the visible transient branch.
 //! Within a child family, parent content records below descendants while the parent's intrinsic menu

@@ -27,7 +27,7 @@ filled rectangle appears over the client. Those L-shaped roles belong only to or
 Modal dialogs instead use a uniform four-pixel outer frame: black in the base state and the period
 `#0000AA` focus blue while active.
 
-Menu bars and popup interiors are white, popup shells use a solid two-pixel black frame instead of
+Menu bars and popup interiors are white, popup shells use a solid one-pixel black frame instead of
 window bevels, and highlighted rows pair the `#0000AA` selection with white state-specific foregrounds.
 Caption controls use the manager-owned close, minimize, maximize, and restore symbols colored by
 each button state's content color. Their raised and pressed faces remain ordinary control appearance
