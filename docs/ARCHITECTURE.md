@@ -65,7 +65,7 @@ ctx.set_skin(skin);
 
 The context value styles manager-owned window chrome and every retained widget. Nodes, containers,
 windows, and typed widget handles do not own local overrides. Call `Context::update_ui` after a
-layout-affecting replacement and before painting. Custom widgets inspect the same value through
+programmatic replacement and before relying on its visual or layout result. Custom widgets inspect the same value through
 `MeasureCtx::skin`, `ContainerLayoutCtx::skin`, `WidgetUpdateCtx::skin`, and `WidgetPaintCtx::skin`.
 
 Window and dialog creation consume one complete `Window` and return a non-owning `WindowHandle`;

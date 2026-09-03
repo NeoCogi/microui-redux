@@ -375,12 +375,18 @@ impl TypedWidgetHandle<Scrollbar> {
     }
 
     /// Replaces the requested offset without emitting a user-originated change event.
+    ///
+    /// This measurement-preserving setter does not invalidate the current commit; call
+    /// `Context::update_ui` before relying on the resulting presentation.
     pub fn set_offset(&self, offset: i32) -> Option<()> {
         // Programmatic synchronization is silent so composite owners do not receive feedback loops.
         self.try_update_without_measurement(|scrollbar| scrollbar.set_offset(offset))
     }
 
     /// Replaces the current viewport and content lengths.
+    ///
+    /// This measurement-preserving setter does not invalidate the current commit; call
+    /// `Context::update_ui` before relying on the resulting thumb geometry.
     pub fn set_lengths(&self, viewport_len: i32, content_len: i32) -> Option<()> {
         // Range changes affect thumb geometry but not the scrollbar's intrinsic thickness.
         self.try_update_without_measurement(|scrollbar| scrollbar.set_lengths(viewport_len, content_len))

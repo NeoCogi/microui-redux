@@ -41,11 +41,11 @@ interprets these rules—the child reports desired content without knowing wheth
 place it in a content, fixed, or flexible track.
 
 - Every built-in leaf reports its own intrinsic preferred size from content metrics (text/icon/thumb/line layout), while every container measures against its authoritative child collection.
-- A consumed or captured event conservatively dirties its recipient's retained measurement; the runtime propagates that invalidation through dependent ancestors at the next layout boundary. Typed-handle mutations use the same propagation path, so widget implementations do not manage layout caches.
+- A consumed or captured event conservatively dirties its recipient's retained measurement; the runtime propagates that invalidation through dependent ancestors at the next layout boundary. Generic `TypedWidgetHandle::try_update` access and topology mutations use the same propagation path. Specialized setters documented as measurement-preserving may defer derived update state until the next synchronization without invalidating the current commit.
 - `LeafWidget::measure` and `ContainerWidget::measure` report desired content, not an allocation. `Constraints` represents each axis as `AvailableSpace::Bounded(i32)` or `AvailableSpace::Unbounded`; bounded zero is not an unconstrained request.
 - Auto-sized roots measure unbounded axes intrinsically. `TrackSize::Content` uses desired extent, `TrackSize::Fixed` stays exact, and `TrackSize::Flex` shares bounded space left after content, fixed tracks, and spacing while falling back to desired content when unbounded.
 - `Context::update_ui` first synchronizes layout, then drains input in API-call order. Every event runs one complete eligible-tree `Widget::update` traversal and one follow-up layout, so geometry changed by one event is authoritative for routing the next.
-- `ContextFrame::render_ui` performs no input, update, or layout work. It paints the committed tree with `Widget::paint` and submits one display list; missing, stale, pending-input, visible-tree-dirty, or dimension-mismatched commits return `RenderError::UiUpdateRequired` before backend acquisition.
+- `ContextFrame::render_ui` performs no input, update, or layout work. It paints the committed tree with `Widget::paint` and submits one display list. A missing commit, pending input, a successful invalidating typed mutation in a visible tree, or different frame dimensions returns `RenderError::UiUpdateRequired` before backend acquisition.
 - Leaves and containers share the public `Widget` update/paint contract. `LeafWidget` adds intrinsic measurement; `ContainerWidget` adds child-aware measurement, placement, and optional surface event filtering.
 - Parent containers assign each node one exact retained parent-local allocation. Sizing relationships belong to parent-child edges such as `LinearItem`; `Node` has no global placement policy. Child offsets and clips remain node-local and are resolved through a composed transform during traversal.
 - Resolved outer rectangles and clips remain runtime stack locals. Node behavior works against its local content surface, while outer frame painting, standard hit routing, and conversion from screen input remain runtime-owned.
@@ -55,7 +55,22 @@ place it in a content, fixed, or flexible track.
 - `LinearCrossSize` gives every direction the same shared-line choices: desired content, stretching across exact allocation, or an exact fixed cross extent. `LinearDirection` combines axis and leading edge.
 - Negative desired extents are normalized to zero at the node boundary. A desired zero remains zero; generic containers do not substitute Skin-owned fallback cells.
 
-Built-in leaves and containers are mutated through their typed widget handles between commits. After programmatic state/topology changes, call `update_ui` even when no input is pending so layout is synchronized before paint. Feed raw input through methods such as `mousemove`, `mousedown`, `scroll`, `key`, and `text`; calls are queued without coalescing. `Context::key` accepts one backend-normalized `KeyEvent` containing logical identity, pressed/released state, the complete modifier snapshot, and repeat state. Printable key transitions remain distinct from `text`, which is the authoritative channel for composed UTF-8 input. A widget receives the current event as `Option<&UiInputEvent>`, while `WidgetUpdateCtx::{mouse_buttons,modifiers}` exposes held state after that event was applied.
+## Programmatic mutation and commit validity
+
+Built-in leaves and containers are mutated through their typed widget handles between commits. Call
+`update_ui` after every programmatic state or topology change, even when no input is pending, before
+relying on its visual or layout result. Generic `try_update` access conservatively invalidates a
+visible commit. Specialized measurement-preserving setters may leave that commit renderable, but
+derived state such as caret reveal or clamped scrolling is allowed to lag until the next update.
+Applications must not use successful immediate rendering as evidence that synchronization was
+unnecessary.
+
+Feed raw input through methods such as `mousemove`, `mousedown`, `scroll`, `key`, and `text`; calls
+are queued without coalescing. `Context::key` accepts one backend-normalized `KeyEvent` containing
+logical identity, pressed/released state, the complete modifier snapshot, and repeat state.
+Printable key transitions remain distinct from `text`, which is the authoritative channel for
+composed UTF-8 input. A widget receives the current event as `Option<&UiInputEvent>`, while
+`WidgetUpdateCtx::{mouse_buttons,modifiers}` exposes held state after that event was applied.
 
 Keyboard focus persists after a pointer release and is independent of pointer capture. A widget
 runtime owns one focused node ID; nested containers do not maintain competing mutable focus
@@ -106,7 +121,7 @@ platform-dependent pass threshold. This provides evidence for the focused-ID rep
 keeping a future route-cache decision dependent on measured tree shapes rather than embedding a
 second persistent ancestry model preemptively.
 
-`ContextFrame` holds the Context borrow needed to serialize paint/submission, but it does not lock independent typed widget or root handles and there is no Context access token. Do not keep a typed-access closure active while retained update/layout/paint can reach that same widget. Framework recursion through a container's scoped child visitor is the intentional exception. If layout-affecting state changes after the last commit, drop any unsubmitted frame and call `update_ui` again before paint.
+`ContextFrame` holds the Context borrow needed to serialize paint/submission, but it does not lock independent typed widget or root handles and there is no Context access token. Do not keep a typed-access closure active while retained update/layout/paint can reach that same widget. Framework recursion through a container's scoped child visitor is the intentional exception. If programmatic state changes after the last commit, drop any unsubmitted frame and call `update_ui` again before paint.
 
 The application owns `Context` and its weak typed handles as independent Rust values, so the
 compiler permits explicitly capturing the Context inside a handle-access closure. Do not initiate

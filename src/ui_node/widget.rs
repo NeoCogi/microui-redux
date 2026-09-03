@@ -320,7 +320,9 @@ impl<W: Widget + 'static> TypedWidgetHandle<W> {
         Ok(result)
     }
 
-    /// Mutates derived or interaction state known not to affect preferred measurement.
+    /// Mutates derived or interaction state without invalidating the current UI commit.
+    ///
+    /// The mutation's derived update state may lag until the next Context update.
     pub(crate) fn try_update_without_measurement<R>(&self, f: impl FnOnce(&mut W) -> R) -> Option<R> {
         let widget = self.widget.upgrade()?;
         let mut widget = widget.try_borrow_mut().ok()?;

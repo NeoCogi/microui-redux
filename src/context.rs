@@ -340,8 +340,8 @@ pub struct Context<B: RendererBackend, State: 'static = ()> {
 /// Exclusively owned logical UI frame.
 ///
 /// This value borrows `Context` to serialize paint/submission, but it does not lock independent
-/// [`crate::TypedWidgetHandle`] access. Mutating layout-affecting state after the last update commit
-/// makes that commit semantically stale; drop the unsubmitted frame and call
+/// [`crate::TypedWidgetHandle`] access. Programmatic mutation after the last update commit may make
+/// that commit semantically stale; drop the unsubmitted frame and call
 /// [`Context::update_ui`] or [`Context::update_ui_state`] again before painting. No separate
 /// Context token exists.
 ///
@@ -928,8 +928,10 @@ impl<B: RendererBackend, State: 'static> ContextFrame<'_, B, State> {
     /// Consumes this logical frame, paints the last committed UI once, and submits it once.
     ///
     /// Returns [`RenderError::UiUpdateRequired`] before paint or backend acquisition when no commit
-    /// exists for these dimensions, raw input is pending, or a measurement-affecting typed mutation
-    /// dirtied a visible widget tree. This operation is paint-only: it does not route input, update
+    /// exists for these dimensions, raw input is pending, or an invalidating typed mutation dirtied
+    /// a visible widget tree. Specialized measurement-preserving setters may leave the current
+    /// commit renderable while derived state waits for the next update. This operation is
+    /// paint-only: it does not route input, update
     /// semantic state, run layout, synthesize timers, or produce a generic
     /// frame-result/resource-state object. Widget paint is observational with respect to
     /// application-authored semantic state, topology, interaction, and committed layout. Widgets

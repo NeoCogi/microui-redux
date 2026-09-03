@@ -386,12 +386,16 @@ impl TypedWidgetHandle<TextArea> {
     }
 
     /// Moves the retained cursor to the nearest preceding Unicode scalar boundary.
+    ///
+    /// Call `Context::update_ui` before relying on caret reveal or updated scroll state.
     pub fn set_cursor(&self, cursor: usize) -> Option<()> {
         // Cursor movement does not change intrinsic text measurement.
         self.try_update_without_measurement(|widget| widget.set_cursor(cursor))
     }
 
     /// Moves the retained cursor to the end of its text.
+    ///
+    /// Call `Context::update_ui` before relying on caret reveal or updated scroll state.
     pub fn move_cursor_to_end(&self) -> Option<()> {
         // Cursor movement does not change intrinsic text measurement.
         self.try_update_without_measurement(TextArea::move_cursor_to_end)
@@ -404,6 +408,8 @@ impl TypedWidgetHandle<TextArea> {
     }
 
     /// Requests a containing scroll-area offset without invalidating text measurement.
+    ///
+    /// Call `Context::update_ui` before relying on the resulting viewport state.
     pub fn set_scroll(&self, scroll: Vec2i) -> Option<()> {
         // The nested call mutates only ScrollArea's interactive state; the text leaf remains the
         // checked access anchor exposed to applications.

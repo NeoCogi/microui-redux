@@ -103,16 +103,18 @@
 //! event. Calling it with an empty queue is the synchronization path after programmatic state or
 //! topology mutation. [`ContextFrame::render_ui`] is paint-only and returns
 //! [`render::RenderError::UiUpdateRequired`] before backend acquisition when the commit is missing,
-//! stale because of pending input or a measurement-affecting typed mutation in a visible tree, or
-//! for different dimensions. The runtime synthesizes no timer events and produces no generic
-//! frame-result/resource-state object.
+//! raw input is pending, an invalidating typed mutation succeeded in a visible tree, or the frame
+//! dimensions differ. Specialized measurement-preserving setters may leave the current commit
+//! renderable while derived state waits for the next update. Applications call `update_ui` after
+//! every programmatic mutation before relying on its visual or layout result. The runtime
+//! synthesizes no timer events and produces no generic frame-result/resource-state object.
 //!
 //! A `ContextFrame` serializes Context operations but does not lock independent typed handles, and
 //! there is no Context token. Typed access closures must finish before retained traversal reaches
 //! the same widget. Framework-controlled recursion through a container's opaque
-//! child visitor is the intentional exception. If a layout-affecting handle mutation occurs after
-//! the last commit, `render_ui` rejects that commit until `update_ui` consumes the mutation marker
-//! and synchronizes layout again.
+//! child visitor is the intentional exception. An invalidating handle mutation after the last
+//! commit makes `render_ui` reject that commit until `update_ui` consumes the marker and
+//! synchronizes layout again.
 //! Handles and Context are independent Rust values, so explicitly capturing Context inside
 //! `try_update` compiles; it is nevertheless unsupported because the closure retains the mutable
 //! widget borrow. If nested traversal reaches that allocation, runtime borrowing reports an
