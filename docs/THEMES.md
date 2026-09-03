@@ -43,6 +43,16 @@ the theme directories must remain available beside the repository sources at run
     "heading": { "path": "body.ttf", "size": 18 },
     "mono": { "path": "mono.ttf", "size": 14 }
   },
+  "icons": {
+    "close": { "path": "icon-close.png" },
+    "expand": { "path": "icon-expand.png" },
+    "collapse": { "path": "icon-collapse.png" },
+    "check": { "path": "icon-check.png" },
+    "expand_down": { "path": "icon-expand-down.png" },
+    "open_folder": { "path": "icon-open-folder.png" },
+    "closed_folder": { "path": "icon-closed-folder.png" },
+    "file": { "path": "icon-file.png" }
+  },
   "skin": {
     "metrics": {
       "padding": 4,
@@ -103,14 +113,16 @@ the theme directories must remain available beside the repository sources at run
 
 The optional `fonts` object is all-or-nothing. When present, it declares atlas texture dimensions
 and exact file/size recipes for the five semantic roles: `body`, `small`, `title`, `heading`, and
-`mono`. Paths are relative to the JSON file. Loading copies the application catalog's named icons into a
-fresh atlas of the requested size, rasterizes these declared fonts, packs the unique image-patch sources,
-and binds the resulting capabilities into the theme bundle. Without a font recipe, an
-artwork-bearing theme reuses the application resource catalog's atlas dimensions and repacks its
-icons and baked glyphs before adding the PNG regions. A flat palette-only theme reuses that source
-atlas allocation exactly. Every load starts from the immutable `ResourceCatalog` captured by
-`Context::new`, not from the currently selected theme. The bundled classic themes all provide
-explicit font recipes and dimensions.
+`mono`. The optional `icons` object is likewise all-or-nothing and supplies the eight closed
+`IconRole` recipes: `close`, `expand`, `collapse`, `check`, `expand_down`, `open_folder`,
+`closed_folder`, and `file`. All paths are relative to the JSON file. Loading copies application
+resources that are not being replaced into a fresh atlas, preserves the stable IDs of replaced
+semantic resources, then rasterizes fonts and packs semantic icons and unique image-patch sources.
+Without a font recipe, an artwork-bearing theme reuses the application resource catalog's atlas
+dimensions and repacks its baked glyphs. Without an icon recipe, it preserves every base icon. A
+flat palette-only theme reuses the source atlas allocation exactly. Every load starts from the
+immutable `ResourceCatalog` captured by `Context::new`, not from the currently selected theme. The
+bundled classic themes all provide explicit font recipes and dimensions.
 
 Atlas-scoped IDs are intentionally concrete capabilities and are not retained by widgets.
 Use `FontRef::role(FontRole::Heading)` for theme-controlled typography or create a checked named

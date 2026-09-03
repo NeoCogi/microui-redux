@@ -88,9 +88,11 @@ store `FontRef` and `IconRef`:
   `Context::resource_catalog()`.
 
 Measurement and paint resolve those references against the current bundle. Named application fonts
-and icons are copied into every rebuilt JSON-theme atlas, while a theme may replace the five
-semantic font roles. Custom renderer code that caches atlas rectangles or UVs must still refresh
-those allocation-bound values after a bundle switch.
+and icons are copied into every rebuilt JSON-theme atlas, while a theme may replace the complete
+five-role semantic font catalog and/or complete eight-role semantic icon catalog. Replacement
+preserves each resource's stable ID, so already-retained exact references remain valid in the
+derived atlas. Custom renderer code that caches atlas rectangles or UVs must still refresh those
+allocation-bound values after a bundle switch.
 
 ## Global skin and caches
 

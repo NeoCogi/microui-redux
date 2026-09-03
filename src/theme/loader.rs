@@ -39,8 +39,8 @@ use std::{
 use serde::Deserialize;
 
 use super::{
-    ChromeRole, ChromeState, ControlRole, ControlState, FlatPalette, FontRole, MenuRole, MenuState, PointerState, Skin, SkinBundle, SkinMetrics, SurfaceRole,
-    SurfaceState, WindowChromeSkin,
+    ChromeRole, ChromeState, ControlRole, ControlState, FlatPalette, FontRole, IconRole, MenuRole, MenuState, PointerState, Skin, SkinBundle, SkinMetrics,
+    SurfaceRole, SurfaceState, WindowChromeSkin,
 };
 use crate::{
     atlas::{
@@ -204,6 +204,8 @@ struct ThemeDefinition {
     name: String,
     /// Optional complete semantic font recipe replacing the base atlas's semantic fonts.
     fonts: Option<FontCatalogDocument>,
+    /// Optional complete semantic icon recipe replacing the base atlas's semantic icons.
+    icons: Option<IconCatalogDocument>,
     /// Sparse scalar and flat-color overrides applied to the built-in skin.
     #[serde(default)]
     skin: ThemeSkinDocument,
@@ -283,10 +285,13 @@ impl ThemeDefinition {
 
     /// Resolves every relative asset path against this document's directory exactly once.
     fn resolve_paths(&mut self, directory: &Path) {
-        // Fonts and appearance images share one source owner. No later compilation stage needs to
-        // retain the definition filename or reinterpret a path.
+        // Fonts, semantic icons, and appearance images share one source owner. No later compilation
+        // stage needs to retain the definition filename or reinterpret a path.
         if let Some(fonts) = &mut self.fonts {
             fonts.resolve_paths(directory);
+        }
+        if let Some(icons) = &mut self.icons {
+            icons.resolve_paths(directory);
         }
         self.appearances.resolve_paths(directory);
     }
@@ -309,7 +314,7 @@ impl ThemeDefinition {
     /// fonts repacks existing glyph bitmaps so the original font files are not required.
     fn build_atlas(&self, base: &AtlasHandle) -> Result<ThemeAtlas, ThemeLoadError> {
         let image_paths = self.image_paths();
-        if self.fonts.is_none() && image_paths.is_empty() {
+        if self.fonts.is_none() && self.icons.is_none() && image_paths.is_empty() {
             // No atlas-visible resource changes are requested, so preserving pointer identity also
             // lets selecting a palette-only theme avoid an unnecessary backend atlas upload.
             return Ok(ThemeAtlas {
@@ -323,22 +328,28 @@ impl ThemeDefinition {
             .as_ref()
             .map(|fonts| (fonts.texture_width, fonts.texture_height))
             .unwrap_or_else(|| (base.width(), base.height()));
-        let mut builder = if self.fonts.is_some() {
-            // Explicit recipes replace the five semantic roles while unrelated application fonts
-            // and every icon survive from the stable source catalog. Replaced fonts retain their
-            // baked IDs, keeping exact FontRef values valid without retained resource names.
-            let semantic_font_names = FontRole::ALL.map(FontRole::atlas_name);
-            Builder::from_atlas_with_size_excluding_fonts(base, width, height, &semantic_font_names)
-        } else {
-            // Artwork-only themes retain exact base typography by copying its baked glyphs.
-            Builder::from_atlas_with_size(base, width, height)
-        }
-        .map_err(|source| ThemeLoadError::AtlasBuild { source })?;
+        // Replacement is expressed entirely in the atlas's two resource namespaces. The builder
+        // preserves every excluded recipe's stable capability while it copies all application-owned
+        // resources that the theme does not replace.
+        let semantic_font_names = FontRole::ALL.map(FontRole::atlas_name);
+        let semantic_icon_names = IconRole::ALL.map(IconRole::atlas_name);
+        let excluded_fonts = self.fonts.as_ref().map(|_| semantic_font_names.as_slice()).unwrap_or(&[]);
+        let excluded_icons = self.icons.as_ref().map(|_| semantic_icon_names.as_slice()).unwrap_or(&[]);
+        let mut builder = Builder::from_atlas_with_size_excluding(base, width, height, excluded_fonts, excluded_icons)
+            .map_err(|source| ThemeLoadError::AtlasBuild { source })?;
 
         if let Some(fonts) = &self.fonts {
             for (role, font) in fonts.entries() {
                 builder
                     .add_font_named(role.atlas_name(), font.path.as_path(), font.size)
+                    .map_err(|source| ThemeLoadError::AtlasBuild { source })?;
+            }
+        }
+
+        if let Some(icons) = &self.icons {
+            for (role, icon) in icons.entries() {
+                builder
+                    .add_icon_named(role.atlas_name(), icon.path.as_path())
                     .map_err(|source| ThemeLoadError::AtlasBuild { source })?;
             }
         }
@@ -554,6 +565,80 @@ struct FontDocument {
     path: PathBuf,
     /// Pixel size rasterized into printable-ASCII atlas glyphs.
     size: usize,
+}
+
+/// Complete semantic icon recipe for one rebuilt theme atlas.
+///
+/// The object is deliberately all-or-nothing, just like [`FontCatalogDocument`]. A theme that
+/// takes ownership of semantic iconography cannot accidentally leave one widget using pixels from
+/// an unrelated base atlas, and every accepted key maps directly to one closed [`IconRole`].
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IconCatalogDocument {
+    /// Window and dialog close glyph.
+    close: IconDocument,
+    /// Collapsed disclosure glyph.
+    expand: IconDocument,
+    /// Expanded disclosure glyph.
+    collapse: IconDocument,
+    /// Checked checkbox and checked menu-item glyph.
+    check: IconDocument,
+    /// Combo-box dropdown glyph.
+    expand_down: IconDocument,
+    /// Open folder glyph used by file dialogs.
+    open_folder: IconDocument,
+    /// Closed folder glyph used by file dialogs.
+    closed_folder: IconDocument,
+    /// Regular file glyph used by file dialogs.
+    file: IconDocument,
+}
+
+impl IconCatalogDocument {
+    /// Returns every semantic recipe in stable atlas insertion order.
+    fn entries(&self) -> [(IconRole, &IconDocument); IconRole::COUNT] {
+        // This explicit table is the single bridge from schema fields to runtime roles. Widgets
+        // remain unaware of filenames, while the loader remains unaware of widget implementations.
+        [
+            (IconRole::Close, &self.close),
+            (IconRole::Expand, &self.expand),
+            (IconRole::Collapse, &self.collapse),
+            (IconRole::Check, &self.check),
+            (IconRole::ExpandDown, &self.expand_down),
+            (IconRole::OpenFolder, &self.open_folder),
+            (IconRole::ClosedFolder, &self.closed_folder),
+            (IconRole::File, &self.file),
+        ]
+    }
+
+    /// Resolves every relative icon filename against its declaring document directory.
+    fn resolve_paths(&mut self, directory: &Path) {
+        // Traverse through the same typed table used for insertion so path ownership and resource
+        // identity cannot diverge between parsing and atlas construction.
+        self.close.resolve_path(directory);
+        self.expand.resolve_path(directory);
+        self.collapse.resolve_path(directory);
+        self.check.resolve_path(directory);
+        self.expand_down.resolve_path(directory);
+        self.open_folder.resolve_path(directory);
+        self.closed_folder.resolve_path(directory);
+        self.file.resolve_path(directory);
+    }
+}
+
+/// One PNG file declared for a semantic icon role.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IconDocument {
+    /// Icon path resolved relative to the theme JSON directory.
+    path: PathBuf,
+}
+
+impl IconDocument {
+    /// Makes this icon path independent of later compilation stages.
+    fn resolve_path(&mut self, directory: &Path) {
+        // Path::join also preserves an absolute source supplied by an embedding application.
+        self.path = directory.join(self.path.as_path());
+    }
 }
 
 impl FontDocument {
@@ -1142,6 +1227,31 @@ mod tests {
             Err(error) => error,
         };
         assert!(error.to_string().contains("missing field `mono`"));
+    }
+
+    /// Verifies a theme-owned semantic icon set is complete rather than mixing unrelated base
+    /// artwork into whichever roles the document forgot to declare.
+    #[test]
+    fn icon_catalog_requires_every_semantic_role() {
+        let error = match ThemeDefinition::parse_for_test(
+            r#"{
+                "schema_version": 1,
+                "name": "Incomplete icons",
+                "icons": {
+                    "close": { "path": "close.png" },
+                    "expand": { "path": "expand.png" },
+                    "collapse": { "path": "collapse.png" },
+                    "check": { "path": "check.png" },
+                    "expand_down": { "path": "expand-down.png" },
+                    "open_folder": { "path": "open-folder.png" },
+                    "closed_folder": { "path": "closed-folder.png" }
+                }
+            }"#,
+        ) {
+            Ok(_) => panic!("missing file icon role must violate the strict icon schema"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("missing field `file`"));
     }
 
     /// Verifies the bundled Windows theme and every original PNG install through the public schema.

@@ -60,6 +60,11 @@ pub struct Builder {
     /// here lets the subsequent `add_font_named` call replace pixels and metrics without changing
     /// the logical resource observed by retained widgets.
     replacement_font_ids: Vec<(String, FontId)>,
+    /// Identities of copied icons whose bitmap recipes are intentionally being replaced.
+    ///
+    /// Semantic theme icons follow the same capability rule as semantic fonts: changing pixels
+    /// must not invalidate an exact `IconRef` that already names the base catalog resource.
+    replacement_icon_ids: Vec<(String, IconId)>,
 }
 
 /// One glyph whose rectangle has been reserved in a temporary packer but whose bitmap has not yet
@@ -205,6 +210,7 @@ impl Builder {
             // Atlas packing has one private one-pixel border/inter-rectangle policy.
             packer: Packer::new(config.texture_width as i32, config.texture_height as i32),
             replacement_font_ids: Vec::new(),
+            replacement_icon_ids: Vec::new(),
         };
 
         builder.add_icon_named("white", config.white_icon.as_path())?;
@@ -245,6 +251,20 @@ impl Builder {
     /// Returns an error when the requested dimensions are invalid or cannot contain every copied
     /// icon. A failure leaves the immutable source atlas untouched.
     pub fn from_atlas_icons_with_size(atlas: &AtlasHandle, width: usize, height: usize) -> Result<Builder, BuilderError> {
+        Self::from_atlas_icons_with_size_excluding(atlas, width, height, &[])
+    }
+
+    /// Creates an empty-font builder while omitting icon recipes that will be replaced.
+    ///
+    /// Excluded icons retain their stable logical IDs in the builder and receive those IDs when
+    /// a later [`Builder::add_icon_named`] call supplies their replacement pixels. The concrete
+    /// name slice keeps this narrow construction concern independent of theme or widget types.
+    pub(crate) fn from_atlas_icons_with_size_excluding(
+        atlas: &AtlasHandle,
+        width: usize,
+        height: usize,
+        excluded_icons: &[&str],
+    ) -> Result<Builder, BuilderError> {
         let mut builder = Builder {
             candidate: AtlasCandidate::blank(width, height)?,
             // Reconstruct packing state solely from concrete icon rectangles; font glyphs from the
@@ -253,10 +273,17 @@ impl Builder {
             // This constructor deliberately copies icons only. Fonts added by its public caller
             // are new logical resources rather than replacements for omitted source entries.
             replacement_font_ids: Vec::new(),
+            replacement_icon_ids: Vec::new(),
         };
         let source_pixels = atlas.pixels_clone();
         let source_width = atlas.width();
         for (name, icon) in atlas.clone_icon_table() {
+            if excluded_icons.contains(&name.as_str()) {
+                // Keep the capability while omitting only its old pixels and metadata. A later
+                // insertion under this exact name consumes the saved identity.
+                builder.replacement_icon_ids.push((name, icon));
+                continue;
+            }
             let rectangle = atlas.get_icon_rect(icon);
             let left = usize::try_from(rectangle.x).expect("validated atlas icon x must be nonnegative");
             let top = usize::try_from(rectangle.y).expect("validated atlas icon y must be nonnegative");
@@ -287,23 +314,24 @@ impl Builder {
     pub fn from_atlas_with_size(atlas: &AtlasHandle, width: usize, height: usize) -> Result<Builder, BuilderError> {
         // Ordinary rebuilds preserve every named font. Theme recipes use the narrower internal
         // helper below to replace only their semantic roles while retaining application fonts.
-        Self::from_atlas_with_size_excluding_fonts(atlas, width, height, &[])
+        Self::from_atlas_with_size_excluding(atlas, width, height, &[], &[])
     }
 
-    /// Creates a builder by repacking all source resources except explicitly replaced fonts.
+    /// Creates a builder by repacking all source resources except explicitly replaced recipes.
     ///
-    /// The exclusion list is intentionally a concrete slice of atlas names. Theme loading has
-    /// exactly five semantic roles to replace and does not need a callback, erased predicate, or
-    /// second resource-copy abstraction.
-    pub(crate) fn from_atlas_with_size_excluding_fonts(
+    /// The two concrete name slices correspond directly to the atlas's font and icon namespaces.
+    /// They avoid callbacks or erased predicates while letting the theme compiler preserve stable
+    /// capabilities for the small closed sets it replaces.
+    pub(crate) fn from_atlas_with_size_excluding(
         atlas: &AtlasHandle,
         width: usize,
         height: usize,
         excluded_fonts: &[&str],
+        excluded_icons: &[&str],
     ) -> Result<Builder, BuilderError> {
         // Begin with the existing icon-copy path so required semantic icon names, including the
         // opaque white tile, retain their table order and exact pixels in the new allocation.
-        let mut builder = Self::from_atlas_icons_with_size(atlas, width, height)?;
+        let mut builder = Self::from_atlas_icons_with_size_excluding(atlas, width, height, excluded_icons)?;
         let source_pixels = atlas.pixels_clone();
         let source_width = atlas.width();
 
@@ -394,9 +422,14 @@ impl Builder {
     /// File-backed and atlas-copy insertion share this boundary so duplicate checks, transactional
     /// packing, candidate metadata, and stable identity handling cannot diverge.
     fn add_icon_pixels_named(&mut self, name: &str, width: usize, height: usize, pixels: &[Color4b]) -> Result<IconId, BuilderError> {
-        // New artwork receives a new logical identity. Atlas-copy paths use the private helper
-        // below with the source ID instead.
-        self.add_icon_pixels_with_id(name, IconId::allocate(), width, height, pixels)
+        // Replaced semantic artwork keeps the base capability. A genuinely new private image gets
+        // a fresh identity, while atlas-copy paths continue to pass their source ID directly.
+        let id = self
+            .replacement_icon_ids
+            .iter()
+            .find_map(|(replacement_name, id)| (replacement_name == name).then_some(*id))
+            .unwrap_or_else(IconId::allocate);
+        self.add_icon_pixels_with_id(name, id, width, height, pixels)
     }
 
     /// Adds decoded icon pixels while preserving a caller-supplied logical resource identity.
@@ -973,7 +1006,7 @@ mod tests {
         let source_body = source.font_id("body").expect("source body identity must exist");
         let source_application = source.font_id("application-code").expect("source application identity must exist");
         let mut replacement =
-            Builder::from_atlas_with_size_excluding_fonts(&source, 512, 256, &["body"]).expect("the application font must copy without the replaced body role");
+            Builder::from_atlas_with_size_excluding(&source, 512, 256, &["body"], &[]).expect("the application font must copy without the replaced body role");
         replacement
             .add_font_named("body", Path::new(FONT_PATH), 14)
             .expect("the replacement body recipe must fit beside the application font");
@@ -992,6 +1025,53 @@ mod tests {
             "exact copies must preserve logical identity"
         );
         assert_eq!(replacement.clone_font_table().len(), 2);
+    }
+
+    /// Verifies semantic icon replacement changes pixels without invalidating either the replaced
+    /// capability or unrelated application-owned icon capabilities.
+    #[test]
+    fn selective_icon_copy_preserves_stable_resource_identities() {
+        let config = Config {
+            texture_width: 64,
+            texture_height: 64,
+            white_icon: WHITE_PATH.into(),
+            icons: vec![
+                IconAsset {
+                    name: "close".into(),
+                    path: FILE_ICON_PATH.into(),
+                },
+                IconAsset {
+                    name: "application-file".into(),
+                    path: FILE_ICON_PATH.into(),
+                },
+            ],
+            fonts: Vec::new(),
+        };
+        let source = Builder::from_config(&config)
+            .expect("source icons must fit the fixture atlas")
+            .build()
+            .expect("source icon atlas must satisfy validation");
+        let source_close = source.icon_id("close").expect("source close icon must exist");
+        let source_application = source.icon_id("application-file").expect("source application icon must exist");
+
+        let mut replacement =
+            Builder::from_atlas_with_size_excluding(&source, 64, 64, &[], &["close"]).expect("atlas must copy while withholding one replacement icon");
+        replacement
+            .add_icon_named("close", Path::new(WHITE_PATH))
+            .expect("replacement close icon must fit beside copied icons");
+        let replacement = replacement.build().expect("selectively rebuilt atlas must validate");
+
+        assert_eq!(replacement.icon_id("close"), Some(source_close));
+        assert_eq!(replacement.icon_id("application-file"), Some(source_application));
+        let close_size = replacement.get_icon_size(source_close);
+        let application_size = replacement.get_icon_size(source_application);
+        assert_eq!((close_size.width, close_size.height), (24, 24));
+        assert_eq!((application_size.width, application_size.height), (16, 16));
+        assert_eq!(
+            replacement.clone_icon_table().len(),
+            3,
+            "white, replaced, and application icons must remain unique"
+        );
     }
 
     /// Verifies duplicate resource keys are structural errors detected before opening the supplied
