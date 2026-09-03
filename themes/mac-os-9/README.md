@@ -2,12 +2,14 @@
 
 This bundled theme reconstructs the late Mac OS 9 Platinum visual language through the crate's
 typed appearance catalog. Active windows use centered labels over interrupted horizontal racing
-stripes, a blank leading close box, and compact trailing windowshade and zoom boxes. Windows
+stripes, a blank leading close box, compact trailing windowshade and zoom boxes, and a four-pixel
+unstriped field between each caption bank and the stripes. Windows
 without activation use a pale title and frame state without caption boxes. The surrounding chrome
-uses a six-layer black, white, face, and shadow perimeter, a two-pixel top reservation, fourteen-pixel
-metallic caption faces, sixteen-pixel scrollbars, and a grooved diagonal resize handle. Popup menus
-use a crisp one-pixel black perimeter, a directional inner bevel, and black selections with white
-text.
+uses one continuous geometry: a two-pixel top edge, a twenty-pixel title band delimited by the
+directional black/white and gray/black side rails, a shared horizontal junction, and only then the
+six-layer vertical body frame. Fourteen-pixel metallic caption faces, sixteen-pixel scrollbars, and
+a grooved diagonal resize handle complete the window decoration. Popup menus use a crisp one-pixel
+black perimeter, a directional inner bevel, and black selections with white text.
 
 Controls use seventeen-pixel chamfered push-button sources, dedicated thirteen-pixel checkbox
 faces, compact nine-pixel recessed white fields, black focus keylines, reversed pressed bevels, and
@@ -39,8 +41,10 @@ cargo run --bin mac_os_9_theme_export -- --output-dir themes/mac-os-9
 
 The deterministic generator draws only integer-aligned primitive pixels. Semantic icons are
 opaque-white masks whose final color comes from the selected role state. Control sources use
-five-pixel fixed 3x3 spans, recessed sources use four-pixel spans, window frames use six-pixel
-visual spans, and caption faces use four-pixel spans. `style.window_border` independently reserves
-six structural pixels on the sides and bottom, but only two above the integrated title. The active
-title source is 8x20 pixels with zero fixed insets so its bands repeat across the complete title
-allocation.
+five-pixel fixed 3x3 spans, recessed sources use four-pixel spans, and caption faces use four-pixel
+spans. Window-frame sources use six-pixel body-side and bottom spans plus a twenty-two-pixel top
+span containing the outer edge, the title's two-pixel side rails, and the title/body junction.
+`style.window_border` independently reserves six structural pixels on the sides and bottom, but
+only two above the integrated title. The active title source is 8x20 pixels with a two-pixel fixed
+bottom span, so its bands repeat across the title allocation while its shadow and black lower rule
+remain continuous beneath the centered label backdrop.

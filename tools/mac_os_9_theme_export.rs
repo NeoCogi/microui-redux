@@ -67,6 +67,14 @@ const DISABLED_EDGE: Pixel = [153, 153, 153, 255];
 const INACTIVE_FACE: Pixel = [227, 228, 228, 255];
 /// Restrained inactive-window perimeter and title separator.
 const INACTIVE_EDGE: Pixel = [104, 104, 104, 255];
+/// Structural pixels above the separately decorated Platinum title band.
+const WINDOW_FRAME_TOP: i32 = 2;
+/// Height shared by the title artwork and the frame's integrated title band.
+const WINDOW_TITLE_HEIGHT: i32 = 20;
+/// Outer edge layers that remain visible beside the separately painted title artwork.
+const WINDOW_TITLE_RAIL: i32 = 2;
+/// Fixed width of each layered body-frame side and bottom cell.
+const WINDOW_FRAME_EDGE: i32 = 6;
 
 /// Mutable row-major bitmap used only while exporting one PNG source image.
 struct Bitmap {
@@ -359,7 +367,7 @@ fn checkbox_control(treatment: ControlTreatment) -> Bitmap {
 
 /// Builds the active racing-stripe title source or the restrained inactive title source.
 fn title_strip(active: bool) -> Bitmap {
-    let mut bitmap = Bitmap::new(8, 20, if active { FACE } else { INACTIVE_FACE });
+    let mut bitmap = Bitmap::new(8, WINDOW_TITLE_HEIGHT as u32, if active { FACE } else { INACTIVE_FACE });
     if active {
         // Alternating one-pixel highlights and shadows form the six racing-stripe pairs around the
         // centered title backdrop. Neutral rows above and below keep the bar from looking striped
@@ -371,16 +379,21 @@ fn title_strip(active: bool) -> Bitmap {
     }
     // The title owns the separator below itself because the outer frame surrounds the complete
     // root and cannot otherwise divide title chrome from a menu bar or application body.
-    bitmap.horizontal(0, 7, 18, if active { SHADOW } else { INACTIVE_FACE });
-    bitmap.horizontal(0, 7, 19, if active { BLACK } else { INACTIVE_EDGE });
+    bitmap.horizontal(0, 7, WINDOW_TITLE_HEIGHT - 2, if active { SHADOW } else { INACTIVE_FACE });
+    bitmap.horizontal(0, 7, WINDOW_TITLE_HEIGHT - 1, if active { BLACK } else { INACTIVE_EDGE });
     bitmap
 }
 
-/// Builds the base or active six-layer Platinum window perimeter.
+/// Builds one frame containing a rail-bounded title band above the layered body perimeter.
 fn window_frame(active: bool) -> Bitmap {
-    let mut bitmap = Bitmap::new(13, 13, if active { FACE } else { INACTIVE_FACE });
-    // Both activation states retain the same six-pixel geometry. Active chrome uses the directional
-    // black/white/face/shadow stack; inactive chrome becomes a pale slab inside a restrained edge.
+    let title_bottom = WINDOW_FRAME_TOP + WINDOW_TITLE_HEIGHT;
+    let width = WINDOW_FRAME_EDGE * 2 + 1;
+    let height = title_bottom + 1 + WINDOW_FRAME_EDGE;
+    let title_fill = if active { FACE } else { INACTIVE_FACE };
+    let mut bitmap = Bitmap::new(width as u32, height as u32, title_fill);
+
+    // Draw the complete body perimeter first. The single row after `title_bottom` supplies the
+    // vertically stretchable side cells, and the final six rows retain the fixed lower corners.
     let layers = if active {
         [BLACK, WHITE, FACE, FACE, SHADOW, BLACK]
     } else {
@@ -389,7 +402,93 @@ fn window_frame(active: bool) -> Bitmap {
     for (inset, pixel) in layers.into_iter().enumerate() {
         bitmap.outline(inset as i32, pixel);
     }
+
+    // Clear the four body-only layers from the title band while retaining Platinum's directional
+    // outer rails. The separately painted title begins at the six-pixel client edge, so these
+    // fixed corner pixels are what delimit its stripes from the outside of the window.
+    if active {
+        for y in WINDOW_FRAME_TOP..title_bottom - 2 {
+            bitmap.horizontal(WINDOW_TITLE_RAIL, width - WINDOW_TITLE_RAIL - 1, y, FACE);
+        }
+        bitmap.vertical(0, WINDOW_FRAME_TOP, title_bottom - 2, BLACK);
+        bitmap.vertical(1, 1, title_bottom - 2, WHITE);
+        bitmap.set(width - 2, 1, FACE);
+        bitmap.vertical(width - 2, WINDOW_FRAME_TOP, title_bottom - 2, SHADOW);
+        bitmap.vertical(width - 1, WINDOW_FRAME_TOP, title_bottom - 2, BLACK);
+
+        // The shadow rule reaches into each fixed corner without cutting across either outer rail.
+        // These six-pixel crops match Platinum9's top-left and top-right title terminators.
+        bitmap.horizontal(WINDOW_TITLE_RAIL, width - WINDOW_TITLE_RAIL - 1, title_bottom - 2, FACE);
+        bitmap.horizontal(4, 7, title_bottom - 2, SHADOW);
+        bitmap.set(0, title_bottom - 2, BLACK);
+        bitmap.set(1, title_bottom - 2, WHITE);
+        bitmap.set(width - 2, title_bottom - 2, SHADOW);
+        bitmap.set(width - 1, title_bottom - 2, BLACK);
+
+        // The black lower rule occupies the stretchable center while both fixed corners transition
+        // to the ordinary six-layer body profile on the same row.
+        bitmap.set(WINDOW_FRAME_EDGE, title_bottom - 1, BLACK);
+        bitmap.set(WINDOW_FRAME_EDGE + 2, title_bottom - 1, WHITE);
+        bitmap.set(width - 2, title_bottom - 1, SHADOW);
+
+        // Platinum9 authors both body-side strips in the same left-to-right color order. Correct
+        // the stretchable right cell left by the symmetric outline helper.
+        bitmap.set(WINDOW_FRAME_EDGE + 2, title_bottom, WHITE);
+        bitmap.set(width - 2, title_bottom, SHADOW);
+    } else {
+        for y in WINDOW_FRAME_TOP..title_bottom - 1 {
+            bitmap.horizontal(1, width - 2, y, INACTIVE_FACE);
+        }
+        // Inactive title chrome keeps a dark outer rail on each side and uses the same dark lower
+        // rule between its pale fixed corner transitions.
+        bitmap.vertical(0, WINDOW_FRAME_TOP, title_bottom - 2, INACTIVE_EDGE);
+        bitmap.vertical(width - 1, WINDOW_FRAME_TOP, title_bottom - 2, INACTIVE_EDGE);
+        bitmap.set(WINDOW_FRAME_EDGE, title_bottom - 1, INACTIVE_EDGE);
+    }
     bitmap
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Reads one generated pixel without exposing bitmap internals to the exporter itself.
+    fn pixel(bitmap: &Bitmap, x: i32, y: i32) -> Pixel {
+        let index = (usize::try_from(y).unwrap() * usize::try_from(bitmap.width).unwrap() + usize::try_from(x).unwrap()) * 4;
+        bitmap.pixels[index..index + 4].try_into().unwrap()
+    }
+
+    #[test]
+    fn window_title_band_retains_platinum_side_rails_and_body_transitions() {
+        let active = window_frame(true);
+        assert_eq!((active.width, active.height), (13, 29));
+        assert_eq!(pixel(&active, 11, 1), FACE);
+        for y in WINDOW_FRAME_TOP..=WINDOW_FRAME_TOP + WINDOW_TITLE_HEIGHT - 2 {
+            assert_eq!(pixel(&active, 0, y), BLACK);
+            assert_eq!(pixel(&active, 1, y), WHITE);
+            assert_eq!(pixel(&active, 11, y), SHADOW);
+            assert_eq!(pixel(&active, 12, y), BLACK);
+        }
+        assert_eq!(
+            (0..6).map(|x| pixel(&active, x, 20)).collect::<Vec<_>>(),
+            vec![BLACK, WHITE, FACE, FACE, SHADOW, SHADOW]
+        );
+        assert_eq!(
+            (7..13).map(|x| pixel(&active, x, 20)).collect::<Vec<_>>(),
+            vec![SHADOW, FACE, FACE, FACE, SHADOW, BLACK]
+        );
+        let body_side = vec![BLACK, WHITE, FACE, FACE, SHADOW, BLACK];
+        assert_eq!((0..6).map(|x| pixel(&active, x, 21)).collect::<Vec<_>>(), body_side);
+        assert_eq!((7..13).map(|x| pixel(&active, x, 21)).collect::<Vec<_>>(), body_side);
+        assert_eq!(pixel(&active, WINDOW_FRAME_EDGE, 21), BLACK);
+
+        let inactive = window_frame(false);
+        for y in WINDOW_FRAME_TOP..=WINDOW_FRAME_TOP + WINDOW_TITLE_HEIGHT - 2 {
+            assert_eq!(pixel(&inactive, 0, y), INACTIVE_EDGE);
+            assert_eq!(pixel(&inactive, 12, y), INACTIVE_EDGE);
+        }
+        assert_eq!(pixel(&inactive, WINDOW_FRAME_EDGE, 21), INACTIVE_EDGE);
+    }
 }
 
 /// Builds one complete thirteen-by-fourteen title-control face with its embedded period mark.

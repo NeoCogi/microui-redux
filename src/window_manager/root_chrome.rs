@@ -396,11 +396,18 @@ pub(super) fn root_chrome_geometry(
             .filter(|(button, _)| caption_side(&style.window_chrome, *button) == CaptionButtonSide::Trailing)
             .map(|(_, count)| *count)
             .sum::<i32>();
+        let inner_spacing = style.window_chrome.captions.inner_spacing.max(0);
+        let leading_width = caption_extent
+            .saturating_mul(leading_count)
+            .saturating_add(if leading_count > 0 { inner_spacing } else { 0 });
+        let trailing_width = caption_extent
+            .saturating_mul(trailing_count)
+            .saturating_add(if trailing_count > 0 { inner_spacing } else { 0 });
         let caption_width = match style.window_chrome.title_alignment {
-            WindowTitleAlignment::Leading => caption_extent.saturating_mul(leading_count.saturating_add(trailing_count)),
+            WindowTitleAlignment::Leading => leading_width.saturating_add(trailing_width),
             WindowTitleAlignment::Centered => {
                 // Centered titles reserve equal space using the larger actual button bank.
-                caption_extent.saturating_mul(leading_count.max(trailing_count)).saturating_mul(2)
+                leading_width.max(trailing_width).saturating_mul(2)
             }
         };
         let title_font = style.resolve_font_role(atlas, crate::FontRole::Title);
@@ -572,24 +579,13 @@ fn allocate_trailing_caption(leading_x: i32, y: i32, extent: i32, trailing_x: &m
 /// Returns the title-text allocation after reserving the selected layout's caption banks.
 fn root_title_text_rect(title: Recti, geometry: RootChromeGeometry, chrome: &WindowChromeSkin) -> Recti {
     let title_end = title.x.saturating_add(title.width);
-    let captions = [
-        (RootCaptionButton::Close, geometry.close),
-        (RootCaptionButton::Maximize, geometry.maximize),
-        (RootCaptionButton::Minimize, geometry.minimize),
-    ];
-    let leading_end = captions
-        .iter()
-        .filter(|(button, _)| caption_side(chrome, *button) == CaptionButtonSide::Leading)
-        .filter_map(|(_, caption)| *caption)
-        .map(|caption| caption.x.saturating_add(caption.width))
-        .max()
+    let (leading_bank_end, trailing_bank_start) = root_caption_bank_edges(geometry, chrome);
+    let inner_spacing = chrome.captions.inner_spacing.max(0);
+    let leading_end = leading_bank_end
+        .map(|edge| edge.saturating_add(inner_spacing).min(title_end))
         .unwrap_or(title.x);
-    let trailing_start = captions
-        .iter()
-        .filter(|(button, _)| caption_side(chrome, *button) == CaptionButtonSide::Trailing)
-        .filter_map(|(_, caption)| *caption)
-        .map(|caption| caption.x)
-        .min()
+    let trailing_start = trailing_bank_start
+        .map(|edge| edge.saturating_sub(inner_spacing).max(title.x))
         .unwrap_or(title_end);
     match chrome.title_alignment {
         WindowTitleAlignment::Leading => {
@@ -597,7 +593,8 @@ fn root_title_text_rect(title: Recti, geometry: RootChromeGeometry, chrome: &Win
             Recti::new(leading_end, title.y, trailing_start.saturating_sub(leading_end).max(0), title.height)
         }
         WindowTitleAlignment::Centered => {
-            // Centered text reserves the larger actual bank on both sides of the complete title.
+            // Centered text reserves the larger actual bank and its inner gap on both sides of the
+            // complete title, so an asymmetric button arrangement cannot shift the label.
             let leading_reserve = leading_end.saturating_sub(title.x).max(0);
             let trailing_reserve = title_end.saturating_sub(trailing_start).max(0);
             let reserve = leading_reserve.max(trailing_reserve).min(title.width.max(0) / 2);
@@ -609,6 +606,44 @@ fn root_title_text_rect(title: Recti, geometry: RootChromeGeometry, chrome: &Win
             )
         }
     }
+}
+
+/// Returns the innermost edge of each non-empty caption bank.
+fn root_caption_bank_edges(geometry: RootChromeGeometry, chrome: &WindowChromeSkin) -> (Option<i32>, Option<i32>) {
+    let captions = [
+        (RootCaptionButton::Close, geometry.close),
+        (RootCaptionButton::Maximize, geometry.maximize),
+        (RootCaptionButton::Minimize, geometry.minimize),
+    ];
+    let leading_end = captions
+        .iter()
+        .filter(|(button, _)| caption_side(chrome, *button) == CaptionButtonSide::Leading)
+        .filter_map(|(_, caption)| *caption)
+        .map(|caption| caption.x.saturating_add(caption.width))
+        .max();
+    let trailing_start = captions
+        .iter()
+        .filter(|(button, _)| caption_side(chrome, *button) == CaptionButtonSide::Trailing)
+        .filter_map(|(_, caption)| *caption)
+        .map(|caption| caption.x)
+        .min();
+    (leading_end, trailing_start)
+}
+
+/// Returns unstriped fields between the title artwork and each populated caption bank.
+fn root_caption_bank_spacing_rects(title_content: Recti, geometry: RootChromeGeometry, chrome: &WindowChromeSkin) -> [Option<Recti>; 2] {
+    let spacing = chrome.captions.inner_spacing.max(0);
+    if spacing == 0 || !title_content.has_positive_area() {
+        return [None, None];
+    }
+    let (leading_end, trailing_start) = root_caption_bank_edges(geometry, chrome);
+    let leading = leading_end
+        .map(|edge| Recti::new(edge, title_content.y, spacing, title_content.height))
+        .and_then(|rect| rect.positive_intersection(title_content));
+    let trailing = trailing_start
+        .map(|edge| Recti::new(edge.saturating_sub(spacing), title_content.y, spacing, title_content.height))
+        .and_then(|rect| rect.positive_intersection(title_content));
+    [leading, trailing]
 }
 
 /// Returns a title height large enough for the configured title font and padding.
@@ -712,28 +747,46 @@ pub(super) fn record_root_overlay(
         painter.nine_patch(outer, root_frame_patch(style, frame_kind, chrome_active, enabled).without_center());
     }
     if let Some(title) = geometry.title {
-        let _ = crate::ui_node::frame::paint_internal_frame(&mut painter, title, style.chrome(ChromeRole::Title, chrome_state).patch);
+        let title_visual = style.chrome(ChromeRole::Title, chrome_state);
+        let title_content = crate::ui_node::frame::paint_internal_frame(&mut painter, title, title_visual.patch);
+        let title_backdrop = if chrome_active { style.window_chrome.active_title_backdrop } else { None };
+        if let (Some(backdrop), Some(title_content)) = (title_backdrop, title_content) {
+            // Clear the inner side of each populated caption bank before painting its controls.
+            // The same title color used behind the label makes the gap part of the title field.
+            for spacing in root_caption_bank_spacing_rects(title_content, geometry, &style.window_chrome)
+                .into_iter()
+                .flatten()
+            {
+                painter.fill_rect(spacing, backdrop.color);
+            }
+        }
         let text = root_title_text_rect(title, geometry, &style.window_chrome);
         if text.width > 0 && text.height > 0 {
-            let color = style.chrome(ChromeRole::Title, chrome_state).content_color;
+            let color = title_visual.content_color;
             let options = match style.window_chrome.title_alignment {
                 WindowTitleAlignment::Leading => crate::WidgetOption::NONE,
                 WindowTitleAlignment::Centered => crate::WidgetOption::ALIGN_CENTER,
             };
             let title_font = style.resolve_font_role(atlas, crate::FontRole::Title);
             let position = crate::ui_node::text_layout::control_text_position_with_font(style, atlas, title_font, name, text, options);
-            if chrome_active && let Some(backdrop) = style.window_chrome.active_title_backdrop {
-                // The optional recipe field interrupts active title artwork only behind measured
-                // text, independent of title alignment or caption-bank placement.
+            if let Some(backdrop) = title_backdrop
+                && let Some(title_content) = title_content
+            {
+                // Keep the backdrop inside the title patch's content cell. Fixed patch rows such
+                // as Platinum's lower shadow and black separator must remain uninterrupted beneath
+                // the label even though text alignment still uses the complete title allocation.
                 let measured = atlas.get_text_size(title_font, name);
                 let horizontal_padding = backdrop.horizontal_padding.max(0);
                 let desired_label = Recti::new(
                     position.x.saturating_sub(horizontal_padding),
-                    title.y,
+                    title_content.y,
                     measured.width.saturating_add(horizontal_padding.saturating_mul(2)),
-                    title.height,
+                    title_content.height,
                 );
-                if let Some(label) = desired_label.positive_intersection(text) {
+                if let Some(label) = desired_label
+                    .positive_intersection(text)
+                    .and_then(|label| label.positive_intersection(title_content))
+                {
                     painter.fill_rect(label, backdrop.color);
                 }
             }
@@ -904,10 +957,80 @@ mod tests {
         };
 
         // The two-control trailing bank is twenty-four pixels wide, so the centered title must
-        // reserve the same twenty-four pixels even though the leading bank contains only close.
+        // reserve the same twenty-eight pixels, including the inner gap, even though the leading
+        // bank contains only close. The resulting rectangle remains centered on the whole title.
         let chrome = WindowChromeSkin::classic_mac(crate::color(0, 0, 0, 255));
         let text = root_title_text_rect(title, geometry, &chrome);
-        assert_eq!((text.x, text.y, text.width, text.height), (44, 30, 112, 18));
+        assert_eq!((text.x, text.y, text.width, text.height), (48, 30, 104, 18));
+        assert_eq!(
+            text.x.saturating_mul(2).saturating_add(text.width),
+            title.x.saturating_mul(2).saturating_add(title.width)
+        );
+    }
+
+    #[test]
+    fn classic_mac_caption_banks_clear_symmetric_inner_title_gaps() {
+        let title = Recti::new(20, 30, 160, 18);
+        let content = Recti::new(20, 30, 160, 16);
+        let geometry = RootChromeGeometry {
+            title: Some(title),
+            close: Some(Recti::new(20, 33, 12, 12)),
+            minimize: Some(Recti::new(156, 33, 12, 12)),
+            maximize: Some(Recti::new(168, 33, 12, 12)),
+            ..RootChromeGeometry::default()
+        };
+        let chrome = WindowChromeSkin::classic_mac(crate::color(0, 0, 0, 255));
+        let [leading, trailing] = root_caption_bank_spacing_rects(content, geometry, &chrome);
+        assert_eq!(leading.map(|rect| (rect.x, rect.y, rect.width, rect.height)), Some((32, 30, 4, 16)));
+        assert_eq!(trailing.map(|rect| (rect.x, rect.y, rect.width, rect.height)), Some((152, 30, 4, 16)));
+    }
+
+    /// Verifies a centered label field cannot erase fixed title-patch separator rows.
+    #[test]
+    fn title_backdrop_stays_inside_the_title_patch_content_cell() {
+        let atlas = crate::test_support::test_atlas();
+        let backdrop = crate::color(17, 29, 43, 255);
+        let mut style = crate::test_support::test_skin(&atlas);
+        style.window_chrome = WindowChromeSkin::classic_mac(backdrop);
+        crate::test_support::replace_chrome_patch(
+            &mut style,
+            ChromeRole::Title,
+            ChromeState::Active,
+            crate::NinePatch::framed(
+                crate::SliceInsets::new(0, 0, 0, 2),
+                crate::color(3, 5, 7, 255),
+                Some(crate::color(11, 13, 15, 255)),
+            ),
+        );
+        let title = Recti::new(10, 20, 100, 20);
+        let geometry = RootChromeGeometry {
+            title: Some(title),
+            ..RootChromeGeometry::default()
+        };
+        let mut display_list = crate::render::DisplayList::default();
+        record_root_overlay(
+            &mut display_list,
+            Recti::new(0, 0, 160, 100),
+            Recti::new(0, 0, 120, 80),
+            WindowOption::NONE,
+            "ab",
+            geometry,
+            &style,
+            &atlas,
+            RootFrameKind::Window,
+            true,
+            true,
+            RootChromeVisualState::idle(),
+        );
+
+        let backdrop_rects = display_list
+            .debug_fill_rects()
+            .into_iter()
+            .filter_map(|(rect, _, color)| ((color.r, color.g, color.b, color.a) == (backdrop.r, backdrop.g, backdrop.b, backdrop.a)).then_some(rect))
+            .collect::<Vec<_>>();
+        assert_eq!(backdrop_rects.len(), 1);
+        let rect = backdrop_rects[0];
+        assert_eq!((rect.y, rect.height), (title.y, title.height - 2));
     }
 
     /// Verifies an unnamed mixed recipe drives geometry without a platform-layout branch.

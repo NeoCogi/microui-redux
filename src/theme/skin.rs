@@ -118,6 +118,8 @@ pub struct CaptionButtonsSkin {
     pub extent_inset: i32,
     /// Minimum square caption extent after applying the inset.
     pub minimum_extent: i32,
+    /// Unstriped title pixels reserved between each non-empty caption bank and title field.
+    pub inner_spacing: i32,
     /// Whether caption controls remain visible and hittable without window activation.
     ///
     /// Activation selects [`ChromeState::Active`] for frame and title chrome; it does not rewrite
@@ -136,6 +138,7 @@ impl Default for CaptionButtonsSkin {
             maximize_side: CaptionButtonSide::Trailing,
             extent_inset: 0,
             minimum_extent: 0,
+            inner_spacing: 0,
             show_without_activation: true,
         }
     }
@@ -229,6 +232,7 @@ impl WindowChromeSkin {
                 maximize_side: CaptionButtonSide::Trailing,
                 extent_inset: 0,
                 minimum_extent: 0,
+                inner_spacing: 0,
                 show_without_activation: true,
             },
             active_title_backdrop: None,
@@ -247,6 +251,7 @@ impl WindowChromeSkin {
                 maximize_side: CaptionButtonSide::Trailing,
                 extent_inset: 6,
                 minimum_extent: 1,
+                inner_spacing: 4,
                 show_without_activation: false,
             },
             active_title_backdrop: Some(TitleBackdropSkin {

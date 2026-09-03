@@ -1446,6 +1446,7 @@ mod tests {
         let chrome = loaded.bundle().skin().window_chrome;
         assert_eq!(chrome.title_alignment, crate::WindowTitleAlignment::Centered);
         assert_eq!(chrome.captions.close_side, crate::CaptionButtonSide::Leading);
+        assert_eq!(chrome.captions.inner_spacing, 4);
         assert!(!chrome.captions.show_without_activation);
         assert_eq!(loaded.bundle().skin().metrics.title_height, 20);
         for (role, expected_size) in [
@@ -1479,7 +1480,7 @@ mod tests {
             "Platinum windows expose their complete application body below root chrome"
         );
         let insets = loaded.bundle().skin().chrome(ChromeRole::WindowFrame, ChromeState::Base).patch.insets;
-        assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (6, 6, 6, 6));
+        assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (6, 22, 6, 6));
         let border = loaded.bundle().skin().metrics.window_border;
         assert_eq!(
             (border.left, border.top, border.right, border.bottom),
@@ -1492,6 +1493,31 @@ mod tests {
         };
         let active_title_size = loaded.bundle().atlas().get_icon_size(active_title_image.icon);
         assert_eq!((active_title_size.width, active_title_size.height), (8, 20));
+        assert_eq!(
+            (
+                active_title.insets.left,
+                active_title.insets.top,
+                active_title.insets.right,
+                active_title.insets.bottom,
+            ),
+            (0, 0, 0, 2),
+            "the centered label must not overwrite the title's lower shadow and black separator"
+        );
+        assert_eq!(
+            (
+                active_title_image.source_insets.left,
+                active_title_image.source_insets.top,
+                active_title_image.source_insets.right,
+                active_title_image.source_insets.bottom,
+            ),
+            (0, 0, 0, 2)
+        );
+        let active_frame = loaded.bundle().skin().chrome(ChromeRole::WindowFrame, ChromeState::Active).patch;
+        let crate::NinePatchContent::Image { image: active_frame_image } = active_frame.content else {
+            panic!("Mac OS 9 active frame must use baked title-and-body artwork");
+        };
+        let active_frame_size = loaded.bundle().atlas().get_icon_size(active_frame_image.icon);
+        assert_eq!((active_frame_size.width, active_frame_size.height), (13, 29));
         // Push buttons and checkboxes deliberately own different source geometry. Verifying their
         // baked sizes prevents later theme edits from collapsing both controls back onto the same
         // generic frame merely because both expose the same typed interaction states.
