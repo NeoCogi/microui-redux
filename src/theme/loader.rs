@@ -1442,7 +1442,7 @@ mod tests {
     fn bundled_mac_os_9_theme_reuses_shared_png_regions() {
         let (loaded, images) = install_bundled_theme("themes/mac-os-9/theme.json");
         assert_eq!(loaded.name(), "Mac OS 9");
-        assert_eq!(images, 24, "each shared PNG path must be baked exactly once");
+        assert_eq!(images, 29, "each shared PNG path must be baked exactly once");
         let chrome = loaded.bundle().skin().window_chrome;
         assert_eq!(chrome.title_alignment, crate::WindowTitleAlignment::Centered);
         assert_eq!(chrome.captions.close_side, crate::CaptionButtonSide::Leading);
@@ -1492,10 +1492,40 @@ mod tests {
         };
         let active_title_size = loaded.bundle().atlas().get_icon_size(active_title_image.icon);
         assert_eq!((active_title_size.width, active_title_size.height), (8, 20));
-        assert!(matches!(
-            loaded.bundle().skin().control(ControlRole::Button, ControlState::Disabled).patch.content,
-            crate::NinePatchContent::Image { .. }
-        ));
+        // Push buttons and checkboxes deliberately own different source geometry. Verifying their
+        // baked sizes prevents later theme edits from collapsing both controls back onto the same
+        // generic frame merely because both expose the same typed interaction states.
+        let button = loaded.bundle().skin().control(ControlRole::Button, ControlState::Enabled(PointerState::Normal));
+        let crate::NinePatchContent::Image { image: button_image } = button.patch.content else {
+            panic!("Mac OS 9 buttons must use baked artwork");
+        };
+        let button_size = loaded.bundle().atlas().get_icon_size(button_image.icon);
+        assert_eq!((button_size.width, button_size.height), (17, 17));
+        let checkbox = loaded
+            .bundle()
+            .skin()
+            .control(ControlRole::Checkbox, ControlState::Enabled(PointerState::Normal));
+        let pressed_checkbox = loaded
+            .bundle()
+            .skin()
+            .control(ControlRole::Checkbox, ControlState::Enabled(PointerState::Pressed));
+        let focused_checkbox = loaded
+            .bundle()
+            .skin()
+            .control(ControlRole::Checkbox, ControlState::Focused(PointerState::Normal));
+        let disabled_checkbox = loaded.bundle().skin().control(ControlRole::Checkbox, ControlState::Disabled);
+        let [checkbox_image, pressed_checkbox_image, focused_checkbox_image, disabled_checkbox_image] =
+            [checkbox, pressed_checkbox, focused_checkbox, disabled_checkbox].map(|visual| {
+                let crate::NinePatchContent::Image { image } = visual.patch.content else {
+                    panic!("Mac OS 9 checkbox states must use baked artwork");
+                };
+                image
+            });
+        let checkbox_size = loaded.bundle().atlas().get_icon_size(checkbox_image.icon);
+        assert_eq!((checkbox_size.width, checkbox_size.height), (13, 13));
+        assert_ne!(checkbox_image.icon, pressed_checkbox_image.icon);
+        assert_ne!(checkbox_image.icon, focused_checkbox_image.icon);
+        assert_ne!(checkbox_image.icon, disabled_checkbox_image.icon);
         assert!(matches!(
             loaded.bundle().skin().chrome(ChromeRole::DialogFrame, ChromeState::Active).patch.content,
             crate::NinePatchContent::Image { .. }
@@ -1533,7 +1563,7 @@ mod tests {
         assert_ne!(close_image.icon, pressed_image.icon);
 
         // Platinum popup selection uses black image-backed rows with white content text, while
-        // the popup itself retains its authored thick black and beveled frame.
+        // the popup itself retains its authored one-pixel black and beveled frame.
         let menu_popup = loaded.bundle().skin().menu(MenuRole::Popup, MenuState::Normal).patch;
         let crate::NinePatchContent::Image { image: menu_popup_image } = menu_popup.content else {
             panic!("Mac OS 9 popup must use baked artwork");
@@ -1542,7 +1572,11 @@ mod tests {
         assert_eq!((menu_popup_size.width, menu_popup_size.height), (7, 7));
         let selected_text = loaded.bundle().skin().menu(MenuRole::Item, MenuState::Hovered).content_color;
         assert_eq!((selected_text.r, selected_text.g, selected_text.b, selected_text.a), (255, 255, 255, 255));
-        for state in [ControlState::Focused(PointerState::Normal), ControlState::Focused(PointerState::Hovered)] {
+        for state in [
+            ControlState::Focused(PointerState::Normal),
+            ControlState::Focused(PointerState::Hovered),
+            ControlState::Focused(PointerState::Pressed),
+        ] {
             assert!(matches!(
                 loaded.bundle().skin().control(ControlRole::Item, state).patch.content,
                 crate::NinePatchContent::Image { .. }

@@ -6,17 +6,21 @@ stripes, a blank leading close box, and compact trailing windowshade and zoom bo
 without activation use a pale title and frame state without caption boxes. The surrounding chrome
 uses a six-layer black, white, face, and shadow perimeter, a two-pixel top reservation, fourteen-pixel
 metallic caption faces, sixteen-pixel scrollbars, and a grooved diagonal resize handle. Popup menus
-use a heavy black perimeter and black selections with white text.
+use a crisp one-pixel black perimeter, a directional inner bevel, and black selections with white
+text.
 
-Controls use chamfered raised faces, recessed white fields, black focus keylines, reversed pressed
-bevels, and softened disabled edges. Disabled and nested enabled/focused pointer sources remain
-independent JSON states even where period Mac OS intentionally gives two states the same restrained
-appearance. Open Sans Bold supplies the dense body, menu, title, and heading typography while
-Fixedsys Excelsior supplies the compact monospaced role. Both are already licensed repository
-assets and approximate the proprietary Charcoal and Monaco faces without redistributing either
-font. All five semantic font roles and their sizes are declared by this theme. The theme also owns
-all eight semantic icon roles through original one-bit mask artwork, so disclosure triangles,
-checks, combo arrows, and file-dialog symbols no longer inherit the application's default icon set.
+Controls use seventeen-pixel chamfered push-button sources, dedicated thirteen-pixel checkbox
+faces, compact nine-pixel recessed white fields, black focus keylines, reversed pressed bevels, and
+softened disabled edges. Combo boxes now compose a recessed field with the ordinary raised
+indicator button instead of presenting the whole control as one push button. Disabled and nested
+enabled/focused pointer sources remain independent JSON states even where period Mac OS
+intentionally gives two states the same restrained appearance. Open Sans Bold supplies the dense
+body, menu, title, and heading typography while Fixedsys Excelsior supplies the compact monospaced
+role. Both are already licensed repository assets and approximate the proprietary Charcoal and
+Monaco faces without redistributing either font. All five semantic font roles and their sizes are
+declared by this theme. The theme also owns all eight semantic icon roles through original one-bit
+mask artwork, so disclosure triangles, checks, combo arrows, and file-dialog symbols no longer
+inherit the application's default icon set.
 
 The visual research references were the
 [Apple Mac OS 8 Human Interface Guidelines](https://dev.os9.ca/techpubs/mac/pdf/HIGOS8Guidelines.pdf),

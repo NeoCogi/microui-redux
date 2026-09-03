@@ -213,6 +213,11 @@ fn export_theme(output_dir: &Path) -> Result<(), Box<dyn Error>> {
         ("disabled.png", raised_control(ControlTreatment::Disabled)),
         ("recessed.png", recessed_control(false)),
         ("recessed-focused.png", recessed_control(true)),
+        ("checkbox.png", checkbox_control(ControlTreatment::Raised)),
+        ("checkbox-pressed.png", checkbox_control(ControlTreatment::Pressed)),
+        ("checkbox-focused.png", checkbox_control(ControlTreatment::Focused)),
+        ("checkbox-pressed-focused.png", checkbox_control(ControlTreatment::PressedFocused)),
+        ("checkbox-disabled.png", checkbox_control(ControlTreatment::Disabled)),
         ("resize-grip.png", resize_grip()),
         ("title-active.png", title_strip(true)),
         ("title-normal.png", title_strip(false)),
@@ -246,14 +251,14 @@ fn export_theme(output_dir: &Path) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Builds a thirteen-pixel chamfered raised, pressed, focused, or disabled control source.
+/// Builds a seventeen-pixel chamfered raised, pressed, focused, or disabled control source.
 fn raised_control(treatment: ControlTreatment) -> Bitmap {
     let pressed = matches!(treatment, ControlTreatment::Pressed | ControlTreatment::PressedFocused);
     let focused = matches!(treatment, ControlTreatment::Focused | ControlTreatment::PressedFocused);
     let disabled = matches!(treatment, ControlTreatment::Disabled);
     let fill = if pressed { PRESSED_FACE } else { FACE };
     let outline = if disabled { DISABLED_EDGE } else { BLACK };
-    let mut bitmap = Bitmap::new(13, 13, fill);
+    let mut bitmap = Bitmap::new(17, 17, fill);
 
     // Transparent corner pixels and diagonal joins produce the clipped rectangular outline seen on
     // Platinum push buttons without requiring curved or antialiased source pixels.
@@ -261,67 +266,93 @@ fn raised_control(treatment: ControlTreatment) -> Bitmap {
         (0, 0),
         (1, 0),
         (0, 1),
-        (11, 0),
-        (12, 0),
-        (12, 1),
-        (0, 11),
-        (0, 12),
-        (1, 12),
-        (12, 11),
-        (11, 12),
-        (12, 12),
+        (15, 0),
+        (16, 0),
+        (16, 1),
+        (0, 15),
+        (0, 16),
+        (1, 16),
+        (16, 15),
+        (15, 16),
+        (16, 16),
     ] {
         bitmap.set(x, y, TRANSPARENT);
     }
-    bitmap.horizontal(2, 10, 0, outline);
-    bitmap.horizontal(2, 10, 12, outline);
-    bitmap.vertical(0, 2, 10, outline);
-    bitmap.vertical(12, 2, 10, outline);
-    for (x, y) in [(1, 1), (11, 1), (1, 11), (11, 11)] {
+    bitmap.horizontal(2, 14, 0, outline);
+    bitmap.horizontal(2, 14, 16, outline);
+    bitmap.vertical(0, 2, 14, outline);
+    bitmap.vertical(16, 2, 14, outline);
+    for (x, y) in [(1, 1), (15, 1), (1, 15), (15, 15)] {
         bitmap.set(x, y, outline);
     }
 
     let upper = if pressed { DARK_SHADOW } else { WHITE };
     let lower = if pressed { WHITE } else { DARK_SHADOW };
-    bitmap.horizontal(2, 10, 1, upper);
-    bitmap.vertical(1, 2, 10, upper);
-    bitmap.horizontal(2, 10, 11, lower);
-    bitmap.vertical(11, 2, 10, lower);
-    bitmap.horizontal(2, 9, 2, if disabled { PALE } else { upper });
-    bitmap.vertical(2, 2, 9, if disabled { PALE } else { upper });
-    bitmap.horizontal(3, 9, 10, SHADOW);
-    bitmap.vertical(10, 3, 9, SHADOW);
+    bitmap.horizontal(2, 14, 1, upper);
+    bitmap.vertical(1, 2, 14, upper);
+    bitmap.horizontal(2, 14, 15, lower);
+    bitmap.vertical(15, 2, 14, lower);
+    bitmap.horizontal(2, 13, 2, if disabled { PALE } else { upper });
+    bitmap.vertical(2, 2, 13, if disabled { PALE } else { upper });
+    bitmap.horizontal(3, 13, 14, SHADOW);
+    bitmap.vertical(14, 3, 13, SHADOW);
 
     if focused {
-        // A dark inner keyline gives the default button a period-appropriate stronger outline while
-        // retaining the same five-pixel stretch-safe border span.
-        bitmap.horizontal(3, 9, 3, BLACK);
-        bitmap.horizontal(3, 9, 9, BLACK);
-        bitmap.vertical(3, 3, 9, BLACK);
-        bitmap.vertical(9, 3, 9, BLACK);
+        // A second dark keyline marks the default or keyboard-focused button without changing its
+        // outer bounds or replacing the raised face with an unrelated state treatment.
+        bitmap.outline(4, BLACK);
     }
     bitmap
 }
 
-/// Builds an eleven-pixel inset text, checkbox, or track source.
+/// Builds a nine-pixel inset text field, panel, or track source.
 fn recessed_control(focused: bool) -> Bitmap {
-    let mut bitmap = Bitmap::new(11, 11, WHITE);
+    let mut bitmap = Bitmap::new(9, 9, WHITE);
     // The upper and leading shadow sinks the white field while the lower and trailing highlight
     // preserves the raised outer-window lighting direction.
-    bitmap.horizontal(0, 10, 0, BLACK);
-    bitmap.vertical(0, 0, 10, BLACK);
-    bitmap.horizontal(1, 10, 10, WHITE);
-    bitmap.vertical(10, 1, 10, WHITE);
-    bitmap.horizontal(1, 9, 1, DARK_SHADOW);
-    bitmap.vertical(1, 1, 9, DARK_SHADOW);
-    bitmap.horizontal(2, 9, 9, PALE);
-    bitmap.vertical(9, 2, 9, PALE);
+    bitmap.horizontal(0, 8, 0, BLACK);
+    bitmap.vertical(0, 0, 8, BLACK);
+    bitmap.horizontal(1, 8, 8, WHITE);
+    bitmap.vertical(8, 1, 8, WHITE);
+    bitmap.horizontal(1, 7, 1, DARK_SHADOW);
+    bitmap.vertical(1, 1, 7, DARK_SHADOW);
+    bitmap.horizontal(2, 7, 7, PALE);
+    bitmap.vertical(7, 2, 7, PALE);
     if focused {
         // Platinum uses a black inner focus keyline rather than recoloring the entire input field.
-        bitmap.horizontal(2, 8, 2, BLACK);
-        bitmap.horizontal(2, 8, 8, BLACK);
-        bitmap.vertical(2, 2, 8, BLACK);
-        bitmap.vertical(8, 2, 8, BLACK);
+        bitmap.outline(2, BLACK);
+    }
+    bitmap
+}
+
+/// Builds the dedicated square checkbox face for one meaningful interaction treatment.
+fn checkbox_control(treatment: ControlTreatment) -> Bitmap {
+    let pressed = matches!(treatment, ControlTreatment::Pressed | ControlTreatment::PressedFocused);
+    let focused = matches!(treatment, ControlTreatment::Focused | ControlTreatment::PressedFocused);
+    let disabled = matches!(treatment, ControlTreatment::Disabled);
+    let mut bitmap = Bitmap::new(
+        13,
+        13,
+        if disabled {
+            INACTIVE_FACE
+        } else if pressed {
+            PRESSED_FACE
+        } else {
+            WHITE
+        },
+    );
+    let outer = if disabled { DISABLED_EDGE } else { BLACK };
+    bitmap.outline(0, outer);
+    let upper = if pressed { DARK_SHADOW } else { WHITE };
+    let lower = if pressed { WHITE } else { SHADOW };
+    bitmap.horizontal(1, 11, 1, upper);
+    bitmap.vertical(1, 1, 11, upper);
+    bitmap.horizontal(1, 11, 11, lower);
+    bitmap.vertical(11, 1, 11, lower);
+    if focused {
+        // The inner keyline is independent of the check mark, which is still supplied by the
+        // semantic icon according to persistent checkbox value.
+        bitmap.outline(2, BLACK);
     }
     bitmap
 }
@@ -426,24 +457,19 @@ fn menu_bar() -> Bitmap {
     bitmap
 }
 
-/// Builds a thick black popup perimeter with a compact Platinum inner bevel.
+/// Builds a crisp black popup perimeter with a compact Platinum inner bevel.
 fn menu_popup() -> Bitmap {
     let mut bitmap = Bitmap::new(7, 7, FACE);
-    // Two black outer pixels satisfy the visually heavy popup edge while the white/dark inner bevel
-    // retains the same top-left lighting direction as windows and controls.
+    // One black perimeter and one directional bevel match the compact popup panel without making
+    // every menu row look as though it sits inside a doubled window frame.
     bitmap.horizontal(0, 6, 0, BLACK);
-    bitmap.horizontal(0, 6, 1, BLACK);
-    bitmap.horizontal(0, 6, 5, BLACK);
     bitmap.horizontal(0, 6, 6, BLACK);
     bitmap.vertical(0, 0, 6, BLACK);
-    bitmap.vertical(1, 0, 6, BLACK);
-    bitmap.vertical(5, 0, 6, BLACK);
     bitmap.vertical(6, 0, 6, BLACK);
-    bitmap.horizontal(2, 4, 2, WHITE);
-    bitmap.vertical(2, 2, 4, WHITE);
-    bitmap.horizontal(2, 4, 4, DARK_SHADOW);
-    bitmap.vertical(4, 2, 4, DARK_SHADOW);
-    bitmap.set(3, 3, FACE);
+    bitmap.horizontal(1, 5, 1, WHITE);
+    bitmap.vertical(1, 1, 5, WHITE);
+    bitmap.horizontal(1, 5, 5, SHADOW);
+    bitmap.vertical(5, 1, 5, SHADOW);
     bitmap
 }
 
