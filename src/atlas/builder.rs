@@ -702,7 +702,7 @@ impl Builder {
         // A caller needing an exact resource key uses the named insertion API. The convenience API
         // derives a readable key from the final path component without requiring platform paths to
         // be representable as UTF-8.
-        path.file_stem().unwrap_or_else(|| path.as_os_str()).to_string_lossy().into_owned()
+        path.file_stem().unwrap_or(path.as_os_str()).to_string_lossy().into_owned()
     }
 
     /// Validates and consumes the populated builder, returning an immutable [`AtlasHandle`].

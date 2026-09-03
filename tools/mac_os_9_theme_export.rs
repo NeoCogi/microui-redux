@@ -448,49 +448,6 @@ fn window_frame(active: bool) -> Bitmap {
     bitmap
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Reads one generated pixel without exposing bitmap internals to the exporter itself.
-    fn pixel(bitmap: &Bitmap, x: i32, y: i32) -> Pixel {
-        let index = (usize::try_from(y).unwrap() * usize::try_from(bitmap.width).unwrap() + usize::try_from(x).unwrap()) * 4;
-        bitmap.pixels[index..index + 4].try_into().unwrap()
-    }
-
-    #[test]
-    fn window_title_band_retains_platinum_side_rails_and_body_transitions() {
-        let active = window_frame(true);
-        assert_eq!((active.width, active.height), (13, 29));
-        assert_eq!(pixel(&active, 11, 1), FACE);
-        for y in WINDOW_FRAME_TOP..=WINDOW_FRAME_TOP + WINDOW_TITLE_HEIGHT - 2 {
-            assert_eq!(pixel(&active, 0, y), BLACK);
-            assert_eq!(pixel(&active, 1, y), WHITE);
-            assert_eq!(pixel(&active, 11, y), SHADOW);
-            assert_eq!(pixel(&active, 12, y), BLACK);
-        }
-        assert_eq!(
-            (0..6).map(|x| pixel(&active, x, 20)).collect::<Vec<_>>(),
-            vec![BLACK, WHITE, FACE, FACE, SHADOW, SHADOW]
-        );
-        assert_eq!(
-            (7..13).map(|x| pixel(&active, x, 20)).collect::<Vec<_>>(),
-            vec![SHADOW, FACE, FACE, FACE, SHADOW, BLACK]
-        );
-        let body_side = vec![BLACK, WHITE, FACE, FACE, SHADOW, BLACK];
-        assert_eq!((0..6).map(|x| pixel(&active, x, 21)).collect::<Vec<_>>(), body_side);
-        assert_eq!((7..13).map(|x| pixel(&active, x, 21)).collect::<Vec<_>>(), body_side);
-        assert_eq!(pixel(&active, WINDOW_FRAME_EDGE, 21), BLACK);
-
-        let inactive = window_frame(false);
-        for y in WINDOW_FRAME_TOP..=WINDOW_FRAME_TOP + WINDOW_TITLE_HEIGHT - 2 {
-            assert_eq!(pixel(&inactive, 0, y), INACTIVE_EDGE);
-            assert_eq!(pixel(&inactive, 12, y), INACTIVE_EDGE);
-        }
-        assert_eq!(pixel(&inactive, WINDOW_FRAME_EDGE, 21), INACTIVE_EDGE);
-    }
-}
-
 /// Builds one complete thirteen-by-fourteen title-control face with its embedded period mark.
 fn caption_button(mark: CaptionMark, pressed: bool) -> Bitmap {
     let mut bitmap = Bitmap::new(13, 14, if pressed { PRESSED_FACE } else { FACE });
@@ -686,4 +643,47 @@ fn resize_grip() -> Bitmap {
         }
     }
     bitmap
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Reads one generated pixel without exposing bitmap internals to the exporter itself.
+    fn pixel(bitmap: &Bitmap, x: i32, y: i32) -> Pixel {
+        let index = (usize::try_from(y).unwrap() * usize::try_from(bitmap.width).unwrap() + usize::try_from(x).unwrap()) * 4;
+        bitmap.pixels[index..index + 4].try_into().unwrap()
+    }
+
+    #[test]
+    fn window_title_band_retains_platinum_side_rails_and_body_transitions() {
+        let active = window_frame(true);
+        assert_eq!((active.width, active.height), (13, 29));
+        assert_eq!(pixel(&active, 11, 1), FACE);
+        for y in WINDOW_FRAME_TOP..=WINDOW_FRAME_TOP + WINDOW_TITLE_HEIGHT - 2 {
+            assert_eq!(pixel(&active, 0, y), BLACK);
+            assert_eq!(pixel(&active, 1, y), WHITE);
+            assert_eq!(pixel(&active, 11, y), SHADOW);
+            assert_eq!(pixel(&active, 12, y), BLACK);
+        }
+        assert_eq!(
+            (0..6).map(|x| pixel(&active, x, 20)).collect::<Vec<_>>(),
+            vec![BLACK, WHITE, FACE, FACE, SHADOW, SHADOW]
+        );
+        assert_eq!(
+            (7..13).map(|x| pixel(&active, x, 20)).collect::<Vec<_>>(),
+            vec![SHADOW, FACE, FACE, FACE, SHADOW, BLACK]
+        );
+        let body_side = vec![BLACK, WHITE, FACE, FACE, SHADOW, BLACK];
+        assert_eq!((0..6).map(|x| pixel(&active, x, 21)).collect::<Vec<_>>(), body_side);
+        assert_eq!((7..13).map(|x| pixel(&active, x, 21)).collect::<Vec<_>>(), body_side);
+        assert_eq!(pixel(&active, WINDOW_FRAME_EDGE, 21), BLACK);
+
+        let inactive = window_frame(false);
+        for y in WINDOW_FRAME_TOP..=WINDOW_FRAME_TOP + WINDOW_TITLE_HEIGHT - 2 {
+            assert_eq!(pixel(&inactive, 0, y), INACTIVE_EDGE);
+            assert_eq!(pixel(&inactive, 12, y), INACTIVE_EDGE);
+        }
+        assert_eq!(pixel(&inactive, WINDOW_FRAME_EDGE, 21), INACTIVE_EDGE);
+    }
 }

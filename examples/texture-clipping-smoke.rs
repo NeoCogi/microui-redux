@@ -267,8 +267,10 @@ fn main() -> Result<(), String> {
     // Keep the window background out of the recording log so the assertions isolate the widget's
     // atlas/texture ordering while still exercising the retained public rendering path.
     let mut style = ctx.skin().clone();
-    let mut palette = FlatPalette::default();
-    palette.window_background = color(0, 0, 0, 0);
+    let palette = FlatPalette {
+        window_background: color(0, 0, 0, 0),
+        ..FlatPalette::default()
+    };
     style.apply_flat_palette(palette);
     ctx.set_skin(style);
 
