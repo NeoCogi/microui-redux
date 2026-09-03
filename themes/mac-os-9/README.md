@@ -11,6 +11,7 @@ directional black/white and gray/black side rails, a shared horizontal junction,
 six-layer vertical body frame. Fourteen-pixel metallic caption faces, sixteen-pixel scrollbars, and
 a grooved diagonal resize handle complete the window decoration. Popup menus use a crisp one-pixel
 black perimeter, a directional inner bevel, and black selections with white text.
+Each caption face retains three title pixels above and below it.
 
 Controls use seventeen-pixel chamfered push-button sources, dedicated thirteen-pixel checkbox
 faces, compact nine-pixel recessed white fields, black focus keylines, reversed pressed bevels, and

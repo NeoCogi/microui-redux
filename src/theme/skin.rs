@@ -114,8 +114,8 @@ pub struct CaptionButtonsSkin {
     pub minimize_side: CaptionButtonSide,
     /// Edge used by the maximize or restore button.
     pub maximize_side: CaptionButtonSide,
-    /// Total pixels removed from title height to obtain each square caption extent.
-    pub extent_inset: i32,
+    /// Title pixels retained above and below each square caption button.
+    pub vertical_spacing: i32,
     /// Minimum square caption extent after applying the inset.
     pub minimum_extent: i32,
     /// Unstriped title pixels reserved between each non-empty caption bank and title field.
@@ -136,7 +136,7 @@ impl Default for CaptionButtonsSkin {
             close_side: CaptionButtonSide::Trailing,
             minimize_side: CaptionButtonSide::Trailing,
             maximize_side: CaptionButtonSide::Trailing,
-            extent_inset: 0,
+            vertical_spacing: 2,
             minimum_extent: 0,
             inner_spacing: 0,
             show_without_activation: true,
@@ -232,7 +232,7 @@ impl WindowChromeSkin {
                 close_side: CaptionButtonSide::Trailing,
                 minimize_side: CaptionButtonSide::Trailing,
                 maximize_side: CaptionButtonSide::Trailing,
-                extent_inset: 0,
+                vertical_spacing: 2,
                 minimum_extent: 0,
                 inner_spacing: 0,
                 show_without_activation: true,
@@ -252,7 +252,7 @@ impl WindowChromeSkin {
                 close_side: CaptionButtonSide::Leading,
                 minimize_side: CaptionButtonSide::Trailing,
                 maximize_side: CaptionButtonSide::Trailing,
-                extent_inset: 6,
+                vertical_spacing: 3,
                 minimum_extent: 1,
                 inner_spacing: 4,
                 show_without_activation: false,

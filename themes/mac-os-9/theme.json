@@ -213,7 +213,7 @@
         "close_side": "leading",
         "minimize_side": "trailing",
         "maximize_side": "trailing",
-        "extent_inset": 6,
+        "vertical_spacing": 3,
         "minimum_extent": 1,
         "inner_spacing": 4,
         "show_without_activation": false

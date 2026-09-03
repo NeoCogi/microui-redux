@@ -47,6 +47,9 @@
       "menu_background": [192, 192, 192, 255]
     },
     "window_chrome": {
+      "captions": {
+        "vertical_spacing": 2
+      },
       "minimized_content_height": 2
     }
   },

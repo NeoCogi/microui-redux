@@ -20,3 +20,4 @@ two-axis target. The raised and recessed assets use independent two- or three-pi
 destination insets stay role-specific so focus artwork does not reflow a control.
 The minimize button keeps the window visible with a two-pixel-high application-content strip,
 configured explicitly by this theme.
+Caption buttons retain two pixels of the active title field both above and below their faces.

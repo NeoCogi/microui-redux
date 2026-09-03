@@ -1261,6 +1261,7 @@ mod tests {
         assert_eq!(loaded.name(), "Windows 95");
         assert_eq!(images, 11, "each shared PNG path must be baked exactly once");
         assert_eq!(loaded.bundle().skin().window_chrome.minimized_content_height, 2);
+        assert_eq!(loaded.bundle().skin().window_chrome.captions.vertical_spacing, 2);
         let atlas = loaded.bundle().atlas();
         assert_eq!((atlas.width(), atlas.height()), (512, 256));
         assert_eq!(
@@ -1298,6 +1299,7 @@ mod tests {
         assert_eq!(loaded.name(), "Windows 3.11 for Workgroups");
         assert_eq!(images, 12, "only referenced role-state artwork is baked into the theme atlas");
         assert_eq!(loaded.bundle().skin().window_chrome.minimized_content_height, 2);
+        assert_eq!(loaded.bundle().skin().window_chrome.captions.vertical_spacing, 0);
         let insets = loaded.bundle().skin().chrome(ChromeRole::WindowFrame, ChromeState::Base).patch.insets;
         assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (23, 23, 23, 23));
         let border = loaded.bundle().skin().metrics.window_border;
@@ -1448,6 +1450,7 @@ mod tests {
         let chrome = loaded.bundle().skin().window_chrome;
         assert_eq!(chrome.title_alignment, crate::WindowTitleAlignment::Centered);
         assert_eq!(chrome.captions.close_side, crate::CaptionButtonSide::Leading);
+        assert_eq!(chrome.captions.vertical_spacing, 3);
         assert_eq!(chrome.captions.inner_spacing, 4);
         assert_eq!(chrome.minimized_content_height, 2);
         assert!(!chrome.captions.show_without_activation);

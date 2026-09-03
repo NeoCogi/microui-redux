@@ -35,3 +35,4 @@ artwork; no caption-only overlay role enters the theme schema. No reference asse
 transformed.
 The minimize button keeps the window visible with a two-pixel-high application-content strip,
 configured explicitly by this theme.
+Caption buttons use no extra title-field spacing above or below their faces in either title state.

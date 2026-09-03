@@ -553,10 +553,8 @@ fn caption_side(chrome: &WindowChromeSkin, button: RootCaptionButton) -> Caption
 fn root_caption_extent(chrome: &WindowChromeSkin, title_height: i32) -> i32 {
     // Normalize authored negative values at consumption, then apply both independent recipe limits
     // without recognizing a named platform mode.
-    title_height
-        .max(0)
-        .saturating_sub(chrome.captions.extent_inset.max(0))
-        .max(chrome.captions.minimum_extent.max(0))
+    let vertical_extent = chrome.captions.vertical_spacing.max(0).saturating_mul(2);
+    title_height.max(0).saturating_sub(vertical_extent).max(chrome.captions.minimum_extent.max(0))
 }
 
 /// Removes one square caption allocation from the remaining leading title span.
@@ -1038,11 +1036,11 @@ mod tests {
 
     /// Verifies an unnamed mixed recipe drives geometry without a platform-layout branch.
     #[test]
-    fn independent_caption_recipe_fields_support_mixed_banks_and_extent() {
+    fn independent_caption_recipe_fields_support_mixed_banks_and_vertical_spacing() {
         let atlas = crate::test_support::test_atlas();
         let mut skin = crate::test_support::test_skin(&atlas);
         skin.window_chrome.captions.maximize_side = CaptionButtonSide::Leading;
-        skin.window_chrome.captions.extent_inset = 4;
+        skin.window_chrome.captions.vertical_spacing = 2;
         skin.window_chrome.captions.minimum_extent = 2;
         let geometry = root_chrome_geometry(
             Recti::new(10, 20, 180, 110),
@@ -1059,10 +1057,15 @@ mod tests {
         let close = geometry.close.expect("the default trailing close button must exist");
 
         // No built-in preset uses this combination: maximize consumes the leading edge while close
-        // remains trailing, and both use the independently configured extent inset.
+        // remains trailing, and both use the independently configured vertical spacing.
         assert_eq!(maximize.x, title.x);
         assert_eq!(close.x.saturating_add(close.width), title.x.saturating_add(title.width));
         assert_eq!(maximize.width, title.height.saturating_sub(4));
         assert_eq!(close.width, maximize.width);
+        assert_eq!(maximize.y.saturating_sub(title.y), 2);
+        assert_eq!(
+            title.y.saturating_add(title.height).saturating_sub(maximize.y.saturating_add(maximize.height)),
+            2
+        );
     }
 }

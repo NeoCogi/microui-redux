@@ -182,6 +182,9 @@
       ]
     },
     "window_chrome": {
+      "captions": {
+        "vertical_spacing": 0
+      },
       "minimized_content_height": 2
     }
   },
