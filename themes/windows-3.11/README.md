@@ -19,11 +19,12 @@ reference only: no source image, CSS, XPM, SVG, or other file was copied or tran
 PNG in this directory is original, deterministic pixel artwork authored for this repository and is
 distributed under the repository's BSD-3-Clause terms.
 
-The four-pixel window edge follows the period's black-gray-gray-black outline. Its four fixed
-23-pixel corner cells form the long mirrored L pieces visible in the reference while remaining
-independent from the four-pixel client inset and resize hit thickness. The bottom-right L is the
-visible two-axis affordance; the larger semantic grip image is intentionally transparent, so no
-filled rectangle appears over the client. Those L-shaped roles belong only to ordinary windows.
+The four-pixel window edge follows the period's black-gray-gray-black outline.
+`skin.metrics.window_border` controls that structural client inset and the one-axis resize hit
+thickness independently of the frame artwork's four fixed 23-pixel corner cells. A separate
+two-pixel `skin.metrics.window_content_insets` value pads the application body. The bottom-right L
+is the visible two-axis affordance; the larger semantic grip image is intentionally transparent, so
+no filled rectangle appears over the client. Those L-shaped roles belong only to ordinary windows.
 Modal dialogs instead use a uniform four-pixel outer frame: black in the base state and the period
 `#0000AA` focus blue while active.
 

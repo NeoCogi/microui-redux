@@ -46,7 +46,7 @@ opaque-white masks whose final color comes from the selected role state. Control
 five-pixel fixed 3x3 spans, recessed sources use four-pixel spans, and caption faces use four-pixel
 spans. Window-frame sources use six-pixel body-side and bottom spans plus a twenty-two-pixel top
 span containing the outer edge, the title's two-pixel side rails, and the title/body junction.
-`style.window_border` independently reserves six structural pixels on the sides and bottom, but
-only two above the integrated title. The active title source is 8x20 pixels with a two-pixel fixed
+`skin.metrics.window_border` independently reserves six structural pixels on the sides and bottom,
+but only two above the integrated title. The active title source is 8x20 pixels with a two-pixel fixed
 bottom span, so its bands repeat across the title allocation while its shadow and black lower rule
 remain continuous beneath the centered label backdrop.
