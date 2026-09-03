@@ -77,7 +77,7 @@ bitflags! {
     #[derive(Copy, Clone)]
     /// Presentation options shared by windows, dialogs, and window-owned popup surfaces.
     pub struct WindowOption : u32 {
-        /// Shows a minimize caption button that hides the retained window when activated.
+        /// Shows a minimize caption button that toggles the skin-sized compact window height.
         const MINIMIZE_BUTTON = 1;
         /// Shows a maximize caption button that toggles the inherited viewport and saved rectangle.
         const MAXIMIZE_BUTTON = 2;

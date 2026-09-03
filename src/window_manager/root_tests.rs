@@ -3519,6 +3519,9 @@ fn positive_caption_flags_minimize_maximize_follow_viewport_and_restore_exactly(
     }
 
     let mut ctx = context();
+    let mut style = ctx.skin().clone();
+    style.window_chrome.minimized_content_height = 3;
+    ctx.set_skin(style);
     let normal = rect(30, 35, 150, 110);
     let root = ctx.ui().create_window(Window::new("caption flags", normal, empty_content()));
     ctx.ui()
@@ -3552,14 +3555,22 @@ fn positive_caption_flags_minimize_maximize_follow_viewport_and_restore_exactly(
 
     let minimize = ctx.debug_root_chrome_controls(root.id()).unwrap().minimize.unwrap();
     click_caption(&mut ctx, minimize, larger_dimensions);
-    assert_eq!(ctx.debug_root_visible(root.id()), Some(false));
+    let minimized = ctx.debug_root_rect(root.id()).expect("minimized window must retain geometry");
+    assert_eq!(ctx.debug_root_visible(root.id()), Some(true));
+    assert_eq!(ctx.debug_root_body(root.id()).map(|body| body.height), Some(3));
+    assert!(ctx.debug_root_chrome_controls(root.id()).unwrap().resize_bottom.is_none());
     assert!(dispatcher.dispatch(&mut events));
     assert!(matches!(
         events.as_slice(),
-        [WindowEvent::Maximized { .. }, WindowEvent::Restored { .. }, WindowEvent::Minimized]
+        [WindowEvent::Maximized { .. }, WindowEvent::Restored { .. }, WindowEvent::Minimized { rect }]
+            if tuple(*rect) == tuple(minimized)
     ));
-    ctx.ui().set_window_visible(&root, true).unwrap();
+
+    let restore_minimized = ctx.debug_root_chrome_controls(root.id()).unwrap().minimize.unwrap();
+    click_caption(&mut ctx, restore_minimized, larger_dimensions);
     assert_eq!(ctx.debug_root_rect(root.id()).map(tuple), Some(tuple(normal)));
+    assert!(dispatcher.dispatch(&mut events));
+    assert!(matches!(events.last(), Some(WindowEvent::Restored { rect }) if tuple(*rect) == tuple(normal)));
 }
 
 #[test]

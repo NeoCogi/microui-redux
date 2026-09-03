@@ -183,7 +183,7 @@ patches and content colors cannot drift through parallel catalogs, and no erased
 payload participates at runtime.
 
 The optional `skin.window_chrome` object is the concrete `WindowChromeSkin` recipe. It accepts
-`title_alignment` (`leading` or `centered`), a `captions` object containing `close_side`,
+`title_alignment` (`leading` or `centered`), `minimized_content_height`, a `captions` object containing `close_side`,
 `minimize_side`, `maximize_side`, `extent_inset`, `minimum_extent`, `inner_spacing`, and
 `show_without_activation`, and an optional `active_title_backdrop` containing `color` and
 `horizontal_padding`. Omitted fields use the same concrete defaults as programmatic skins.
@@ -308,7 +308,9 @@ these states use a transparent content color and do not show an additional manag
 manager consumes only the concrete `WindowChromeSkin` fields and never branches on a theme or
 platform mode.
 
-Minimize hides the retained window and emits `WindowEvent::Minimized`; the same `WindowHandle` can
-be shown again. Maximize saves the exact normal outer rectangle, tracks the complete inherited
-viewport, and emits `WindowEvent::Maximized`. Activating the same caption position while maximized
-uses `control.restore_button`, restores the saved rectangle, and emits `WindowEvent::Restored`.
+Minimize keeps the retained window visible, saves its expanded height, reduces its application body
+to `minimized_content_height`, and emits `WindowEvent::Minimized`. Activating minimize again restores
+the saved height and emits `WindowEvent::Restored`. Maximize saves the exact normal outer rectangle,
+tracks the complete inherited viewport, and emits `WindowEvent::Maximized`. Activating the same
+caption position while maximized uses `control.restore_button`, restores the saved rectangle, and
+emits `WindowEvent::Restored`.

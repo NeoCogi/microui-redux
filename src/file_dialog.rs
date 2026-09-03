@@ -732,7 +732,7 @@ impl FileDialog {
         match event {
             WindowEvent::CloseRequested if self.active => self.finish(ui, FileDialogStatus::Cancelled),
             WindowEvent::CloseRequested | WindowEvent::GeometryChanged { .. } => {}
-            WindowEvent::Minimized | WindowEvent::Maximized { .. } | WindowEvent::Restored { .. } => {
+            WindowEvent::Minimized { .. } | WindowEvent::Maximized { .. } | WindowEvent::Restored { .. } => {
                 // File-dialog windows do not expose minimize/maximize buttons, so these variants
                 // are exhaustive defensive handling for application-customized future options.
             }

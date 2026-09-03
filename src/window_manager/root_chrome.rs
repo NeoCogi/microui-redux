@@ -70,7 +70,7 @@ pub(super) enum RootResizeAxis {
 /// Concrete manager-owned caption button selected by hit testing and capture.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub(super) enum RootCaptionButton {
-    /// Hides the retained window while preserving its state for explicit restoration.
+    /// Toggles the window between its full and skin-sized compact heights.
     Minimize,
     /// Maximizes a normal window or restores a currently maximized window.
     Maximize,
@@ -91,14 +91,17 @@ pub enum WindowEvent {
     },
     /// The user released the manager-owned close affordance after a matching press.
     CloseRequested,
-    /// The user minimized the window, making it locally invisible without destroying it.
-    Minimized,
+    /// The user minimized the window to its configured compact content height.
+    Minimized {
+        /// Complete compact outer rectangle.
+        rect: Recti,
+    },
     /// The user maximized the window into its complete inherited viewport.
     Maximized {
         /// Complete maximized outer rectangle.
         rect: Recti,
     },
-    /// The user restored the exact outer rectangle saved before maximization.
+    /// The user restored the exact outer rectangle saved before minimizing or maximizing.
     Restored {
         /// Restored outer rectangle.
         rect: Recti,

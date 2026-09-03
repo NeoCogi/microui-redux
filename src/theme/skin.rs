@@ -216,6 +216,8 @@ pub struct WindowChromeSkin {
     pub title_alignment: WindowTitleAlignment,
     /// Independent placement, extent, and visibility policy for caption buttons.
     pub captions: CaptionButtonsSkin,
+    /// Application-content height retained while a window is minimized.
+    pub minimized_content_height: i32,
     /// Optional active-title field painted behind measured text.
     pub active_title_backdrop: Option<TitleBackdropSkin>,
 }
@@ -235,6 +237,7 @@ impl WindowChromeSkin {
                 inner_spacing: 0,
                 show_without_activation: true,
             },
+            minimized_content_height: 2,
             active_title_backdrop: None,
         }
     }
@@ -254,6 +257,7 @@ impl WindowChromeSkin {
                 inner_spacing: 4,
                 show_without_activation: false,
             },
+            minimized_content_height: 2,
             active_title_backdrop: Some(TitleBackdropSkin {
                 color: title_backdrop,
                 horizontal_padding: 4,

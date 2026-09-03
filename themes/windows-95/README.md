@@ -18,3 +18,5 @@ under the repository's BSD-3-Clause terms.
 four-pixel one-axis resize hit regions, while `resize-grip.png` remains the larger bottom-right
 two-axis target. The raised and recessed assets use independent two- or three-pixel source slices;
 destination insets stay role-specific so focus artwork does not reflow a control.
+The minimize button keeps the window visible with a two-pixel-high application-content strip,
+configured explicitly by this theme.

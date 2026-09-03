@@ -369,8 +369,9 @@ fn window_event(&mut self, ui: &mut Ui<'_>, event: &WindowEvent) {
         WindowEvent::CloseRequested => {
             ui.destroy_window(&self.window).expect("window must remain registered");
         }
-        WindowEvent::Minimized => self.window_visible = false,
-        WindowEvent::Maximized { rect } | WindowEvent::Restored { rect } => {
+        WindowEvent::Minimized { rect }
+        | WindowEvent::Maximized { rect }
+        | WindowEvent::Restored { rect } => {
             self.last_rect = *rect;
         }
     }

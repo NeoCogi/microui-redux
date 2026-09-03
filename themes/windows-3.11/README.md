@@ -33,3 +33,5 @@ Caption controls use the manager-owned close, minimize, maximize, and restore sy
 each button state's content color. Their raised and pressed faces remain ordinary control appearance
 artwork; no caption-only overlay role enters the theme schema. No reference asset was copied or
 transformed.
+The minimize button keeps the window visible with a two-pixel-high application-content strip,
+configured explicitly by this theme.

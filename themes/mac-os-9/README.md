@@ -3,7 +3,8 @@
 This bundled theme reconstructs the late Mac OS 9 Platinum visual language through the crate's
 typed appearance catalog. Active windows use centered labels over interrupted horizontal racing
 stripes, a blank leading close box, compact trailing windowshade and zoom boxes, and a four-pixel
-unstriped field between each caption bank and the stripes. Windows
+unstriped field between each caption bank and the stripes. Minimizing preserves the window and
+reduces its application-content height to the theme's configured two pixels. Windows
 without activation use a pale title and frame state without caption boxes. The surrounding chrome
 uses one continuous geometry: a two-pixel top edge, a twenty-pixel title band delimited by the
 directional black/white and gray/black side rails, a shared horizontal junction, and only then the

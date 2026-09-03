@@ -45,6 +45,9 @@
       "window_active": [0, 0, 128, 255],
       "menu_foreground": [0, 0, 0, 255],
       "menu_background": [192, 192, 192, 255]
+    },
+    "window_chrome": {
+      "minimized_content_height": 2
     }
   },
   "appearances": {

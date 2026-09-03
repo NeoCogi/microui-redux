@@ -291,7 +291,15 @@ impl Surface {
     }
 
     /// Measures automatic axes and lays out the application tree in the derived body.
-    fn layout(&mut self, menu_bar: Option<&mut MenuSurface>, frame_kind: RootFrameKind, style: &Skin, atlas: &crate::AtlasHandle, clip: Recti) {
+    fn layout(
+        &mut self,
+        menu_bar: Option<&mut MenuSurface>,
+        frame_kind: RootFrameKind,
+        style: &Skin,
+        atlas: &crate::AtlasHandle,
+        clip: Recti,
+        minimized_content_height: Option<i32>,
+    ) {
         // Commit the inherited surface boundary before any concrete body sees it. Every later
         // manager-owned hit or paint path reads this same snapshot until the next complete layout.
         self.clip = clip;
@@ -347,6 +355,21 @@ impl Surface {
             style,
             atlas,
         );
+        if let Some(content_height) = minimized_content_height {
+            // Derive the compact outer height from the ordinary committed body. Reusing the same
+            // geometry function keeps frame, title, menu, padding, paint, and hit testing aligned.
+            self.rect.height = self.rect.height.saturating_sub(self.geometry.body.height).saturating_add(content_height.max(0));
+            self.geometry = root_chrome_geometry(
+                self.rect,
+                Dimensioni::default(),
+                menu_intrinsic,
+                &self.name,
+                self.options,
+                frame_kind,
+                style,
+                atlas,
+            );
+        }
         if let (Some(bar), Some(rect)) = (menu_bar, self.geometry.menu_bar) {
             // The menu consumes the exact chrome rectangle derived above. Popup anchors, overlay
             // paint, and hit testing subsequently read the MenuSurface's matching committed rect.
@@ -590,6 +613,8 @@ struct RootState {
     /// `None` means normal placement; `Some` simultaneously records restoration geometry and the
     /// maximized mode without a second boolean that could disagree with it.
     restore_rect: Option<Recti>,
+    /// Expanded outer height retained while the minimize button shows a compact window.
+    unminimized_height: Option<i32>,
     /// Strong owner of the unified window geometry/lifecycle event stream.
     events: Rc<RefCell<crate::event::WidgetEventPort<WindowEvent>>>,
     /// Optional concrete menu bar laid out above the application widget body.
@@ -735,7 +760,7 @@ impl SurfaceNode {
     /// Replaces root chrome options and revokes a gesture disabled by the new policy.
     fn set_root_options(&mut self, options: WindowOption) {
         self.surface.options = options;
-        let (interaction, restore_rect) = {
+        let (interaction, restore_rect, unminimized_height, remains_maximized, remains_minimized) = {
             let root = self.root_mut().expect("chrome options are defined only for roots");
             let restore_rect = if options.intersects(WindowOption::MAXIMIZE_BUTTON) {
                 None
@@ -743,12 +768,34 @@ impl SurfaceNode {
                 // Removing the only restore affordance must leave the root in normal mode.
                 root.restore_rect.take()
             };
-            (root.interaction, restore_rect)
+            let unminimized_height = if options.intersects(WindowOption::MINIMIZE_BUTTON) {
+                None
+            } else {
+                // Removing the minimize affordance must leave the root at its expanded height.
+                root.unminimized_height.take()
+            };
+            (
+                root.interaction,
+                restore_rect,
+                unminimized_height,
+                root.restore_rect.is_some(),
+                root.unminimized_height.is_some(),
+            )
         };
         if let Some(rect) = restore_rect {
             // Removing the positive maximize affordance also exits its mode, preserving the exact
             // normal rectangle rather than leaving an un-restorable maximized window.
             self.surface.rect = rect;
+            if remains_minimized {
+                self.root_mut().expect("chrome options are defined only for roots").unminimized_height = Some(rect.height);
+            }
+        }
+        if let Some(height) = unminimized_height
+            && restore_rect.is_none()
+        {
+            // A maximized window expands to its live viewport; an ordinary one restores the height
+            // captured by minimize. If both modes were removed, `restore_rect` already won above.
+            self.surface.rect.height = if remains_maximized { self.surface.clip.height } else { height };
         }
         let disabled = options.intersects(WindowOption::DISABLED);
         let revokes_interaction = (options.intersects(WindowOption::NO_TITLE) && interaction == RootInteraction::Moving)
@@ -816,11 +863,18 @@ impl SurfaceNode {
 
     /// Lays out this node and its optional root-owned menu bar through concrete bodies.
     fn layout(&mut self, style: &Skin, atlas: &crate::AtlasHandle, viewport: Recti) {
-        let maximized = self.root().is_some_and(|root| root.restore_rect.is_some());
+        let (maximized, unminimized_height) = self
+            .root()
+            .map(|root| (root.restore_rect.is_some(), root.unminimized_height))
+            .unwrap_or((false, None));
         if maximized {
             // Follow the effective viewport on every layout so native drawable or ancestor-clip
             // changes resize a maximized top-level or child window without losing restoration data.
             self.surface.rect = viewport;
+        } else if let Some(height) = unminimized_height {
+            // Begin from the saved expanded height on every layout. The shared geometry pass below
+            // can then respond consistently to theme, menu, and content-inset changes.
+            self.surface.rect.height = height;
         }
         let frame_kind = match &self.kind {
             // Modal roots retain dialog artwork, ordinary roots retain window artwork, and every
@@ -833,9 +887,10 @@ impl SurfaceNode {
             SurfaceKind::Root(root) => root.menu_bar.as_mut(),
             SurfaceKind::Popup(_) => None,
         };
-        self.surface.layout(menu_bar, frame_kind, style, atlas, viewport);
-        if maximized {
-            // Maximized windows keep caption actions but expose no resize hit regions or grip.
+        let minimized_content_height = unminimized_height.map(|_| style.window_chrome.minimized_content_height);
+        self.surface.layout(menu_bar, frame_kind, style, atlas, viewport, minimized_content_height);
+        if maximized || unminimized_height.is_some() {
+            // Managed size modes keep caption actions but expose no conflicting resize regions.
             self.surface.geometry = self.surface.geometry.without_resize();
         }
     }
@@ -1315,6 +1370,7 @@ impl WindowManager {
                 interaction: RootInteraction::None,
                 hovered_chrome: None,
                 restore_rect: None,
+                unminimized_height: None,
                 events,
                 menu_bar,
                 child_window_clip,
@@ -1466,9 +1522,11 @@ impl WindowManager {
     pub fn set_window_rect(&mut self, window: &WindowHandle, rect: Recti) -> Result<(), SurfaceMutationError> {
         let root = self.window_id(window)?;
         let node = self.root_node_mut(root)?;
-        // An explicit application rectangle becomes the new normal placement and exits maximized
-        // mode so a later caption click cannot restore stale geometry over this request.
-        node.root_mut().expect("window identity must resolve root policy").restore_rect = None;
+        // An explicit application rectangle becomes the new normal placement and exits both
+        // manager-owned size modes so no caption can restore stale geometry over this request.
+        let state = node.root_mut().expect("window identity must resolve root policy");
+        state.restore_rect = None;
+        state.unminimized_height = None;
         node.surface.rect = rect;
         self.invalidate_ui_commit();
         Ok(())
@@ -1478,8 +1536,10 @@ impl WindowManager {
     pub fn set_window_size(&mut self, window: &WindowHandle, size: Dimensioni) -> Result<(), SurfaceMutationError> {
         let root = self.window_id(window)?;
         let node = self.root_node_mut(root)?;
-        // Programmatic sizing has the same maximized-mode policy as replacing the complete rect.
-        node.root_mut().expect("window identity must resolve root policy").restore_rect = None;
+        // Programmatic sizing has the same managed-mode policy as replacing the complete rect.
+        let state = node.root_mut().expect("window identity must resolve root policy");
+        state.restore_rect = None;
+        state.unminimized_height = None;
         node.surface.rect.width = size.width;
         node.surface.rect.height = size.height;
         self.invalidate_ui_commit();
@@ -2494,7 +2554,7 @@ impl WindowManager {
     }
 
     /// Routes one event to window chrome and reports whether the overlay consumed it.
-    fn route_chrome_event(&mut self, root: RootId, event: &UiInputEvent, caption_controls_visible: bool) -> bool {
+    fn route_chrome_event(&mut self, root: RootId, event: &UiInputEvent, caption_controls_visible: bool, minimized_content_height: i32) -> bool {
         if self.root_node(root).is_err() || !self.surface_accepts_input(SurfaceKey::Root(root)) {
             return false;
         }
@@ -2577,7 +2637,7 @@ impl WindowManager {
                 if let RootInteraction::Caption(button) = interaction
                     && released_part == Some(RootChromePart::Caption(button))
                 {
-                    self.activate_caption_button(root, button);
+                    self.activate_caption_button(root, button, minimized_content_height);
                 }
                 true
             }
@@ -2588,7 +2648,7 @@ impl WindowManager {
     }
 
     /// Applies one caption action after its capture has ended on the originating button.
-    fn activate_caption_button(&mut self, root: RootId, button: RootCaptionButton) {
+    fn activate_caption_button(&mut self, root: RootId, button: RootCaptionButton, minimized_content_height: i32) {
         match button {
             RootCaptionButton::Close => {
                 // Apply visibility before queuing Close so subscribers observe final policy.
@@ -2598,16 +2658,37 @@ impl WindowManager {
                     .emit_window_event(WindowEvent::CloseRequested);
             }
             RootCaptionButton::Minimize => {
-                // Minimize preserves the complete root and any saved maximized restoration rect;
-                // application code can show the same handle later without rebuilding state.
-                self.set_window_visible_id(root, false).expect("caption target must remain registered");
-                self.root_node_mut(root)
-                    .expect("minimizing a root must not destroy it")
-                    .emit_window_event(WindowEvent::Minimized);
+                let node = self.root_node_mut(root).expect("caption target must remain registered");
+                let restore_height = node.root_mut().expect("caption target must be a root").unminimized_height.take();
+                let event = if let Some(height) = restore_height {
+                    // Maximized windows restore against their live viewport; ordinary windows use
+                    // the exact height saved by the preceding minimize action.
+                    let maximized = node.root().expect("caption target must be a root").restore_rect.is_some();
+                    node.surface.rect.height = if maximized { node.surface.clip.height } else { height };
+                    WindowEvent::Restored { rect: node.surface.rect }
+                } else {
+                    let expanded_height = node.surface.rect.height;
+                    node.root_mut().expect("caption target must be a root").unminimized_height = Some(expanded_height);
+                    node.surface.rect.height = node
+                        .surface
+                        .rect
+                        .height
+                        .saturating_sub(node.surface.geometry.body.height)
+                        .saturating_add(minimized_content_height.max(0));
+                    WindowEvent::Minimized { rect: node.surface.rect }
+                };
+                node.emit_window_event(event);
+                self.invalidate_ui_commit();
             }
             RootCaptionButton::Maximize => {
                 let node = self.root_node_mut(root).expect("caption target must remain registered");
-                let restore = node.root_mut().expect("caption target must be a root").restore_rect.take();
+                let state = node.root_mut().expect("caption target must be a root");
+                let restore = state.restore_rect.take();
+                let unminimized_height = state.unminimized_height.take();
+                if let Some(height) = unminimized_height {
+                    // Maximizing a compact window starts from its expanded normal geometry.
+                    node.surface.rect.height = height;
+                }
                 let event = if let Some(rect) = restore {
                     // Restore exactly the normal placement captured by the preceding maximize.
                     node.surface.rect = rect;
@@ -2894,7 +2975,7 @@ impl WindowManager {
                             if chrome_captured {
                                 // Continuation belongs to an already-visible caption or another
                                 // chrome capture, so activation-time first-press filtering no longer applies.
-                                self.route_chrome_event(root, event, true)
+                                self.route_chrome_event(root, event, true, style.window_chrome.minimized_content_height)
                             } else {
                                 self.surfaces
                                     .surface_mut(surface)
@@ -2918,7 +2999,7 @@ impl WindowManager {
                 handled = match surface {
                     SurfaceKey::Root(root) => {
                         let caption_controls_visible = pointer_owner_was_active || style.window_chrome.captions.show_without_activation;
-                        self.route_chrome_event(root, event, caption_controls_visible)
+                        self.route_chrome_event(root, event, caption_controls_visible, style.window_chrome.minimized_content_height)
                     }
                     SurfaceKey::Popup(_) => false,
                 };

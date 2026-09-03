@@ -1490,6 +1490,8 @@ struct State {
     theme_menu_items: [MenuItemHandle; DemoTheme::ALL.len()],
 
     demo_root: WindowHandle,
+    /// Whether Demo Window geometry currently represents its compact minimize state.
+    demo_root_minimized: bool,
     combo_popup_root: PopupHandle,
     /// Standalone compact menu opened by the Demo Window's Popup button.
     test_popup: PopupHandle,
@@ -2018,6 +2020,7 @@ impl State {
             themes,
             theme_menu_items: menu_items.themes,
             demo_root,
+            demo_root_minimized: false,
             combo_popup_root,
             test_popup,
             grid_3d_state,
@@ -2359,10 +2362,9 @@ impl State {
         });
     }
 
-    /// Makes the showcase window visible again after minimize or close hides it.
+    /// Makes the showcase window visible again after close hides it.
     fn grid_show_demo_window(&mut self, context: &mut Ui<'_>, _event: &MenuItemSubmitted) {
-        // The fullscreen grid menu remains reachable when the child is hidden, providing a concrete
-        // restoration path for the minimize button without inventing a taskbar abstraction.
+        // The fullscreen grid menu remains reachable when the child is hidden by its close button.
         context
             .set_window_visible(&self.demo_root, true)
             .expect("demo window must remain registered while hidden");
@@ -2412,24 +2414,26 @@ impl State {
     /// Handles all manager-originated events for the ordinary floating Demo Window.
     fn demo_window_event(&mut self, context: &mut Ui<'_>, event: &WindowEvent) {
         let (event_rect, enforce_demo_minimum) = match event {
-            WindowEvent::GeometryChanged { rect } => (rect, true),
+            WindowEvent::GeometryChanged { rect } => (rect, !self.demo_root_minimized),
             WindowEvent::Maximized { rect } => {
                 // Maximized geometry belongs to the inherited viewport and must not be replaced by
                 // the demo's normal-mode minimum, which would also cancel saved restore state.
+                self.demo_root_minimized = false;
                 self.write_log("Maximized Demo Window");
                 (rect, false)
             }
             WindowEvent::Restored { rect } => {
+                self.demo_root_minimized = false;
                 self.write_log("Restored Demo Window");
                 (rect, false)
             }
-            WindowEvent::Minimized => {
-                self.write_log("Minimized Demo Window; use Grid > Show Demo Window to restore it");
+            WindowEvent::Minimized { .. } => {
+                self.demo_root_minimized = true;
+                self.write_log("Minimized Demo Window; press minimize again to restore it");
                 return;
             }
             WindowEvent::CloseRequested => {
-                // Close hides this example window; the persistent grid menu provides the same
-                // explicit show operation used after minimization.
+                // Close hides this example window; the persistent grid menu can show it again.
                 self.write_log("Closed Demo Window; use Grid > Show Demo Window to restore it");
                 return;
             }

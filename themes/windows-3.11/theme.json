@@ -180,6 +180,9 @@
         255,
         255
       ]
+    },
+    "window_chrome": {
+      "minimized_content_height": 2
     }
   },
   "appearances": {
