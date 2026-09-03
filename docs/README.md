@@ -30,7 +30,7 @@ cover the retained UI model, integration details, and repository workflows.
 
 ## Project information
 
-- [Version history and roadmap](CHANGELOG.md)
+- [Changelog](CHANGELOG.md)
 - [Support and compatibility](SUPPORT.md) — Rust toolchain, platform, renderer, and API stability
   expectations.
 - [Bundled asset attribution and licenses](ASSETS.md)

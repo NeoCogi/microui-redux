@@ -3,20 +3,12 @@
 [![Crate](https://img.shields.io/crates/v/microui-redux.svg)](https://crates.io/crates/microui-redux)
 
 `microui-redux` is a retained, backend-agnostic Rust GUI toolkit inspired by
-[rxi/microui](https://github.com/rxi/microui). It keeps microui's compact rendering model while
-using unique owning `Node` trees, typed weak widget handles, and typed backend frames. A concrete
-context-owned surface forest stores every widget tree and menu surface exactly once. Sole parent
-edges encode structural child-window, dialog, and popup ownership, chronological window order is
-carried by the forest itself, and one deepest-popup key derives the visible transient branch.
-Declarative menus are consumed directly into concrete `MenuSurface` values rather than a generic
-popup payload, a temporary menu tree, or a separate controller. Logical `KeyEvent` transitions,
-persistent retained focus, wrapping Tab traversal, Ctrl+F6 window cycling, shared control actions,
-and F10/Alt menu navigation provide one Windows-style keyboard contract across windows, widgets,
-and examples.
-Focused widget roles and active window roles make the sole keyboard and window scopes visible
-without a second universal outline or exposing remembered focus in nonselected windows.
+[rxi/microui](https://github.com/rxi/microui). Applications assemble uniquely owned `Node` trees,
+retain typed weak handles for later access, and register windows, dialogs, popups, and menus in a
+`Context`. Ordered input and typed widget events update that retained state; painting records a
+backend-neutral display list for the application's `RendererBackend`.
 
-> **Development status:** `0.8.0` is the current retained-API release. The crate remains pre-1.0,
+> **Development status:** `0.8.0` is the current crate version. The crate remains pre-1.0,
 > so APIs may continue to evolve in later minor releases.
 
 Compared with [microui-rs](https://github.com/neocogi/microui-rs), this crate embraces standard
@@ -48,92 +40,58 @@ cargo run --example demo-full --features example-glow
 See [Examples](docs/EXAMPLES.md) for the other backends, asset requirements, and size-focused
 builds.
 
-## Retained surface API
+## Minimal retained UI
 
-Applications borrow a short-lived `Ui<'_>` from `Context` to create or mutate surfaces. Window and
-dialog operations take a complete `WindowHandle`; popup operations take a distinct `PopupHandle`.
-Each non-owning handle contains private process-unique identity and separately projects its weak
-typed event endpoint. Surface lookup never uses an event-port pointer, so freeing and reusing an
-allocation cannot retarget a stale handle. There is no public numeric window ID, and a stale or
-foreign handle passed to a borrowed operation returns a concrete `SurfaceMutationError`. Fallible
-child-window, dialog, and popup creation returns `SurfaceCreationError<Window>` or
-`SurfaceCreationError<Node>`; inspect `reason()` and call `into_input()` to recover the unchanged
-unique value for retry.
+Most application code starts with `microui_redux::prelude`. Construct each widget once, move its
+unique node into a container, then register the completed tree in the context:
 
-```rust,no_run
+```rust
 # use microui_redux::prelude::*;
-# struct Model;
-# impl Model {
-#     fn window_event(&mut self, _ui: &mut Ui<'_>, _event: &WindowEvent) {}
-#     fn popup_event(&mut self, _event: &PopupEvent) {}
-#     fn inspect(&mut self, _ui: &mut Ui<'_>, _event: &MenuItemSubmitted) {}
-# }
-# fn build<B: RendererBackend>(
-#     context: &mut Context<B, Model>,
-#     main_content: Node,
-#     tool_content: Node,
-#     settings_content: Node,
-#     popup_content: Node,
-#     anchor: Recti,
-# ) -> Result<(), Box<dyn std::error::Error>> {
-let main = context.ui().create_window(
-    Window::new("main", rect(20, 20, 480, 320), main_content)
-        .child_window_clip(ChildWindowClip::Content),
-);
-let tool = context.ui().create_child_window(
-    &main,
-    Window::new("tool", rect(60, 80, 240, 160), tool_content),
-)?;
-let dialog = context
-    .ui()
-    .create_dialog(&main, Window::new("settings", rect(80, 60, 320, 220), settings_content))?;
-let popup = context.ui().create_popup(&main, "choices", popup_content)?;
-let (inspect, inspect_item) = MenuItem::create(MenuItemParameters::new("Inspect"));
-let actions = context
-    .ui()
-    .create_menu_popup(&main, Menu::new("object actions").item(inspect_item))?;
+fn install<B: RendererBackend>(context: &mut Context<B>) -> WindowHandle {
+    let (_, hello) = Button::create(ButtonParameters::new("Hello, world!"));
+    let (_, content) = Linear::create(LinearParameters::vertical([
+        LinearItem::content(hello),
+    ]));
 
-context.subscribe_context(main.events(), Model::window_event)?;
-context.subscribe(popup.events(), Model::popup_event)?;
-context.subscribe_context(inspect.submitted(), Model::inspect)?;
-context.ui().set_window_visible(&dialog, true)?;
-context.ui().show_popup_at(&popup, anchor)?;
-context.ui().show_popup(&actions)?;
-# Ok(())
-# }
+    context
+        .ui()
+        .create_window(Window::new("Hello", rect(40, 40, 300, 120), content))
+}
 ```
 
-`WindowEvent` combines geometry, close, minimize, maximize, and restore observations on one typed
-window port.
-`PopupEvent::Dismissed` reports removal of an application popup from the sole active branch.
-Showing or fronting a window moves its complete forest node to the tail of the chronology in its
-structural scope; its effective layer still determines the rendered tier. Independent windows own
-fixed layers, while child windows inherit their family root's layer. Within a family, each parent
-body records below its children and its menu/chrome records and handles above them. An optional
-`ChildWindowClip::Content` policy confines complete descendant surfaces to the parent application
-body without changing their screen-space geometry.
+Forward platform input to `Context`, synchronize the retained UI once, then render the committed
+state through the backend frame:
+
+```rust
+# use microui_redux::prelude::*;
+# use microui_redux::render::RenderError;
+fn draw<B: RendererBackend>(
+    context: &mut Context<B>,
+    dimensions: Dimensioni,
+    frame_info: FrameInfo,
+) -> Result<(), RenderError> {
+    context.update_ui(dimensions);
+    context.frame(frame_info).render_ui()
+}
+```
+
+Contexts with application state use `update_ui_state` instead. Call the same update method after
+every programmatic widget mutation before depending on its result. The complete
+[`simple` example](examples/simple.rs) supplies SDL windowing, input translation, atlas setup, and a
+selectable example renderer.
 
 ## Documentation
 
-- [Documentation index](docs/README.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Typed events and retained services](docs/EVENTS.md)
-- [Retained layout](docs/LAYOUT.md)
-- [Per-window application menus](docs/MENUS.md)
-- [Rendering and backend integration](docs/RENDER.md)
-- [Backend frames and custom rendering](docs/BACKENDS.md)
-- [Fonts and typography](docs/TYPOGRAPHY.md)
-- [Concrete skin architecture](docs/SKINNING.md)
-- [JSON themes and bundled classic examples](docs/THEMES.md)
-- [Examples and demos](docs/EXAMPLES.md)
-- [Cargo features](docs/FEATURES.md)
-- [Version history and roadmap](docs/CHANGELOG.md)
-- [Bundled asset attribution and licenses](docs/ASSETS.md)
+The [documentation index](docs/README.md) routes each topic to one canonical guide. Useful starting
+points are [built-in widgets](docs/WIDGETS.md), [typed events](docs/EVENTS.md),
+[layout and synchronization](docs/LAYOUT.md), [rendering](docs/RENDER.md), and the
+[example catalog](docs/EXAMPLES.md). Release and adoption details live in the
+[changelog](docs/CHANGELOG.md) and [support policy](docs/SUPPORT.md).
 
-The application-facing API is centered on `microui_redux::prelude` and
-`microui_redux::retained`. Low-level rendering lives under `microui_redux::render`, and atlas
-construction lives under `microui_redux::atlas::builder`. The generated API reference is
-available on [docs.rs](https://docs.rs/microui-redux).
+Applications normally import `microui_redux::prelude`; `microui_redux::retained` is available for
+explicit imports of the retained core. Backend contracts live under `microui_redux::render`, atlas
+construction lives under `microui_redux::atlas::builder`, and the complete generated API reference
+is available on [docs.rs](https://docs.rs/microui-redux).
 
 ## License
 
