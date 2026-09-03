@@ -4,261 +4,1691 @@
   "fonts": {
     "texture_width": 512,
     "texture_height": 256,
-    "body": { "path": "../../assets/NORMAL.ttf", "size": 12 },
-    "small": { "path": "../../assets/NORMAL.ttf", "size": 10 },
-    "title": { "path": "../../assets/BOLD.ttf", "size": 12 },
-    "heading": { "path": "../../assets/NORMAL.ttf", "size": 18 },
-    "mono": { "path": "../../assets/CONSOLE.ttf", "size": 14 }
+    "body": {
+      "path": "../../assets/NORMAL.ttf",
+      "size": 12
+    },
+    "small": {
+      "path": "../../assets/NORMAL.ttf",
+      "size": 10
+    },
+    "title": {
+      "path": "../../assets/BOLD.ttf",
+      "size": 12
+    },
+    "heading": {
+      "path": "../../assets/NORMAL.ttf",
+      "size": 18
+    },
+    "mono": {
+      "path": "../../assets/CONSOLE.ttf",
+      "size": 14
+    }
   },
   "skin": {
     "metrics": {
       "default_cell_width": 96,
       "padding": 4,
-      "window_content_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
+      "window_content_insets": {
+        "left": 2,
+        "top": 2,
+        "right": 2,
+        "bottom": 2
+      },
       "spacing": 4,
       "indent": 16,
       "title_height": 20,
-      "window_border": { "left": 4, "top": 4, "right": 4, "bottom": 4 },
+      "window_border": {
+        "left": 4,
+        "top": 4,
+        "right": 4,
+        "bottom": 4
+      },
       "scrollbar_size": 16,
       "thumb_size": 16
     },
-    "fallback_frame_insets": { "left": 1, "top": 1, "right": 1, "bottom": 1 },
+    "fallback_frame_insets": {
+      "left": 1,
+      "top": 1,
+      "right": 1,
+      "bottom": 1
+    },
     "palette": {
-      "text": [0, 0, 0, 255],
-      "border": [0, 0, 0, 255],
-      "window_background": [255, 255, 255, 255],
-      "title_background": [255, 255, 255, 255],
-      "title_foreground": [255, 255, 255, 255],
-      "disabled_foreground": [125, 125, 125, 255],
-      "disabled_background": [211, 211, 211, 255],
-      "disabled_title_foreground": [125, 125, 125, 255],
-      "panel_background": [255, 255, 255, 255],
-      "button": [195, 199, 203, 255],
-      "button_hovered": [195, 199, 203, 255],
-      "input": [255, 255, 255, 255],
-      "input_hovered": [255, 255, 255, 255],
-      "scrollbar_track": [195, 199, 203, 255],
-      "scrollbar_thumb": [195, 199, 203, 255],
-      "control_focus": [0, 0, 0, 255],
-      "selection_background": [0, 0, 170, 255],
-      "selection_foreground": [255, 255, 255, 255],
-      "window_active": [0, 0, 170, 255],
-      "menu_foreground": [0, 0, 0, 255],
-      "menu_background": [255, 255, 255, 255]
+      "text": [
+        0,
+        0,
+        0,
+        255
+      ],
+      "border": [
+        0,
+        0,
+        0,
+        255
+      ],
+      "window_background": [
+        255,
+        255,
+        255,
+        255
+      ],
+      "title_background": [
+        255,
+        255,
+        255,
+        255
+      ],
+      "title_foreground": [
+        255,
+        255,
+        255,
+        255
+      ],
+      "disabled_foreground": [
+        125,
+        125,
+        125,
+        255
+      ],
+      "disabled_background": [
+        211,
+        211,
+        211,
+        255
+      ],
+      "disabled_title_foreground": [
+        125,
+        125,
+        125,
+        255
+      ],
+      "panel_background": [
+        255,
+        255,
+        255,
+        255
+      ],
+      "button": [
+        195,
+        199,
+        203,
+        255
+      ],
+      "button_hovered": [
+        195,
+        199,
+        203,
+        255
+      ],
+      "input": [
+        255,
+        255,
+        255,
+        255
+      ],
+      "input_hovered": [
+        255,
+        255,
+        255,
+        255
+      ],
+      "scrollbar_track": [
+        195,
+        199,
+        203,
+        255
+      ],
+      "scrollbar_thumb": [
+        195,
+        199,
+        203,
+        255
+      ],
+      "control_focus": [
+        0,
+        0,
+        0,
+        255
+      ],
+      "selection_background": [
+        0,
+        0,
+        170,
+        255
+      ],
+      "selection_foreground": [
+        255,
+        255,
+        255,
+        255
+      ],
+      "window_active": [
+        0,
+        0,
+        170,
+        255
+      ],
+      "menu_foreground": [
+        0,
+        0,
+        0,
+        255
+      ],
+      "menu_background": [
+        255,
+        255,
+        255,
+        255
+      ]
     }
   },
   "appearances": {
     "surface": {
       "generic_frame": {
-        "insets": { "left": 1, "top": 1, "right": 1, "bottom": 1 },
-        "normal": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } },
-        "disabled": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } }
+        "insets": {
+          "left": 1,
+          "top": 1,
+          "right": 1,
+          "bottom": 1
+        },
+        "normal": {
+          "patch": {
+            "type": "image",
+            "path": "recessed.png",
+            "source_insets": {
+              "left": 2,
+              "top": 2,
+              "right": 2,
+              "bottom": 2
+            }
+          }
+        },
+        "disabled": {
+          "patch": {
+            "type": "image",
+            "path": "recessed.png",
+            "source_insets": {
+              "left": 2,
+              "top": 2,
+              "right": 2,
+              "bottom": 2
+            }
+          }
+        }
       },
       "panel": {
-        "insets": { "left": 1, "top": 1, "right": 1, "bottom": 1 },
-        "normal": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } },
-        "disabled": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } }
+        "insets": {
+          "left": 1,
+          "top": 1,
+          "right": 1,
+          "bottom": 1
+        },
+        "normal": {
+          "patch": {
+            "type": "image",
+            "path": "recessed.png",
+            "source_insets": {
+              "left": 2,
+              "top": 2,
+              "right": 2,
+              "bottom": 2
+            }
+          }
+        },
+        "disabled": {
+          "patch": {
+            "type": "image",
+            "path": "recessed.png",
+            "source_insets": {
+              "left": 2,
+              "top": 2,
+              "right": 2,
+              "bottom": 2
+            }
+          }
+        }
       }
     },
     "control": {
       "button": {
-        "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
+        "insets": {
+          "left": 3,
+          "top": 3,
+          "right": 3,
+          "bottom": 3
+        },
         "enabled": {
-          "normal": { "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-          "hovered": { "patch": { "type": "image", "path": "raised-hovered.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-          "pressed": { "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
+          "normal": {
+            "patch": {
+              "type": "image",
+              "path": "raised.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          },
+          "hovered": {
+            "patch": {
+              "type": "image",
+              "path": "raised-hovered.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          },
+          "pressed": {
+            "patch": {
+              "type": "image",
+              "path": "pressed.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          }
         },
         "focused": {
-          "normal": { "patch": { "type": "image", "path": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
-          "hovered": { "patch": { "type": "image", "path": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
-          "pressed": { "patch": { "type": "image", "path": "pressed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } }
+          "normal": {
+            "patch": {
+              "type": "image",
+              "path": "focused.png",
+              "source_insets": {
+                "left": 4,
+                "top": 4,
+                "right": 4,
+                "bottom": 4
+              }
+            }
+          },
+          "hovered": {
+            "patch": {
+              "type": "image",
+              "path": "focused.png",
+              "source_insets": {
+                "left": 4,
+                "top": 4,
+                "right": 4,
+                "bottom": 4
+              }
+            }
+          },
+          "pressed": {
+            "patch": {
+              "type": "image",
+              "path": "pressed-focused.png",
+              "source_insets": {
+                "left": 4,
+                "top": 4,
+                "right": 4,
+                "bottom": 4
+              }
+            }
+          }
         },
-        "disabled": { "patch": { "type": "image", "path": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
+        "disabled": {
+          "patch": {
+            "type": "image",
+            "path": "disabled.png",
+            "source_insets": {
+              "left": 3,
+              "top": 3,
+              "right": 3,
+              "bottom": 3
+            }
+          }
+        }
       },
       "checkbox": {
-        "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
+        "insets": {
+          "left": 2,
+          "top": 2,
+          "right": 2,
+          "bottom": 2
+        },
         "enabled": {
-          "normal": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } },
-          "hovered": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } },
-          "pressed": { "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
+          "normal": {
+            "patch": {
+              "type": "image",
+              "path": "recessed.png",
+              "source_insets": {
+                "left": 2,
+                "top": 2,
+                "right": 2,
+                "bottom": 2
+              }
+            }
+          },
+          "hovered": {
+            "patch": {
+              "type": "image",
+              "path": "recessed.png",
+              "source_insets": {
+                "left": 2,
+                "top": 2,
+                "right": 2,
+                "bottom": 2
+              }
+            }
+          },
+          "pressed": {
+            "patch": {
+              "type": "image",
+              "path": "pressed.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          }
         },
         "focused": {
-          "normal": { "patch": { "type": "image", "path": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-          "hovered": { "patch": { "type": "image", "path": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-          "pressed": { "patch": { "type": "image", "path": "pressed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } }
+          "normal": {
+            "patch": {
+              "type": "image",
+              "path": "recessed-focused.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          },
+          "hovered": {
+            "patch": {
+              "type": "image",
+              "path": "recessed-focused.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          },
+          "pressed": {
+            "patch": {
+              "type": "image",
+              "path": "pressed-focused.png",
+              "source_insets": {
+                "left": 4,
+                "top": 4,
+                "right": 4,
+                "bottom": 4
+              }
+            }
+          }
         },
-        "disabled": { "patch": { "type": "image", "path": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
+        "disabled": {
+          "patch": {
+            "type": "image",
+            "path": "disabled.png",
+            "source_insets": {
+              "left": 3,
+              "top": 3,
+              "right": 3,
+              "bottom": 3
+            }
+          }
+        }
       },
       "text_input": {
-        "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
+        "insets": {
+          "left": 2,
+          "top": 2,
+          "right": 2,
+          "bottom": 2
+        },
         "enabled": {
-          "normal": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } },
-          "hovered": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } },
-          "pressed": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } }
+          "normal": {
+            "patch": {
+              "type": "image",
+              "path": "recessed.png",
+              "source_insets": {
+                "left": 2,
+                "top": 2,
+                "right": 2,
+                "bottom": 2
+              }
+            }
+          },
+          "hovered": {
+            "patch": {
+              "type": "image",
+              "path": "recessed.png",
+              "source_insets": {
+                "left": 2,
+                "top": 2,
+                "right": 2,
+                "bottom": 2
+              }
+            }
+          },
+          "pressed": {
+            "patch": {
+              "type": "image",
+              "path": "recessed.png",
+              "source_insets": {
+                "left": 2,
+                "top": 2,
+                "right": 2,
+                "bottom": 2
+              }
+            }
+          }
         },
         "focused": {
-          "normal": { "patch": { "type": "image", "path": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-          "hovered": { "patch": { "type": "image", "path": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-          "pressed": { "patch": { "type": "image", "path": "recessed-focused.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
+          "normal": {
+            "patch": {
+              "type": "image",
+              "path": "recessed-focused.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          },
+          "hovered": {
+            "patch": {
+              "type": "image",
+              "path": "recessed-focused.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          },
+          "pressed": {
+            "patch": {
+              "type": "image",
+              "path": "recessed-focused.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          }
         },
-        "disabled": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }, "tint": [184, 184, 184, 255] } } },
+        "disabled": {
+          "patch": {
+            "type": "image",
+            "path": "recessed.png",
+            "source_insets": {
+              "left": 2,
+              "top": 2,
+              "right": 2,
+              "bottom": 2
+            },
+            "tint": [
+              184,
+              184,
+              184,
+              255
+            ]
+          }
+        }
+      },
       "item": {
-        "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
+        "insets": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0
+        },
         "enabled": {
-          "normal": { "content_color": [0, 0, 0, 255] },
-          "hovered": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } },
-          "pressed": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } }
+          "normal": {
+            "content_color": [
+              0,
+              0,
+              0,
+              255
+            ]
+          },
+          "hovered": {
+            "content_color": [
+              255,
+              255,
+              255,
+              255
+            ],
+            "patch": {
+              "type": "image",
+              "path": "title-active.png"
+            }
+          },
+          "pressed": {
+            "content_color": [
+              255,
+              255,
+              255,
+              255
+            ],
+            "patch": {
+              "type": "image",
+              "path": "title-active.png"
+            }
+          }
         },
         "focused": {
-          "normal": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } },
-          "hovered": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } },
-          "pressed": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } }
+          "normal": {
+            "content_color": [
+              255,
+              255,
+              255,
+              255
+            ],
+            "patch": {
+              "type": "image",
+              "path": "title-active.png"
+            }
+          },
+          "hovered": {
+            "content_color": [
+              255,
+              255,
+              255,
+              255
+            ],
+            "patch": {
+              "type": "image",
+              "path": "title-active.png"
+            }
+          },
+          "pressed": {
+            "content_color": [
+              255,
+              255,
+              255,
+              255
+            ],
+            "patch": {
+              "type": "image",
+              "path": "title-active.png"
+            }
+          }
         },
-        "disabled": { "content_color": [125, 125, 125, 255] }
+        "disabled": {
+          "content_color": [
+            125,
+            125,
+            125,
+            255
+          ]
+        }
       },
       "combo": {
-        "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
+        "insets": {
+          "left": 3,
+          "top": 3,
+          "right": 3,
+          "bottom": 3
+        },
         "enabled": {
-          "normal": { "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-          "hovered": { "patch": { "type": "image", "path": "raised-hovered.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-          "pressed": { "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
+          "normal": {
+            "patch": {
+              "type": "image",
+              "path": "raised.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          },
+          "hovered": {
+            "patch": {
+              "type": "image",
+              "path": "raised-hovered.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          },
+          "pressed": {
+            "patch": {
+              "type": "image",
+              "path": "pressed.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          }
         },
         "focused": {
-          "normal": { "patch": { "type": "image", "path": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
-          "hovered": { "patch": { "type": "image", "path": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
-          "pressed": { "patch": { "type": "image", "path": "pressed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } }
+          "normal": {
+            "patch": {
+              "type": "image",
+              "path": "focused.png",
+              "source_insets": {
+                "left": 4,
+                "top": 4,
+                "right": 4,
+                "bottom": 4
+              }
+            }
+          },
+          "hovered": {
+            "patch": {
+              "type": "image",
+              "path": "focused.png",
+              "source_insets": {
+                "left": 4,
+                "top": 4,
+                "right": 4,
+                "bottom": 4
+              }
+            }
+          },
+          "pressed": {
+            "patch": {
+              "type": "image",
+              "path": "pressed-focused.png",
+              "source_insets": {
+                "left": 4,
+                "top": 4,
+                "right": 4,
+                "bottom": 4
+              }
+            }
+          }
         },
-        "disabled": { "patch": { "type": "image", "path": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
+        "disabled": {
+          "patch": {
+            "type": "image",
+            "path": "disabled.png",
+            "source_insets": {
+              "left": 3,
+              "top": 3,
+              "right": 3,
+              "bottom": 3
+            }
+          }
+        }
       },
       "slider_track": {
-        "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
+        "insets": {
+          "left": 2,
+          "top": 2,
+          "right": 2,
+          "bottom": 2
+        },
         "enabled": {
-          "normal": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } },
-          "hovered": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } },
-          "pressed": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } }
+          "normal": {
+            "patch": {
+              "type": "image",
+              "path": "recessed.png",
+              "source_insets": {
+                "left": 2,
+                "top": 2,
+                "right": 2,
+                "bottom": 2
+              }
+            }
+          },
+          "hovered": {
+            "patch": {
+              "type": "image",
+              "path": "recessed.png",
+              "source_insets": {
+                "left": 2,
+                "top": 2,
+                "right": 2,
+                "bottom": 2
+              }
+            }
+          },
+          "pressed": {
+            "patch": {
+              "type": "image",
+              "path": "recessed.png",
+              "source_insets": {
+                "left": 2,
+                "top": 2,
+                "right": 2,
+                "bottom": 2
+              }
+            }
+          }
         },
         "focused": {
-          "normal": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } },
-          "hovered": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } },
-          "pressed": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 } } }
+          "normal": {
+            "patch": {
+              "type": "image",
+              "path": "recessed.png",
+              "source_insets": {
+                "left": 2,
+                "top": 2,
+                "right": 2,
+                "bottom": 2
+              }
+            }
+          },
+          "hovered": {
+            "patch": {
+              "type": "image",
+              "path": "recessed.png",
+              "source_insets": {
+                "left": 2,
+                "top": 2,
+                "right": 2,
+                "bottom": 2
+              }
+            }
+          },
+          "pressed": {
+            "patch": {
+              "type": "image",
+              "path": "recessed.png",
+              "source_insets": {
+                "left": 2,
+                "top": 2,
+                "right": 2,
+                "bottom": 2
+              }
+            }
+          }
         },
-        "disabled": { "patch": { "type": "image", "path": "recessed.png", "source_insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 }, "tint": [184, 184, 184, 255] } } },
+        "disabled": {
+          "patch": {
+            "type": "image",
+            "path": "recessed.png",
+            "source_insets": {
+              "left": 2,
+              "top": 2,
+              "right": 2,
+              "bottom": 2
+            },
+            "tint": [
+              184,
+              184,
+              184,
+              255
+            ]
+          }
+        }
+      },
       "slider_thumb": {
-        "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
+        "insets": {
+          "left": 3,
+          "top": 3,
+          "right": 3,
+          "bottom": 3
+        },
         "enabled": {
-          "normal": { "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-          "hovered": { "patch": { "type": "image", "path": "raised-hovered.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-          "pressed": { "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
+          "normal": {
+            "patch": {
+              "type": "image",
+              "path": "raised.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          },
+          "hovered": {
+            "patch": {
+              "type": "image",
+              "path": "raised-hovered.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          },
+          "pressed": {
+            "patch": {
+              "type": "image",
+              "path": "pressed.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          }
         },
         "focused": {
-          "normal": { "patch": { "type": "image", "path": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
-          "hovered": { "patch": { "type": "image", "path": "focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } },
-          "pressed": { "patch": { "type": "image", "path": "pressed-focused.png", "source_insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 } } }
+          "normal": {
+            "patch": {
+              "type": "image",
+              "path": "focused.png",
+              "source_insets": {
+                "left": 4,
+                "top": 4,
+                "right": 4,
+                "bottom": 4
+              }
+            }
+          },
+          "hovered": {
+            "patch": {
+              "type": "image",
+              "path": "focused.png",
+              "source_insets": {
+                "left": 4,
+                "top": 4,
+                "right": 4,
+                "bottom": 4
+              }
+            }
+          },
+          "pressed": {
+            "patch": {
+              "type": "image",
+              "path": "pressed-focused.png",
+              "source_insets": {
+                "left": 4,
+                "top": 4,
+                "right": 4,
+                "bottom": 4
+              }
+            }
+          }
         },
-        "disabled": { "patch": { "type": "image", "path": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
+        "disabled": {
+          "patch": {
+            "type": "image",
+            "path": "disabled.png",
+            "source_insets": {
+              "left": 3,
+              "top": 3,
+              "right": 3,
+              "bottom": 3
+            }
+          }
+        }
       },
       "scrollbar_thumb": {
-        "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
+        "insets": {
+          "left": 3,
+          "top": 3,
+          "right": 3,
+          "bottom": 3
+        },
         "enabled": {
-          "normal": { "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-          "hovered": { "patch": { "type": "image", "path": "raised-hovered.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-          "pressed": { "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
+          "normal": {
+            "patch": {
+              "type": "image",
+              "path": "raised.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          },
+          "hovered": {
+            "patch": {
+              "type": "image",
+              "path": "raised-hovered.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          },
+          "pressed": {
+            "patch": {
+              "type": "image",
+              "path": "pressed.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          }
         },
         "focused": {},
-        "disabled": { "patch": { "type": "image", "path": "disabled.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
+        "disabled": {
+          "patch": {
+            "type": "image",
+            "path": "disabled.png",
+            "source_insets": {
+              "left": 3,
+              "top": 3,
+              "right": 3,
+              "bottom": 3
+            }
+          }
+        }
       },
       "close_button": {
-        "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
+        "insets": {
+          "left": 3,
+          "top": 3,
+          "right": 3,
+          "bottom": 3
+        },
         "enabled": {
-          "normal": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-          "hovered": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-          "pressed": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
+          "normal": {
+            "content_color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "patch": {
+              "type": "image",
+              "path": "raised.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          },
+          "hovered": {
+            "content_color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "patch": {
+              "type": "image",
+              "path": "raised.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          },
+          "pressed": {
+            "content_color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "patch": {
+              "type": "image",
+              "path": "pressed.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          }
         },
         "focused": {},
-        "disabled": { "content_color": [125, 125, 125, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
+        "disabled": {
+          "content_color": [
+            125,
+            125,
+            125,
+            255
+          ],
+          "patch": {
+            "type": "image",
+            "path": "raised.png",
+            "source_insets": {
+              "left": 3,
+              "top": 3,
+              "right": 3,
+              "bottom": 3
+            }
+          }
+        }
       },
       "minimize_button": {
-        "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
+        "insets": {
+          "left": 3,
+          "top": 3,
+          "right": 3,
+          "bottom": 3
+        },
         "enabled": {
-          "normal": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-          "hovered": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-          "pressed": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
+          "normal": {
+            "content_color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "patch": {
+              "type": "image",
+              "path": "raised.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          },
+          "hovered": {
+            "content_color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "patch": {
+              "type": "image",
+              "path": "raised.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          },
+          "pressed": {
+            "content_color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "patch": {
+              "type": "image",
+              "path": "pressed.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          }
         },
         "focused": {},
-        "disabled": { "content_color": [125, 125, 125, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
+        "disabled": {
+          "content_color": [
+            125,
+            125,
+            125,
+            255
+          ],
+          "patch": {
+            "type": "image",
+            "path": "raised.png",
+            "source_insets": {
+              "left": 3,
+              "top": 3,
+              "right": 3,
+              "bottom": 3
+            }
+          }
+        }
       },
       "maximize_button": {
-        "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
+        "insets": {
+          "left": 3,
+          "top": 3,
+          "right": 3,
+          "bottom": 3
+        },
         "enabled": {
-          "normal": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-          "hovered": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-          "pressed": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
+          "normal": {
+            "content_color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "patch": {
+              "type": "image",
+              "path": "raised.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          },
+          "hovered": {
+            "content_color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "patch": {
+              "type": "image",
+              "path": "raised.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          },
+          "pressed": {
+            "content_color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "patch": {
+              "type": "image",
+              "path": "pressed.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          }
         },
         "focused": {},
-        "disabled": { "content_color": [125, 125, 125, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
+        "disabled": {
+          "content_color": [
+            125,
+            125,
+            125,
+            255
+          ],
+          "patch": {
+            "type": "image",
+            "path": "raised.png",
+            "source_insets": {
+              "left": 3,
+              "top": 3,
+              "right": 3,
+              "bottom": 3
+            }
+          }
+        }
       },
       "restore_button": {
-        "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
+        "insets": {
+          "left": 3,
+          "top": 3,
+          "right": 3,
+          "bottom": 3
+        },
         "enabled": {
-          "normal": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-          "hovered": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-          "pressed": { "content_color": [0, 0, 0, 255], "patch": { "type": "image", "path": "pressed.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
+          "normal": {
+            "content_color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "patch": {
+              "type": "image",
+              "path": "raised.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          },
+          "hovered": {
+            "content_color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "patch": {
+              "type": "image",
+              "path": "raised.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          },
+          "pressed": {
+            "content_color": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "patch": {
+              "type": "image",
+              "path": "pressed.png",
+              "source_insets": {
+                "left": 3,
+                "top": 3,
+                "right": 3,
+                "bottom": 3
+              }
+            }
+          }
         },
         "focused": {},
-        "disabled": { "content_color": [125, 125, 125, 255], "patch": { "type": "image", "path": "raised.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } }
+        "disabled": {
+          "content_color": [
+            125,
+            125,
+            125,
+            255
+          ],
+          "patch": {
+            "type": "image",
+            "path": "raised.png",
+            "source_insets": {
+              "left": 3,
+              "top": 3,
+              "right": 3,
+              "bottom": 3
+            }
+          }
+        }
       },
       "resize_grip": {
-        "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
+        "insets": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0
+        },
         "enabled": {
-          "normal": { "patch": { "type": "image", "path": "resize-grip.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 } } },
-          "hovered": { "patch": { "type": "image", "path": "resize-grip.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 } } },
-          "pressed": { "patch": { "type": "image", "path": "resize-grip.png", "source_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 }, "tint": [210, 210, 210, 255] } } },
+          "normal": {
+            "patch": {
+              "type": "image",
+              "path": "resize-grip.png",
+              "source_insets": {
+                "left": 0,
+                "top": 0,
+                "right": 0,
+                "bottom": 0
+              }
+            }
+          },
+          "hovered": {
+            "patch": {
+              "type": "image",
+              "path": "resize-grip.png",
+              "source_insets": {
+                "left": 0,
+                "top": 0,
+                "right": 0,
+                "bottom": 0
+              }
+            }
+          },
+          "pressed": {
+            "patch": {
+              "type": "image",
+              "path": "resize-grip.png",
+              "source_insets": {
+                "left": 0,
+                "top": 0,
+                "right": 0,
+                "bottom": 0
+              },
+              "tint": [
+                210,
+                210,
+                210,
+                255
+              ]
+            }
+          }
+        },
         "focused": {}
       }
     },
     "menu": {
       "bar": {
-        "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
-        "normal": { "content_color": [0, 0, 0, 255] },
-        "disabled": { "content_color": [125, 125, 125, 255] }
+        "insets": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0
+        },
+        "normal": {
+          "content_color": [
+            0,
+            0,
+            0,
+            255
+          ]
+        },
+        "disabled": {
+          "content_color": [
+            125,
+            125,
+            125,
+            255
+          ]
+        }
       },
       "title": {
-        "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
-        "normal": { "content_color": [0, 0, 0, 255] },
-        "hovered": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } },
-        "pressed": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } },
-        "focused": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } },
-        "open": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } },
-        "disabled": { "content_color": [125, 125, 125, 255] }
+        "insets": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0
+        },
+        "normal": {
+          "content_color": [
+            0,
+            0,
+            0,
+            255
+          ]
+        },
+        "hovered": {
+          "content_color": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patch": {
+            "type": "image",
+            "path": "title-active.png"
+          }
+        },
+        "pressed": {
+          "content_color": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patch": {
+            "type": "image",
+            "path": "title-active.png"
+          }
+        },
+        "focused": {
+          "content_color": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patch": {
+            "type": "image",
+            "path": "title-active.png"
+          }
+        },
+        "open": {
+          "content_color": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patch": {
+            "type": "image",
+            "path": "title-active.png"
+          }
+        },
+        "disabled": {
+          "content_color": [
+            125,
+            125,
+            125,
+            255
+          ]
+        }
       },
       "popup": {
-        "insets": { "left": 2, "top": 2, "right": 2, "bottom": 2 },
-        "normal": { "content_color": [0, 0, 0, 255] },
-        "disabled": { "content_color": [125, 125, 125, 255] }
+        "insets": {
+          "left": 1,
+          "top": 1,
+          "right": 1,
+          "bottom": 1
+        },
+        "normal": {
+          "content_color": [
+            0,
+            0,
+            0,
+            255
+          ]
+        },
+        "disabled": {
+          "content_color": [
+            125,
+            125,
+            125,
+            255
+          ]
+        }
       },
       "item": {
-        "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
-        "normal": { "content_color": [0, 0, 0, 255] },
-        "hovered": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } },
-        "pressed": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } },
-        "focused": { "content_color": [255, 255, 255, 255], "patch": { "type": "image", "path": "title-active.png" } },
-        "disabled": { "content_color": [125, 125, 125, 255] }
+        "insets": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 0
+        },
+        "normal": {
+          "content_color": [
+            0,
+            0,
+            0,
+            255
+          ]
+        },
+        "hovered": {
+          "content_color": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patch": {
+            "type": "image",
+            "path": "title-active.png"
+          }
+        },
+        "pressed": {
+          "content_color": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patch": {
+            "type": "image",
+            "path": "title-active.png"
+          }
+        },
+        "focused": {
+          "content_color": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patch": {
+            "type": "image",
+            "path": "title-active.png"
+          }
+        },
+        "disabled": {
+          "content_color": [
+            125,
+            125,
+            125,
+            255
+          ]
+        }
       }
     },
     "chrome": {
       "window_frame": {
-        "insets": { "left": 23, "top": 23, "right": 23, "bottom": 23 },
-        "base": { "patch": { "type": "image", "path": "window-frame.png", "source_insets": { "left": 23, "top": 23, "right": 23, "bottom": 23 } } },
-        "active": { "patch": { "type": "image", "path": "window-frame-active.png", "source_insets": { "left": 23, "top": 23, "right": 23, "bottom": 23 } } },
-        "disabled": { "patch": { "type": "image", "path": "window-frame.png", "source_insets": { "left": 23, "top": 23, "right": 23, "bottom": 23 }, "tint": [235, 235, 235, 255] } } },
+        "insets": {
+          "left": 23,
+          "top": 23,
+          "right": 23,
+          "bottom": 23
+        },
+        "base": {
+          "patch": {
+            "type": "image",
+            "path": "window-frame.png",
+            "source_insets": {
+              "left": 23,
+              "top": 23,
+              "right": 23,
+              "bottom": 23
+            }
+          }
+        },
+        "active": {
+          "patch": {
+            "type": "image",
+            "path": "window-frame-active.png",
+            "source_insets": {
+              "left": 23,
+              "top": 23,
+              "right": 23,
+              "bottom": 23
+            }
+          }
+        },
+        "disabled": {
+          "patch": {
+            "type": "image",
+            "path": "window-frame.png",
+            "source_insets": {
+              "left": 23,
+              "top": 23,
+              "right": 23,
+              "bottom": 23
+            },
+            "tint": [
+              235,
+              235,
+              235,
+              255
+            ]
+          }
+        }
+      },
       "dialog_frame": {
-        "insets": { "left": 4, "top": 4, "right": 4, "bottom": 4 }
+        "insets": {
+          "left": 4,
+          "top": 4,
+          "right": 4,
+          "bottom": 4
+        }
       },
       "title": {
-        "insets": { "left": 0, "top": 0, "right": 0, "bottom": 1 },
-        "base": { "content_color": [0, 0, 0, 255], "patch": { "type": "framed", "border": [0, 0, 0, 255], "center": [255, 255, 255, 255] } },
-        "active": { "content_color": [255, 255, 255, 255], "patch": { "type": "framed", "border": [0, 0, 0, 255], "center": [0, 0, 170, 255] } },
-        "disabled": { "content_color": [125, 125, 125, 255], "patch": { "type": "framed", "border": [0, 0, 0, 255], "center": [255, 255, 255, 255] } } }
+        "insets": {
+          "left": 0,
+          "top": 0,
+          "right": 0,
+          "bottom": 1
+        },
+        "base": {
+          "content_color": [
+            0,
+            0,
+            0,
+            255
+          ],
+          "patch": {
+            "type": "framed",
+            "border": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "center": [
+              255,
+              255,
+              255,
+              255
+            ]
+          }
+        },
+        "active": {
+          "content_color": [
+            255,
+            255,
+            255,
+            255
+          ],
+          "patch": {
+            "type": "framed",
+            "border": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "center": [
+              0,
+              0,
+              170,
+              255
+            ]
+          }
+        },
+        "disabled": {
+          "content_color": [
+            125,
+            125,
+            125,
+            255
+          ],
+          "patch": {
+            "type": "framed",
+            "border": [
+              0,
+              0,
+              0,
+              255
+            ],
+            "center": [
+              255,
+              255,
+              255,
+              255
+            ]
+          }
+        }
+      }
     }
   }
 }
