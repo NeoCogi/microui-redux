@@ -254,6 +254,11 @@ impl FileDialog {
     /// The accessor is stored with the component's subscriptions and is not invoked during
     /// construction. Once the returned value is placed in application state, the accessor must
     /// resolve that same `FileDialog` for the remainder of the component's lifetime.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `parent` is stale, belongs to a different Context, or does not identify an
+    /// ordinary window that can own a dialog in `ctx`.
     pub fn new<B: crate::render::RendererBackend, State: 'static>(
         ctx: &mut Context<B, State>,
         parent: &WindowHandle,
@@ -499,9 +504,9 @@ impl FileDialog {
     /// Returns the retained dialog window used by this component.
     ///
     /// Its typed handle supports the same checked mutations and event access as any other window.
-    /// Keep lifecycle changes routed through
-    /// [`Self::open`] or [`Self::cancel`] so component activity and modal visibility stay
-    /// synchronized.
+    /// Use it for inspection and event access only: hiding or destroying the window independently
+    /// desynchronizes the component. Route lifecycle changes through [`Self::open`] and
+    /// [`Self::cancel`].
     pub fn window(&self) -> &WindowHandle {
         // Lend the aggregate capability without transferring ownership or exposing its private ID.
         &self.window
@@ -518,7 +523,9 @@ impl FileDialog {
     ///
     /// # Panics
     ///
-    /// Panics when the dialog is already open or its application-owned window was destroyed.
+    /// Panics when the dialog is already open, its application-owned window was destroyed, `ui`
+    /// belongs to another Context, or the owning window is not currently eligible to show its
+    /// modal dialog (for example, because the owner is hidden).
     pub fn open(&mut self, ui: &mut Ui<'_>, request: FileDialogRequest) {
         let (title, rect) = self.prepare_open(request);
         ui.set_window_name(&self.window, title)
@@ -533,6 +540,11 @@ impl FileDialog {
     ///
     /// Returns `false` when it is already idle. A successful cancellation queues exactly one
     /// [`FileDialogCompleted`] event for the next application dispatch boundary.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the picker is open but its dialog window was destroyed or `ui` belongs to a
+    /// different Context.
     pub fn cancel(&mut self, ui: &mut Ui<'_>) -> bool {
         if !self.active {
             return false;
