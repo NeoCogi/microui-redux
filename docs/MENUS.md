@@ -87,6 +87,11 @@ rather than a painted heading. `show_popup` places it at the pointer; `show_popu
 explicit screen-space anchor:
 
 ```rust
+# use microui_redux::prelude::*;
+# fn show_menu(
+#     ui: &mut Ui<'_>,
+#     window: &WindowHandle,
+# ) -> Result<(), Box<dyn std::error::Error>> {
 let (inspect, inspect_item) = MenuItem::create(MenuItemParameters::new("Inspect"));
 let (details, details_item) = MenuItem::create(MenuItemParameters::new("Details"));
 let popup = ui.create_menu_popup(
@@ -97,6 +102,8 @@ let popup = ui.create_menu_popup(
 )?;
 
 ui.show_popup(&popup)?;
+# Ok(())
+# }
 ```
 
 `inspect.submitted()`, `details.submitted()`, `ui.menu_item`, and `ui.menu_item_mut` work exactly as
@@ -112,12 +119,21 @@ menu when selected; its unobserved event is simply discarded.
 Use a `MenuItemHandle` as the stable identity for short-lived presentation borrows from `Ui`:
 
 ```rust
+# use microui_redux::prelude::*;
+# fn update_items(
+#     ui: &mut Ui<'_>,
+#     save: &MenuItemHandle,
+#     auto_scroll: &MenuItemHandle,
+#     enabled: bool,
+# ) -> Result<(), Box<dyn std::error::Error>> {
 let save = ui.menu_item_mut(&save)?;
 save.enabled = true;
 save.label = "Save document".into();
 save.shortcut_hint = Some("Ctrl+Shift+S".into());
 
 ui.menu_item_mut(&auto_scroll)?.mark = MenuItemMark::Checked(enabled);
+# Ok(())
+# }
 ```
 
 `Ui::menu_item` provides immutable inspection. Both accessors return

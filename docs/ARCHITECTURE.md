@@ -52,6 +52,8 @@ and paint with `Context::frame(FrameInfo).render_ui()?`.
 The application constructs one complete skin and installs it on the context:
 
 ```rust
+# use microui_redux::prelude::*;
+# fn customize<B: RendererBackend, State: 'static>(ctx: &mut Context<B, State>) {
 let mut skin = ctx.skin().clone().with_metrics(|metrics| {
     metrics.spacing = 8;
     metrics.padding = 6;
@@ -61,6 +63,7 @@ let mut button = skin.control(ControlRole::Button, button_state);
 button.content_color = color(55, 90, 160, 255);
 skin.set_control(ControlRole::Button, button_state, button);
 ctx.set_skin(skin);
+# }
 ```
 
 The context value styles manager-owned window chrome and every retained widget. Nodes, containers,
@@ -275,6 +278,7 @@ the other floating windows are content-clipped children: they render above the g
 below the root's Grid/Help bar, and inherit the root's layer without a special desktop subsystem.
 
 ```rust
+# use microui_redux::prelude::*;
 #[derive(Default)]
 struct Model {
     submitted_names: Vec<String>,
@@ -286,6 +290,9 @@ impl Model {
     }
 }
 
+# fn render<B: RendererBackend>(
+#     ctx: &mut Context<B, Model>,
+# ) -> Result<(), Box<dyn std::error::Error>> {
 let (name, name_node) = Textbox::create(TextboxParameters::new(""));
 let name_submitted = name.submitted();
 let (_, label_node) = TextBlock::create(TextBlockParameters::new("Name"));
@@ -303,6 +310,8 @@ ctx.subscribe(name_submitted, Model::name_submitted)?;
 let mut model = Model::default();
 ctx.update_ui_state(dimensions, &mut model);
 ctx.frame(info).render_ui()?;
+# Ok(())
+# }
 ```
 
 An event-driven context is constructed as `Context::<Backend, Model>::new(backend)`. It owns the

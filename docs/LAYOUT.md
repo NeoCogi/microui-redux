@@ -127,7 +127,7 @@ The application owns `Context` and its weak typed handles as independent Rust va
 compiler permits explicitly capturing the Context inside a handle-access closure. Do not initiate
 retained traversal that way:
 
-```rust
+```rust,ignore
 textbox.try_update(|widget| {
     widget.set_text("hello");
     context.update_ui(dimensions); // unsupported: the mutable widget borrow is still active
@@ -140,8 +140,15 @@ incompatible and panics with a diagnostic naming the runtime phase. This is the 
 there is no separate Context lock. Finish typed access before committing instead:
 
 ```rust
+# use microui_redux::prelude::*;
+# fn synchronize<B: RendererBackend>(
+#     context: &mut Context<B>,
+#     textbox: &TypedWidgetHandle<Textbox>,
+#     dimensions: Dimensioni,
+# ) {
 textbox.set_text("hello").expect("textbox unavailable");
 context.update_ui(dimensions);
+# }
 ```
 
 Update and paint visit a node before its eligible children and visit siblings in forward order. A

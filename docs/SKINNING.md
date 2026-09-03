@@ -58,9 +58,11 @@ adjacent without erased values or a universal role/state cross-product.
 Start from a skin whose atlas ownership is known, mutate its concrete fields, and install the
 completed value:
 
-```rust,ignore
-use microui_redux::{color, ControlRole, ControlState, PointerState, Visual};
+```rust
+use microui_redux::{Context, color, ControlRole, ControlState, PointerState, Visual};
+use microui_redux::render::RendererBackend;
 
+# fn customize<B: RendererBackend, State: 'static>(context: &mut Context<B, State>) {
 let mut skin = context.skin().clone();
 skin.metrics.padding = 8;
 let state = ControlState::Focused(PointerState::Normal);
@@ -71,6 +73,7 @@ skin.set_control(
     Visual::new(focused_button.patch, color(255, 255, 255, 255)),
 );
 context.set_skin(skin);
+# }
 ```
 
 The runtime retains only complete `Skin` values. `FlatPalette` is construction input for flat skins,

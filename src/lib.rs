@@ -220,6 +220,28 @@
 //! retained UI types from [`prelude`], while backend integrations import frame contracts from
 //! [`render`].
 
+// Compile the Rust examples in standalone guides as part of `cargo test --doc` without publishing
+// duplicate guide modules in the normal API reference.
+#[cfg(doctest)]
+mod guide_doctests {
+    #[doc = include_str!("../README.md")]
+    mod readme {}
+    #[doc = include_str!("../docs/ARCHITECTURE.md")]
+    mod architecture {}
+    #[doc = include_str!("../docs/BACKENDS.md")]
+    mod backends {}
+    #[doc = include_str!("../docs/LAYOUT.md")]
+    mod layout {}
+    #[doc = include_str!("../docs/MENUS.md")]
+    mod menus {}
+    #[doc = include_str!("../docs/SKINNING.md")]
+    mod skinning {}
+    #[doc = include_str!("../docs/THEMES.md")]
+    mod themes {}
+    #[doc = include_str!("../docs/TYPOGRAPHY.md")]
+    mod typography {}
+}
+
 pub mod atlas;
 mod context;
 mod event;

@@ -7,7 +7,7 @@ ordinary compile-time alias for one concrete renderer. The feature guards use Gl
 WGPU precedence so the aliases remain well-defined when additive Cargo tooling enables several
 backend features:
 
-```rust
+```rust,ignore
 #[cfg(feature = "example-glow")]
 use common::glow_renderer::GLRenderer as SelectedBackend;
 #[cfg(all(not(feature = "example-glow"), feature = "example-vulkan"))]
@@ -31,7 +31,7 @@ the backend selected by this build.”
 
 The relevant part of the backend contract is:
 
-```rust
+```text
 trait RendererBackend {
     type Frame<'a>: RendererFrame
     where
@@ -103,7 +103,7 @@ are deliberately absent from `RendererFrame`: a render-pass encoder, a mesh subm
 another backend-specific command recorder. The example backends all provide
 `enqueue_colored_vertices`, so a selected-backend callback can call it directly:
 
-```rust
+```rust,ignore
 let cube_renderer = ctx.register_custom_renderer({
     let angle = angle.clone();
     move |frame: &mut SelectedFrame<'_>, args: CustomRenderArgs| {

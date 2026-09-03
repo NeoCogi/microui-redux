@@ -58,7 +58,22 @@ child-window, dialog, and popup creation returns `SurfaceCreationError<Window>` 
 `SurfaceCreationError<Node>`; inspect `reason()` and call `into_input()` to recover the unchanged
 unique value for retry.
 
-```rust,ignore
+```rust,no_run
+# use microui_redux::prelude::*;
+# struct Model;
+# impl Model {
+#     fn window_event(&mut self, _ui: &mut Ui<'_>, _event: &WindowEvent) {}
+#     fn popup_event(&mut self, _event: &PopupEvent) {}
+#     fn inspect(&mut self, _ui: &mut Ui<'_>, _event: &MenuItemSubmitted) {}
+# }
+# fn build<B: RendererBackend>(
+#     context: &mut Context<B, Model>,
+#     main_content: Node,
+#     tool_content: Node,
+#     settings_content: Node,
+#     popup_content: Node,
+#     anchor: Recti,
+# ) -> Result<(), Box<dyn std::error::Error>> {
 let main = context.ui().create_window(
     Window::new("main", rect(20, 20, 480, 320), main_content)
         .child_window_clip(ChildWindowClip::Content),
@@ -82,6 +97,8 @@ context.subscribe_context(inspect.submitted(), Model::inspect)?;
 context.ui().set_window_visible(&dialog, true)?;
 context.ui().show_popup_at(&popup, anchor)?;
 context.ui().show_popup(&actions)?;
+# Ok(())
+# }
 ```
 
 `WindowEvent` combines geometry, close, minimize, maximize, and restore observations on one typed
