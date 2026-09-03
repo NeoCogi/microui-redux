@@ -27,8 +27,8 @@
       "window_content_insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
       "spacing": 5,
       "indent": 16,
-      "title_height": 18,
-      "window_border": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
+      "title_height": 20,
+      "window_border": { "left": 6, "top": 2, "right": 6, "bottom": 6 },
       "scrollbar_size": 16,
       "thumb_size": 16
     },
@@ -36,25 +36,25 @@
     "palette": {
       "text": [0, 0, 0, 255],
       "border": [0, 0, 0, 255],
-      "window_background": [221, 221, 221, 255],
-      "title_background": [221, 221, 221, 255],
+      "window_background": [213, 214, 213, 255],
+      "title_background": [213, 214, 213, 255],
       "title_foreground": [0, 0, 0, 255],
       "disabled_foreground": [119, 119, 119, 255],
-      "disabled_background": [221, 221, 221, 255],
+      "disabled_background": [227, 228, 228, 255],
       "disabled_title_foreground": [119, 119, 119, 255],
       "panel_background": [255, 255, 255, 255],
-      "button": [221, 221, 221, 255],
-      "button_hovered": [221, 221, 221, 255],
+      "button": [213, 214, 213, 255],
+      "button_hovered": [213, 214, 213, 255],
       "input": [255, 255, 255, 255],
       "input_hovered": [255, 255, 255, 255],
-      "scrollbar_track": [221, 221, 221, 255],
-      "scrollbar_thumb": [221, 221, 221, 255],
+      "scrollbar_track": [213, 214, 213, 255],
+      "scrollbar_thumb": [213, 214, 213, 255],
       "control_focus": [0, 0, 0, 255],
       "selection_background": [0, 0, 0, 255],
       "selection_foreground": [255, 255, 255, 255],
-      "window_active": [221, 221, 221, 255],
+      "window_active": [213, 214, 213, 255],
       "menu_foreground": [0, 0, 0, 255],
-      "menu_background": [221, 221, 221, 255]
+      "menu_background": [213, 214, 213, 255]
     },
     "window_chrome": {
       "title_alignment": "centered",
@@ -67,7 +67,7 @@
         "show_without_activation": false
       },
       "active_title_backdrop": {
-        "color": [221, 221, 221, 255],
+        "color": [213, 214, 213, 255],
         "horizontal_padding": 4
       }
     }
@@ -270,18 +270,20 @@
     },
     "chrome": {
       "window_frame": {
-        "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
-        "base": { "patch": { "type": "image", "path": "window-frame.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-        "active": { "patch": { "type": "image", "path": "window-frame-active.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-        "disabled": { "patch": { "type": "image", "path": "window-frame.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "tint": [221, 221, 221, 255] } } },
+        "insets": { "left": 6, "top": 6, "right": 6, "bottom": 6 },
+        "base": { "patch": { "type": "image", "path": "window-frame.png", "source_insets": { "left": 6, "top": 6, "right": 6, "bottom": 6 } } },
+        "active": { "patch": { "type": "image", "path": "window-frame-active.png", "source_insets": { "left": 6, "top": 6, "right": 6, "bottom": 6 } } },
+        "disabled": { "patch": { "type": "image", "path": "window-frame.png", "source_insets": { "left": 6, "top": 6, "right": 6, "bottom": 6 } } }
+      },
       "dialog_frame": {
-        "insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 },
-        "base": { "patch": { "type": "image", "path": "window-frame.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-        "active": { "patch": { "type": "image", "path": "window-frame-active.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 } } },
-        "disabled": { "patch": { "type": "image", "path": "window-frame.png", "source_insets": { "left": 3, "top": 3, "right": 3, "bottom": 3 }, "tint": [221, 221, 221, 255] } } },
+        "insets": { "left": 6, "top": 6, "right": 6, "bottom": 6 },
+        "base": { "patch": { "type": "image", "path": "window-frame.png", "source_insets": { "left": 6, "top": 6, "right": 6, "bottom": 6 } } },
+        "active": { "patch": { "type": "image", "path": "window-frame-active.png", "source_insets": { "left": 6, "top": 6, "right": 6, "bottom": 6 } } },
+        "disabled": { "patch": { "type": "image", "path": "window-frame.png", "source_insets": { "left": 6, "top": 6, "right": 6, "bottom": 6 } } }
+      },
       "title": {
         "insets": { "left": 0, "top": 0, "right": 0, "bottom": 0 },
-        "base": { "content_color": [102, 102, 102, 255], "patch": { "type": "image", "path": "title-normal.png" } },
+        "base": { "content_color": [104, 104, 104, 255], "patch": { "type": "image", "path": "title-normal.png" } },
         "active": { "patch": { "type": "image", "path": "title-active.png" } },
         "disabled": { "content_color": [119, 119, 119, 255], "patch": { "type": "image", "path": "title-normal.png" } }
       }

@@ -3,9 +3,10 @@
 This bundled theme reconstructs the late Mac OS 9 Platinum visual language through the crate's
 typed appearance catalog. Active windows use centered labels over interrupted horizontal racing
 stripes, a blank leading close box, and compact trailing windowshade and zoom boxes. Windows
-without activation use the base flat-gray title state without caption boxes. The surrounding chrome
-uses thin black outlines, directional white and dark-gray bevels, sixteen-pixel scrollbars, and a grooved diagonal
-resize handle. Popup menus use a heavy black perimeter and black selections with white text.
+without activation use a pale title and frame state without caption boxes. The surrounding chrome
+uses a six-layer black, white, face, and shadow perimeter, a two-pixel top reservation, fourteen-pixel
+metallic caption faces, sixteen-pixel scrollbars, and a grooved diagonal resize handle. Popup menus
+use a heavy black perimeter and black selections with white text.
 
 Controls use chamfered raised faces, recessed white fields, black focus keylines, reversed pressed
 bevels, and softened disabled edges. Disabled and nested enabled/focused pointer sources remain
@@ -34,7 +35,8 @@ cargo run --bin mac_os_9_theme_export -- --output-dir themes/mac-os-9
 
 The deterministic generator draws only integer-aligned primitive pixels. Semantic icons are
 opaque-white masks whose final color comes from the selected role state. Control sources use
-five-pixel fixed 3x3 spans, recessed sources use four-pixel spans, window frames use three-pixel
+five-pixel fixed 3x3 spans, recessed sources use four-pixel spans, window frames use six-pixel
 visual spans, and caption faces use four-pixel spans. `style.window_border` independently reserves
-three structural pixels for client layout and one-axis resize hit regions. The active title source
-is 8x18 pixels with zero fixed insets so its bands repeat across the complete title allocation.
+six structural pixels on the sides and bottom, but only two above the integrated title. The active
+title source is 8x20 pixels with zero fixed insets so its bands repeat across the complete title
+allocation.

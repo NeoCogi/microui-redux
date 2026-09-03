@@ -52,17 +52,21 @@ const BLACK: Pixel = [0, 0, 0, 255];
 /// Bright bevel and title-stripe highlight.
 const WHITE: Pixel = [255, 255, 255, 255];
 /// Bright inner control highlight.
-const PALE: Pixel = [238, 238, 238, 255];
+const PALE: Pixel = [241, 242, 241, 255];
 /// Standard Platinum window and control fill.
-const FACE: Pixel = [221, 221, 221, 255];
+const FACE: Pixel = [213, 214, 213, 255];
 /// Pressed control and menu-bar fill.
-const PRESSED_FACE: Pixel = [204, 204, 204, 255];
+const PRESSED_FACE: Pixel = [184, 185, 184, 255];
 /// Secondary bevel shadow.
-const SHADOW: Pixel = [170, 170, 170, 255];
+const SHADOW: Pixel = [169, 169, 169, 255];
 /// Deep bevel shadow and active-title racing stripe.
-const DARK_SHADOW: Pixel = [119, 119, 119, 255];
+const DARK_SHADOW: Pixel = [138, 138, 138, 255];
 /// Disabled outline used instead of the enabled black edge.
 const DISABLED_EDGE: Pixel = [153, 153, 153, 255];
+/// Pale face used by windows that do not own top-level activation.
+const INACTIVE_FACE: Pixel = [227, 228, 228, 255];
+/// Restrained inactive-window perimeter and title separator.
+const INACTIVE_EDGE: Pixel = [104, 104, 104, 255];
 
 /// Mutable row-major bitmap used only while exporting one PNG source image.
 struct Bitmap {
@@ -113,6 +117,18 @@ impl Bitmap {
         for y in y0..=y1 {
             self.set(x, y, pixel);
         }
+    }
+
+    /// Draws one complete rectangular one-pixel outline at `inset`.
+    fn outline(&mut self, inset: i32, pixel: Pixel) {
+        // A single helper keeps each nested Platinum frame symmetric and exposes its complete
+        // layer order directly at the call site instead of repeating four unrelated line calls.
+        let right = self.width as i32 - inset - 1;
+        let bottom = self.height as i32 - inset - 1;
+        self.horizontal(inset, right, inset, pixel);
+        self.horizontal(inset, right, bottom, pixel);
+        self.vertical(inset, inset, bottom, pixel);
+        self.vertical(right, inset, bottom, pixel);
     }
 
     /// Encodes this bitmap as an eight-bit RGBA PNG at `path`.
@@ -310,54 +326,72 @@ fn recessed_control(focused: bool) -> Bitmap {
     bitmap
 }
 
-/// Builds the active racing-stripe title source or the base flat title source.
+/// Builds the active racing-stripe title source or the restrained inactive title source.
 fn title_strip(active: bool) -> Bitmap {
-    let mut bitmap = Bitmap::new(8, 18, FACE);
+    let mut bitmap = Bitmap::new(8, 20, if active { FACE } else { INACTIVE_FACE });
     if active {
-        // Two-pixel bands reproduce Platinum's horizontal white/dark racing stripes while leaving a
-        // narrow neutral margin at the top and bottom for the frame bevel.
-        for y in (3..15).step_by(2) {
+        // Alternating one-pixel highlights and shadows form the six racing-stripe pairs around the
+        // centered title backdrop. Neutral rows above and below keep the bar from looking striped
+        // edge-to-edge.
+        for y in (2..14).step_by(2) {
             bitmap.horizontal(0, 7, y, WHITE);
             bitmap.horizontal(0, 7, y + 1, DARK_SHADOW);
         }
     }
+    // The title owns the separator below itself because the outer frame surrounds the complete
+    // root and cannot otherwise divide title chrome from a menu bar or application body.
+    bitmap.horizontal(0, 7, 18, if active { SHADOW } else { INACTIVE_FACE });
+    bitmap.horizontal(0, 7, 19, if active { BLACK } else { INACTIVE_EDGE });
     bitmap
 }
 
-/// Builds the base or active one-pixel structural window frame with a three-pixel visual bevel.
+/// Builds the base or active six-layer Platinum window perimeter.
 fn window_frame(active: bool) -> Bitmap {
-    let fill = if active { FACE } else { PRESSED_FACE };
-    let mut bitmap = Bitmap::new(11, 11, fill);
-    // Active and base frames share exact geometry so activation never moves the client. Only the
-    // interior fill and title role distinguish them at runtime.
-    bitmap.horizontal(0, 10, 0, BLACK);
-    bitmap.horizontal(0, 10, 10, BLACK);
-    bitmap.vertical(0, 0, 10, BLACK);
-    bitmap.vertical(10, 0, 10, BLACK);
-    bitmap.horizontal(1, 9, 1, WHITE);
-    bitmap.vertical(1, 1, 9, WHITE);
-    bitmap.horizontal(1, 9, 9, DARK_SHADOW);
-    bitmap.vertical(9, 1, 9, DARK_SHADOW);
-    bitmap.horizontal(2, 8, 8, SHADOW);
-    bitmap.vertical(8, 2, 8, SHADOW);
+    let mut bitmap = Bitmap::new(13, 13, if active { FACE } else { INACTIVE_FACE });
+    // Both activation states retain the same six-pixel geometry. Active chrome uses the directional
+    // black/white/face/shadow stack; inactive chrome becomes a pale slab inside a restrained edge.
+    let layers = if active {
+        [BLACK, WHITE, FACE, FACE, SHADOW, BLACK]
+    } else {
+        [INACTIVE_EDGE, INACTIVE_FACE, INACTIVE_FACE, INACTIVE_FACE, INACTIVE_FACE, INACTIVE_EDGE]
+    };
+    for (inset, pixel) in layers.into_iter().enumerate() {
+        bitmap.outline(inset as i32, pixel);
+    }
     bitmap
 }
 
-/// Builds one complete twelve-pixel title-control face with its embedded period mark.
+/// Builds one complete thirteen-by-fourteen title-control face with its embedded period mark.
 fn caption_button(mark: CaptionMark, pressed: bool) -> Bitmap {
-    let mut bitmap = Bitmap::new(12, 12, if pressed { PRESSED_FACE } else { FACE });
-    // Compact caption boxes are square rather than chamfered; their one-pixel outline and reversible
-    // bevel remain legible inside an eighteen-pixel title allocation.
-    bitmap.horizontal(0, 11, 0, BLACK);
-    bitmap.horizontal(0, 11, 11, BLACK);
-    bitmap.vertical(0, 0, 11, BLACK);
-    bitmap.vertical(11, 0, 11, BLACK);
+    let mut bitmap = Bitmap::new(13, 14, if pressed { PRESSED_FACE } else { FACE });
+    // Caption boxes use a dense square keyline rather than the chamfered button shape. The spare
+    // bottom row blends into the title while the upper thirteen rows carry the complete face.
+    bitmap.horizontal(0, 11, 0, SHADOW);
+    bitmap.vertical(0, 0, 11, SHADOW);
+    bitmap.horizontal(0, 11, 12, WHITE);
+    bitmap.vertical(12, 0, 12, WHITE);
+    bitmap.outline(1, BLACK);
     let upper = if pressed { DARK_SHADOW } else { WHITE };
     let lower = if pressed { WHITE } else { DARK_SHADOW };
-    bitmap.horizontal(1, 10, 1, upper);
-    bitmap.vertical(1, 1, 10, upper);
-    bitmap.horizontal(1, 10, 10, lower);
-    bitmap.vertical(10, 1, 10, lower);
+    bitmap.horizontal(2, 10, 2, upper);
+    bitmap.vertical(2, 2, 10, upper);
+    bitmap.horizontal(2, 10, 10, lower);
+    bitmap.vertical(10, 2, 10, lower);
+
+    // Five hard diagonal bands suggest Platinum's metallic title controls without introducing
+    // gradients or antialiasing into the deterministic pixel source.
+    for y in 3..10 {
+        for x in 3..10 {
+            let shade = match (x + y) / 3 {
+                2 => SHADOW,
+                3 => PRESSED_FACE,
+                4 => FACE,
+                5 => PALE,
+                _ => WHITE,
+            };
+            bitmap.set(x, y, if pressed { PRESSED_FACE } else { shade });
+        }
+    }
 
     let offset = i32::from(pressed);
     match mark {
@@ -366,22 +400,18 @@ fn caption_button(mark: CaptionMark, pressed: bool) -> Bitmap {
             // state supplies meaning; the beveled face itself is the complete mark.
         }
         CaptionMark::WindowShade => {
-            bitmap.horizontal(3 + offset, 7 + offset, 4 + offset, BLACK);
-            bitmap.horizontal(3 + offset, 7 + offset, 6 + offset, BLACK);
+            bitmap.horizontal(3 + offset, 8 + offset, 5 + offset, BLACK);
         }
         CaptionMark::Zoom => {
-            bitmap.horizontal(3 + offset, 7 + offset, 3 + offset, BLACK);
-            bitmap.horizontal(3 + offset, 7 + offset, 7 + offset, BLACK);
-            bitmap.vertical(3 + offset, 3 + offset, 7 + offset, BLACK);
-            bitmap.vertical(7 + offset, 3 + offset, 7 + offset, BLACK);
+            bitmap.horizontal(6 + offset, 6 + offset, 3 + offset, BLACK);
+            bitmap.vertical(6 + offset, 3 + offset, 8 + offset, BLACK);
+            bitmap.horizontal(3 + offset, 8 + offset, 8 + offset, BLACK);
         }
         CaptionMark::Restore => {
-            bitmap.horizontal(4 + offset, 8 + offset, 3 + offset, BLACK);
-            bitmap.vertical(8 + offset, 3 + offset, 7 + offset, BLACK);
-            bitmap.horizontal(2 + offset, 6 + offset, 5 + offset, BLACK);
-            bitmap.horizontal(2 + offset, 6 + offset, 8 + offset, BLACK);
-            bitmap.vertical(2 + offset, 5 + offset, 8 + offset, BLACK);
-            bitmap.vertical(6 + offset, 5 + offset, 8 + offset, BLACK);
+            bitmap.horizontal(7 + offset, 7 + offset, 3 + offset, BLACK);
+            bitmap.vertical(7 + offset, 3 + offset, 7 + offset, BLACK);
+            bitmap.horizontal(3 + offset, 8 + offset, 7 + offset, BLACK);
+            bitmap.horizontal(3 + offset, 8 + offset, 9 + offset, BLACK);
         }
     }
     bitmap

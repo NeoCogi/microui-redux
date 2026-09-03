@@ -1436,7 +1436,8 @@ mod tests {
         }
     }
 
-    /// Verifies the bundled Mac theme installs its controls, title strips, frame, and grip artwork.
+    /// Verifies the bundled Mac theme installs its semantic resources and asymmetric Platinum
+    /// chrome geometry together with the generated state artwork.
     #[test]
     fn bundled_mac_os_9_theme_reuses_shared_png_regions() {
         let (loaded, images) = install_bundled_theme("themes/mac-os-9/theme.json");
@@ -1446,7 +1447,7 @@ mod tests {
         assert_eq!(chrome.title_alignment, crate::WindowTitleAlignment::Centered);
         assert_eq!(chrome.captions.close_side, crate::CaptionButtonSide::Leading);
         assert!(!chrome.captions.show_without_activation);
-        assert_eq!(loaded.bundle().skin().metrics.title_height, 18);
+        assert_eq!(loaded.bundle().skin().metrics.title_height, 20);
         for (role, expected_size) in [
             (FontRole::Body, 12),
             (FontRole::Small, 10),
@@ -1478,13 +1479,19 @@ mod tests {
             "Platinum windows expose their complete application body below root chrome"
         );
         let insets = loaded.bundle().skin().chrome(ChromeRole::WindowFrame, ChromeState::Base).patch.insets;
-        assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (3, 3, 3, 3));
+        assert_eq!((insets.left, insets.top, insets.right, insets.bottom), (6, 6, 6, 6));
+        let border = loaded.bundle().skin().metrics.window_border;
+        assert_eq!(
+            (border.left, border.top, border.right, border.bottom),
+            (6, 2, 6, 6),
+            "the title begins below the two-pixel top edge while the remaining edges retain the six-layer frame"
+        );
         let active_title = loaded.bundle().skin().chrome(ChromeRole::Title, ChromeState::Active).patch;
         let crate::NinePatchContent::Image { image: active_title_image } = active_title.content else {
             panic!("Mac OS 9 active title must use baked artwork");
         };
         let active_title_size = loaded.bundle().atlas().get_icon_size(active_title_image.icon);
-        assert_eq!((active_title_size.width, active_title_size.height), (8, 18));
+        assert_eq!((active_title_size.width, active_title_size.height), (8, 20));
         assert!(matches!(
             loaded.bundle().skin().control(ControlRole::Button, ControlState::Disabled).patch.content,
             crate::NinePatchContent::Image { .. }
@@ -1522,7 +1529,7 @@ mod tests {
             panic!("Mac OS 9 close states must use baked artwork");
         };
         let close_size = loaded.bundle().atlas().get_icon_size(close_image.icon);
-        assert_eq!((close_size.width, close_size.height), (12, 12));
+        assert_eq!((close_size.width, close_size.height), (13, 14));
         assert_ne!(close_image.icon, pressed_image.icon);
 
         // Platinum popup selection uses black image-backed rows with white content text, while
