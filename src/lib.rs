@@ -240,6 +240,8 @@ mod guide_doctests {
     mod themes {}
     #[doc = include_str!("../docs/TYPOGRAPHY.md")]
     mod typography {}
+    #[doc = include_str!("../docs/WIDGETS.md")]
+    mod widgets {}
 }
 
 pub mod atlas;
