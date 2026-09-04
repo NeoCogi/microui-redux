@@ -1,109 +1,52 @@
-[package]
-name = "microui-redux"
+[workspace]
+resolver = "3"
+members = [
+    "crates/microui-redux",
+    "crates/renderer-common",
+    "crates/renderer-glow",
+    "crates/renderer-vulkan",
+    "crates/renderer-wgpu",
+    "demos/demo-assets",
+    "demos/demo-host",
+    "demos/demo-full",
+    "demos/basic",
+    "tools/xtask",
+]
+default-members = ["crates/microui-redux"]
+
+[workspace.package]
 authors = ["Raja Lehtihet", "Wael El Oraiby"]
-version = "0.8.0"
 edition = "2024"
-readme = "README.md"
 license = "BSD-3-Clause AND MIT AND OFL-1.1 AND Apache-2.0 AND CC0-1.0"
-description = "Retained Rust MicroUI-inspired GUI library"
+readme = "README.md"
 repository = "https://github.com/NeoCogi/microui-redux"
-autoexamples = false
-categories = ["gui", "rendering"]
-exclude = ["atlas.png", ".codex", ".codex/**"]
 
-[lib]
-name = "microui_redux"
+[workspace.dependencies]
+microui-redux = { path = "crates/microui-redux", version = "0.8.0", default-features = false }
+microui-redux-demo-assets = { path = "demos/demo-assets", default-features = false }
+microui-redux-demo-host = { path = "demos/demo-host", default-features = false }
+microui-redux-renderer-common = { path = "crates/renderer-common" }
+microui-redux-renderer-glow = { path = "crates/renderer-glow" }
+microui-redux-renderer-vulkan = { path = "crates/renderer-vulkan" }
+microui-redux-renderer-wgpu = { path = "crates/renderer-wgpu" }
 
-[features]
-default = ["save-to-rust", "theme-json"]
-builder = ["dep:fontdue", "dep:png"]
-png_source = ["dep:png"]
-# Versioned JSON definitions and relative image-backed state patches.
-theme-json = ["builder", "dep:serde", "dep:serde_json", "png_source"]
-save-to-rust = ["dep:tempfile"]
-prebuilt-atlas = ["png_source"]
-external-atlas = ["png_source"]
-example-backend = []
-# Example backends are only used by examples and are wired to optional deps. They remain additive:
-# examples select Glow, then Vulkan, then WGPU when more than one is enabled.
-example-glow = ["example-backend", "dep:sdl2", "dep:glow"]
-example-vulkan = [
-    "example-backend",
-    "dep:sdl2",
-    "dep:ash",
-    "dep:ash-window-handle",
-    "dep:raw-window-handle",
-]
-example-wgpu = [
-    "example-backend",
-    "dep:sdl2",
-    "dep:wgpu",
-    "dep:pollster",
-    "dep:raw-window-handle",
-]
-
-[dependencies]
-fontdue = { version = "0.9.2", optional = true }
+ash = { version = "0.38", default-features = false, features = ["linked"] }
+ash-window-handle = { package = "ash-window", version = "0.13" }
 bitflags = "2.4.1"
-rs-math3d = "0.13"
-png = { version = "0.18", optional = true }
-serde = { version = "1", features = ["derive"], optional = true }
-serde_json = { version = "1", optional = true }
-sdl2 = { version = "0.38", features = ["raw-window-handle"], optional = true }
-glow = { version = "0.18", optional = true }
-ash = { version = "0.38", default-features = false, features = [
-    "linked",
-], optional = true }
-ash-window-handle = { package = "ash-window", version = "0.13", optional = true }
-raw-window-handle = { version = "0.6", optional = true }
-wgpu = { version = "30", optional = true }
-pollster = { version = "1", optional = true }
-tempfile = { version = "3.27", optional = true }
-
-[dev-dependencies]
+fontdue = "0.9.2"
+glow = "0.18"
+png = "0.18"
+pollster = "1"
 rand = "0.10"
+raw-window-handle = "0.6"
+rs-math3d = "0.13"
+sdl2 = { version = "0.38", features = ["raw-window-handle"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3.27"
 trybuild = "1.0"
+wgpu = "30"
 
-[[bin]]
-name = "atlas_export"
-path = "tools/atlas_export.rs"
-required-features = ["builder", "save-to-rust", "png_source"]
-
-[[bin]]
-name = "mac_os_9_theme_export"
-path = "tools/mac_os_9_theme_export.rs"
-required-features = ["png_source"]
-
-# Examples listed explicitly to ensure shared assets compile across feature sets.
-[[example]]
-name = "simple"
-path = "examples/simple.rs"
-required-features = ["example-backend"]
-
-[[example]]
-name = "demo-full"
-path = "examples/demo-full.rs"
-required-features = ["example-backend", "theme-json"]
-
-[[example]]
-name = "backend-frame-cube"
-path = "examples/backend-frame-cube.rs"
-required-features = ["example-backend"]
-
-[[example]]
-name = "calculator"
-path = "examples/calculator.rs"
-required-features = ["example-backend"]
-
-[[example]]
-name = "texture-clipping-smoke"
-path = "examples/texture-clipping-smoke.rs"
-
-[[example]]
-name = "retained-custom-drawing"
-path = "examples/retained-custom-drawing.rs"
-
-# small size executable
 [profile.release]
 overflow-checks = false
 opt-level = "z"
@@ -113,8 +56,6 @@ codegen-units = 1
 debug = "none"
 strip = "symbols"
 
-# Profile used only by the dedicated min-size platform target. The alias overrides panic to the
-# nightly-only immediate-abort strategy while rebuilding std with the same size-oriented profile.
 [profile.min-size]
 inherits = "release"
 incremental = false

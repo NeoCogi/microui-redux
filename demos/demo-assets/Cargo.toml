@@ -1,0 +1,17 @@
+[package]
+name = "microui-redux-demo-assets"
+version = "0.0.0"
+publish = false
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["builder"]
+builder = ["microui-redux/builder"]
+prebuilt-atlas = ["microui-redux/png_source"]
+external-atlas = ["microui-redux/png_source"]
+
+[dependencies]
+microui-redux.workspace = true

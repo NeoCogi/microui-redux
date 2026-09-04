@@ -1,0 +1,16 @@
+[package]
+name = "microui-redux-renderer-vulkan"
+version = "0.0.0"
+publish = false
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ash.workspace = true
+ash-window-handle.workspace = true
+microui-redux.workspace = true
+microui-redux-renderer-common.workspace = true
+raw-window-handle.workspace = true
+sdl2.workspace = true

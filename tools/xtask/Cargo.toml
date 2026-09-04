@@ -1,0 +1,25 @@
+[package]
+name = "microui-redux-tools"
+version = "0.0.0"
+publish = false
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["png_source"]
+png_source = ["dep:png"]
+
+[dependencies]
+microui-redux = { workspace = true, features = ["builder", "save-to-rust", "png_source"] }
+microui-redux-demo-assets = { workspace = true, features = ["builder"] }
+png = { workspace = true, optional = true }
+
+[[bin]]
+name = "atlas-export"
+path = "src/bin/atlas-export.rs"
+
+[[bin]]
+name = "mac-os-9-theme-export"
+path = "src/bin/mac-os-9-theme-export.rs"

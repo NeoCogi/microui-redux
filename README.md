@@ -34,7 +34,7 @@ microui-redux = "0.8.0"
 Clone the repository and run the full demo with one backend:
 
 ```bash
-cargo run --example demo-full --features example-glow
+cargo run -p microui-redux-demo-full --no-default-features --features glow
 ```
 
 See [Examples](docs/EXAMPLES.md) for the other backends, asset requirements, and size-focused
@@ -77,14 +77,14 @@ fn draw<B: RendererBackend>(
 
 Contexts with application state use `update_ui_state` instead. Call the same update method after
 every programmatic widget mutation before depending on its result. The complete
-[`simple` example](examples/simple.rs) supplies SDL windowing, input translation, atlas setup, and a
+[`simple` demo](demos/basic/src/bin/simple.rs) supplies SDL windowing, input translation, atlas setup, and a
 selectable example renderer.
 
 ## Documentation
 
 The [documentation index](docs/README.md) routes each topic to one canonical guide. Useful starting
-points are [built-in widgets](docs/WIDGETS.md), [typed events](docs/EVENTS.md),
-[layout and synchronization](docs/LAYOUT.md), [rendering](docs/RENDER.md), and the
+points are [built-in widgets](crates/microui-redux/docs/WIDGETS.md), [typed events](crates/microui-redux/docs/EVENTS.md),
+[layout and synchronization](crates/microui-redux/docs/LAYOUT.md), [rendering](crates/microui-redux/docs/RENDER.md), and the
 [example catalog](docs/EXAMPLES.md). Release and adoption details live in the
 [changelog](docs/CHANGELOG.md) and [support policy](docs/SUPPORT.md).
 

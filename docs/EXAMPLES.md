@@ -2,15 +2,15 @@
 
 ## Example catalog
 
-- [`simple`](../examples/simple.rs) shows the smallest complete retained application.
-- [`calculator`](../examples/calculator.rs) builds a focused retained calculator UI.
-- [`retained-custom-drawing`](../examples/retained-custom-drawing.rs) implements a custom widget
+- [`simple`](../demos/basic/src/bin/simple.rs) shows the smallest complete retained application.
+- [`calculator`](../demos/basic/src/bin/calculator.rs) builds a focused retained calculator UI.
+- [`retained-custom-drawing`](../crates/microui-redux/examples/retained-custom-drawing.rs) implements a custom widget
   with the backend-neutral `Painter` API.
-- [`backend-frame-cube`](../examples/backend-frame-cube.rs) records backend-specific 3D work from a
+- [`backend-frame-cube`](../demos/basic/src/bin/backend-frame-cube.rs) records backend-specific 3D work from a
   typed custom-render callback.
-- [`texture-clipping-smoke`](../examples/texture-clipping-smoke.rs) exercises low-level texture
+- [`texture-clipping-smoke`](../crates/microui-redux/examples/texture-clipping-smoke.rs) exercises low-level texture
   upload and clipping behavior.
-- [`demo-full`](../examples/demo-full.rs) combines retained widgets, per-window File/View/Help
+- [`demo-full`](../demos/demo-full/src/main.rs) combines retained widgets, per-window File/View/Help
   menus, a standalone Test Popup menu, dialogs, custom drawing, external textures, and custom
   backend rendering. Its menu shows
   grouped and disabled commands, shortcut hints, a live checked item, radio choices in a cascading
@@ -50,7 +50,7 @@ separately through `Context::text`. The retained examples therefore share these 
   remain ordinary raw input for the restored parent, while a custom focused widget receives every
   Escape transition when no application popup accepts the initial press.
 - `F10` or a tap of Alt enters a window menu. Arrow keys, Home, End, Enter, Space, and Escape navigate
-  the active menu branch using the bindings described in the [menu guide](MENUS.md).
+  the active menu branch using the bindings described in the [menu guide](../crates/microui-redux/docs/MENUS.md).
 
 Custom drawing in `demo-full` declares its keyboard role explicitly. Pointer-only grid and graph
 surfaces stay out of Tab order, while the Suzanne viewport remains a Tab stop because it implements
@@ -67,17 +67,15 @@ widget-specific focus painting.
 Clone the repository and run the demo with one backend feature:
 
 ```bash
-cargo run --example demo-full --features example-vulkan
-cargo run --example demo-full --features example-glow
-cargo run --example demo-full --features example-wgpu
+cargo run -p microui-redux-demo-full --no-default-features --features vulkan
+cargo run -p microui-redux-demo-full --no-default-features --features glow
+cargo run -p microui-redux-demo-full --no-default-features --features wgpu
 ```
 
-`example-backend` is only a shared gate for example code paths; it is not runnable by itself.
-Running with only `--features example-backend` will fail intentionally at compile time.
 Backend features are additive for Cargo tooling. If several are enabled together, examples select
 Glow first, then Vulkan, then WGPU; enable only the backend you want for normal interactive runs.
 
-`demo-full` loads `examples/FACEPALM.png`, `assets/suzanne.obj`, and all three bundled directories
+`demo-full` loads its own `assets/FACEPALM.png`, the workspace's `assets/suzanne.obj`, and all three bundled directories
 under `themes/` from disk at runtime. Paths are anchored to the Cargo manifest directory, but the
 files must remain present in a source checkout or package.
 
@@ -86,17 +84,17 @@ enable exactly one backend plus `theme-json`; that feature enables the required 
 
 ```bash
 cargo build \
+  -p microui-redux-demo-full \
   --release \
-  --example demo-full \
   --no-default-features \
-  --features "example-glow theme-json"
+  --features glow
 ```
 
 This keeps demo assets outside the executable: fonts/icons are read from `assets/`, the external
-demo image is read from `examples/FACEPALM.png`, the Suzanne mesh is read from
+demo image is read from `demos/demo-full/assets/FACEPALM.png`, the Suzanne mesh is read from
 `assets/suzanne.obj`, and theme JSON/PNGs are read from `themes/`. To inspect real binary section
 size rather than asset size, use
-`size -A target/release/examples/demo-full`.
+`size -A target/release/microui-redux-demo-full`.
 
 For the smallest Linux executable, use the `build-min-size` Cargo alias with nightly. It builds for
 a dedicated `x86_64-unknown-linux-min-size` platform target, rebuilds `std`, uses immediate-abort
@@ -105,14 +103,14 @@ build ID. Normal builds remain on their selected toolchain and platform:
 
 ```bash
 cargo +nightly build-min-size \
-  --example demo-full \
+  -p microui-redux-demo-full \
   --no-default-features \
-  --features "example-glow theme-json"
+  --features glow
 ```
 The executable is written to
-`target/x86_64-unknown-linux-min-size/min-size/examples/demo-full`. The alias accepts ordinary Cargo
-feature and package-selection arguments; replace `example-glow` with `example-vulkan` or
-`example-wgpu` when needed. It requires the nightly `rust-src` component (`rustup component add
+`target/x86_64-unknown-linux-min-size/min-size/microui-redux-demo-full`. The alias accepts ordinary Cargo
+feature and package-selection arguments; replace `glow` with `vulkan` or `wgpu` when needed. It
+requires the nightly `rust-src` component (`rustup component add
 rust-src --toolchain nightly`).
 
 | Windows 3.11 | Mac OS 9 |

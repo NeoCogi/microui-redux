@@ -1,0 +1,27 @@
+[package]
+name = "microui-redux-basic-demos"
+version = "0.0.0"
+publish = false
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["wgpu"]
+glow = ["microui-redux-demo-host/glow"]
+vulkan = ["microui-redux-demo-host/vulkan"]
+wgpu = ["microui-redux-demo-host/wgpu"]
+prebuilt-atlas = ["microui-redux-demo-assets/prebuilt-atlas"]
+external-atlas = ["microui-redux-demo-assets/external-atlas"]
+
+[dependencies]
+microui-redux.workspace = true
+microui-redux-demo-assets = { workspace = true, features = ["builder"] }
+microui-redux-demo-host.workspace = true
+microui-redux-renderer-common.workspace = true
+rs-math3d.workspace = true
+
+[[bin]]
+name = "backend-frame-cube"
+path = "src/bin/backend-frame-cube.rs"

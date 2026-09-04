@@ -1,0 +1,22 @@
+[package]
+name = "microui-redux-demo-host"
+version = "0.0.0"
+publish = false
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+glow = ["dep:glow", "dep:microui-redux-renderer-glow"]
+vulkan = ["dep:microui-redux-renderer-vulkan"]
+wgpu = ["dep:microui-redux-renderer-wgpu"]
+
+[dependencies]
+glow = { workspace = true, optional = true }
+microui-redux.workspace = true
+microui-redux-renderer-glow = { workspace = true, optional = true }
+microui-redux-renderer-vulkan = { workspace = true, optional = true }
+microui-redux-renderer-wgpu = { workspace = true, optional = true }
+sdl2.workspace = true

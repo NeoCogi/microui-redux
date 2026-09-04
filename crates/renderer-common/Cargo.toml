@@ -1,0 +1,11 @@
+[package]
+name = "microui-redux-renderer-common"
+version = "0.0.0"
+publish = false
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+microui-redux.workspace = true

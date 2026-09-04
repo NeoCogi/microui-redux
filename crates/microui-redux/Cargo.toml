@@ -1,0 +1,33 @@
+[package]
+name = "microui-redux"
+version = "0.8.0"
+authors.workspace = true
+edition.workspace = true
+readme.workspace = true
+license.workspace = true
+description = "Retained Rust MicroUI-inspired GUI library"
+repository.workspace = true
+categories = ["gui", "rendering"]
+
+[lib]
+name = "microui_redux"
+
+[features]
+default = ["save-to-rust", "theme-json"]
+builder = ["dep:fontdue", "dep:png"]
+png_source = ["dep:png"]
+theme-json = ["builder", "dep:serde", "dep:serde_json", "png_source"]
+save-to-rust = ["dep:tempfile"]
+
+[dependencies]
+bitflags.workspace = true
+fontdue = { workspace = true, optional = true }
+png = { workspace = true, optional = true }
+rs-math3d.workspace = true
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
+
+[dev-dependencies]
+rand.workspace = true
+trybuild.workspace = true

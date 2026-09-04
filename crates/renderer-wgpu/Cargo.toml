@@ -1,0 +1,17 @@
+[package]
+name = "microui-redux-renderer-wgpu"
+version = "0.0.0"
+publish = false
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+microui-redux.workspace = true
+microui-redux-renderer-common.workspace = true
+pollster.workspace = true
+raw-window-handle.workspace = true
+rs-math3d.workspace = true
+sdl2.workspace = true
+wgpu.workspace = true
