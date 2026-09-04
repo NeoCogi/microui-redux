@@ -258,8 +258,12 @@ impl ThemeDefinition {
         // The file path is retained verbatim in diagnostics. Its lexical parent is sufficient to
         // anchor assets because one document is now their only possible owner.
         let bytes = fs::read(path).map_err(|source| ThemeLoadError::DefinitionRead { path: path.to_path_buf(), source })?;
-        let mut definition: Self =
-            serde_json::from_slice(bytes.as_slice()).map_err(|source| ThemeLoadError::DefinitionJson { path: path.to_path_buf(), source })?;
+        Self::read_bytes(path, bytes.as_slice())
+    }
+
+    /// Parses one definition supplied by an embedding host and anchors its assets to `path`.
+    fn read_bytes(path: &Path, bytes: &[u8]) -> Result<Self, ThemeLoadError> {
+        let mut definition: Self = serde_json::from_slice(bytes).map_err(|source| ThemeLoadError::DefinitionJson { path: path.to_path_buf(), source })?;
         definition.validate_header()?;
 
         let directory = path.parent().unwrap_or_else(|| Path::new("."));
@@ -313,6 +317,15 @@ impl ThemeDefinition {
     /// without a font recipe can reuse the base allocation exactly; adding artwork without new
     /// fonts repacks existing glyph bitmaps so the original font files are not required.
     fn build_atlas(&self, base: &AtlasHandle) -> Result<ThemeAtlas, ThemeLoadError> {
+        self.build_atlas_with(base, Builder::read_asset_file)
+    }
+
+    /// Builds a theme atlas from assets supplied by the caller instead of requiring filesystem
+    /// access. The same builder validation and resource-identity rules apply to both paths.
+    fn build_atlas_with<F>(&self, base: &AtlasHandle, mut read_asset: F) -> Result<ThemeAtlas, ThemeLoadError>
+    where
+        F: FnMut(&Path) -> Result<Vec<u8>, BuilderError>,
+    {
         let image_paths = self.image_paths();
         if self.fonts.is_none() && self.icons.is_none() && image_paths.is_empty() {
             // No atlas-visible resource changes are requested, so preserving pointer identity also
@@ -340,16 +353,18 @@ impl ThemeDefinition {
 
         if let Some(fonts) = &self.fonts {
             for (role, font) in fonts.entries() {
+                let bytes = read_asset(font.path.as_path()).map_err(|source| ThemeLoadError::AtlasBuild { source })?;
                 builder
-                    .add_font_named(role.atlas_name(), font.path.as_path(), font.size)
+                    .add_font_bytes_named(role.atlas_name(), font.path.as_path(), font.size, bytes.as_slice())
                     .map_err(|source| ThemeLoadError::AtlasBuild { source })?;
             }
         }
 
         if let Some(icons) = &self.icons {
             for (role, icon) in icons.entries() {
+                let bytes = read_asset(icon.path.as_path()).map_err(|source| ThemeLoadError::AtlasBuild { source })?;
                 builder
-                    .add_icon_named(role.atlas_name(), icon.path.as_path())
+                    .add_icon_bytes_named(role.atlas_name(), icon.path.as_path(), bytes.as_slice())
                     .map_err(|source| ThemeLoadError::AtlasBuild { source })?;
             }
         }
@@ -358,8 +373,9 @@ impl ThemeDefinition {
         for (index, path) in image_paths.into_iter().enumerate() {
             // Builder owns bounded file I/O, PNG decoding, transactional packing, and typed image
             // diagnostics. The loader supplies only a deterministic private resource name.
+            let bytes = read_asset(path.as_path()).map_err(|source| ThemeLoadError::AtlasBuild { source })?;
             let icon = builder
-                .add_icon_named(format!("@microui-theme-image/{index}").as_str(), path.as_path())
+                .add_icon_bytes_named(format!("@microui-theme-image/{index}").as_str(), path.as_path(), bytes.as_slice())
                 .map_err(|source| ThemeLoadError::AtlasBuild { source })?;
             images.insert(path, icon);
         }
@@ -462,6 +478,20 @@ pub(crate) fn load(path: &Path, base: &AtlasHandle) -> Result<LoadedTheme, Theme
     // when the application explicitly selects it through `set_theme`.
     let definition = ThemeDefinition::read(path)?;
     let atlas = definition.build_atlas(base)?;
+    definition.install(atlas)
+}
+
+/// Compiles one in-memory JSON definition using caller-supplied bytes for every referenced asset.
+pub(crate) fn load_bytes<F>(path: &Path, bytes: &[u8], base: &AtlasHandle, mut read_asset: F) -> Result<LoadedTheme, ThemeLoadError>
+where
+    F: FnMut(&Path) -> io::Result<Vec<u8>>,
+{
+    let definition = ThemeDefinition::read_bytes(path, bytes)?;
+    let atlas = definition.build_atlas_with(base, |asset_path| {
+        read_asset(asset_path).map_err(|source| BuilderError::Asset {
+            source: io::Error::new(source.kind(), format!("Cannot read theme asset `{}`: {source}", asset_path.display())),
+        })
+    })?;
     definition.install(atlas)
 }
 
@@ -998,6 +1028,26 @@ mod tests {
             .filter(|(name, _)| name.starts_with("@microui-theme-image/"))
             .count();
         (loaded, image_count)
+    }
+
+    /// Verifies an embedded host can compile the same complete theme without filesystem access in
+    /// the loader itself.
+    #[test]
+    fn in_memory_theme_uses_the_supplied_asset_provider() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../themes/windows-95/theme.json");
+        let definition = fs::read(&path).expect("read bundled theme definition for test");
+        let loaded = load_bytes(path.as_path(), definition.as_slice(), &test_atlas(), |asset| fs::read(asset))
+            .expect("in-memory theme must resolve every asset through the supplied provider");
+
+        assert_eq!(loaded.name(), "Windows 95");
+        assert!(
+            loaded
+                .bundle()
+                .atlas()
+                .clone_icon_table()
+                .iter()
+                .any(|(name, _)| name.starts_with("@microui-theme-image/"))
+        );
     }
 
     /// Verifies missing state patches remain state-specific flat fallbacks after palette replacement.

@@ -29,7 +29,8 @@ microui-redux = "0.8.0"
 ```
 
 `microui-redux` does not create a native window or graphics device. Applications provide a
-`RendererBackend`; the repository examples contain SDL-based Glow, Vulkan, and WGPU integrations.
+`RendererBackend`; the repository examples contain SDL-based Glow, Vulkan, WGPU, and browser
+WebGL 2 integrations.
 
 Clone the repository and run the full demo with one backend:
 
@@ -39,6 +40,14 @@ cargo run -p microui-redux-demo-full --no-default-features --features glow
 
 See [Examples](docs/EXAMPLES.md) for the other backends, asset requirements, and size-focused
 builds.
+
+The full demo also runs in an HTML canvas. Once the repository's Pages workflow has been deployed,
+open the [live WebGL demo](https://neocogi.github.io/microui-redux/), or build and serve it locally
+with the Rust toolchain:
+
+```bash
+./scripts/web-demo.sh serve
+```
 
 ## Minimal retained UI
 
@@ -85,7 +94,7 @@ selectable example renderer.
 The [documentation index](docs/README.md) routes each topic to one canonical guide. Useful starting
 points are [built-in widgets](crates/microui-redux/docs/WIDGETS.md), [typed events](crates/microui-redux/docs/EVENTS.md),
 [layout and synchronization](crates/microui-redux/docs/LAYOUT.md), [rendering](crates/microui-redux/docs/RENDER.md), and the
-[example catalog](docs/EXAMPLES.md). Release and adoption details live in the
+[example catalog](docs/EXAMPLES.md), and [browser build guide](docs/WEB.md). Release and adoption details live in the
 [changelog](docs/CHANGELOG.md) and [support policy](docs/SUPPORT.md).
 
 Applications normally import `microui_redux::prelude`; `microui_redux::retained` is available for

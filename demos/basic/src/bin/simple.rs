@@ -63,7 +63,7 @@ struct State {
 
 fn main() {
     let atlas = atlas_assets::load_atlas();
-    let mut fw = Application::new(atlas.clone(), move |_gl, ctx| {
+    let fw = Application::new(atlas.clone(), move |_gl, ctx| {
         let (_, hello) = Button::create(ButtonParameters::with_opt("Hello World!", WidgetOption::FRAME | WidgetOption::ALIGN_CENTER));
         let (_, tree) = Linear::create(LinearParameters::horizontal([LinearItem::flex(hello, 1.0)]));
         State {

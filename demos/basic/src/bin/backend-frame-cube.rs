@@ -182,7 +182,7 @@ struct State {
 fn main() {
     let atlas = atlas_assets::load_atlas();
 
-    let mut app = Application::new(atlas, |_backend, ctx| {
+    let app = Application::new(atlas, |_backend, ctx| {
         let angle = Rc::new(Cell::new(0.0_f32));
         let callback_angle = angle.clone();
         let white_uv = white_uv(&ctx.atlas());

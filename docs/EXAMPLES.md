@@ -73,11 +73,27 @@ cargo run -p microui-redux-demo-full --no-default-features --features wgpu
 ```
 
 Backend features are additive for Cargo tooling. If several are enabled together, examples select
-Glow first, then Vulkan, then WGPU; enable only the backend you want for normal interactive runs.
+WebGL first, then Glow, Vulkan, and WGPU; enable only the backend you want for normal interactive
+runs. The WebGL feature is restricted to the `wasm32-unknown-unknown` browser target.
 
-`demo-full` loads its own `assets/FACEPALM.png`, the workspace's `assets/suzanne.obj`, and all three bundled directories
-under `themes/` from disk at runtime. Paths are anchored to the Cargo manifest directory, but the
-files must remain present in a source checkout or package.
+## Browser demo
+
+With the Rust toolchain installed, build and serve the full demo in a WebGL 2 canvas:
+
+```bash
+./scripts/web-demo.sh serve
+```
+
+The default URL is `http://127.0.0.1:8000`; pass another port as the second argument, for example
+`./scripts/web-demo.sh serve 8080`. Use `./scripts/web-demo.sh build` to package the static site in
+`target/web-demo` without starting a server. The [browser build guide](WEB.md) covers prerequisites,
+asset packaging, and GitHub Pages deployment.
+
+`demo-full` loads its own `assets/FACEPALM.png`, the workspace's `assets/suzanne.obj`, and all three
+bundled directories under `themes/` from disk at runtime. Native paths are anchored to the Cargo
+manifest directory. The browser build embeds the image, mesh, and prebuilt atlas directly; because
+it has no virtual filesystem, its file dialog is disabled. All bundled themes are embedded and
+remain selectable.
 
 For a smaller release executable with runtime-loaded assets, build without default features and
 enable exactly one backend plus `theme-json`; that feature enables the required atlas builder:

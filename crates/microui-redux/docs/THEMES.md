@@ -1,6 +1,8 @@
 # JSON themes
 
 The `theme-json` feature is enabled by default. It adds `Context::load_theme_file`, which reads one
+theme and its assets from disk, and `Context::load_theme_bytes`, which resolves the same relative
+paths through a caller-supplied embedded or virtual asset provider. Each API compiles one
 strict, versioned JSON definition and bakes each referenced PNG into the theme's immutable atlas.
 The returned `LoadedTheme` owns a validated `SkinBundle`: one rebuilt resource atlas and its
 complete matching `Skin`. Install both with `context.set_theme(&theme)`. Loading does not change

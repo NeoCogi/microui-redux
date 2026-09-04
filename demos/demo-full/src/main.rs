@@ -63,13 +63,18 @@ mod view3d;
 
 use camera::Camera;
 use microui_redux_demo_assets as atlas_assets;
-use microui_redux_demo_host::{Application, BackendInitContext, SelectedBackend};
+use microui_redux_demo_host::{Application, BackendInitContext, SelectedBackend, monotonic_seconds};
 use microui_redux_renderer_common::{CustomRenderArea, MeshBuffers, MeshSubmission, MeshVertex};
 use obj_loader::Obj;
 use polymesh::PolyMesh;
 use view3d::View3D;
 use microui_redux::{prelude::*, render::Vertex};
-use std::{cell::RefCell, f32::consts::PI, fs, path::PathBuf, rc::Rc, time::Instant};
+use std::{cell::RefCell, f32::consts::PI, rc::Rc};
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+use std::{fs, path::PathBuf};
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+include!(concat!(env!("OUT_DIR"), "/embedded_theme_assets.rs"));
 
 type SelectedFrame<'a> = <SelectedBackend as RendererBackend>::Frame<'a>;
 
@@ -1204,22 +1209,42 @@ impl DemoThemes {
         // Theme loading bakes each unique PNG into its candidate atlas and leaves the installed
         // Context style alone. Retaining every bundle permits switching without later file I/O.
         let default = LoadedTheme::new("Default Skin", context.skin_bundle().clone());
-        let windows_311_path = demo_asset_path("themes/windows-3.11/theme.json");
-        let windows_311 = context
-            .load_theme_file(windows_311_path.as_path())
-            .unwrap_or_else(|error| panic!("failed to load bundled Windows 3.11 theme {}: {error}", windows_311_path.display()));
-        let windows_95_path = demo_asset_path("themes/windows-95/theme.json");
-        let windows_95 = context
-            .load_theme_file(windows_95_path.as_path())
-            .unwrap_or_else(|error| panic!("failed to load bundled Windows 95 theme {}: {error}", windows_95_path.display()));
-        let mac_path = demo_asset_path("themes/mac-os-9/theme.json");
-        let mac = context
-            .load_theme_file(mac_path.as_path())
-            .unwrap_or_else(|error| panic!("failed to load bundled Mac OS 9 theme {}: {error}", mac_path.display()));
-        Self {
-            themes: [default, windows_311, windows_95, mac],
-            selected: DemoTheme::Default,
-            installed: DemoTheme::Default,
+        #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+        {
+            let windows_311 = context
+                .load_theme_bytes("themes/windows-3.11/theme.json", EMBEDDED_WINDOWS_311_THEME, embedded_theme_asset)
+                .unwrap_or_else(|error| panic!("failed to load embedded Windows 3.11 theme: {error}"));
+            let windows_95 = context
+                .load_theme_bytes("themes/windows-95/theme.json", EMBEDDED_WINDOWS_95_THEME, embedded_theme_asset)
+                .unwrap_or_else(|error| panic!("failed to load embedded Windows 95 theme: {error}"));
+            let mac = context
+                .load_theme_bytes("themes/mac-os-9/theme.json", EMBEDDED_MAC_OS_9_THEME, embedded_theme_asset)
+                .unwrap_or_else(|error| panic!("failed to load embedded Mac OS 9 theme: {error}"));
+            return Self {
+                themes: [default, windows_311, windows_95, mac],
+                selected: DemoTheme::Default,
+                installed: DemoTheme::Default,
+            };
+        }
+        #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+        {
+            let windows_311_path = demo_asset_path("themes/windows-3.11/theme.json");
+            let windows_311 = context
+                .load_theme_file(windows_311_path.as_path())
+                .unwrap_or_else(|error| panic!("failed to load bundled Windows 3.11 theme {}: {error}", windows_311_path.display()));
+            let windows_95_path = demo_asset_path("themes/windows-95/theme.json");
+            let windows_95 = context
+                .load_theme_file(windows_95_path.as_path())
+                .unwrap_or_else(|error| panic!("failed to load bundled Windows 95 theme {}: {error}", windows_95_path.display()));
+            let mac_path = demo_asset_path("themes/mac-os-9/theme.json");
+            let mac = context
+                .load_theme_file(mac_path.as_path())
+                .unwrap_or_else(|error| panic!("failed to load bundled Mac OS 9 theme {}: {error}", mac_path.display()));
+            Self {
+                themes: [default, windows_311, windows_95, mac],
+                selected: DemoTheme::Default,
+                installed: DemoTheme::Default,
+            }
         }
     }
 
@@ -1295,7 +1320,10 @@ fn registered_menu_item(
 fn demo_menu_bar(context: &mut Context<SelectedBackend, State>) -> (MenuBar, DemoMenuItems) {
     let (new_session, new_session_item) =
         registered_menu_item(context, MenuItemParameters::new("New Session").shortcut_hint("Ctrl+N"), State::menu_new_session);
-    let (open_file, open_file_item) = registered_menu_item(context, MenuItemParameters::new("Open...").shortcut_hint("Ctrl+O"), State::menu_open_file);
+    let open_file_parameters = MenuItemParameters::new("Open...").shortcut_hint("Ctrl+O");
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    let open_file_parameters = open_file_parameters.disabled();
+    let (open_file, open_file_item) = registered_menu_item(context, open_file_parameters, State::menu_open_file);
     let (_, save_snapshot_item) = MenuItem::create(MenuItemParameters::new("Save Snapshot").shortcut_hint("Ctrl+S").disabled());
     let (clear_log, clear_log_item) = registered_menu_item(context, MenuItemParameters::new("Clear Log"), State::menu_clear_log);
     let (_, exit_item) = MenuItem::create(MenuItemParameters::new("Exit").disabled());
@@ -1508,7 +1536,7 @@ struct State {
     menu_auto_scroll: bool,
     file_dialog: FileDialog,
     fps: f32,
-    last_frame: Instant,
+    last_frame_seconds: f64,
 
     submit_button_submitted: WidgetEventPortHandle<ButtonSubmitted>,
     log_text_state: TypedWidgetHandle<TextBlock>,
@@ -1567,10 +1595,15 @@ impl State {
         };
 
         let triangle_data = Rc::new(RefCell::new(TriangleState { angle: 0.0 }));
-        let suzanne_path = demo_asset_path("assets/suzanne.obj");
-        let suzanne_bytes = fs::read(&suzanne_path).unwrap_or_else(|err| panic!("Failed to read {}: {err}", suzanne_path.display()));
+        #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+        let suzanne_bytes = include_bytes!("../../../assets/suzanne.obj").to_vec();
+        #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+        let suzanne_bytes = {
+            let suzanne_path = demo_asset_path("assets/suzanne.obj");
+            fs::read(&suzanne_path).unwrap_or_else(|err| panic!("Failed to read {}: {err}", suzanne_path.display()))
+        };
         let pm_suzanne = Obj::from_byte_stream(suzanne_bytes.as_slice())
-            .unwrap_or_else(|err| panic!("Failed to parse {}: {err}", suzanne_path.display()))
+            .unwrap_or_else(|err| panic!("Failed to parse Suzanne mesh: {err}"))
             .to_polymesh();
         let bounds = pm_suzanne.calculate_bounding_box();
         let mesh_buffers = build_mesh_buffers(&pm_suzanne);
@@ -2023,7 +2056,7 @@ impl State {
             menu_auto_scroll: true,
             file_dialog,
             fps: 0.0,
-            last_frame: Instant::now(),
+            last_frame_seconds: monotonic_seconds(),
             submit_button_submitted,
             log_text_state,
             log_scroll_state,
@@ -2990,9 +3023,9 @@ impl State {
         // Synchronize geometry before the style and animated state changes below; all of them are
         // consumed together by the runner's post-callback retained update.
         self.sync_grid_surface(ctx, dimensions);
-        let now = Instant::now();
-        let dt = now.duration_since(self.last_frame).as_secs_f32();
-        self.last_frame = now;
+        let now = monotonic_seconds();
+        let dt = (now - self.last_frame_seconds).max(0.0) as f32;
+        self.last_frame_seconds = now;
         if dt > 0.0 {
             let inst_fps = 1.0 / dt;
             self.fps = if self.fps == 0.0 { inst_fps } else { self.fps * 0.9 + inst_fps * 0.1 };
@@ -3034,7 +3067,7 @@ fn upload_noise_texture(ctx: &mut Context<SelectedBackend, State>, width: i32, h
 
 fn main() {
     let atlas = atlas_assets::load_atlas();
-    let mut app = Application::new(atlas, |backend: BackendInitContext, ctx| State::new(backend, ctx)).unwrap();
+    let app = Application::new(atlas, |backend: BackendInitContext, ctx| State::new(backend, ctx)).unwrap();
 
     app.event_loop_events(
         |state, context| state.subscribe_events(context),
@@ -3346,23 +3379,29 @@ fn build_mesh_buffers(mesh: &PolyMesh) -> MeshBuffers {
     MeshBuffers::from_vecs(vertices, indices)
 }
 
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 fn demo_asset_path(relative: &str) -> PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(relative)
 }
 
 fn load_external_image_texture(ctx: &mut Context<SelectedBackend, State>) -> Option<TextureId> {
-    let image_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/FACEPALM.png");
-    let png_bytes = match fs::read(&image_path) {
-        Ok(bytes) => bytes,
-        Err(err) => {
-            eprintln!("Failed to read {}: {err}", image_path.display());
-            return None;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    let png_bytes = include_bytes!("../assets/FACEPALM.png").to_vec();
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    let png_bytes = {
+        let image_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/FACEPALM.png");
+        match fs::read(&image_path) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                eprintln!("Failed to read {}: {err}", image_path.display());
+                return None;
+            }
         }
     };
     match ctx.load_image_from(ImageSource::Png { bytes: png_bytes.as_slice() }) {
         Ok(texture) => Some(texture),
         Err(err) => {
-            eprintln!("Failed to decode {}: {err}", image_path.display());
+            eprintln!("Failed to decode FACEPALM.png: {err}");
             None
         }
     }

@@ -16,10 +16,12 @@ The library owns retained UI behavior but does not create an operating-system wi
 device, or event loop. Those responsibilities belong to the application through
 `RendererBackend` and the input-forwarding methods on `Context`.
 
-The repository includes SDL-based Glow, Vulkan, and WGPU integrations as executable examples. The
-automated project workflow runs on Linux; Windows and macOS portability are intended, but they are
-not currently a CI-backed platform guarantee. Treat the example integrations as reference code to
-adapt to an application's own renderer and lifecycle.
+The repository includes SDL-based Glow, Vulkan, and WGPU integrations as native executable
+examples, plus a `web-sys` WebGL 2 integration for an HTML canvas. The automated project
+workflow runs native checks on Linux and builds the browser demo for GitHub Pages. Windows and
+macOS portability are intended, but they are not currently a CI-backed platform guarantee. Treat
+the example integrations as reference code to adapt to an application's own renderer and
+lifecycle.
 
 ## API compatibility
 

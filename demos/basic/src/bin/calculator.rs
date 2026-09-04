@@ -319,7 +319,7 @@ impl State {
 
 fn main() {
     let atlas = atlas_assets::load_atlas();
-    let mut fw = Application::new(atlas, |_gl, ctx| {
+    let fw = Application::new(atlas, |_gl, ctx| {
         // Resolve the application name once through the catalog. Derived theme atlases preserve
         // this exact FontId when copying or replacing the display font.
         let display_font = ctx

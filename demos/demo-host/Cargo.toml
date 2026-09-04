@@ -10,6 +10,7 @@ repository.workspace = true
 [features]
 default = []
 glow = ["dep:glow", "dep:microui-redux-renderer-glow"]
+webgl = ["dep:glow", "dep:microui-redux-renderer-webgl-canvas"]
 vulkan = ["dep:microui-redux-renderer-vulkan"]
 wgpu = ["dep:microui-redux-renderer-wgpu"]
 
@@ -17,6 +18,27 @@ wgpu = ["dep:microui-redux-renderer-wgpu"]
 glow = { workspace = true, optional = true }
 microui-redux.workspace = true
 microui-redux-renderer-glow = { workspace = true, optional = true }
+microui-redux-renderer-webgl-canvas = { workspace = true, optional = true }
 microui-redux-renderer-vulkan = { workspace = true, optional = true }
 microui-redux-renderer-wgpu = { workspace = true, optional = true }
+
+[target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies]
 sdl2.workspace = true
+
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+wasm-bindgen.workspace = true
+web-sys = { workspace = true, features = [
+    "Document",
+    "DomRect",
+    "Element",
+    "Event",
+    "EventTarget",
+    "HtmlCanvasElement",
+    "HtmlElement",
+    "KeyboardEvent",
+    "Performance",
+    "PointerEvent",
+    "WebGl2RenderingContext",
+    "WheelEvent",
+    "Window",
+] }

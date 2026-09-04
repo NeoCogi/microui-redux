@@ -3,16 +3,19 @@
 ## How `SelectedBackend::Frame<'a>` works
 
 `SelectedBackend` is not a special type supplied by microui-redux. The examples define it as an
-ordinary compile-time alias for one concrete renderer. The feature guards use Glow, Vulkan, then
-WGPU precedence so the aliases remain well-defined when additive Cargo tooling enables several
-backend features:
+ordinary compile-time alias for one concrete renderer. The feature guards use WebGL, Glow, Vulkan,
+then WGPU precedence so the aliases remain well-defined when additive Cargo tooling enables
+several backend features:
 
 ```rust,ignore
-#[cfg(feature = "glow")]
+#[cfg(feature = "webgl")]
+use microui_redux_renderer_webgl_canvas::WebGlCanvasRenderer as SelectedBackend;
+#[cfg(all(not(feature = "webgl"), feature = "glow"))]
 use microui_redux_renderer_glow::GLRenderer as SelectedBackend;
-#[cfg(all(not(feature = "glow"), feature = "vulkan"))]
+#[cfg(all(not(feature = "webgl"), not(feature = "glow"), feature = "vulkan"))]
 use microui_redux_renderer_vulkan::VulkanRenderer as SelectedBackend;
 #[cfg(all(
+    not(feature = "webgl"),
     not(feature = "glow"),
     not(feature = "vulkan"),
     feature = "wgpu"
@@ -24,10 +27,10 @@ type SelectedFrame<'a> =
 ```
 
 `RendererBackend::Frame<'a>` is a generic associated type (GAT): each backend chooses its own
-active-frame type, and that type may borrow the backend for `'a`. For example, the GL backend
-selects `GlFrame<'a>`, WGPU selects `WgpuFrame<'a>`, and Vulkan selects `VulkanFrame<'a>`. The
-fully qualified alias above is simply an unambiguous way to spell “the frame type associated with
-the backend selected by this build.”
+active-frame type, and that type may borrow the backend for `'a`. For example, the WebGL backend
+selects `WebGlCanvasFrame<'a>`, GL selects `GlFrame<'a>`, WGPU selects `WgpuFrame<'a>`, and Vulkan
+selects `VulkanFrame<'a>`. The fully qualified alias above is simply an unambiguous way to spell
+“the frame type associated with the backend selected by this build.”
 
 The relevant part of the backend contract is:
 
@@ -158,3 +161,6 @@ cargo run -p microui-redux-basic-demos --bin backend-frame-cube --no-default-fea
 cargo run -p microui-redux-basic-demos --bin backend-frame-cube --no-default-features --features vulkan
 cargo run -p microui-redux-basic-demos --bin backend-frame-cube --no-default-features --features wgpu
 ```
+
+The same custom-frame path is available in the WebGL 2 canvas backend. Build the complete browser
+site with `./scripts/web-demo.sh build`; see the [browser build guide](../../../docs/WEB.md).

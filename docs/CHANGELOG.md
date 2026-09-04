@@ -44,6 +44,8 @@ and compatibility layers were removed.
 - `Skin` provides typed role/state visuals, stable font and icon references, configurable window
   chrome, and atomic skin/atlas replacement. Strict JSON themes compile before atlas construction.
 - Original Windows 3.11, Windows 95, and Mac OS 9 themes are bundled and selectable in `demo-full`.
+- A WebGL 2 canvas renderer, browser-native animation loop, local build/server script, and GitHub Pages
+  workflow make the complete demo available in the browser.
 - Public retained scrolling now includes `Scrollbar`, `ScrollArea`, and a scrollable `TextArea`.
 - Atlas configuration supports semantic font roles and named variants in runtime-built, generated,
   and external atlas forms.

@@ -10,6 +10,7 @@ repository.workspace = true
 [features]
 default = ["wgpu"]
 glow = ["microui-redux-demo-host/glow"]
+webgl = ["microui-redux-demo-host/webgl"]
 vulkan = ["microui-redux-demo-host/vulkan"]
 wgpu = ["microui-redux-demo-host/wgpu"]
 prebuilt-atlas = ["microui-redux-demo-assets/prebuilt-atlas"]

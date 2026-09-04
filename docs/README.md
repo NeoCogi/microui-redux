@@ -26,6 +26,7 @@ cover the retained UI model, integration details, and repository workflows.
   lifetimes, custom callbacks, and the backend-frame cube example.
 - [Examples](EXAMPLES.md) — running the demos, backend selection, asset loading, and size-focused
   builds.
+- [WebGL demo](WEB.md) — building, serving, and publishing the HTML canvas demo.
 - [Cargo features](FEATURES.md) — crate features and atlas-loading combinations.
 
 ## Project information

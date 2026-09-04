@@ -91,17 +91,17 @@ pub struct GLRenderer {
     verts: Vec<Vertex>,
     indices: Vec<u16>,
 
-    vbo: NativeBuffer,
-    ibo: NativeBuffer,
-    tex_o: NativeTexture,
+    vbo: Buffer,
+    ibo: Buffer,
+    tex_o: Texture,
 
-    program: NativeProgram,
+    program: Program,
 
     width: u32,
     height: u32,
 
     atlas: AtlasHandle,
-    textures: HashMap<TextureId, NativeTexture>,
+    textures: HashMap<TextureId, Texture>,
 }
 
 trait GlFrameOps {
@@ -122,7 +122,7 @@ impl GLRenderer {
     /// Keeping allocation behind this helper gives atlas replacement a transaction boundary: the
     /// existing texture remains bound to future frames unless all GL setup and upload work for the
     /// candidate succeeds.
-    fn create_atlas_texture(&self, atlas: &AtlasHandle) -> Result<NativeTexture, AtlasUploadError> {
+    fn create_atlas_texture(&self, atlas: &AtlasHandle) -> Result<Texture, AtlasUploadError> {
         unsafe {
             let texture_gl = self.gl.clone();
             let texture = ResourceGuard::new(
@@ -184,6 +184,21 @@ impl GLRenderer {
     }
 
     pub fn new(gl: Arc<glow::Context>, atlas: AtlasHandle, width: u32, height: u32) -> Result<Self, String> {
+        Self::new_with_shaders(gl, atlas, width, height, VERTEX_SHADER, FRAGMENT_SHADER)
+    }
+
+    /// Creates a renderer using a caller-selected GLSL dialect.
+    ///
+    /// The WebGL/Canvas specialization uses this entry point with GLSL ES 3.00 shaders while
+    /// retaining the same batching and resource lifecycle as the native Glow renderer.
+    pub fn new_with_shaders(
+        gl: Arc<glow::Context>,
+        atlas: AtlasHandle,
+        width: u32,
+        height: u32,
+        vertex_shader: &str,
+        fragment_shader: &str,
+    ) -> Result<Self, String> {
         assert_eq!(core::mem::size_of::<Vertex>(), 20);
         unsafe {
             // Each driver object stays guarded until all four persistent resources exist. Any
@@ -237,7 +252,7 @@ impl GLRenderer {
 
             let program_gl = gl.clone();
             let program = ResourceGuard::new(
-                create_program(&gl, VERTEX_SHADER, FRAGMENT_SHADER).map_err(|err| format!("failed to create UI program: {err}"))?,
+                create_program(&gl, vertex_shader, fragment_shader).map_err(|err| format!("failed to create UI program: {err}"))?,
                 move |program| program_gl.delete_program(program),
             );
 
@@ -794,7 +809,7 @@ impl GLRenderer {
 }
 
 /// Compiles and links a GL program from vertex/fragment shader sources.
-pub fn create_program(gl: &glow::Context, vertex_shader_source: &str, fragment_shader_source: &str) -> Result<NativeProgram, io::Error> {
+pub fn create_program(gl: &glow::Context, vertex_shader_source: &str, fragment_shader_source: &str) -> Result<Program, io::Error> {
     unsafe {
         // Program and shader guards cover allocation errors, compile/link errors, and unwinding.
         // Handles leave these guards only after a successful link.

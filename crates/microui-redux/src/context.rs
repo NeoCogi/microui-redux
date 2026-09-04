@@ -44,7 +44,7 @@ use crate::{AtlasHandle, Dimensioni, ImageSource, KeyEvent, Menu, MouseButton, N
 #[cfg(feature = "theme-json")]
 use crate::{LoadedTheme, ThemeLoadError};
 #[cfg(feature = "theme-json")]
-use std::path::Path;
+use std::{io, path::Path};
 
 /// Short-lived access to retained UI state owned by a [`Context`].
 ///
@@ -745,6 +745,24 @@ impl<B: RendererBackend, State: 'static> Context<B, State> {
         // The loader owns every construction stage and returns only the complete immutable bundle.
         // Applications can preload several values and choose one later without repeated file I/O.
         crate::theme::loader::load(path.as_ref(), self.resource_catalog.atlas())
+    }
+
+    /// Loads a versioned JSON theme from memory and obtains each referenced asset from `read_asset`.
+    ///
+    /// `path` is the definition's logical location and anchors relative font, icon, and appearance
+    /// paths exactly as it does for [`Context::load_theme_file`]. This entry point is intended for
+    /// embedded or virtual asset stores on hosts without a filesystem.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same [`ThemeLoadError`] classifications as file loading. Asset-provider failures
+    /// retain the requested logical path inside the nested atlas-build diagnostic.
+    #[cfg(feature = "theme-json")]
+    pub fn load_theme_bytes<F>(&mut self, path: impl AsRef<Path>, definition: &[u8], read_asset: F) -> Result<LoadedTheme, ThemeLoadError>
+    where
+        F: FnMut(&Path) -> io::Result<Vec<u8>>,
+    {
+        crate::theme::loader::load_bytes(path.as_ref(), definition, self.resource_catalog.atlas(), read_asset)
     }
 }
 

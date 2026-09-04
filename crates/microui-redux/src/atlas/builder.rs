@@ -417,6 +417,18 @@ impl Builder {
         self.add_icon_pixels_named(name, width, height, pixels.as_slice())
     }
 
+    /// Adds a named PNG icon from caller-owned bytes while retaining its logical source path in
+    /// diagnostics.
+    pub(crate) fn add_icon_bytes_named(&mut self, name: &str, path: &Path, bytes: &[u8]) -> Result<IconId, BuilderError> {
+        if self.candidate.icons.iter().any(|(existing, _)| existing == name) {
+            return Err(AtlasError::DuplicateIconName { name: name.to_string() }.into());
+        }
+        Self::validate_asset_bytes(bytes)?;
+        let (width, height, pixels) =
+            load_image_bytes(ImageSource::Png { bytes }).map_err(|source| BuilderError::Image { path: path.to_path_buf(), source })?;
+        self.add_icon_pixels_named(name, width, height, pixels.as_slice())
+    }
+
     /// Adds one already-decoded icon tile under a stable name.
     ///
     /// File-backed and atlas-copy insertion share this boundary so duplicate checks, transactional
@@ -474,14 +486,25 @@ impl Builder {
             // space. Check it before size validation and file I/O to keep failure transactional.
             return Err(AtlasError::DuplicateFontName { name: name.to_string() }.into());
         }
-        let maximum = i32::MAX as usize;
-        if size == 0 || size > maximum {
-            // Match the serialized AtlasSource contract before converting the requested size to
-            // runtime coordinates. Per-glyph metrics are checked against the live packer below
-            // before fontdue is allowed to allocate any raster bitmap.
-            return Err(AtlasError::InvalidFontSize { font: name.to_string(), font_size: size }.into());
+        Self::validate_font_size(name, size)?;
+        let bytes = Self::read_asset_file(path)?;
+        self.add_font_bytes_after_name_check(name, path, size, bytes.as_slice())
+    }
+
+    /// Adds a named font from caller-owned bytes while retaining its logical source path in
+    /// diagnostics.
+    pub(crate) fn add_font_bytes_named(&mut self, name: &str, path: &Path, size: usize, bytes: &[u8]) -> Result<FontId, BuilderError> {
+        if self.candidate.fonts.iter().any(|(existing, _)| existing == name) {
+            return Err(AtlasError::DuplicateFontName { name: name.to_string() }.into());
         }
-        let font = Self::load_font(path)?;
+        self.add_font_bytes_after_name_check(name, path, size, bytes)
+    }
+
+    fn add_font_bytes_after_name_check(&mut self, name: &str, path: &Path, size: usize, bytes: &[u8]) -> Result<FontId, BuilderError> {
+        Self::validate_font_size(name, size)?;
+        Self::validate_asset_bytes(bytes)?;
+        let font = RasterFont::from_bytes(bytes.to_vec(), FontSettings::default())
+            .map_err(|error| io::Error::other(format!("Cannot parse font asset `{}`: {error}", path.display())))?;
         let mut next_packer = self.packer.clone();
         let mut planned_glyphs = Vec::with_capacity(95);
         let mut min_y = i64::MAX;
@@ -597,7 +620,7 @@ impl Builder {
     }
 
     /// Reads one builder asset while bounding compressed images and font files before allocation.
-    fn read_asset_file(path: &Path) -> Result<Vec<u8>, BuilderError> {
+    pub(crate) fn read_asset_file(path: &Path) -> Result<Vec<u8>, BuilderError> {
         let file = File::open(path).map_err(|source| io::Error::new(source.kind(), format!("Cannot open asset file `{}`: {source}", path.display())))?;
         Self::read_bounded(file, MAX_DECODED_RGBA_BYTES)
             .map_err(|source| io::Error::new(source.kind(), format!("Cannot read asset file `{}`: {source}", path.display())).into())
@@ -621,6 +644,25 @@ impl Builder {
             ));
         }
         Ok(bytes)
+    }
+
+    fn validate_asset_bytes(bytes: &[u8]) -> Result<(), BuilderError> {
+        if bytes.len() > MAX_DECODED_RGBA_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("asset exceeds the {MAX_DECODED_RGBA_BYTES}-byte builder input limit"),
+            )
+            .into());
+        }
+        Ok(())
+    }
+
+    fn validate_font_size(name: &str, size: usize) -> Result<(), BuilderError> {
+        if size == 0 || size > i32::MAX as usize {
+            // Match the serialized AtlasSource contract before reading or parsing font bytes.
+            return Err(AtlasError::InvalidFontSize { font: name.to_string(), font_size: size }.into());
+        }
+        Ok(())
     }
 
     /// Packs one populated bitmap transactionally and copies it into the texture buffer.
@@ -687,14 +729,6 @@ impl Builder {
             let destination_start = (top + row) * atlas_width + left;
             atlas_pixels[destination_start..destination_start + width].copy_from_slice(&pixels[source_start..source_start + width]);
         }
-    }
-
-    /// Loads and parses a font file using `fontdue`.
-    fn load_font(path: &Path) -> Result<RasterFont, BuilderError> {
-        let data = Self::read_asset_file(path)?;
-        let font = RasterFont::from_bytes(data, FontSettings::default())
-            .map_err(|error| io::Error::other(format!("Cannot parse font asset `{}`: {error}", path.display())))?;
-        Ok(font)
     }
 
     /// Converts an asset path into the stable atlas key used for generated sources.

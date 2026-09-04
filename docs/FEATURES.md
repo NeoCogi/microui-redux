@@ -25,7 +25,8 @@ allocation limit. Higher layers preserve that structure: `AtlasError::Image` and
 through `std::io::Error` or matching diagnostic text.
 
 The demo packages have their own feature namespace. `glow`, `vulkan`, and `wgpu` select one of the
-renderer crates through `demos/demo-host`. The demos build their atlas at runtime unless you opt
+native renderer crates through `demos/demo-host`. `webgl` selects the WebGL 2 canvas renderer and
+requires the `wasm32-unknown-unknown` target. The demos build their atlas at runtime unless you opt
 into the forwarded `prebuilt-atlas` feature from `demos/demo-assets`:
 `cargo run -p microui-redux-demo-full --no-default-features --features vulkan`
 
@@ -33,6 +34,10 @@ To generate and embed the atlas at build time instead, add `prebuilt-atlas` expl
 changes the demo's runtime asset-loading path; `demo-full` still enables the main crate's
 `theme-json` feature through its manifest:
 `cargo run -p microui-redux-demo-full --no-default-features --features "vulkan prebuilt-atlas"`
+
+Use [`scripts/web-demo.sh`](../scripts/web-demo.sh) for the browser build. It selects `webgl`,
+packages the generated JavaScript, WebAssembly, embedded assets, and HTML into `target/web-demo`,
+and can start a local HTTP server. See the [WebGL guide](WEB.md).
 
 `external-atlas` is a repository-development path and must not be enabled from a crates.io package.
 It expects

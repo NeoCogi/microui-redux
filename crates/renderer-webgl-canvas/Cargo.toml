@@ -1,0 +1,14 @@
+[package]
+name = "microui-redux-renderer-webgl-canvas"
+version = "0.0.0"
+publish = false
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+glow.workspace = true
+microui-redux.workspace = true
+microui-redux-renderer-common.workspace = true
+microui-redux-renderer-glow.workspace = true
