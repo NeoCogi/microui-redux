@@ -146,14 +146,15 @@ impl WgpuRenderer {
     /// Acquires the native surface texture before any display-list execution begins.
     fn acquire_surface_frame(&mut self) -> Result<wgpu::SurfaceTexture, FrameError> {
         match self.surface.get_current_texture() {
-            Ok(frame) => Ok(frame),
-            Err(wgpu::SurfaceError::Lost) | Err(wgpu::SurfaceError::Outdated) => {
+            wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => Ok(frame),
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
                 self.surface.configure(&self.device, &self.config);
-                self.surface
-                    .get_current_texture()
-                    .map_err(|error| FrameError::new(format!("failed to acquire WGPU frame after reconfigure: {error}")))
+                match self.surface.get_current_texture() {
+                    wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => Ok(frame),
+                    status => Err(FrameError::new(format!("failed to acquire WGPU frame after reconfigure: {status:?}"))),
+                }
             }
-            Err(error) => Err(FrameError::new(format!("failed to acquire WGPU frame: {error}"))),
+            status => Err(FrameError::new(format!("failed to acquire WGPU frame: {status:?}"))),
         }
     }
 
@@ -379,7 +380,7 @@ impl WgpuRenderer {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("microui.pipeline_layout"),
-            bind_group_layouts: &[&bind_group_layout],
+            bind_group_layouts: &[Some(&bind_group_layout)],
             immediate_size: 0,
         });
 
@@ -390,7 +391,7 @@ impl WgpuRenderer {
                 module: &shader,
                 entry_point: Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[wgpu::VertexBufferLayout {
+                buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: mem::size_of::<GpuVertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[
@@ -410,7 +411,7 @@ impl WgpuRenderer {
                             shader_location: 2,
                         },
                     ],
-                }],
+                })],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -461,7 +462,10 @@ impl WgpuRenderer {
         // We intentionally build from raw handles because the SDL window owns the native handles.
         let surface = unsafe {
             instance
-                .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle { raw_display_handle, raw_window_handle })
+                .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
+                    raw_display_handle: Some(raw_display_handle),
+                    raw_window_handle,
+                })
                 .map_err(|err| format!("failed to create wgpu surface: {err}"))?
         };
 
@@ -470,6 +474,7 @@ impl WgpuRenderer {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: Some(&surface),
             force_fallback_adapter: false,
+            apply_limit_buckets: false,
         }))
         .map_err(|err| format!("failed to request wgpu adapter: {err}"))?;
 
@@ -818,7 +823,7 @@ impl WgpuFrameOps for WgpuRenderer {
         }
 
         self.queue.submit(Some(encoder.finish()));
-        frame.present();
+        self.queue.present(frame);
     }
 
     /// Creates a backend-owned sampled texture and its bind group.
